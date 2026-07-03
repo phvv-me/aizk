@@ -35,7 +35,7 @@ dependencies = [
   "httpx>=0.28,<0.29",
   "cyclopts>=4,<5",
   "loguru>=0.7.3,<0.8",
-  "fastmcp>=2.11,<3",
+  "fastmcp>=2.11,<4",
   "networkx>=3.4,<4",
   # the sweep and scale eval harnesses' numeric work, present transitively through pgvector too
   "numpy>=2,<3",
