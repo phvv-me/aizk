@@ -1,0 +1,118 @@
+/* Canonical docs brand base, shared by every package.
+
+   This is the single source of truth for the docs look. Each package
+   vendors a copy of this file and pairs it with a tiny brand.css that
+   only sets the --brand-* hook variables below. Edit here, then copy
+   out to chefe, lote, mainboard and patos.
+
+   Styling is mkdocs-material's built-in components plus Open Props
+   design tokens, pulled build-free over the wire. No custom build
+   step, no vendoring of Open Props.
+
+   A package brand.css sets three hooks:
+     --brand-primary       primary header color, light scheme
+     --brand-primary-dark  primary header color, dark scheme
+     --brand-accent        accent color for links, focus and active state
+   Everything else here maps those hooks and Open Props tokens onto
+   Material's own CSS variables. */
+
+@import url("https://unpkg.com/open-props");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+/* fallback hooks, so the base reads fine even without a brand.css.
+   A package overrides these in its own brand.css. */
+:root {
+  --brand-primary: var(--gray-9);
+  --brand-primary-dark: var(--gray-7);
+  --brand-accent: var(--indigo-6);
+}
+
+/* light scheme */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--brand-primary);
+  --md-primary-fg-color--light: var(--brand-primary);
+  --md-primary-fg-color--dark: var(--brand-primary-dark);
+  --md-accent-fg-color: var(--brand-accent);
+  --md-typeset-a-color: var(--brand-accent);
+
+  --md-default-bg-color: var(--gray-0);
+  --md-code-bg-color: var(--gray-1);
+}
+
+/* dark scheme */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--brand-primary-dark);
+  --md-primary-fg-color--light: var(--brand-primary);
+  --md-primary-fg-color--dark: var(--brand-primary-dark);
+  --md-accent-fg-color: var(--brand-accent);
+  --md-typeset-a-color: var(--brand-accent);
+
+  --md-default-bg-color: var(--gray-10);
+  --md-code-bg-color: var(--gray-9);
+}
+
+/* Space Grotesk headings, sharp and slightly tightened */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-header__title,
+.md-nav__title {
+  font-family: "Space Grotesk", var(--md-text-font-family), var(--font-sans);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h1 {
+  font-weight: 700;
+}
+
+/* an accent seam under the header, the brand cue */
+.md-header {
+  border-bottom: var(--border-size-2) solid var(--brand-accent);
+}
+
+/* tabs: keep the active page fully lit */
+.md-tabs__link--active {
+  opacity: 1;
+}
+
+/* a bigger header logo so the brand mark reads at a glance */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.8rem;
+  width: 1.8rem;
+}
+
+/* soft cards with a generous radius and a lift on hover */
+.md-typeset .grid.cards > ul > li {
+  border: var(--border-size-1) solid var(--md-default-fg-color--lightest);
+  border-radius: var(--radius-3);
+  padding: var(--size-4) var(--size-5);
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--brand-accent);
+  box-shadow: var(--shadow-3);
+  transform: translateY(-3px);
+}
+
+.md-typeset .grid.cards > ul > li > h3 > a {
+  color: var(--md-accent-fg-color);
+}
+
+/* softer corners on code blocks and admonitions, a less boxy feel */
+.md-typeset pre > code {
+  border-radius: var(--radius-3);
+}
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-2);
+}
+
+/* center mermaid diagrams */
+.md-typeset .mermaid {
+  text-align: center;
+}

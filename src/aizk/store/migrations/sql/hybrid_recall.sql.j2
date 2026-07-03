@@ -1,0 +1,135 @@
+{#
+hybrid_recall(): the one-statement dense+lexical+graph fusion recall reads through.
+
+A `language sql, stable` function, so it runs with the caller's own privileges and inside the
+caller's own transaction, the same invoker-rights default live_fact.sql's `security_invoker` makes
+explicit for views; row level security and the app.scope lens both apply exactly as they would to
+the equivalent hand-written queries. Five lanes, each a CTE: dense_chunk and lexical_chunk rank the
+top fusion_depth candidates by cosine distance and the backend-branched lexical lane respectively,
+fused_chunk reciprocal-rank-fuses them by summing `1/(rrf_k+rank)` per chunk across whichever lanes
+it appears in, chunk_scored adds promoted_bonus to a promoted document's chunks and keeps the top
+k, dense_fact ranks the closest k current facts from live_fact, and neighbor_fact widens to the
+other current facts touching a dense_fact's subject or object entities. The final union tags each
+row's lane as kind (chunk/fact/neighbor) over one typed column set wide enough for every lane, null
+in whichever half a lane does not use.
+
+bm25_backend: which lexical lane the chunk search uses, vchord_bm25 for the bundled VectorChord BM25
+    index over a tokenized bm25vector column, or tsvector for the native Postgres full-text
+    ts_rank path, the only branch this template carries.
+promoted_bonus: additive score bump chunk_scored gives a hit whose document carries promote
+    provenance, baked in as a literal since a `language sql` function takes no config of its own.
+bm25_tokenizer: offline tokenizer name the vchord_bm25 lane tokenizes chunk text and queries with.
+bm25_index: name of the bm25 index the vchord_bm25 lane ranks through.
+#}
+CREATE FUNCTION hybrid_recall(qvec halfvec, qtext text, k int, rrf_k int, fusion_depth int)
+RETURNS TABLE (
+    kind text,
+    id uuid,
+    document_title text,
+    source_uri text,
+    text text,
+    promoted boolean,
+    statement text,
+    predicate text,
+    valid_from timestamptz,
+    valid_to timestamptz,
+    score double precision
+)
+LANGUAGE sql STABLE AS $$
+WITH dense_chunk AS (
+    SELECT c.id AS id, d.title AS document_title, d.source_uri AS source_uri,
+           c.text AS text, d.promoted_from IS NOT NULL AS promoted,
+           row_number() OVER (ORDER BY c.embedding <=> qvec) AS rank
+    FROM chunk c JOIN document d ON d.id = c.document_id
+    WHERE c.embedding IS NOT NULL
+    ORDER BY c.embedding <=> qvec
+    LIMIT fusion_depth
+),
+{% if bm25_backend == "vchord_bm25" %}
+lexical_chunk AS (
+    SELECT id, document_title, source_uri, text, promoted,
+           row_number() OVER (ORDER BY raw_rank) AS rank
+    FROM (
+        SELECT c.id AS id, d.title AS document_title, d.source_uri AS source_uri,
+               c.text AS text, d.promoted_from IS NOT NULL AS promoted,
+               c.bm25 <&> to_bm25query(
+                   '{{ bm25_index }}', tokenize(qtext, '{{ bm25_tokenizer }}')
+               ) AS raw_rank
+        FROM chunk c JOIN document d ON d.id = c.document_id
+        ORDER BY raw_rank
+        LIMIT fusion_depth
+    ) ranked
+    WHERE raw_rank < 0
+),
+{% else %}
+lexical_chunk AS (
+    SELECT c.id AS id, d.title AS document_title, d.source_uri AS source_uri,
+           c.text AS text, d.promoted_from IS NOT NULL AS promoted,
+           row_number() OVER (
+               ORDER BY ts_rank(c.tsv, plainto_tsquery('english', qtext)) DESC
+           ) AS rank
+    FROM chunk c JOIN document d ON d.id = c.document_id
+    WHERE c.tsv @@ plainto_tsquery('english', qtext)
+    ORDER BY ts_rank(c.tsv, plainto_tsquery('english', qtext)) DESC
+    LIMIT fusion_depth
+),
+{% endif %}
+fused_chunk AS (
+    SELECT id, document_title, source_uri, text, promoted,
+           sum(1.0 / (rrf_k + rank)) AS rrf_score
+    FROM (
+        SELECT * FROM dense_chunk
+        UNION ALL
+        SELECT * FROM lexical_chunk
+    ) lanes
+    GROUP BY id, document_title, source_uri, text, promoted
+),
+chunk_scored AS (
+    SELECT id, document_title, source_uri, text, promoted,
+           rrf_score + (CASE WHEN promoted THEN {{ promoted_bonus }} ELSE 0 END) AS score
+    FROM fused_chunk
+    ORDER BY score DESC
+    LIMIT k
+),
+dense_fact AS (
+    SELECT f.id AS id, f.subject_id AS subject_id, f.object_id AS object_id,
+           f.statement AS statement, f.predicate AS predicate,
+           lower(f.valid) AS valid_from, upper(f.valid) AS valid_to,
+           1 - (f.embedding <=> qvec) AS score
+    FROM live_fact f
+    WHERE f.embedding IS NOT NULL
+    ORDER BY f.embedding <=> qvec
+    LIMIT k
+),
+seed_entities AS (
+    SELECT subject_id AS entity_id FROM dense_fact
+    UNION
+    SELECT object_id AS entity_id FROM dense_fact WHERE object_id IS NOT NULL
+),
+neighbor_fact AS (
+    SELECT f.id AS id, f.statement AS statement, f.predicate AS predicate,
+           lower(f.valid) AS valid_from, upper(f.valid) AS valid_to,
+           1 - (f.embedding <=> qvec) AS score
+    FROM live_fact f
+    WHERE f.embedding IS NOT NULL
+      AND f.id NOT IN (SELECT id FROM dense_fact)
+      AND (
+          f.subject_id IN (SELECT entity_id FROM seed_entities)
+          OR f.object_id IN (SELECT entity_id FROM seed_entities)
+      )
+    ORDER BY f.embedding <=> qvec
+    LIMIT k
+)
+SELECT 'chunk'::text AS kind, cs.id, cs.document_title, cs.source_uri, cs.text,
+       cs.promoted, NULL::text AS statement, NULL::text AS predicate,
+       NULL::timestamptz AS valid_from, NULL::timestamptz AS valid_to, cs.score
+FROM chunk_scored cs
+UNION ALL
+SELECT 'fact'::text, df.id, NULL::text, NULL::text, NULL::text,
+       NULL::boolean, df.statement, df.predicate, df.valid_from, df.valid_to, df.score
+FROM dense_fact df
+UNION ALL
+SELECT 'neighbor'::text, nf.id, NULL::text, NULL::text, NULL::text,
+       NULL::boolean, nf.statement, nf.predicate, nf.valid_from, nf.valid_to, nf.score
+FROM neighbor_fact nf
+$$

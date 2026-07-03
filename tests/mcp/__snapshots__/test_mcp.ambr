@@ -1,0 +1,20 @@
+# serializer version: 1
+# name: test_render_snapshot
+  '''
+  profile:
+  Leech lattice: the optimal 24-dimensional sphere packing.
+  
+  overview:
+  - L2 lattices: packings and codes
+  
+  communities:
+  - coding theory: dense lattices and codes
+  
+  facts:
+  - (implements) The Leech lattice is optimal in dimension 24.
+  
+  sources:
+  [0.654] lattice note
+    The Leech lattice is a remarkable object. The Leech lattice is a remarkable object. The Leech lattice is a remarkable object. The Leech lattice is a remarkable object. The Leech lattice is a remarkable object. The Leech lattice is a remarkable object. The Leech lattice is a remar
+  '''
+# ---

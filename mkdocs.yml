@@ -1,0 +1,93 @@
+site_name: aizk
+site_description: A self-hosted multi-tenant memory engine that turns a Zettelkasten into scoped agent-queryable memory over MCP
+site_url: https://phvv.me/aizk/
+repo_url: https://github.com/phvv-me/aizk
+repo_name: phvv-me/aizk
+copyright: Apache-2.0 - Pedro Valois
+
+theme:
+  name: material
+  logo: assets/icon.svg
+  favicon: assets/icon.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.top
+    - navigation.indexes
+    - navigation.footer
+    - content.code.copy
+    - content.code.annotate
+    - toc.integrate
+
+extra_css:
+  - stylesheets/base.css
+  - stylesheets/brand.css
+
+nav:
+  - Home: index.md
+  - API: api.md
+  - Release: release.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.inlinehilite
+
+hooks:
+  - docs/hooks/llms.py
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      reconfigure_material: true
+      reconfigure_search: true
+      fallback_to_default: true
+      languages:
+        - locale: en
+          name: 🇺🇸 English
+          default: true
+        - locale: pt-BR
+          name: 🇧🇷 Português (BR)
+          build: true
+        - locale: es
+          name: 🇲🇽 Español
+          build: true
+        - locale: ja
+          name: 🇯🇵 日本語
+          build: true
+        - locale: zh
+          name: 🇨🇳 简体中文
+          build: true

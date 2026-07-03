@@ -1,0 +1,29 @@
+# system
+.DS_Store
+
+# editors
+.idea/
+.vscode/
+
+# logs
+*.log
+
+# docs
+site/
+
+# generated
+dist/
+build/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.pytest_cache/
+.pyrefly/
+.mypy_cache/
+.hypothesis/
+.coverage
+htmlcov/
+*.egg-info/

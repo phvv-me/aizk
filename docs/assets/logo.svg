@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <title>aizk</title>
+  <rect x="7" y="7" width="86" height="86" rx="20"
+        stroke="#eab308" stroke-width="6"/>
+  <text x="50" y="54" text-anchor="middle" dominant-baseline="central"
+        font-family="'Space Grotesk', system-ui, sans-serif" font-weight="700" font-size="46"
+        fill="#eab308">A</text>
+</svg>

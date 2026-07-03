@@ -1,0 +1,8 @@
+/* aizk accent. Loads after base.css, sets only the
+   --brand-* hooks. The shared base maps them onto Material. */
+
+:root {
+  --brand-primary: #f59e0b;
+  --brand-primary-dark: #d97706;
+  --brand-accent: #f59e0b;
+}

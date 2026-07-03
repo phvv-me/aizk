@@ -1,0 +1,162 @@
+services:
+  db:
+    image: tensorchord/vchord-suite:pg18-latest
+    environment:
+      POSTGRES_USER: aizk
+      POSTGRES_PASSWORD: aizk
+      POSTGRES_DB: aizk
+    ports:
+      - "5433:5432"
+    # the image's own CMD (`docker inspect tensorchord/vchord-suite:pg18-latest`) already carries
+    # shared_preload_libraries and search_path, and a compose `command:` replaces CMD outright
+    # rather than appending to it, so both are repeated here verbatim alongside the two declared
+    # GUC defaults this stack adds: app.uid and app.scope, the identity and reading-lens settings
+    # `store/events.py`'s bind_principal sets per transaction. A custom "class.name" GUC needs no
+    # extension or placeholder to declare it, a bare `-c app.uid=...` is enough, and with a real
+    # default in place an untouched session already reads the anonymous principal and the
+    # unnarrowed lens rather than the empty-string placeholder an undeclared custom GUC reverts to.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=vchord,vchord_bm25,vector,pg_tokenizer
+      - -c
+      - search_path="$$user", public, bm25_catalog, tokenizer_catalog
+      - -c
+      - app.uid=00000000-0000-0000-0000-000000000000
+      - -c
+      - app.scope=
+    volumes:
+      # pg18+ images store data under a major-version-specific subdirectory (pg_ctlcluster-style),
+      # so the mount point is the parent dir now, not .../data directly
+      - db-data:/var/lib/postgresql
+      # runs once against a fresh volume, before any migration ever connects: creates the
+      # restricted aizk_app role and its schema-wide default privileges, so 0001_init never has
+      # to create the role itself. Postgres runs every /docker-entrypoint-initdb.d/ script exactly
+      # once, only when the data directory is empty, so a `down -v && up` is required to re-run it.
+      - ./initdb/roles.sql:/docker-entrypoint-initdb.d/roles.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aizk -d aizk"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # vLLM serves Qwen3-VL-Embedding-2B over an OpenAI-compatible /v1/embeddings, so the model loads
+  # in this container, never inside aizk. --runner pooling is the current flag (--task embed was
+  # removed), is_matryoshka lets a request set dimensions=1024 to truncate the native 2048-d output.
+  # FP8 is the Ada 4090's native path, so the weights load quantized, and a 0.15 memory fraction
+  # leaves room for the reranker and the chat model to co-reside on the same 24 GB card. Every
+  # serving knob below is an .env var with an inline default, so flipping precision or model is an
+  # .env edit and never a yaml one. Bound to localhost only because vLLM ships unauthenticated;
+  # never expose it on a public address.
+  vllm-emb:
+    image: vllm/vllm-openai:v0.24.0
+    command:
+      - "--model"
+      - "${EMBED_MODEL:-Qwen/Qwen3-VL-Embedding-2B}"
+      - "--runner"
+      - "pooling"
+      - "--quantization"
+      - "${EMBED_QUANTIZATION:-fp8}"
+      - "--gpu-memory-utilization"
+      - "${EMBED_GPU_MEM_UTIL:-0.30}"
+      # cap the context far below the model's 262K native length; embeddings only see short chunks,
+      # and sizing the KV cache for 262K needs 28 GiB and overflows the 4090
+      - "--max-model-len"
+      - "${EMBED_MAX_MODEL_LEN:-8192}"
+      - "--served-model-name"
+      - "qwen3-vl-emb"
+      - "--trust-remote-code"
+      - "--hf-overrides"
+      - '{"is_matryoshka": true}'
+    ports:
+      - "127.0.0.1:${EMBED_PORT:-8000}:8000"
+    ipc: host
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+
+  # vLLM serves the cross-encoder reranker over an OpenAI-compatible /v1/rerank in the Cohere/Jina
+  # shape that aizk's Reranker posts to, on its own port so it co-resides with the embedder and the
+  # chat model on the one GPU. Qwen3-Reranker ships as a causal LM, so vLLM needs the hf-overrides
+  # below to route it through Qwen3ForSequenceClassification and read the yes/no classifier token
+  # vLLM scores from, plus the reranker's own chat template, both required for the /v1/rerank and
+  # /v1/score endpoints to work; FP8 and a 0.20 memory fraction keep it within the shared 4090. The
+  # served model name must match AIZK_RERANK_MODEL so the request's model id resolves here.
+  vllm-rerank:
+    image: vllm/vllm-openai:v0.24.0
+    command:
+      - "--model"
+      - "${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
+      - "--runner"
+      - "pooling"
+      - "--quantization"
+      - "${RERANK_QUANTIZATION:-fp8}"
+      - "--gpu-memory-utilization"
+      - "${RERANK_GPU_MEM_UTIL:-0.35}"
+      - "--max-model-len"
+      - "${RERANK_MAX_MODEL_LEN:-8192}"
+      - "--served-model-name"
+      - "${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
+      - "--trust-remote-code"
+      - "--hf-overrides"
+      - >-
+        {"architectures": ["Qwen3ForSequenceClassification"],
+        "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}
+      - "--chat-template"
+      - "examples/pooling/score/template/qwen3_reranker.jinja"
+    ports:
+      - "127.0.0.1:${RERANK_PORT:-8001}:8000"
+    ipc: host
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+
+  # vLLM serves the graph-extraction chat model over an OpenAI-compatible /v1/chat/completions,
+  # the third co-resident model on the same 4090, reached by aizk's instructor client at llm_url.
+  # FP8 and a 0.45 memory fraction give the chat model the largest share of the three, since its KV
+  # cache scales with the extraction context rather than the short chunks the other two lanes see.
+  # opt-in profile: an 8B fp8 LLM beside the embedder and reranker overflows a 24 GB card,
+  # so extraction defaults to an external endpoint (Ollama or a cloud provider via
+  # AIZK_LLM_URL) and this service starts only with `docker compose --profile llm up`.
+  vllm-llm:
+    profiles: ["llm"]
+    image: vllm/vllm-openai:v0.24.0
+    command:
+      - "--model"
+      - "${LLM_MODEL:-Qwen/Qwen3-8B-FP8}"
+      - "--quantization"
+      - "${LLM_QUANTIZATION:-fp8}"
+      - "--gpu-memory-utilization"
+      - "${LLM_GPU_MEM_UTIL:-0.45}"
+      - "--max-model-len"
+      - "${LLM_MAX_MODEL_LEN:-16384}"
+      - "--served-model-name"
+      - "qwen3-llm"
+      - "--trust-remote-code"
+    ports:
+      - "127.0.0.1:${LLM_PORT:-8002}:8000"
+    ipc: host
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+
+volumes:
+  db-data:

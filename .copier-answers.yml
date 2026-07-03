@@ -1,0 +1,8 @@
+# Changes here will be overwritten by Copier; do not edit by hand.
+_commit: 20bc709
+_src_path: packages/oss-template
+cli_command: ''
+description: A self-hosted multi-tenant memory engine that turns a Zettelkasten into
+    scoped agent-queryable memory over MCP
+project_name: aizk
+

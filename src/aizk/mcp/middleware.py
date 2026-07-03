@@ -1,0 +1,64 @@
+from collections.abc import Sequence
+
+import mcp.types as mt
+from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
+from fastmcp.server.middleware.rate_limiting import RateLimitError, TokenBucketRateLimiter
+from fastmcp.tools.tool import Tool, ToolResult
+
+from ..config import settings
+from ..store import Principal
+from .principal import ADMIN_TAG, caller_principal
+
+
+class PrincipalMiddleware(Middleware):
+    """Hide the admin-only tools from a non-admin listing, the one middleware duty left.
+
+    Every tool call resolves its own caller through `caller_principal` directly, so this
+    middleware carries no `on_call_tool` hook and caches no per-request state; `on_list_tools` is
+    the whole of it, hiding the ADMIN_TAG tools from a non-admin listing so a regular user neither
+    sees nor is tempted to call any of them. The admin gate itself lives on each admin tool through
+    `AizkMCP.admin_gated`, not here — a listing hides a tool without enforcing access to it, and a
+    caller could still reach a hidden tool directly through `tool.run()`.
+    """
+
+    async def on_list_tools(
+        self,
+        context: MiddlewareContext[mt.ListToolsRequest],
+        call_next: CallNext[mt.ListToolsRequest, Sequence[Tool]],
+    ) -> Sequence[Tool]:
+        tools = await call_next(context)
+        if await Principal.administers(await caller_principal()):
+            return tools
+        return [tool for tool in tools if ADMIN_TAG not in tool.tags]
+
+
+class AnonymousRateLimit(Middleware):
+    """Token-bucket rate limiting applied only to unauthenticated tool calls.
+
+    A public group makes the HTTP server readable by strangers, so anonymous tool calls consume
+    from one shared token bucket while any authenticated principal, keyed or Zitadel resolved,
+    passes through unthrottled. Composing the bucket rather than subclassing fastmcp's
+    RateLimitingMiddleware keeps its inherited on_request hook from also charging every protocol
+    handshake and listing, which would drain the bucket before the first tool call arrived. One
+    bucket serves all strangers, since an unauthenticated HTTP caller carries no identity to key
+    a fairer split on anyway.
+    """
+
+    def __init__(self, max_requests_per_second: float) -> None:
+        # the bucket holds a five-second burst so a stranger's short read sequence flows while the
+        # sustained rate stays capped at the configured requests per second
+        self.limiter = TokenBucketRateLimiter(
+            capacity=max(1, round(max_requests_per_second * 5)),
+            refill_rate=max_requests_per_second,
+        )
+
+    async def on_call_tool(
+        self,
+        context: MiddlewareContext[mt.CallToolRequestParams],
+        call_next: CallNext[mt.CallToolRequestParams, ToolResult],
+    ) -> ToolResult:
+        if await caller_principal() != settings.anonymous_principal_id:
+            return await call_next(context)
+        if not await self.limiter.consume():
+            raise RateLimitError("anonymous rate limit exceeded, authenticate for more")
+        return await call_next(context)

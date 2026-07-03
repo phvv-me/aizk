@@ -1,0 +1,161 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aizk"
+version = "0.0.1"
+description = "A self-hosted multi-tenant memory engine that turns a Zettelkasten into scoped agent-queryable memory over MCP"
+readme = "README.md"
+requires-python = ">=3.14"
+license = "Apache-2.0"
+authors = [{ name = "Pedro Valois", email = "contact@phvv.me" }]
+keywords = [
+  "aizk",
+  # add discovery keywords users would search for
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+  # 2.1 is still beta (2.1.0b3) but adopted deliberately for its PostgreSQL ENUM/DOMAIN and other
+  # improvements; asyncpg is unaffected by the psycopg-default-driver change since the DSN always
+  # names +asyncpg explicitly
+  "sqlalchemy[asyncio]>=2.1.0b3,<3",
+  "sqlmodel>=0.0.39,<0.1",
+  "asyncpg>=0.30,<0.31",
+  "alembic>=1.14,<2",
+  "pgvector>=0.3.6,<0.5",
+  "pydantic-settings>=2.5,<3",
+  "httpx>=0.28,<0.29",
+  "cyclopts>=4,<5",
+  "loguru>=0.7.3,<0.8",
+  "fastmcp>=2.11,<3",
+  "networkx>=3.4,<4",
+  # the sweep and scale eval harnesses' numeric work, present transitively through pgvector too
+  "numpy>=2,<3",
+  # the api embed and rerank backends' shared HTTP client, and the native pydantic structured
+  # outputs (`chat.completions.parse`) the one LLM seam extracts through, no instructor layer
+  "openai>=1.109,<2",
+  # the chonkie recursive prose and tree-sitter code chunker backends; the [code] extra pulls in
+  # tree-sitter-language-pack transitively, which chonkie's CodeChunker(language="auto") uses
+  "chonkie[code]>=1.6,<2",
+  # is_code/is_text's filename and content tagging, the same pre-commit-grade catalog CodeChunker's
+  # language="auto" leans on through chonkie, and a direct dependency since chunker.py reads it at
+  # import time rather than lazily
+  "identify>=2.6,<3",
+  # normalize_name's transliterating fold, the entity id content-addressing depends on
+  "python-slugify>=8.0,<9",
+  # the camelCase-to-snake_case fold Base.__tablename__ derives every table name from
+  "inflection>=0.5,<0.6",
+  # renders the recall, scale, and sweep reports as compact text, structural loops kept out of
+  # the Python that assembles their context
+  "jinja2>=3.1,<4",
+  # eval.benchmarks' load_jsonl streams the EverMemBench and TEMPO dataset files one record at a
+  # time rather than splitting the whole file into lines by hand
+  "jsonlines>=4.0,<5",
+  "patos",
+]
+
+[project.scripts]
+aizk = "aizk.cli:app"
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.6",
+  "pyrefly>=1",
+  "mypy>=1.11",
+  "pytest>=8",
+  "hypothesis>=6.100",
+  "pytest-cov>=5",
+  "syrupy>=4",
+  "pytest-subprocess>=1.5",
+  "pytest-mock>=3.14",
+  "faker>=30",
+  "polyfactory>=2.22,<3",
+  "dirty-equals>=0.8",
+  # offline retrieval-metric aggregation for the eval harness (Qrels/Run/evaluate/compare)
+  "ranx>=0.3.20,<0.4",
+  # house time and memory profiler the config sweep meters each config's latency and peak with
+  "mainboard",
+]
+docs = ["mkdocs-material>=9.5", "mkdocs-static-i18n>=1.2"]
+
+[project.urls]
+Homepage = "https://phvv.me/aizk"
+Documentation = "https://phvv.me/aizk"
+Repository = "https://github.com/phvv-me/aizk"
+Issues = "https://github.com/phvv-me/aizk/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aizk"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+# the vendored `alembic/` migrations directory makes alembic a first-party package here, so its
+# imports sort with our own rather than as a third party, matching how every migration and the rls
+# ops module already order them
+[tool.ruff.lint.isort]
+known-first-party = ["alembic"]
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "standard"
+venvPath = "../../.chefe/.pixi/envs"
+venv = "default"
+reportMissingModuleSource = false
+
+[tool.pyrefly]
+project-includes = ["src", "tests"]
+search-path = ["src", "tests", "."]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+disallow_any_explicit = true
+plugins = ["pydantic.mypy"]
+files = ["src"]
+mypy_path = "src"
+namespace_packages = false
+
+# pgvector ships no py.typed marker, so its SQLAlchemy types resolve as untyped
+[[tool.mypy.overrides]]
+module = "pgvector.*"
+ignore_missing_imports = true
+
+# pydantic's model metaclass makes mypy attribute an explicit Any to every BaseModel
+# subclass at its class statement, so disallow_any_explicit fires falsely on the modules
+# that define our settings and result models. The guard stays on everywhere else.
+[[tool.mypy.overrides]]
+module = ["aizk.config", "aizk.retrieve"]
+disallow_any_explicit = false
+
+[tool.pytest.ini_options]
+addopts = "-q -ra --strict-markers --cov=aizk --cov-report=term-missing"
+testpaths = ["tests"]
+pythonpath = ["tests"]
+
+[tool.coverage.run]
+source = ["aizk"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 99
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+  "\\.\\.\\.",
+]

@@ -1,0 +1,66 @@
+name: Release
+
+# Releases are driven by the version in pyproject.toml, not by manual tags.
+# On every push to main: run the full CI gate, then — only if `v<version>` is not
+# already a tag — build, publish to PyPI (Trusted Publishing/OIDC), and tag the
+# released commit. So bumping the version IS the release; an unchanged version is
+# a no-op. The file stays named publish.yml because the PyPI trusted publisher is
+# registered against this exact workflow path. Publish runs BEFORE the tag so a
+# failed upload leaves no tag and simply retries on the next push.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # The same gate PRs run. A failure here stops the release job below.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # PyPI Trusted Publishing
+      contents: write # push the tag + create the GitHub release
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # need the tag list to tell a new version from a released one
+
+      - id: ver
+        run: echo "version=$(grep -m1 '^version' pyproject.toml | sed -E 's/.*"(.*)".*/\1/')" >> "$GITHUB_OUTPUT"
+
+      - id: tag
+        name: Has this version already been released?
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.ver.outputs.version }}" >/dev/null; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "v${{ steps.ver.outputs.version }} already released — nothing to do."
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.tag.outputs.new == 'true'
+        uses: astral-sh/setup-uv@v7
+      - if: steps.tag.outputs.new == 'true'
+        run: uv build
+      - if: steps.tag.outputs.new == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true # idempotent: a re-run after a partial failure won't error
+
+      - if: steps.tag.outputs.new == 'true'
+        name: Tag the released version
+        run: |
+          git tag "v${{ steps.ver.outputs.version }}"
+          git push origin "v${{ steps.ver.outputs.version }}"
+
+      - if: steps.tag.outputs.new == 'true'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: "v${{ steps.ver.outputs.version }}"
+          generate_release_notes: true
+          append_body: true
+          body: "📦 [aizk ${{ steps.ver.outputs.version }} on PyPI](https://pypi.org/project/aizk/${{ steps.ver.outputs.version }}/)"
