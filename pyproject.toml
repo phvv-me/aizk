@@ -41,7 +41,7 @@ dependencies = [
   "numpy>=2,<3",
   # the api embed and rerank backends' shared HTTP client, and the native pydantic structured
   # outputs (`chat.completions.parse`) the one LLM seam extracts through, no instructor layer
-  "openai>=1.109,<2",
+  "openai>=1.109,<3",
   # the chonkie recursive prose and tree-sitter code chunker backends; the [code] extra pulls in
   # tree-sitter-language-pack transitively, which chonkie's CodeChunker(language="auto") uses
   "chonkie[code]>=1.6,<2",
