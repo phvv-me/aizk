@@ -3,6 +3,8 @@
 aizk is a self-hosted shared brain. One Postgres holds a bi-temporal knowledge graph under
 forced row level security, so private notes, project scopes, and implicit intersection graphs
 never cross, and every capability is an MCP tool an agent calls. Nothing leaves the building.
+New to a term on this page? [Concepts](../concepts.md) covers the vocabulary in plain language
+first.
 
 ```mermaid
 flowchart LR

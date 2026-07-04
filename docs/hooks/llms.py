@@ -18,7 +18,7 @@ from pathlib import Path
 from mkdocs.config.defaults import MkDocsConfig
 
 SECTIONS: dict[str, list[str]] = {
-    "Usage": ["index.md"],
+    "Usage": ["index.md", "concepts.md"],
     "Reference": ["api.md", "release.md"],
 }
 

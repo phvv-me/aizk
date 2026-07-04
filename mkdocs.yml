@@ -45,6 +45,7 @@ extra_css:
 
 nav:
   - Home: index.md
+  - Concepts: concepts.md
   - Engine:
       - engine/index.md
       - Write path: engine/write-path.md

@@ -1,16 +1,22 @@
 # Release
 
 Releases are driven by the `version` in `pyproject.toml`. Bumping it and merging to
-`main` is the whole release. CI runs the gate, and if `v<version>` is not yet a tag,
-the workflow builds, publishes to PyPI, tags the commit, and cuts a GitHub release.
-An unchanged version is a no-op, so ordinary commits never publish.
+`main` is normally the whole release, CI runs the gate, and if `v<version>` is not yet
+a tag, the workflow builds, publishes to PyPI, tags the commit, and cuts a GitHub
+release. An unchanged version is a no-op, so ordinary commits never publish.
+
+The publish step is presently manual (`workflow_dispatch` only, run from the Actions
+tab or `gh workflow run publish.yml`), because the `rls` dependency is a direct git
+reference and the pinned SQLAlchemy 2.1 beta needs a `uv` override plain `pip` cannot
+express, both block an unattended PyPI upload. Every push to `main` still runs the
+full CI gate above regardless.
 
 ## Checklist
 
 1. Bump `version` in `pyproject.toml`.
 2. Update `CHANGELOG.md`.
 3. Run the local checks.
-4. Merge to `main`. `.github/workflows/publish.yml` builds, publishes, and tags.
+4. Merge to `main`, then manually trigger `publish.yml` to build, publish, and tag.
 5. Verify the package page and docs site.
 
 ## Commands
