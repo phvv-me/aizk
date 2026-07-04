@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 from asyncpg.exceptions import DuplicateObjectError, DuplicateTableError
+from bg_doubles import RecordingQueue
 from hypothesis import given
 from hypothesis import strategies as st
 
 import aizk.background.queue as queue_mod
-from aizk.background.payloads import ChunkJob, ProfileJob, TaskJob
 from aizk.background.queue import (
     EXTRACT_ENTRYPOINT,
     PROFILE_ENTRYPOINT,
@@ -26,71 +26,12 @@ from aizk.config import settings
 from aizk.store import Watermark
 
 uuids = st.uuids()
-
-
-@pytest.mark.parametrize(
-    ("payload_cls", "field"),
-    [(ChunkJob, "chunk_id"), (ProfileJob, "entity_id"), (TaskJob, None)],
-    ids=["chunk", "profile", "task"],
-)
-@given(first=uuids, second=uuids)
-def test_payload_round_trips_exactly_the_fields_the_worker_decodes(
-    payload_cls: type[ChunkJob | ProfileJob | TaskJob],
-    field: str | None,
-    first: uuid.UUID,
-    second: uuid.UUID,
-) -> None:
-    """Each queue payload decodes back to exactly the ids its worker body reads, unchanged.
-
-    The chunk and profile jobs carry their own subject plus the principal, and the task job carries
-    only the principal, so a round trip through `encode`/`decode` reproduces the fields as built.
-    """
-    job = (
-        payload_cls(**{field: first, "principal_id": second})
-        if field
-        else payload_cls(principal_id=second)
-    )
-    decoded = payload_cls.decode(job.encode())
-    assert decoded == job
-    assert decoded.principal_id == second
-    if field:
-        assert getattr(decoded, field) == first
-
-
-@given(
-    scheme=st.sampled_from(["postgresql", "postgres"]),
-    rest=st.text(alphabet="abcdefghijklmnop/@:._-", min_size=1, max_size=30),
-)
-def test_asyncpg_dsn_drops_the_asyncpg_tag_once_and_is_idempotent(
-    scheme: str, rest: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Stripping the driver tag yields a clean asyncpg DSN and re-stripping leaves it untouched."""
-    tagged = f"{scheme}+asyncpg://{rest}"
-    clean = f"{scheme}://{rest}"
-    monkeypatch.setattr(settings, "database_url", tagged)
-    assert settings.asyncpg_dsn == clean
-    monkeypatch.setattr(settings, "database_url", clean)
-    assert settings.asyncpg_dsn == clean
-
-
-@pytest.mark.parametrize(
-    ("url", "expected"),
-    [
-        ("postgresql+asyncpg://writer@host:5432/db", "writer"),
-        ("postgresql+asyncpg://host:5432/db", "aizk_app"),
-    ],
-)
-def test_app_role_reads_the_username_or_falls_back(
-    url: str, expected: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The restricted role is the DSN username, defaulting to aizk_app when the DSN omits it."""
-    monkeypatch.setattr(settings, "database_url", url)
-    assert settings.app_role == expected
+InstallSeam = Callable[[object], RecordingQueue]
 
 
 @given(entities=st.lists(uuids, max_size=5, unique=True), principal=uuids)
 def test_enqueue_profiles_debounces_per_entity_and_skips_when_empty(
-    queue_seam, entities: list[uuid.UUID], principal: uuid.UUID
+    queue_seam: InstallSeam, entities: list[uuid.UUID], principal: uuid.UUID
 ) -> None:
     """Each touched entity gets one rebuild job keyed on it, an empty set opens no connection.
 
@@ -109,40 +50,79 @@ def test_enqueue_profiles_debounces_per_entity_and_skips_when_empty(
     assert recorder.opened == recorder.closed == (2 if entities else 0)
 
 
-@given(chunks=st.lists(uuids, max_size=5, unique=True), principal=uuids)
-def test_enqueue_pending_queues_one_job_per_chunk_and_returns_the_count(
-    monkeypatch: pytest.MonkeyPatch, queue_seam, chunks: list[uuid.UUID], principal: uuid.UUID
+@given(
+    chunks=st.lists(uuids, max_size=5, unique=True),
+    principal=st.none() | uuids,
+    limit=st.none() | st.integers(1, 4),
+    source=st.none() | st.text(alphabet="abc", max_size=3),
+)
+def test_enqueue_pending_queues_one_deduped_job_per_chunk_and_counts_them(
+    monkeypatch: pytest.MonkeyPatch,
+    queue_seam: InstallSeam,
+    chunks: list[uuid.UUID],
+    principal: uuid.UUID | None,
+    limit: int | None,
+    source: str | None,
 ) -> None:
-    """Every pending chunk the lister returns enqueues one deduped job, counted in the total."""
+    """Every pending chunk the lister returns enqueues one deduped extraction job, counted once.
+
+    A null principal falls back to the system identity the lister is then queried under, and the
+    chunk id is the dedupe key so re-enqueuing the same backlog is harmless. The lister arguments
+    are captured to prove the caller's limit, source, and resolved principal reach it verbatim.
+    """
     recorder = queue_seam(queue_mod)
+    seen_args: list[tuple[uuid.UUID, int | None, str | None]] = []
 
     async def fake_pending(
-        principal_id: uuid.UUID,
-        limit: int | None,
-        source: str | None,
+        principal_id: uuid.UUID, chunk_limit: int | None, chunk_source: str | None
     ) -> list[SimpleNamespace]:
+        seen_args.append((principal_id, chunk_limit, chunk_source))
         return [SimpleNamespace(id=chunk) for chunk in chunks]
 
     monkeypatch.setattr(queue_mod, "pending_chunks", fake_pending)
 
-    queued = asyncio.run(enqueue_pending(principal_id=principal))
+    queued = asyncio.run(enqueue_pending(limit=limit, principal_id=principal, source=source))
 
+    resolved = principal or settings.system_principal_id
+    assert seen_args == [(resolved, limit, source)]
     assert queued == len(chunks)
     assert {call.dedupe_key for call in recorder.enqueues} == {str(chunk) for chunk in chunks}
     assert all(call.entrypoint == EXTRACT_ENTRYPOINT for call in recorder.enqueues)
+    assert recorder.opened == recorder.closed == 1
+
+
+def test_enqueue_pending_swallows_the_already_queued_duplicate(
+    monkeypatch: pytest.MonkeyPatch, queue_seam: InstallSeam
+) -> None:
+    """A second pass over the same pending chunk skips the duplicate and reports only fresh work.
+
+    The recorder raises `DuplicateJobError` on a repeated dedupe key the way pgqueuer does, so the
+    harmless-re-enqueue contract must swallow it and count zero rather than crash the caller.
+    """
+    recorder = queue_seam(queue_mod)
+    chunk = SimpleNamespace(id=uuid.uuid4())
+
+    async def fake_pending(principal_id: uuid.UUID, limit: int | None, source: str | None):
+        return [chunk]
+
+    monkeypatch.setattr(queue_mod, "pending_chunks", fake_pending)
+
+    assert asyncio.run(enqueue_pending()) == 1
+    assert asyncio.run(enqueue_pending()) == 0
+    assert len(recorder.enqueues) == 1
 
 
 class FakeSession:
     """A scoped session stand-in whose only read is the chunk the build body loads.
 
-    chunk: the object `session.get` returns for the build, or None when invisible.
+    chunk: the object `session.get` returns for the build, or None when the chunk is invisible.
     """
 
     def __init__(self, chunk: object) -> None:
         self.chunk = chunk
 
     async def get(self, model: object, identifier: uuid.UUID) -> object:
-        """Return the seeded chunk for the build's lookup.
+        """Return the seeded chunk for the build's lookup, ignoring the fixed model and id.
 
         model: the ORM class the body asks for, ignored since the chunk is fixed.
         identifier: the chunk id, ignored for the same reason.
@@ -150,98 +130,93 @@ class FakeSession:
         return self.chunk
 
 
-def patch_chunk_pipeline(monkeypatch: pytest.MonkeyPatch, chunk: object) -> dict[str, list]:
-    """Swap every extraction, resolution, and watermark seam the per-chunk build calls.
+def patch_chunk_pipeline(
+    monkeypatch: pytest.MonkeyPatch, chunk: object, touched: set[uuid.UUID]
+) -> list[tuple[Watermark.Kind, str]]:
+    """Swap the visibility, extraction, and watermark seams the per-chunk build glues together.
 
-    Records the consolidated facts and the bumped entity refs so a test asserts the build's own
-    glue, the touched-set bookkeeping, without any model, LLM, or database.
+    The build's own logic is the glue: load the chunk under the owner, hand it to
+    `extract_and_consolidate`, then bump a dirty watermark per touched entity. The core build and
+    the watermark writes are mocked so only that glue is under test, and the returned log records
+    every dirty bump so a test asserts the touched-set bookkeeping without a model or database.
 
     monkeypatch: the pytest patcher.
     chunk: the chunk `session.get` hands the build, or None to drive the invisible-chunk branch.
+    touched: the entity ids the mocked core reports the slice touched.
     """
-    log: dict[str, list] = {"consolidated": [], "bumped": []}
+    bumped: list[tuple[Watermark.Kind, str]] = []
 
     @asynccontextmanager
     async def fake_acting_as(principal_id: uuid.UUID) -> AsyncIterator[FakeSession]:
         yield FakeSession(chunk)
 
-    monkeypatch.setattr(queue_mod, "acting_as", fake_acting_as)
-
-    async def fake_extract(text: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            entities=[
-                SimpleNamespace(name="known", type="person"),
-                SimpleNamespace(name="skip", type="person"),
-            ],
-            facts=["raw"],
-        )
-
-    async def fake_resolve_timestamps(text: str, facts: list) -> list[str]:
-        return ["dated"]
-
-    resolved = {"known": uuid.uuid4(), "skip": None}
-
-    class FakeWriter:
-        """Stand-in for GraphWriter, recording each consolidated fact without the real body."""
-
-        def __init__(self, session: object, owner_id: uuid.UUID, scope: object) -> None:
-            pass
-
-        async def resolve(self, name: str, kind: str) -> uuid.UUID | None:
-            return resolved[name]
-
-        async def consolidate(self, fact: object, chunk_id: uuid.UUID) -> None:
-            log["consolidated"].append(fact)
+    async def fake_extract(built_chunk: object, principal_id: uuid.UUID) -> set[uuid.UUID]:
+        return touched
 
     async def fake_bump(
-        session: object, owner_id: uuid.UUID, kind: str, ref: str = "global", by: int = 1
+        session: object,
+        owner_id: uuid.UUID,
+        kind: Watermark.Kind,
+        ref: str = "global",
+        by: int = 1,
     ) -> int:
-        log["bumped"].append((kind, ref))
+        bumped.append((kind, ref))
         return 1
 
-    monkeypatch.setattr(queue_mod, "extract_triples", fake_extract)
-    monkeypatch.setattr(queue_mod, "resolve_timestamps", fake_resolve_timestamps)
-    monkeypatch.setattr(queue_mod, "GraphWriter", FakeWriter)
+    monkeypatch.setattr(queue_mod, "acting_as", fake_acting_as)
+    monkeypatch.setattr(queue_mod, "extract_and_consolidate", fake_extract)
     monkeypatch.setattr(queue_mod.Watermark, "bump", fake_bump)
-    log["resolved_known"] = [resolved["known"]]
-    return log
+    return bumped
 
 
-@pytest.mark.parametrize("visible", [True, False], ids=["resolved", "invisible"])
-def test_process_chunk_touches_what_it_resolves_and_skips_what_it_cannot_see(
-    monkeypatch: pytest.MonkeyPatch, visible: bool
+@given(touched=st.sets(uuids, max_size=4))
+def test_process_chunk_dirties_exactly_the_entities_the_slice_touched(
+    monkeypatch: pytest.MonkeyPatch, touched: set[uuid.UUID]
 ) -> None:
-    """A visible chunk resolves entities, consolidates each dated fact, and dirties what it hit.
+    """A visible chunk bumps one dirty watermark per touched entity and returns that same set.
 
-    A chunk invisible under the owner's row level security yields no graph slice, so the touched
-    set, the consolidation log, and the dirty bumps are all empty, the no-leak skip the same body
-    takes when `session.get` returns nothing.
+    An empty touched set takes the no-bump branch, so the returned list and the dirty log stay
+    empty, while any touched entity is dirtied under `entity_dirty` keyed on its own id, the
+    on-write signal a debounced profile rebuild reads.
     """
-    chunk = SimpleNamespace(text="some text", scope=None, id=uuid.uuid4()) if visible else None
-    log = patch_chunk_pipeline(monkeypatch, chunk)
-    chunk_id, principal = uuid.uuid4(), uuid.uuid4()
+    chunk = SimpleNamespace(text="some text", scope=None, id=uuid.uuid4())
+    bumped = patch_chunk_pipeline(monkeypatch, chunk, touched)
 
-    touched = asyncio.run(process_chunk(chunk_id, principal))
+    result = asyncio.run(process_chunk(uuid.uuid4(), uuid.uuid4()))
 
-    if visible:
-        assert touched == log["resolved_known"]
-        assert log["consolidated"] == ["dated"]
-        assert log["bumped"] == [(Watermark.Kind.entity_dirty, str(touched[0]))]
-    else:
-        assert touched == []
-        assert log["consolidated"] == [] and log["bumped"] == []
+    assert set(result) == touched
+    assert bumped == [(Watermark.Kind.entity_dirty, str(entity)) for entity in result]
+
+
+def test_process_chunk_skips_a_chunk_it_cannot_see(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A chunk invisible under the owner's row level security yields no slice and dirties nothing.
+
+    When `session.get` returns nothing the body returns early, so the core build never runs and no
+    watermark is bumped, the no-leak skip the queue path takes rather than acting on a stray id.
+    """
+    extracted: list[object] = []
+
+    def guard(built_chunk: object, principal_id: uuid.UUID) -> set[uuid.UUID]:
+        extracted.append(built_chunk)
+        raise AssertionError("extract must not run for an invisible chunk")
+
+    bumped = patch_chunk_pipeline(monkeypatch, None, set())
+    monkeypatch.setattr(queue_mod, "extract_and_consolidate", guard)
+
+    assert asyncio.run(process_chunk(uuid.uuid4(), uuid.uuid4())) == []
+    assert bumped == [] and extracted == []
 
 
 def test_process_profile_rebuilds_then_clears_the_dirty_mark(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Rebuilding one profile clears that entity's dirty counter back to zero."""
+    """Rebuilding one profile clears that entity's dirty counter back to zero under its owner."""
     entity, principal = uuid.uuid4(), uuid.uuid4()
-    built: list[uuid.UUID] = []
-    cleared: list[tuple[str, int, str]] = []
+    built: list[tuple[uuid.UUID, uuid.UUID]] = []
+    cleared: list[tuple[Watermark.Kind, int, str]] = []
 
-    async def fake_build_profile(entity_id: uuid.UUID, **kwargs: object) -> None:
-        built.append(entity_id)
+    async def fake_build_profile(entity_id: uuid.UUID, principal_id: uuid.UUID) -> None:
+        built.append((entity_id, principal_id))
 
     @asynccontextmanager
     async def fake_acting_as(principal_id: uuid.UUID) -> AsyncIterator[None]:
@@ -250,7 +225,7 @@ def test_process_profile_rebuilds_then_clears_the_dirty_mark(
     async def fake_set_value(
         session: object,
         owner_id: uuid.UUID,
-        kind: str,
+        kind: Watermark.Kind,
         counter: int = 0,
         payload: object = None,
         ref: str = "global",
@@ -263,15 +238,20 @@ def test_process_profile_rebuilds_then_clears_the_dirty_mark(
 
     asyncio.run(process_profile(entity, principal))
 
-    assert built == [entity]
+    assert built == [(entity, principal)]
     assert cleared == [(Watermark.Kind.entity_dirty, 0, str(entity))]
 
 
 @pytest.mark.parametrize("install_error", [None, DuplicateObjectError, DuplicateTableError])
-def test_install_queue_schema_grants_every_table_and_sequence(
+def test_install_queue_schema_grants_every_table_and_sequence_re_install_tolerated(
     monkeypatch: pytest.MonkeyPatch, install_error: type[Exception] | None
 ) -> None:
-    """Installing the queue grants the app role each table and sequence, re-install tolerated."""
+    """Installing the queue grants the app role each table and sequence, a re-install swallowed.
+
+    A pre-existing schema surfaces as `DuplicateObjectError`/`DuplicateTableError` from `install`,
+    which the body treats as already-installed and still runs every grant, so the restricted role
+    can read and write the queue whether the install is the first or the tenth.
+    """
     grants: list[str] = []
 
     async def execute(sql: str) -> None:
@@ -281,6 +261,7 @@ def test_install_queue_schema_grants_every_table_and_sequence(
         return None
 
     async def connect(dsn: str) -> SimpleNamespace:
+        assert dsn == settings.admin_asyncpg_dsn
         return SimpleNamespace(execute=execute, close=close)
 
     class FakeQueries:
@@ -294,8 +275,8 @@ def test_install_queue_schema_grants_every_table_and_sequence(
     monkeypatch.setattr(queue_mod, "asyncpg", SimpleNamespace(connect=connect))
     monkeypatch.setattr(queue_mod, "AsyncpgDriver", lambda connection: connection)
     monkeypatch.setattr(queue_mod, "Queries", FakeQueries)
-
     monkeypatch.setattr(settings, "database_url", "postgresql+asyncpg://writer@host:5432/db")
+
     asyncio.run(install_queue_schema())
 
     granted = " ".join(grants)
@@ -304,10 +285,8 @@ def test_install_queue_schema_grants_every_table_and_sequence(
     assert all("writer" in grant for grant in grants)
 
 
-def test_queue_connection_opens_and_closes_exactly_once(
-    monkeypatch: pytest.MonkeyPatch, queue_seam: Callable[[object], object]
-) -> None:
-    """The shared connection scope opens once on entry and closes once on exit."""
+def test_queue_connection_opens_and_closes_exactly_once(queue_seam: InstallSeam) -> None:
+    """The shared connection scope opens once on entry and closes once when the block exits."""
     recorder = queue_seam(queue_mod)
 
     async def drive() -> None:
@@ -317,26 +296,3 @@ def test_queue_connection_opens_and_closes_exactly_once(
 
     asyncio.run(drive())
     assert recorder.opened == recorder.closed == 1
-
-
-def test_enqueue_pending_skips_jobs_already_queued(
-    monkeypatch: pytest.MonkeyPatch, queue_seam
-) -> None:
-    """Re-enqueuing pending chunks skips the ones still queued, the harmless-re-enqueue contract.
-
-    The recorder raises `DuplicateJobError` on a repeated dedupe key the way pgqueuer does, so a
-    second pass over the same pending chunk must swallow the duplicate and report only the fresh
-    enqueues rather than crashing the promotion or fan-out path that called it.
-    """
-    recorder = queue_seam(queue_mod)
-    principal = uuid.uuid4()
-    chunk = SimpleNamespace(id=uuid.uuid4())
-
-    async def fake_pending(principal_id: uuid.UUID, limit: int | None, source: str | None):
-        return [chunk]
-
-    monkeypatch.setattr(queue_mod, "pending_chunks", fake_pending)
-
-    assert asyncio.run(queue_mod.enqueue_pending(principal_id=principal)) == 1
-    assert asyncio.run(queue_mod.enqueue_pending(principal_id=principal)) == 0
-    assert len(recorder.enqueues) == 1

@@ -1,10 +1,11 @@
-from typing import ClassVar
+from typing import ClassVar, cast
 
+from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import Index
 from sqlalchemy.orm import declared_attr
+from sqlmodel import Field
 
 from ...config import settings
-from .fields import halfvec_field
 
 
 class Embedded:
@@ -22,7 +23,9 @@ class Embedded:
     # pyrefly's self-type check, since `Embedded` is not one of its subclasses.
     __tablename__: ClassVar[str]
 
-    embedding: list[float] | None = halfvec_field(settings.embed_dim)
+    embedding: list[float] | None = Field(
+        default=None, sa_type=cast(type[list[float]], HALFVEC(settings.embed_dim))
+    )
 
     @declared_attr.directive
     def __table_args__(cls) -> tuple[Index, ...]:

@@ -3,6 +3,13 @@ from sqlalchemy.orm import Mapper
 
 from ..mixins.base import TableBase
 
+# aizk keeps this mapper-construction hook as its own, rather than calling the standalone `rls`
+# library's more general `rls.register(Base)` (https://github.com/phvv-me/rls): every aizk model's
+# `__rls_policies__` is always a classmethod (never a plain list), and this hook does one thing the
+# generic library's does not, populating `metadata.info["rls"]` alongside `metadata.info
+# ["rls_policies"]`, the autogenerate guard set `cli.py`'s `check-rls` command and every DB-backed
+# test in `tests/store/test_rls.py` read as the expected table set.
+
 
 @event.listens_for(Mapper, "after_mapper_constructed")
 def register_policies(mapper: Mapper, class_: type) -> None:

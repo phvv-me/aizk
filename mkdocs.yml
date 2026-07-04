@@ -45,6 +45,16 @@ extra_css:
 
 nav:
   - Home: index.md
+  - Engine:
+      - engine/index.md
+      - Write path: engine/write-path.md
+      - Store: engine/store.md
+      - Lattice: engine/lattice.md
+      - Read path: engine/read-path.md
+      - Autonomy: engine/autonomy.md
+  - Benchmarks: benchmarks.md
+  - Comparison: comparison.md
+  - Provenance: provenance.md
   - API: api.md
   - Release: release.md
 

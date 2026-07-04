@@ -27,17 +27,29 @@ paper or design each piece traces to.
 - [x] The retrieval lanes beyond plain hybrid search, personalized pagerank, community summaries,
   the RAPTOR tree, and rolled-up entity profiles, all fused into one `recall` call
   (`retrieval/recall.py`).
+- [x] The as-of historical-replay path already serves off the existing schema, measured rather than
+  assumed. `store/models/fact.py`'s plain, non-partial `ix_fact_claim_recorded` GiST index, not the
+  partial `ix_fact_claim_live` the earlier note pinned the concern on, is what the planner picks for
+  `FactClaim.visible_at(as_of)`'s `recorded @> as_of` predicate; `EXPLAIN (ANALYZE, BUFFERS)` against
+  a seeded corpus (60,000 facts, 300,000 claim versions) showed a Bitmap Index Scan on
+  `ix_fact_claim_recorded`, not a sequential scan, at 30 ms end to end. No composite or additional
+  index is warranted at this scale.
+- [x] `store/rls`'s generic core shipped as its own house package, `packages/rls`
+  (https://github.com/phvv-me/rls, forked from DelfinaCare/rls, MIT), rather than staying an
+  in-tree module: policy compilation, DDL assembly, `sqlglot`-based clause comparison against the
+  live catalog, and Alembic autogenerate integration all now live there, generic over any
+  SQLAlchemy `DeclarativeBase`/`SQLModel` registry with a configurable GUC namespace, no aizk
+  import anywhere in it. `store/rls/` shrank to `predicates.py` (the aizk-specific visibility-
+  lattice expressions), `register.py` (the mapper-construction hook that also tracks
+  `metadata.info["rls"]`, the autogenerate guard set), and `ops.py` (the table-name-only
+  `apply_scoped_rls`/`drop_scoped_rls` Alembic ops the committed `0001_init.py` migration already
+  calls, kept alive as aizk's own thin wrapper over the library's DDL builders since that call
+  shape predates the library's own self-contained `apply_rls`/`drop_rls`).
 
 ## Next
 
 Open items carried over from the earlier gap analysis, still unbuilt or partial.
 
-- [ ] **Extract `store/rls`'s generic core as a house package.** `policy.py`, `ops.py`,
-  `register.py`, and `verify.py` already import nothing aizk-specific, no `config.settings`, no
-  `store.models`, only SQLAlchemy, alembic, and the generic `mixins.base.TableBase` registry
-  machinery; `predicates.py` is the one aizk-aware module, hardcoding the `membership`/`group_`/
-  `principal` visibility lattice. Any SQLModel project wanting declarative, alembic-diffable
-  Postgres row level security could reuse the generic core as-is once it moves to `packages/`.
 - [ ] **Head-to-head eval baselines.** The earliest design notes promised scoring aizk against the
   actual Cognee, Mem0, and Zep engines. The EverMemBench and TEMPO dataset loaders exist
   (`eval/benchmarks.py`) and the sweep can score aizk on them, but nothing yet runs the competing
@@ -53,21 +65,25 @@ Open items carried over from the earlier gap analysis, still unbuilt or partial.
   inference tie-in flagged directly in `graph/ids.py`. Content-addressed ids and temperature-0
   extraction already make a rerun converge; this would pin the embedder and LLM kernels themselves
   bit for bit.
-- [ ] **An as-of historical-replay index.** `store/models/fact.py` ships `ix_fact_claim_live`, a
-  partial GiST index scoped to the live rows, but EXPLAIN against a seeded corpus showed the as-of
-  replay path, which reads history rather than only the live graph, still falls back to a full
-  GiST scan since `upper_inf` is not one of GiST range_ops's indexable operators on its own.
 - [ ] **Document-level curation.** The v1 review gate, human or the autonomous standing reviewer,
   holds only facts pending (`graph/curation_review.py`), so a curated group's ingested documents
   and chunks publish immediately while their extracted facts wait for review, a gap between what
   is visible as source text and what is visible as graph knowledge.
 - [ ] **Zitadel hardening end to end, plus service-account PAT docs.** The introspection and JWKS
-  paths are wired (`auth/tokens.py`) and unit-tested, but not yet exercised start to finish against
-  a live Zitadel instance, and there is no written guide yet for minting a service-account personal
-  access token for a non-interactive caller.
+  paths are wired (`store/models/principal.py`) and unit-tested, but not yet exercised start to
+  finish against a live Zitadel instance, and there is no written guide yet for minting a
+  service-account personal access token for a non-interactive caller.
 - [ ] **An import counterpart to `export_scope`.** Export emits a principal-scoped, bi-temporal
   JSONL dump today (`export.py`); nothing reads one back in, so a dump is currently a one-way
   archive rather than a portable transfer.
+- [ ] **Erasure, a `forget(document)` tool plus content garbage collection.** Supersession handles
+  wrong knowledge but not knowledge that should never have been stored, a secret or a mistaken
+  ingest, whose payload stays readable in bi-temporal history forever. Deletion is deliberately
+  absent from the everyday surface (the knowledge lifecycle wants "no longer current", never
+  "never happened"), so erasure arrives as one narrow admin-grade verb that removes a document,
+  its chunks, and the claims derived from them, sweeping derived claims through `source_chunk_id`
+  before that `SET NULL` foreign key erases the trail. A background GC pass then collects content
+  rows left with zero claims, the same pass the known claim-less-orphan gap already needs.
 
 ## v1.0.0
 

@@ -13,3 +13,17 @@ class ConsolidationVerdict(FrozenModel):
 
     action: Literal["ADD", "UPDATE", "NOOP"]
     supersedes: uuid.UUID | None = None
+
+
+class BatchConsolidationVerdict(FrozenModel):
+    """One ADD/UPDATE/NOOP verdict per borderline fact in a batch, aligned by position.
+
+    The non-LLM consolidation cascade defers here only for the facts whose top similar claim
+    landed in the ambiguous cosine band; every batch this model answers covers a whole chunk's
+    borderline facts in the one call `extract.llm.decide_consolidations_batch` makes, never one
+    call per fact.
+
+    verdicts: the resolved actions, in the same order the borderline facts were listed.
+    """
+
+    verdicts: list[ConsolidationVerdict]

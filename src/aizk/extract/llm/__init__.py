@@ -1,21 +1,20 @@
-from .client import build_client, client_for
+from .client import LLMClientPool
 from .providers import PROVIDERS, Provider, provider_settings, resolve_provider
 from .triples import (
-    decide_consolidation,
-    extract_triples,
-    resolve_timestamps,
+    combined_extract,
+    decide_consolidations_batch,
+    extract_with_system,
     structured,
 )
 
 __all__ = [
     "PROVIDERS",
+    "LLMClientPool",
     "Provider",
-    "build_client",
-    "client_for",
-    "decide_consolidation",
-    "extract_triples",
+    "combined_extract",
+    "decide_consolidations_batch",
+    "extract_with_system",
     "provider_settings",
     "resolve_provider",
-    "resolve_timestamps",
     "structured",
 ]

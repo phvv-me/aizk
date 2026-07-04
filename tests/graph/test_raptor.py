@@ -1,10 +1,11 @@
-import asyncio
 import uuid
+from collections.abc import Iterator
 
+import dbutil
 import pytest
-from graphdb import FakeLLM
 from hypothesis import given
 from hypothesis import strategies as st
+from pgvector.utils import HalfVector
 from sqlalchemy import text
 
 from aizk.extract.ontology import EntityType
@@ -17,24 +18,35 @@ from aizk.graph.raptor import (
     raptor_search,
     redundant_parent,
     target_level,
+    to_floats,
 )
 from aizk.store import Community, EntityClaim, EntityContent, acting_as
 
 DIM = 1024
 
 
-def basis(index: int) -> list[float]:
-    """A unit vector with its single one in the index slot, so two such vectors are orthogonal.
+@pytest.fixture
+def owner(migrated_db: None) -> Iterator[uuid.UUID]:
+    """A freshly reset schema seeding one principal, the owner every tree body climbs under."""
+    pid = uuid.uuid4()
 
-    index: position of the single one, the axis the seeded embedding points along.
-    """
+    async def setup() -> None:
+        await dbutil.reset_db()
+        await dbutil.seed_principal(pid)
+
+    dbutil.run(setup())
+    yield pid
+
+
+def basis(index: int) -> list[float]:
+    """A unit vector with its single one in the index slot, so two such vectors are orthogonal."""
     slots = [0.0] * DIM
     slots[index] = 1.0
     return slots
 
 
 # components bounded away from zero and from underflow, so a self-cosine of one is the alignment
-# under test rather than the floating-point norm collapsing to zero on a subnormal magnitude.
+# under test rather than the floating-point norm collapsing on a subnormal magnitude.
 small_vectors = st.lists(
     st.floats(min_value=0.1, max_value=100.0, allow_nan=False, allow_subnormal=False),
     min_size=2,
@@ -54,38 +66,34 @@ def test_cosine_reads_orthogonal_and_degenerate_pairs() -> None:
     assert cosine([0.0, 0.0], [1.0, 1.0]) == 0.0
 
 
-def test_cluster_splits_two_orthogonal_groups() -> None:
-    """Two tight groups along orthogonal axes cluster apart, none crossing the similarity link."""
+def test_cluster_splits_groups_and_falls_back_to_singletons() -> None:
+    """Two tight orthogonal groups cluster apart, and with no link every node stands alone."""
     embeddings = [[1.0, 0.0], [0.9, 0.1], [0.0, 1.0], [0.1, 0.9]]
     groups = cluster(embeddings, threshold=0.5)
     assert {frozenset(group) for group in groups} == {frozenset({0, 1}), frozenset({2, 3})}
-
-
-def test_cluster_without_links_returns_singletons() -> None:
-    """With no pair clearing the threshold every node is its own group, the climb's stop signal."""
     assert cluster([[1.0, 0.0], [0.0, 1.0]], threshold=0.9) == [[0], [1]]
 
 
-def test_target_level_climbs_broad_pins_specific_and_lands_mid_in_between() -> None:
-    """Over three levels a theme reads root, a pinned query the leaf, and the rest a middle tier.
+@pytest.mark.parametrize(
+    ("levels", "query", "thematic", "expected"),
+    [
+        ([1, 2, 3], "an overview of everything", True, 3),
+        ([1, 2, 3], "the exact value of the constant", False, 1),
+        ([1, 2, 3], "how Alpha relates to Beta", False, 1),
+        ([1, 2, 3], "how the methods work", False, 2),
+        ([1, 2], "how the methods work", False, 1),
+        ([1, 2], "an overview", True, 2),
+    ],
+)
+def test_target_level_reads_breadth_and_specificity(
+    levels: list[int], query: str, thematic: bool, expected: int
+) -> None:
+    """A theme climbs to the root, a marker or two named terms pins the leaf, the rest lands mid.
 
-    A thematic query climbs to the broadest root regardless of its wording, a query carrying a
-    specificity marker or naming two things drops to the finest leaf, and a plain mid-abstraction
-    query lands on the middle tier, so the intermediate summaries become reachable rather than the
-    old broad-or-leaf snap.
+    The two-level rows also pin the middle collapsing onto the leaf, so the same table covers the
+    named-term count, the specificity markers, and the mid-tier split in one parametrization.
     """
-    levels = [1, 2, 3]
-
-    assert target_level(levels, "an overview of everything", thematic=True) == 3
-    assert target_level(levels, "the exact value of the constant", thematic=False) == 1
-    assert target_level(levels, "how Alpha relates to Beta", thematic=False) == 1
-    assert target_level(levels, "how the methods work", thematic=False) == 2
-
-
-def test_target_level_collapses_the_middle_onto_the_leaf_with_two_levels() -> None:
-    """With only two levels there is no middle, so a non-thematic query still reads the leaf."""
-    assert target_level([1, 2], "how the methods work", thematic=False) == 1
-    assert target_level([1, 2], "an overview", thematic=True) == 2
+    assert target_level(levels, query, thematic) == expected
 
 
 def test_redundant_parent_finds_a_near_duplicate_else_none() -> None:
@@ -96,41 +104,41 @@ def test_redundant_parent_finds_a_near_duplicate_else_none() -> None:
     assert redundant_parent(parents, [0.0, 1.0], threshold=0.95) is None
 
 
-async def seed_communities(owner: uuid.UUID) -> None:
-    """Plant four communities on two orthogonal axes, the leaves the tree climbs above.
+def test_to_floats_unwraps_a_halfvector_and_passes_a_list_through() -> None:
+    """A stored HalfVector reads back as a plain float list, a list passing through unchanged."""
+    assert to_floats([0.5, 0.25]) == [0.5, 0.25]
+    unwrapped = to_floats(HalfVector([1.0, 0.0]))
+    assert isinstance(unwrapped, list) and unwrapped == pytest.approx([1.0, 0.0])
 
-    owner: principal that owns the communities.
-    """
-    pairs = [("Alpha", basis(0)), ("Beta", basis(0)), ("Gamma", basis(1)), ("Delta", basis(1))]
+
+async def seed_communities(owner: uuid.UUID, axes: list[int]) -> None:
+    """Plant one community per axis index, the level-0 leaves the tree climbs above."""
     async with acting_as(owner) as session:
-        for label, vector in pairs:
+        for index, axis in enumerate(axes):
             session.add(
                 Community(
                     id=uuid.uuid4(),
                     owner_id=owner,
-                    label=label,
-                    summary=f"{label} covers its own area",
-                    embedding=vector,
+                    label=f"c{index}",
+                    summary=f"community {index} covers its area",
+                    embedding=basis(axis),
                 )
             )
 
 
 @pytest.mark.usefixtures("fake_embedder")
 def test_build_raptor_lifts_communities_into_a_part_of_tree(
-    fresh_principal: uuid.UUID, fake_llm: FakeLLM
+    owner: uuid.UUID, fake_llm: object
 ) -> None:
-    """Four communities become level-0 leaves under at least one part_of-linked parent summary.
+    """Four communities become level-0 leaves under a part_of-linked parent, no rebuild doubling.
 
-    The leaves cluster two-and-two and roll up, every leaf gains a part_of edge to its parent, a
-    redundant rollup is reused rather than minting a twin, so the written count equals the parents
-    and every edge climbs from a leaf to a higher level. Building a second time first clears this
-    principal's own prior tree, the content/claim removal `leaf_nodes` runs before minting fresh
-    leaves, so a rebuild never doubles the tree it already owns.
+    The leaves cluster two-and-two and roll up, every leaf gains a part_of edge climbing to a
+    higher level, and building a second time first clears this principal's own prior tree, so a
+    rebuild never doubles the tree it already owns.
     """
-    owner = fresh_principal
 
     async def probe() -> tuple[int, int, int, list[tuple[int, int]]]:
-        await seed_communities(owner)
+        await seed_communities(owner, [0, 0, 1, 1])
         await build_raptor(principal_id=owner)
         written = await build_raptor(principal_id=owner)
         async with acting_as(owner) as session:
@@ -168,7 +176,7 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
             edges = [(row.child_level, row.parent_level) for row in rows]
         return written, leaves or 0, parents or 0, edges
 
-    written, leaves, parents, edges = asyncio.run(probe())
+    written, leaves, parents, edges = dbutil.run(probe())
     assert leaves == 4
     assert parents >= 1
     assert written == parents
@@ -176,11 +184,33 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
     assert all(child == 0 and parent >= 1 for child, parent in edges)
 
 
-async def seed_two_levels(owner: uuid.UUID) -> None:
-    """Plant one summary entity at level 1 and one at level 2, a fixed tree for the retrieval read.
+@pytest.mark.usefixtures("fake_embedder")
+@pytest.mark.parametrize(
+    ("axes", "expected"),
+    [
+        ([0, 0, 1, 2], 1),  # one merged pair mints a parent, two singletons carry up unchanged
+        ([0, 1, 2, 3], 0),  # distinct axes never link, the first clustering merges nothing
+        ([0], 0),  # fewer than two communities cannot cluster at all
+    ],
+)
+def test_build_raptor_writes_the_expected_summary_count(
+    owner: uuid.UUID, fake_llm: object, axes: list[int], expected: int
+) -> None:
+    """The climb mints one summary per merged cluster, carries singletons up, stops on no merge.
 
-    owner: principal that owns the summary entities.
+    The three rows cover the singleton-passthrough prune beside a real rollup, the merge-nothing
+    stop once a clustering cannot shrink the level, and the too-few-leaves short circuit.
     """
+
+    async def probe() -> int:
+        await seed_communities(owner, axes)
+        return await build_raptor(principal_id=owner)
+
+    assert dbutil.run(probe()) == expected
+
+
+async def seed_two_levels(owner: uuid.UUID) -> None:
+    """Plant one summary entity at level 1 and one at level 2, a fixed tree the read retrieves."""
     async with acting_as(owner) as session:
         for level, label in ((1, "leaf summary"), (2, "root summary")):
             content = EntityContent(name=label, type=EntityType.RAPTOR_SUMMARY, embedding=basis(0))
@@ -195,121 +225,30 @@ async def seed_two_levels(owner: uuid.UUID) -> None:
             )
 
 
-@pytest.mark.usefixtures("fake_embedder")
-def test_raptor_search_picks_the_level_by_query_breadth(
-    fresh_principal: uuid.UUID,
-) -> None:
+def test_raptor_search_picks_the_level_by_query_breadth(owner: uuid.UUID) -> None:
     """A broad query reaches the root level while a pointed query reads the leaf summaries."""
-    owner = fresh_principal
 
     async def probe() -> tuple[list[int], list[int], list[int]]:
         await seed_two_levels(owner)
-        levels = await raptor_levels(owner)
-        broad = await raptor_search(
-            "an overview of the whole area", principal_id=owner, thematic=True
-        )
-        pointed = await raptor_search("one specific detail", principal_id=owner, thematic=False)
+        async with acting_as(owner) as session:
+            levels = await raptor_levels(session)
+            broad = await raptor_search(
+                session, "an overview of the whole area", basis(0), thematic=True
+            )
+            pointed = await raptor_search(session, "one specific detail", basis(0), thematic=False)
         return levels, [lvl for _, _, lvl, _ in broad], [lvl for _, _, lvl, _ in pointed]
 
-    levels, broad_levels, pointed_levels = asyncio.run(probe())
+    levels, broad_levels, pointed_levels = dbutil.run(probe())
     assert levels == [1, 2]
     assert broad_levels == [2]
     assert pointed_levels == [1]
 
 
-@pytest.mark.usefixtures("fake_embedder")
-def test_raptor_search_on_an_unbuilt_tree_returns_nothing(
-    fresh_principal: uuid.UUID,
-) -> None:
-    """With no summary levels yet, a query short-circuits to an empty result, never ranking."""
-    owner = fresh_principal
-    assert asyncio.run(raptor_search("anything", principal_id=owner)) == []
+def test_raptor_search_on_an_unbuilt_tree_returns_nothing(owner: uuid.UUID) -> None:
+    """With no summary levels yet a query short-circuits to an empty result, never ranking."""
 
-
-async def seed_one_merge_and_two_singletons(owner: uuid.UUID) -> None:
-    """Plant four communities where two share an axis and two stand alone, a mixed clustering.
-
-    Two communities on one axis link into a merged cluster while the other two on distinct axes
-    stay singletons, so a level built from this clustering both rolls up a parent and carries the
-    lone nodes up unchanged, the singleton-passthrough prune.
-
-    owner: principal that owns the communities.
-    """
-    pairs = [("Alpha", basis(0)), ("Beta", basis(0)), ("Gamma", basis(1)), ("Delta", basis(2))]
-    async with acting_as(owner) as session:
-        for label, vector in pairs:
-            session.add(
-                Community(
-                    id=uuid.uuid4(),
-                    owner_id=owner,
-                    label=label,
-                    summary=f"{label} covers its own area",
-                    embedding=vector,
-                )
-            )
-
-
-@pytest.mark.usefixtures("fake_embedder")
-def test_build_raptor_carries_a_singleton_up_beside_a_merged_cluster(
-    fresh_principal: uuid.UUID, fake_llm: FakeLLM
-) -> None:
-    """A level that merges one pair and leaves two singletons rolls up a parent and prunes no node.
-
-    The merged pair mints exactly one summary while each lone community is carried up unchanged, so
-    the climb writes one parent and never a summary that merely restates a single child.
-    """
-    owner = fresh_principal
-
-    async def probe() -> int:
-        await seed_one_merge_and_two_singletons(owner)
-        return await build_raptor(principal_id=owner)
-
-    assert asyncio.run(probe()) == 1
-
-
-@pytest.mark.usefixtures("fake_embedder")
-def test_build_raptor_stops_when_a_level_merges_nothing(
-    fresh_principal: uuid.UUID, fake_llm: FakeLLM
-) -> None:
-    """Communities on distinct axes never link, so the first clustering past the root cap merges
-    nothing and the climb stops with no summaries written above the leaves."""
-    owner = fresh_principal
-
-    async def probe() -> int:
+    async def probe() -> list[tuple[str, str, int, float]]:
         async with acting_as(owner) as session:
-            for index in range(4):
-                session.add(
-                    Community(
-                        id=uuid.uuid4(),
-                        owner_id=owner,
-                        label=f"c{index}",
-                        summary=f"area {index}",
-                        embedding=basis(index),
-                    )
-                )
-        return await build_raptor(principal_id=owner)
+            return await raptor_search(session, "anything", basis(0))
 
-    assert asyncio.run(probe()) == 0
-
-
-@pytest.mark.usefixtures("fake_embedder")
-def test_build_raptor_on_too_few_communities_writes_nothing(
-    fresh_principal: uuid.UUID, fake_llm: FakeLLM
-) -> None:
-    """Fewer than two communities cannot cluster, so the climb writes no summaries."""
-    owner = fresh_principal
-
-    async def probe() -> int:
-        async with acting_as(owner) as session:
-            session.add(
-                Community(
-                    id=uuid.uuid4(),
-                    owner_id=owner,
-                    label="lonely",
-                    summary="only one",
-                    embedding=basis(0),
-                )
-            )
-        return await build_raptor(principal_id=owner)
-
-    assert asyncio.run(probe()) == 0
+    assert dbutil.run(probe()) == []

@@ -1,32 +1,27 @@
-from datetime import UTC, datetime
-
 from loguru import logger
 from pydantic import BaseModel
 
 from ...config import settings
 from ...store import LiveFact
+from ..dating import resolve_valid_from
 from ..models import (
+    BatchConsolidationVerdict,
     ConsolidationVerdict,
-    ExtractedFact,
+    ExtractedEntity,
     Extraction,
-    FactTimestamp,
+    LLMExtraction,
     TimedFact,
-    TimestampResolution,
 )
 from ..ontology import ONTOLOGY_PROMPT
-from .client import client_for
+from .client import LLMClientPool
 from .providers import provider_settings
 
 # the ontology default strategy's system turn, layered on the ontology rules, the few-shot
 # guidance from settings.extract_system_prompt that keeps entity names and facts well formed.
 EXTRACTION_SYSTEM = f"{ONTOLOGY_PROMPT}\n{settings.extract_system_prompt}"
 
-# the timestamp pass's system turn, kept as a module constant so both `resolve_timestamps` and a
-# test asserting the prompt shape read the same value settings.timestamp_resolution_prompt holds.
-TIMESTAMP_PROMPT = settings.timestamp_resolution_prompt
-
-# the consolidation pass's system turn, mirroring TIMESTAMP_PROMPT's role for the ADD/UPDATE/NOOP
-# decision, sourced from settings.consolidation_prompt.
+# the batched borderline-consolidation pass's system turn, mirroring EXTRACTION_SYSTEM's role,
+# sourced from settings.consolidation_prompt.
 CONSOLIDATION_PROMPT = settings.consolidation_prompt
 
 
@@ -58,13 +53,21 @@ async def structured[T: BaseModel](
     # then hand the resolved endpoint to client_for as plain arguments so a concurrently running
     # `structured` call never observes another call's provider resolution.
     resolved = provider_settings()
-    client = client_for(resolved.llm_url, resolved.llm_model, resolved.llm_api_key)
+    client = LLMClientPool().client_for(resolved.llm_url, resolved.llm_model, resolved.llm_api_key)
     completion = await client.chat.completions.parse(
         model=resolved.llm_model,
         response_format=schema,
         temperature=resolved.extract_temperature if temperature is None else temperature,
         timeout=resolved.extract_timeout if timeout is None else timeout,
         max_tokens=resolved.extract_max_tokens if max_tokens is None else max_tokens,
+        # empty by default (see settings.llm_chat_template_kwargs), so a stock load sends no
+        # extra_body and never risks a hosted OpenAI-shaped provider rejecting an unrecognized
+        # field; the local vllm-llm deployment sets AIZK_LLM_CHAT_TEMPLATE_KWARGS to disable a
+        # hybrid-thinking model's own <think> preamble, which would otherwise burn the combined
+        # call's token budget on reasoning the closed ontology schema never asked for.
+        extra_body={"chat_template_kwargs": resolved.llm_chat_template_kwargs}
+        if resolved.llm_chat_template_kwargs
+        else None,
         messages=[
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -76,89 +79,106 @@ async def structured[T: BaseModel](
     return parsed
 
 
-async def extract_triples(text: str) -> Extraction:
-    """Extract an ontology-constrained graph slice from a text span.
+async def extract_with_system(system: str, text: str) -> Extraction:
+    """Run the combined wire-schema extraction call under a given system prompt.
 
-    The endpoint's grammar-constrained decoding holds every entity type and predicate inside the
-    ontology's Literal vocabularies, so an off-ontology value never reaches the graph. Entities and
-    structural facts come back from one combined call, undated, since resolving valid-time competes
-    with fact extraction and is left to `resolve_timestamps`.
+    Every extraction strategy (`extract.strategies.extract_graph`'s ontology default, summary,
+    preferences, and custom) shares this one call shape, only the system prompt's own focus
+    differs. The compact wire schema (`LLMExtraction`) already carries an optional per-fact date
+    alongside its entities and facts, so `extract.dating.resolve_valid_from` only ever needs the
+    model's own field and the fact's own statement text, no second round trip. The wire shapes
+    (`LLMEntity`/`LLMFact`, short keys to hold the call near the ~250-token budget) convert to the
+    readable domain shapes (`ExtractedEntity`/`TimedFact`) immediately after parsing, so nothing
+    downstream of this function ever reads the compact keys.
+
+    system: system prompt fixing the strategy's own focus, layered on the shared ontology rules.
+    text: the source span to extract from.
+    """
+    wire = await structured(system, text, LLMExtraction)
+    entities = [ExtractedEntity(name=entity.n, type=entity.t) for entity in wire.e]
+    facts = [
+        TimedFact(
+            subject=fact.s,
+            predicate=fact.p,
+            object=fact.o,
+            statement=fact.statement,
+            valid_from=resolve_valid_from(fact.date, fact.statement),
+        )
+        for fact in wire.f
+    ]
+    logger.info(
+        "extracted {} entities and {} facts from {} chars", len(entities), len(facts), len(text)
+    )
+    return Extraction(entities=entities, facts=facts)
+
+
+async def combined_extract(text: str) -> Extraction:
+    """Extract entities, facts, and each fact's own date under the ontology default strategy.
 
     text: the source span to extract from.
     """
-    extraction = await structured(EXTRACTION_SYSTEM, text, Extraction)
-    logger.info(
-        "extracted {} entities and {} facts from {} chars",
-        len(extraction.entities),
-        len(extraction.facts),
-        len(text),
+    return await extract_with_system(EXTRACTION_SYSTEM, text)
+
+
+def consolidation_block(index: int, fact: TimedFact, existing: list[LiveFact]) -> str:
+    """Render one candidate's new fact and its existing similar claims as a numbered prompt block.
+
+    index: the candidate's position, the number the batch verdict is keyed back to.
+    fact: the new fact awaiting a consolidation decision.
+    existing: the candidate's own similar claims, the catalog the model chooses among.
+    """
+    catalog = (
+        "\n".join(f"  id={claim.id} statement={claim.statement}" for claim in existing)
+        or "  (none)"
     )
-    return extraction
+    return f"{index}. New fact: {fact.statement}\nExisting facts.\n{catalog}"
 
 
-async def resolve_timestamps(
-    text: str,
-    facts: list[ExtractedFact],
-    *,
-    reference_time: datetime | None = None,
-) -> list[TimedFact]:
-    """Date each extracted fact in a dedicated pass, run after structural extraction so date
-    parsing never competes with fact extraction.
-
-    Reads the source text and a reference time the relative dates resolve against, returning a
-    valid_from and valid_to per fact aligned by position. A fact left undated, or a position the
-    model omits, keeps a null window, so the bi-temporal gate treats it as always-holding.
-
-    text: the source span the facts were extracted from, the evidence for their dates.
-    facts: the structural facts to date, in the order the gate aligns timestamps against.
-    reference_time: world-time the relative dates resolve against, now when None.
-    """
-    if not facts:
-        return []
-    reference = reference_time or datetime.now(UTC)
-    catalog = "\n".join(f"{index}. {fact.statement}" for index, fact in enumerate(facts))
-    user = f"Reference time.\n{reference.isoformat()}\n\nSource text.\n{text}\n\nFacts.\n{catalog}"
-    resolution = await structured(TIMESTAMP_PROMPT, user, TimestampResolution)
-    stamps = resolution.timestamps
-    blank = FactTimestamp()
-    dated = [
-        TimedFact(
-            subject=fact.subject,
-            predicate=fact.predicate,
-            object=fact.object_,
-            statement=fact.statement,
-            valid_from=(stamps[index] if index < len(stamps) else blank).valid_from,
-            valid_to=(stamps[index] if index < len(stamps) else blank).valid_to,
-        )
-        for index, fact in enumerate(facts)
-    ]
-    logger.info("resolved valid-time for {} of {} facts", len(stamps), len(facts))
-    return dated
-
-
-async def decide_consolidation(
-    new_fact: ExtractedFact,
-    existing_facts: list[LiveFact],
+def resolve_verdict(
+    index: int, existing: list[LiveFact], resolution: BatchConsolidationVerdict
 ) -> ConsolidationVerdict:
-    """Decide whether a new fact is an ADD, an UPDATE, or a NOOP against existing claims.
+    """Resolve one candidate's verdict, dropping a supersedes id the batch call hallucinated.
 
-    Asks the model to compare the candidate against the similar latest claims already in scope,
-    naming the superseded claim id when it updates one. With no existing claims the answer is a
-    trivial ADD, and a supersedes id outside the candidate set is dropped so a hallucinated id
-    never retires a real claim.
-
-    new_fact: the freshly extracted candidate fact.
-    existing_facts: the similar live claims already stored in the same scope, `LiveFact.id` each
-        one's own claim identity, the id a supersession names.
+    index: the candidate's position in the batch, aligned with the resolution's own verdicts.
+    existing: the candidate's own similar claims, the only ids UPDATE may legally supersede.
+    resolution: the batch call's raw verdicts, possibly shorter than the candidate list.
     """
-    if not existing_facts:
-        return ConsolidationVerdict(action="ADD")
-    catalog = "\n".join(f"- id={fact.id} statement={fact.statement}" for fact in existing_facts)
-    user = f"New fact.\n{new_fact.statement}\n\nExisting facts.\n{catalog}"
-    verdict = await structured(CONSOLIDATION_PROMPT, user, ConsolidationVerdict)
-    known = {fact.id for fact in existing_facts}
+    known = {claim.id for claim in existing}
+    verdict = (
+        resolution.verdicts[index]
+        if index < len(resolution.verdicts)
+        else ConsolidationVerdict(action="ADD")
+    )
     supersedes = (
         verdict.supersedes if verdict.action == "UPDATE" and verdict.supersedes in known else None
     )
-    logger.info("consolidation verdict {} supersedes {}", verdict.action, supersedes)
     return ConsolidationVerdict(action=verdict.action, supersedes=supersedes)
+
+
+async def decide_consolidations_batch(
+    candidates: list[tuple[TimedFact, list[LiveFact]]],
+) -> list[ConsolidationVerdict]:
+    """Decide ADD/UPDATE/NOOP for every borderline fact in one call.
+
+    The non-LLM consolidation cascade (`graph.consolidation.decide_by_rule`) already resolves
+    every candidate whose top similar claim falls outside the ambiguous cosine band; this is the
+    batched tier it defers to for the rest, one call for a whole chunk's borderline facts together
+    rather than one round trip per fact, the lever that keeps a chunk to at most two LLM calls
+    total: the combined extraction call and this one.
+
+    candidates: each borderline fact paired with its own similar existing claims, the same
+        catalog a single-fact judge would have read, batched into one prompt instead.
+    """
+    if not candidates:
+        return []
+    user = "\n\n".join(
+        consolidation_block(index, fact, existing)
+        for index, (fact, existing) in enumerate(candidates)
+    )
+    resolution = await structured(CONSOLIDATION_PROMPT, user, BatchConsolidationVerdict)
+    results = [
+        resolve_verdict(index, existing, resolution)
+        for index, (_, existing) in enumerate(candidates)
+    ]
+    logger.info("batched consolidation resolved {} borderline facts in one call", len(candidates))
+    return results

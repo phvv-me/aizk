@@ -4,6 +4,7 @@ import uuid
 from collections.abc import Iterator
 
 from loguru import logger
+from patos import FrozenModel
 from sqlalchemy import select
 
 from ..config import settings
@@ -124,6 +125,15 @@ async def judge_answerable(question: str, context: str) -> bool:
     return verdict.answerable
 
 
+def render_context(result: RecallResult) -> str:
+    """Flatten a recall's facts and hits into the plain text the judge reads as its context.
+
+    result: the fused recall bundle to flatten.
+    """
+    facts = [f"({fact.predicate}) {fact.statement}" for fact in result.facts]
+    return "\n".join(facts + [hit.text for hit in result.hits])
+
+
 def retrieved_scores(qa: QA, result: RecallResult) -> dict[str, float]:
     """Score one recall's ranked docs for ranx, labeling the expected fact's first match `rel`.
 
@@ -192,6 +202,70 @@ async def routing_ab(
     return fixed_hit, routed_hit, winner
 
 
+class ToggleSweepResult(FrozenModel):
+    """The rerank/ppr toggle sweep's own scored outcome, before the judge or final assembly.
+
+    per_config: hit-at-k keyed by the rerank/ppr toggle label.
+    headline: the ranx metric values for the current live toggle combination.
+    comparison: ranx.compare's significance table across the toggles.
+    significant_best: the toggle label that significantly beats the current config on ndcg, null
+        when none clears the significance threshold.
+    """
+
+    per_config: dict[str, float]
+    headline: dict[str, float]
+    comparison: str
+    significant_best: str | None
+
+
+async def sweep_toggles(
+    gold: list[QA], principal_id: uuid.UUID, k: int, metrics: list[str], current: str
+) -> ToggleSweepResult:
+    """Score every rerank/ppr toggle combination against one shared qrels, flagging the best.
+
+    gold: the evaluation items that carry an expected fact.
+    principal_id: identity whose visibility scopes the recall.
+    k: number of hits and seed facts each recall surfaces.
+    metrics: the ranx metric list, hit-rate first and ndcg second.
+    current: the live config's run label, the baseline every toggle is compared to.
+    """
+    from ranx import Qrels, Run, compare, evaluate
+
+    qrels = Qrels({f"q{index}": {"rel": 1} for index in range(len(gold))})
+    runs: dict[str, Run] = {}
+    for rerank, ppr in TOGGLES:
+        with swept_settings(rerank=rerank, ppr=ppr):
+            scores = await config_scores(gold, principal_id, k)
+        runs[f"rerank={rerank},ppr={ppr}"] = Run(scores, name=f"rerank={rerank},ppr={ppr}")
+    report = compare(qrels, list(runs.values()), metrics=metrics)
+    scored = evaluate(qrels, runs[current], metrics)
+    assert isinstance(scored, dict)  # a metric list always evaluates to a per-metric dict
+    return ToggleSweepResult(
+        per_config={label: float(report.results[label][metrics[0]]) for label in runs},
+        headline={name: float(value) for name, value in scored.items()},
+        comparison=str(report),
+        significant_best=significant_winner(
+            report.to_dict(), current, metrics[1], settings.self_improve_max_p
+        ),
+    )
+
+
+async def judge_items(items: list[QA], principal_id: uuid.UUID, k: int) -> float | None:
+    """Judge every item's recall for answerability and return the mean, null when judging is off.
+
+    items: the full evaluation item set, gold and caller questions alike.
+    principal_id: identity whose visibility scopes the recall.
+    k: number of hits and seed facts each recall surfaces.
+    """
+    if not settings.eval_judge:
+        return None
+    judged = []
+    for qa in items:
+        result = await recall(qa.question, principal_id=principal_id, k=k)
+        judged.append(await judge_answerable(qa.question, render_context(result)))
+    return sum(judged) / len(judged) if judged else None
+
+
 async def run_eval(
     questions: list[str] | None,
     k: int = 8,
@@ -209,48 +283,19 @@ async def run_eval(
     principal_id: identity whose visibility scopes the recall and the sampled facts, the system
         principal when null.
     """
-    from ranx import Qrels, Run, compare, evaluate
-
     principal_id = principal_id or settings.system_principal_id
     items = await build_questions(questions, principal_id)
     gold = [qa for qa in items if qa.expected is not None]
     metrics = [f"hit_rate@{k}", f"ndcg@{k}", "mrr"]
     current = f"rerank={settings.rerank},ppr={settings.ppr}"
-    per_config: dict[str, float] = {}
-    headline = dict.fromkeys(metrics, 0.0)
-    comparison: str | None = None
-    significant_best: str | None = None
-    fixed_hit: float | None = None
-    routed_hit: float | None = None
-    routing_winner: str | None = None
-    if gold:
-        qrels = Qrels({f"q{index}": {"rel": 1} for index in range(len(gold))})
-        runs: dict[str, Run] = {}
-        for rerank, ppr in TOGGLES:
-            with swept_settings(rerank=rerank, ppr=ppr):
-                scores = await config_scores(gold, principal_id, k)
-            runs[f"rerank={rerank},ppr={ppr}"] = Run(scores, name=f"rerank={rerank},ppr={ppr}")
-        report = compare(qrels, list(runs.values()), metrics=metrics)
-        per_config = {label: float(report.results[label][metrics[0]]) for label in runs}
-        scored = evaluate(qrels, runs[current], metrics)
-        assert isinstance(scored, dict)  # a metric list always evaluates to a per-metric dict
-        headline = {name: float(value) for name, value in scored.items()}
-        comparison = str(report)
-        significant_best = significant_winner(
-            report.to_dict(), current, metrics[1], settings.self_improve_max_p
-        )
-        fixed_hit, routed_hit, routing_winner = await routing_ab(gold, principal_id, k, metrics)
-    judged: list[bool] = []
-    if settings.eval_judge:
-        for qa in items:
-            result = await recall(qa.question, principal_id=principal_id, k=k)
-            judged.append(await judge_answerable(qa.question, result.render()))
-    mean_judge = sum(judged) / len(judged) if judged else None
+    sweep = await sweep_toggles(gold, principal_id, k, metrics, current) if gold else None
+    fixed_hit, routed_hit, routing_winner = (
+        await routing_ab(gold, principal_id, k, metrics) if gold else (None, None, None)
+    )
+    mean_judge = await judge_items(items, principal_id, k)
+    headline = sweep.headline if sweep else dict.fromkeys(metrics, 0.0)
     logger.info(
-        "eval scored {n} items, hit@{k} {hit:.3f}",
-        n=len(items),
-        k=k,
-        hit=headline[metrics[0]],
+        "eval scored {n} items, hit@{k} {hit:.3f}", n=len(items), k=k, hit=headline[metrics[0]]
     )
     return EvalReport(
         n=len(items),
@@ -258,9 +303,9 @@ async def run_eval(
         ndcg_at_k=headline[metrics[1]],
         mrr=headline[metrics[2]],
         mean_judge=mean_judge,
-        per_config=per_config,
-        comparison=comparison,
-        significant_best=significant_best,
+        per_config=sweep.per_config if sweep else {},
+        comparison=sweep.comparison if sweep else None,
+        significant_best=sweep.significant_best if sweep else None,
         fixed_hit_at_k=fixed_hit,
         routed_hit_at_k=routed_hit,
         routing_winner=routing_winner,

@@ -1,15 +1,29 @@
 import hashlib
+from dataclasses import dataclass, field
 from typing import cast
 
 from patos import SingletonMeta
+from pydantic import BaseModel
 
 from aizk.config import settings
+from aizk.extract.models import (
+    BatchConsolidationVerdict,
+    ConsolidationVerdict,
+    LLMExtraction,
+)
+from aizk.graph.models import (
+    CommunitySummary,
+    CurationReview,
+    InsightReport,
+    ProfileReport,
+    RaptorReport,
+)
 from aizk.serving.embed import Embedder, EmbedMode
 from aizk.serving.rerank import Reranker
 
 
 def deterministic_vector(text: str, dim: int) -> list[float]:
-    """A fixed-width vector that depends only on the text, so a recall is reproducible run to run.
+    """A fixed-width vector depending only on the text, so a recall is reproducible run to run.
 
     text: the string being embedded.
     dim: the width every returned vector carries, the halfvec dimension by default.
@@ -19,15 +33,12 @@ def deterministic_vector(text: str, dim: int) -> list[float]:
 
 
 class UncachedMeta(SingletonMeta):
-    """Metaclass for a `Singleton` subclass that must build fresh on every construction.
+    """Metaclass for a `Singleton` subclass that builds fresh on every construction.
 
     `Embedder` and `Reranker` are `patos` singletons, one shared instance per class forever after
-    the first construction, exactly the caching production code wants. A recording test double
-    subclasses one of them purely for its `isinstance` contract, since callers type-hint the real
-    class, never for the caching, since a fresh double with an empty `calls` list is what every
-    test needs. Overriding `__call__` back to plain `type.__call__` opts a double class out of
-    `SingletonMeta`'s cache while it stays, through the class hierarchy, built by the pattern's own
-    metaclass, so a `RecordingEmbedder()` in one test never replays another test's stale instance.
+    the first construction. A recording double subclasses one only for its `isinstance` contract,
+    never for the caching, so overriding `__call__` back to plain `type.__call__` opts the double
+    out of the cache while staying, through the hierarchy, an instance of the real class.
     """
 
     def __call__(cls: type, *args: object, **kwargs: object) -> object:
@@ -38,11 +49,9 @@ class RecordingEmbedder(Embedder, metaclass=UncachedMeta):
     """A recording double for the embedder seam, deterministic and free of any model or network.
 
     Subclasses `Embedder` only so it type-checks everywhere a real one is expected, never calling
-    the base `__init__` and so never building the `AsyncOpenAI` client it would. It records every
-    text and image call so a test can assert what the code under test passed, and returns
-    fixed-width vectors derived from the input, so two embeds of the same text or image match the
-    way a real embedder's cosine ranking depends on. This stands in for the external vLLM process
-    at the one seam, and exposes both the text and image lanes since production `Embedder` does.
+    the base `__init__` and so never building the `AsyncOpenAI` client it would. Records every text
+    and image call and returns fixed-width vectors from the input, so two embeds of one text match
+    the way a real embedder's cosine ranking depends on.
 
     dim: width of every returned vector, the halfvec dimension by default.
     """
@@ -73,11 +82,9 @@ class RecordingEmbedder(Embedder, metaclass=UncachedMeta):
 class RecordingReranker(Reranker, metaclass=UncachedMeta):
     """A recording double for the reranker seam, scoring by a fixed, query-aware rule.
 
-    Subclasses `Reranker` only so it type-checks everywhere a real one is expected, never calling
-    the base `__init__` and so never building the `AsyncOpenAI` client it would. It records the
-    query and candidates each call carried and scores each candidate by its shared character
-    overlap with the query, a monotone stand-in for a cross-encoder that needs no model, so a test
-    can assert the reorder without a GPU. This replaces the external rerank process.
+    Subclasses `Reranker` only for its `isinstance` contract, never building the client. Scores
+    each candidate by its shared character overlap with the query, a monotone stand-in for a
+    cross-encoder that needs no model, so a test asserts the reorder without a GPU.
     """
 
     def __init__(self) -> None:
@@ -97,15 +104,9 @@ class RecordingReranker(Reranker, metaclass=UncachedMeta):
 def install_fake_embedder(embedder: RecordingEmbedder | None) -> RecordingEmbedder | None:
     """Swap every `Embedder()` call onto a fixed double, or restore real construction when None.
 
-    Every module reads the shared instance through `Embedder()`, and `SingletonMeta.__call__` hands
-    back whatever object lives at `Embedder`'s own `singleton_instance` class attribute without
-    re-running `__init__`. `RecordingEmbedder` subclasses `Embedder`, so writing it directly onto
-    that slot with `setattr` (a class's `__dict__` is a read-only mappingproxy, so `setattr` and
-    `delattr` are the only way to write it) redirects every caller's `Embedder()` onto the double
-    for the duration of one test, restoring by clearing the slot so the next real `Embedder()`
-    builds fresh from `settings`. A `RuleBasedStateMachine` is a unittest case that cannot request
-    the `fake_embedder` fixture, so it installs and clears the recording double here directly in
-    its initialize and teardown.
+    Writes the double onto `Embedder.singleton_instance`, the slot `SingletonMeta.__call__` hands
+    back with no re-run of `__init__`, so every caller's `Embedder()` resolves to it until the slot
+    is cleared. A `RuleBasedStateMachine` that cannot request the fixture calls this directly.
 
     embedder: the recording double to install, or None to restore real construction.
     """
@@ -130,3 +131,135 @@ def install_fake_reranker(reranker: RecordingReranker | None) -> RecordingRerank
     else:
         Reranker.singleton_instance = reranker
     return previous
+
+
+def default_response(schema: type[BaseModel]) -> BaseModel:
+    """A minimal valid instance of one extractor or summarizer schema, the fake LLM's fallback.
+
+    schema: the response model the seam asked the LLM for.
+    """
+    defaults: dict[type[BaseModel], BaseModel] = {
+        LLMExtraction: LLMExtraction(e=[], f=[]),
+        BatchConsolidationVerdict: BatchConsolidationVerdict(verdicts=[]),
+        ConsolidationVerdict: ConsolidationVerdict(action="ADD"),
+        CommunitySummary: CommunitySummary(label="cluster theme", summary="a grounded paragraph"),
+        ProfileReport: ProfileReport(summary="a static and dynamic paragraph"),
+        RaptorReport: RaptorReport(label="broad theme", summary="a rolled-up paragraph"),
+        InsightReport: InsightReport(observations=[]),
+        CurationReview: CurationReview(verdicts=[]),
+    }
+    return defaults[schema]
+
+
+@dataclass
+class FakeMessage:
+    """The `.choices[0].message` shape `structured` reads its `.parsed` schema instance off of."""
+
+    parsed: BaseModel
+
+
+@dataclass
+class FakeChoice:
+    """The `.choices[0]` shape wrapping the fake message, mirroring `ParsedChoice`."""
+
+    message: FakeMessage
+
+
+@dataclass
+class FakeParsedCompletion:
+    """A minimal stand-in for `openai.types.chat.ParsedChatCompletion`, only `.choices` read."""
+
+    choices: list[FakeChoice]
+
+
+class FakeCompletions:
+    """A recording completions stand-in dispatching on the requested response_format schema.
+
+    Returns the canned instance a test registered for a schema, or a minimal valid default, so any
+    summarizer and extractor that flows through `structured` runs without the local model. This
+    replaces the one external LLM process at its seam, never any of our own classes.
+
+    responses: per-schema overrides the test installs, falling back to a minimal valid default.
+    calls: every turn's kwargs, normalized to `response_model`/`messages` keys.
+    """
+
+    def __init__(self) -> None:
+        self.responses: dict[type[BaseModel], BaseModel] = {}
+        self.calls: list[dict[str, object]] = []
+
+    async def parse(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, str]],
+        response_format: type[BaseModel],
+        temperature: float | None = None,
+        timeout: float | None = None,
+        max_tokens: int | None = None,
+        extra_body: dict[str, object] | None = None,
+    ) -> FakeParsedCompletion:
+        """Record the turn and return the canned or default model for its response_format schema.
+
+        model: chat model id the seam sent.
+        messages: the system-then-user message pair the seam assembled.
+        response_format: schema the caller asked the structured turn to validate against.
+        temperature: sampling temperature, accepted and ignored.
+        timeout: per-call ceiling, accepted and ignored.
+        max_tokens: output token cap, accepted and ignored.
+        extra_body: provider extra_body (chat_template_kwargs), recorded, accepted and ignored.
+        """
+        self.calls.append(
+            {
+                "model": model,
+                "messages": messages,
+                "response_model": response_format,
+                "temperature": temperature,
+                "timeout": timeout,
+                "max_tokens": max_tokens,
+                "extra_body": extra_body,
+            }
+        )
+        parsed = self.responses.get(response_format) or default_response(response_format)
+        return FakeParsedCompletion(choices=[FakeChoice(FakeMessage(parsed))])
+
+
+@dataclass
+class FakeChat:
+    """The chat namespace wrapping the fake completions."""
+
+    completions: FakeCompletions
+
+
+class FakeLLM:
+    """An AsyncOpenAI stand-in exposing only the `chat.completions.parse` path the seam uses.
+
+    completions: the recording completions the chat namespace exposes.
+    """
+
+    def __init__(self) -> None:
+        self.completions = FakeCompletions()
+        self.chat = FakeChat(self.completions)
+
+    def register(self, schema: type[BaseModel], response: BaseModel) -> None:
+        """Pin the parsed instance the fake returns for one response schema.
+
+        schema: the response_format a `structured` call will ask for.
+        response: the instance to hand back for that schema.
+        """
+        self.completions.responses[schema] = response
+
+
+@dataclass
+class FakeJob:
+    """The one attribute the queue bodies read off a dequeued job, its encoded payload."""
+
+    payload: bytes = b"{}"
+
+
+@dataclass
+class RecordingEnqueue:
+    """One recorded enqueue, the unit the fan-out and the on-write chain emit."""
+
+    entrypoint: str
+    payload: bytes
+    dedupe_key: str | None = field(default=None)

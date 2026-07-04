@@ -1,18 +1,28 @@
+import asyncio
+import functools
 import uuid
+from collections import defaultdict
 from datetime import UTC, datetime
 
+from asyncpg.exceptions import TransactionRollbackError
 from loguru import logger
-from openai import APITimeoutError
-from sqlalchemy import exists, func, or_, select, text
-from sqlalchemy.dialects.postgresql import Range, insert
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from mainboard.profiling import span
+from openai import APIConnectionError, APITimeoutError, LengthFinishReasonError
+from pydantic import ValidationError
+from sqlalchemy import func, or_, select, update
+from sqlalchemy.dialects.postgresql import Range
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
+from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 
 from ..config import settings
-from ..extract.llm import decide_consolidation, resolve_timestamps
-from ..extract.models import TimedFact
+from ..exceptions import ExtractionUnreachableError
+from ..extract import journal
+from ..extract.dating import with_document_fallback
+from ..extract.llm import combined_extract, decide_consolidations_batch
+from ..extract.models import ConsolidationVerdict, ExtractedEntity, TimedFact
 from ..extract.ontology import EntityType
-from ..extract.strategies import extract_graph
-from ..serving import Embedder
+from ..serving import Embedder, EntityGate
 from ..store import (
     Chunk,
     Document,
@@ -25,27 +35,60 @@ from ..store import (
     Membership,
     acting_as,
 )
-from .dedupe import mint_content
+from .admin import admin_session
+from .consolidation import decide_by_rule, rank_pool
+from .dedupe import claim_entity, claim_fact, mint_content
 from .ids import entity_id, fact_id
 from .naming import normalize_name
 
-# the partial live-uniqueness `fact_claim` carries, one open-`recorded` claim per (content, owner,
-# scope); ON CONFLICT DO NOTHING against it is what makes `GraphWriter.consolidate`'s claim insert
-# idempotent under a concurrent durable worker re-processing the same chunk, the same statements
-# whichever writer gets there first rather than a unique-violation crash.
-FACT_CLAIM_LIVE_ARBITER = {
-    "index_elements": ["content_id", "owner_id", "scope"],
-    "index_where": text("upper_inf(recorded)"),
-}
+
+def is_transient_db_error(error: BaseException) -> bool:
+    """Whether a database error is a transient deadlock or serialization failure worth retrying.
+
+    Postgres detects and aborts one side of a deadlock or a serializable-isolation conflict rather
+    than blocking forever, and asyncpg surfaces both as a `TransactionRollbackError` subclass. At
+    the graph's own concurrency (`settings.graph_build_concurrency`, dozens of chunks minting and
+    claiming entity content at once), two chunks racing to mint the same entity is exactly the
+    shape of contention that trips this, so `write_graph_slice`'s retry loop retries on it rather
+    than losing a chunk to noise. SQLAlchemy's asyncpg dialect has no explicit mapping for either
+    error, so it arrives wrapped twice: `DBAPIError.orig` holds the dialect's own emulated DBAPI
+    exception, and that exception's own `.orig` holds the real asyncpg error this checks.
+
+    error: the exception `write_graph_slice`'s retry loop caught.
+    """
+    if not isinstance(error, DBAPIError):
+        return False
+    return isinstance(getattr(error.orig, "orig", None), TransactionRollbackError)
+
+
+@functools.cache
+def extraction_semaphore() -> asyncio.Semaphore:
+    """The process-wide cap on chunks extracting and consolidating at once.
+
+    Shared by `build_graph`'s inline concurrent loop and the pgqueuer worker's extraction
+    entrypoint (`background.queue.process_chunk`), so both paths bound how hard they hit the LLM
+    endpoint at the same `settings.graph_build_concurrency` width regardless of how many chunk
+    jobs pgqueuer itself has dispatched as concurrent asyncio tasks. Cached the way
+    `store.engine.async_session` caches its engine, one semaphore for the process's lifetime.
+    """
+    return asyncio.Semaphore(settings.graph_build_concurrency)
+
+
+class ChunkExtractionTimedOut(Exception):
+    """Internal signal that one chunk's extraction call exceeded extract_timeout.
+
+    Raised by `llm_extraction` and caught by `extract_and_consolidate`, which abandons the chunk
+    outright rather than writing a partial graph slice, leaving it pending for a later retry.
+    """
 
 
 class GraphWriter:
-    """One graph-write round bound to the session, owner, and scope every write in it shares.
+    """One graph-write round bound to the session, owner, and scope set every write in it shares.
 
-    resolve and consolidate both re-threaded (session, owner_id, scope) through every call;
-    binding them once here turns each repeated argument list into a `self` read. build_graph opens
-    one GraphWriter per chunk on its owner-scoped transaction, and background.queue.process_chunk
-    does the same for its durable per-chunk job.
+    resolve and consolidate_facts both re-thread (session, owner_id, scopes) through every call;
+    binding them once here turns each repeated argument list into a `self` read. write_graph_slice
+    opens one GraphWriter per chunk on its owner-scoped transaction, the shared core both
+    build_graph's concurrent loop and background.queue.process_chunk's durable job call.
 
     Every mint below is an idempotent `INSERT ... ON CONFLICT DO NOTHING`, on content's own id for
     the deduplicated structural row and on the claim table's own uniqueness for this container's
@@ -56,61 +99,57 @@ class GraphWriter:
 
     session: an open session already acting as owner_id under row level security.
     owner_id: principal that owns a newly created claim.
-    scope: group a newly created claim is shared with, null when private.
+    scopes: group set a newly created claim is shared with, private when empty. Always the
+        already-canonicalized (sorted) tuple a chunk's own `scopes` carries, so every claim this
+        writer mints compares equal to any other write of the identical set.
     """
 
     def __init__(
-        self, session: AsyncSession, owner_id: uuid.UUID, scope: uuid.UUID | None
+        self, session: AsyncSession, owner_id: uuid.UUID, scopes: tuple[uuid.UUID, ...]
     ) -> None:
         self.session = session
         self.owner_id = owner_id
-        self.scope = scope
+        self.scopes = list(scopes)
         self._reviewed_at: datetime | None = None
         self._reviewed_at_cached = False
 
     async def reviewed_at(self) -> datetime | None:
         """The reviewed_at stamp a claim newly written by this writer should carry, resolved once.
 
-        Private scope and an uncurated group always resolve to now, unchanged single-user and
-        ordinary-sharing behavior; a curated group resolves to now only when the owner already
-        holds its admin membership role, otherwise to null, landing the claim pending review. Reads
-        the group and membership rows once per writer and caches the answer, since every claim this
-        writer consolidates shares the same scope and owner.
+        A private scope set and a set naming no curated group always resolve to now, unchanged
+        single-user and ordinary-sharing behavior; a set naming a curated group resolves to now
+        only when the owner already holds its admin membership role in every curated group named,
+        otherwise to null, landing the claim pending review. Reads the group and membership rows
+        once per writer and caches the answer, since every claim this writer consolidates shares
+        the same scope set and owner.
         """
         if not self._reviewed_at_cached:
-            self._reviewed_at = await Group.review_stamp(self.session, self.scope, self.owner_id)
+            self._reviewed_at = await Group.review_stamp(
+                self.session, tuple(self.scopes), self.owner_id
+            )
             self._reviewed_at_cached = True
         return self._reviewed_at
 
-    async def resolve(self, name: str, type: str) -> uuid.UUID | None:
-        """Resolve a name to a stored content id, reusing or claiming one, dropping path-slugs.
-
-        Normalizes the name first so a path or url echoed as an entity folds to empty and is
-        dropped with a null return. When this container already claims the exact content-addressed
-        id, that fast path returns immediately with no embedding call. Otherwise it embeds the
-        cleaned name, cosine matches the entity content already visible to this container (through
-        one of its own or a shared claim) within the same type, and returns the id of the best
-        match above settings.entity_resolution_threshold with no new claim minted, since visibility
-        already means some claim covers it. With no match it mints a fresh content row and this
-        container's own claim on it together, both idempotent upserts, and returns that id.
-
-        name: entity surface form to resolve.
-        type: ontology entity type the match must share.
-        """
-        if not normalize_name(name):
-            logger.warning("entity name {!r} is a path or link, dropping", name)
-            return None
-        node = entity_id(name, type)
+    async def already_claims_entity(self, content_id: uuid.UUID) -> bool:
+        """Whether this container already stakes its own claim on this entity content id."""
         claimed = await self.session.scalar(
             select(EntityClaim.id).where(
-                EntityClaim.content_id == node,
+                EntityClaim.content_id == content_id,
                 EntityClaim.owner_id == self.owner_id,
-                EntityClaim.scope == self.scope,
+                EntityClaim.scopes == self.scopes,
             )
         )
-        if claimed is not None:
-            return node
-        [vector] = await Embedder().embed([name], mode="document")
+        return claimed is not None
+
+    async def match_or_mint_entity(self, name: str, type: str, node: uuid.UUID) -> uuid.UUID:
+        """The best cosine match already visible to this container, or a freshly minted content id.
+
+        name: entity surface form, already known non-empty.
+        type: ontology entity type the match must share.
+        node: content-addressed id a fresh mint uses, from `graph.ids.entity_id`.
+        """
+        with span("embed"):
+            [vector] = await Embedder().embed([name], mode="document")
         distance = EntityContent.embedding.cosine_distance(vector)
         match = await self.session.scalar(
             select(EntityContent.id)
@@ -124,87 +163,220 @@ class GraphWriter:
         await mint_content(
             self.session, EntityContent(id=node, name=name, type=type, embedding=vector)
         )
-        await self.session.execute(
-            insert(EntityClaim)
-            .values(content_id=node, owner_id=self.owner_id, scope=self.scope)
-            .on_conflict_do_nothing(index_elements=["content_id", "owner_id", "scope"])
-        )
         return node
 
-    async def consolidate(self, fact: TimedFact, source_chunk_id: uuid.UUID) -> None:
-        """Add, update, or skip a claim against this container's existing latest claims.
+    async def resolve(self, name: str, type: str) -> uuid.UUID | None:
+        """Resolve a name to a stored content id, always minting this container's own claim on it.
 
-        Retrieves this container's similar visible latest claims, asks decide_consolidation for the
-        verdict, and on UPDATE closes the old claim by setting valid and recorded before upserting
-        the new one, on ADD upserts the new content and claim, and on NOOP leaves the graph
-        unchanged.
+        Normalizes the name first so a path or url echoed as an entity folds to empty and is
+        dropped with a null return. When this container already claims the exact content-addressed
+        id, that fast path returns immediately with no embedding call. Otherwise
+        `match_or_mint_entity` embeds the cleaned name and cosine matches the entity content
+        already visible to this container (through one of its own or a shared claim) within the
+        same type: a match above settings.entity_resolution_threshold still mints this container's
+        own claim on that content before returning its id, since visibility through another
+        tenant's claim is not this container's own stake, and consolidate_facts resolves every
+        fact's subject and object through this same map, so a claim that never lands here is a
+        fact this container can never write either. With no match it mints a fresh content row.
 
-        fact: the extracted candidate fact, its subject and object already resolved to entities.
-        source_chunk_id: chunk the fact was extracted from, stamped as provenance on the new claim.
+        name: entity surface form to resolve.
+        type: ontology entity type the match must share.
         """
-        # DEFER HippoRAG Personalized PageRank multi-hop retrieval attaches here, walking the
-        # edges this method writes to rank facts beyond first-order similarity.
-        # an identical triple and statement hashes to the same content-addressed id, so a fact
-        # already claimed by this container, live or since superseded or decayed, is a NOOP here
-        # and never claimed twice; opts out of the live gate to see a closed claim too.
-        identity = fact_id(fact.subject, fact.predicate, fact.object_, fact.statement)
+        if not normalize_name(name):
+            logger.warning("entity name {!r} is a path or link, dropping", name)
+            return None
+        node = entity_id(name, type)
+        if await self.already_claims_entity(node):
+            return node
+        resolved = await self.match_or_mint_entity(name, type, node)
+        await claim_entity(self.session, resolved, self.owner_id, self.scopes)
+        return resolved
+
+    async def already_claims_fact(self, content_id: uuid.UUID) -> bool:
+        """Whether this container already stakes its own claim on this fact content id, ever."""
         gate_off = {settings.skip_live_gate: True}
-        already_claimed = await self.session.scalar(
+        claimed = await self.session.scalar(
             select(FactClaim.id)
             .where(
-                FactClaim.content_id == identity,
+                FactClaim.content_id == content_id,
                 FactClaim.owner_id == self.owner_id,
-                FactClaim.scope == self.scope,
+                FactClaim.scopes == self.scopes,
             )
             .execution_options(**gate_off)
         )
-        if already_claimed is not None:
-            return
-        [vector] = await Embedder().embed([fact.statement], mode="document")
-        subject_id = await self.session.scalar(
-            select(EntityContent.id)
-            .where(EntityContent.name == fact.subject)
-            .order_by(EntityContent.id)
-            .limit(1)
-        )
+        return claimed is not None
+
+    async def candidate(
+        self, fact: TimedFact, resolved: dict[str, uuid.UUID]
+    ) -> tuple[TimedFact, uuid.UUID, uuid.UUID | None, uuid.UUID] | None:
+        """One fact's live candidate tuple, or null when already claimed or its subject never
+        resolved.
+
+        fact: an extracted, dated candidate fact from one chunk.
+        resolved: entity surface name to resolved content id, from this chunk's own `resolve`
+            calls.
+        """
+        identity = fact_id(fact.subject, fact.predicate, fact.object_, fact.statement)
+        if await self.already_claims_fact(identity):
+            return None
+        subject_id = resolved.get(fact.subject)
         if subject_id is None:
             logger.warning("fact subject {!r} has no resolved entity, skipping", fact.subject)
+            return None
+        object_id = resolved.get(fact.object_) if fact.object_ else None
+        return fact, subject_id, object_id, identity
+
+    async def new_candidates(
+        self, facts: list[TimedFact], resolved: dict[str, uuid.UUID]
+    ) -> list[tuple[TimedFact, uuid.UUID, uuid.UUID | None, uuid.UUID]]:
+        """The facts not already claimed by this container and whose subject resolved to a real
+        entity, the consolidation cascade's first, free tier.
+
+        facts: the extracted, dated candidate facts from one chunk.
+        resolved: entity surface name to resolved content id, from this chunk's own `resolve`
+            calls.
+        """
+        candidates = [await self.candidate(fact, resolved) for fact in facts]
+        return [candidate for candidate in candidates if candidate is not None]
+
+    async def live_facts_by_subject(
+        self, subject_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, list[LiveFact]]:
+        """Every visible latest claim for a set of subjects, one query for a whole chunk's batch.
+
+        The non-LLM consolidation cascade's batched read: rather than one `ORDER BY <vector>`
+        query per candidate fact, this fetches the unordered pool for every distinct subject a
+        chunk's candidates name at once, and `graph.consolidation.rank_pool` then ranks each
+        candidate's own slice of the pool by cosine similarity in Python, since a single SQL
+        statement cannot `ORDER BY` a different query vector per row.
+
+        subject_ids: the distinct resolved subject content ids this chunk's candidates name.
+        """
+        if not subject_ids:
+            return {}
+        pools: dict[uuid.UUID, list[LiveFact]] = defaultdict(list)
+        for claim in await self.session.scalars(
+            select(LiveFact).where(LiveFact.subject_id.in_(subject_ids))
+        ):
+            pools[claim.subject_id].append(claim)
+        return pools
+
+    async def consolidate_facts(
+        self,
+        facts: list[TimedFact],
+        resolved: dict[str, uuid.UUID],
+        source_chunk_id: uuid.UUID,
+    ) -> None:
+        """Consolidate every dated fact from one chunk through the non-LLM cascade.
+
+        Embeds every surviving statement in one batched call, ranks each against its subject's
+        live-fact pool (`live_facts_by_subject`, also fetched once for the whole chunk), and
+        decides every candidate whose top match is unambiguous by rule alone
+        (`graph.consolidation.decide_by_rule`). Whatever is left, the genuinely borderline
+        candidates whose top match falls in the ambiguous cosine band, resolves in one further
+        batched LLM call (`decide_consolidations_batch`) rather than one per fact, so a chunk
+        never pays more than two LLM calls total: the combined extraction call and this one.
+
+        facts: the extracted, dated candidate facts from one chunk.
+        resolved: entity surface name to resolved content id, from this chunk's own `resolve`
+            calls.
+        source_chunk_id: chunk the facts were extracted from, stamped as provenance on new claims.
+        """
+        candidates = await self.new_candidates(facts, resolved)
+        if not candidates:
             return
-        object_id = (
-            await self.session.scalar(
-                select(EntityContent.id)
-                .where(EntityContent.name == fact.object_)
-                .order_by(EntityContent.id)
-                .limit(1)
+        with span("consolidate"):
+            with span("embed"):
+                vectors = await Embedder().embed(
+                    [fact.statement for fact, _, _, _ in candidates], mode="document"
+                )
+            pools = await self.live_facts_by_subject(
+                {subject_id for _, subject_id, _, _ in candidates}
             )
-            if fact.object_
-            else None
-        )
-        distance = LiveFact.embedding.cosine_distance(vector)
-        # only a currently-valid live claim is a supersession candidate, and `live_fact` already
-        # carries that gate, so a future-dated or already-closed claim is never offered for
-        # retirement and this query lists only its subject bound.
-        existing = list(
-            await self.session.scalars(
-                select(LiveFact)
-                .where(LiveFact.subject_id == subject_id)
-                .order_by(distance)
-                .limit(settings.similar_facts)
-            )
-        )
-        verdict = await decide_consolidation(fact, existing)
+            scored = [
+                rank_pool(vector, pools.get(subject_id, []))
+                for (_, subject_id, _, _), vector in zip(candidates, vectors, strict=True)
+            ]
+            verdicts: list[ConsolidationVerdict | None] = [
+                decide_by_rule(fact.predicate, object_id, pool)
+                for (fact, _, object_id, _), pool in zip(candidates, scored, strict=True)
+            ]
+            borderline = [
+                (fact, [claim for claim, _ in pool])
+                for (fact, _, _, _), pool, verdict in zip(
+                    candidates, scored, verdicts, strict=True
+                )
+                if verdict is None
+            ]
+            if borderline:
+                verdicts = merged_verdicts(verdicts, await decide_consolidations_batch(borderline))
+            for (fact, subject_id, object_id, identity), vector, verdict in zip(
+                candidates, vectors, verdicts, strict=True
+            ):
+                assert verdict is not None  # every slot above is filled, directly or by the batch
+                await self.apply_verdict(
+                    fact, subject_id, object_id, identity, vector, source_chunk_id, verdict
+                )
+
+    async def close_superseded_claim(
+        self, supersedes: uuid.UUID, valid_from: datetime | None, now: datetime
+    ) -> None:
+        """Close the claim an UPDATE verdict supersedes, clamping its valid range non-inverted.
+
+        The superseding fact's own valid_from is the natural close point, but a backdated
+        correction can name a start earlier than the retired claim's own; clamping to its lower
+        bound keeps the range non-inverted (an immediately-closed window) rather than raising a
+        range-order violation the database itself would refuse.
+
+        supersedes: id of the claim to close.
+        valid_from: the new fact's own valid-time start, the natural close point.
+        now: this verdict's own write time, closing `recorded` and defaulting `valid_from`.
+        """
+        gate_off = {settings.skip_live_gate: True}
+        retired = await self.session.get(FactClaim, supersedes, execution_options=gate_off)
+        if retired is None:
+            return
+        lower = retired.valid.lower if retired.valid else None
+        closing = valid_from or now
+        if lower is not None and closing < lower:
+            closing = lower
+        retired.valid = Range(lower, closing)
+        retired.recorded = Range(retired.recorded.lower, now)
+
+    async def apply_verdict(
+        self,
+        fact: TimedFact,
+        subject_id: uuid.UUID,
+        object_id: uuid.UUID | None,
+        identity: uuid.UUID,
+        vector: list[float],
+        source_chunk_id: uuid.UUID,
+        verdict: ConsolidationVerdict,
+    ) -> None:
+        """Apply one fact's already-decided ADD, UPDATE, or NOOP verdict to this container's canon.
+
+        On UPDATE closes the old claim before upserting the new one, on ADD upserts the new
+        content and claim, and on NOOP leaves the graph unchanged. This chunk's only per-fact
+        write, once `consolidate_facts` has already resolved subjects, embedded statements, and
+        decided every verdict together.
+
+        # DEFER HippoRAG Personalized PageRank multi-hop retrieval attaches here, walking the
+        # edges this method writes to rank facts beyond first-order similarity.
+
+        fact: the extracted candidate fact, already known not yet claimed by this container.
+        subject_id: resolved entity content id the fact is about.
+        object_id: resolved entity content id the fact points to, null for a unary fact.
+        identity: content-addressed id for this fact's triple and statement.
+        vector: the statement's already-embedded dense vector.
+        source_chunk_id: chunk the fact was extracted from, stamped as provenance on the new claim.
+        verdict: the already-decided ADD, UPDATE, or NOOP action, from the non-LLM cascade or the
+            batched borderline call.
+        """
         if verdict.action == "NOOP":
             return
         now = datetime.now(UTC)
         if verdict.action == "UPDATE" and verdict.supersedes is not None:
-            retired = await self.session.get(
-                FactClaim, verdict.supersedes, execution_options=gate_off
-            )
-            if retired is not None:
-                retired.valid = Range(
-                    retired.valid.lower if retired.valid else None, fact.valid_from or now
-                )
-                retired.recorded = Range(retired.recorded.lower, now)
+            await self.close_superseded_claim(verdict.supersedes, fact.valid_from, now)
         await mint_content(
             self.session,
             FactContent(
@@ -216,20 +388,33 @@ class GraphWriter:
                 embedding=vector,
             ),
         )
-        await self.session.execute(
-            insert(FactClaim)
-            .values(
-                content_id=identity,
-                owner_id=self.owner_id,
-                scope=self.scope,
-                valid=Range(fact.valid_from, fact.valid_to)
-                if fact.valid_from or fact.valid_to
-                else None,
-                source_chunk_id=source_chunk_id,
-                reviewed_at=await self.reviewed_at(),
-            )
-            .on_conflict_do_nothing(**FACT_CLAIM_LIVE_ARBITER)
+        await claim_fact(
+            self.session,
+            identity,
+            self.owner_id,
+            self.scopes,
+            valid=Range(fact.valid_from, fact.valid_to)
+            if fact.valid_from or fact.valid_to
+            else None,
+            source_chunk_id=source_chunk_id,
+            reviewed_at=await self.reviewed_at(),
         )
+
+
+def merged_verdicts(
+    verdicts: list[ConsolidationVerdict | None], resolved: list[ConsolidationVerdict]
+) -> list[ConsolidationVerdict | None]:
+    """Fill each null, genuinely-ambiguous slot with the batched LLM's own verdict, in order.
+
+    Every slot is non-null once filled (the caller's own `assert verdict is not None` documents
+    it); the return type stays `| None` only so it matches `verdicts`' own declared type at the
+    reassignment `consolidate_facts` makes, list element types being invariant.
+
+    verdicts: the non-LLM cascade's own decisions, null wherever it deferred.
+    resolved: the batched borderline call's verdicts, one per deferred slot, in order.
+    """
+    pending = iter(resolved)
+    return [verdict if verdict is not None else next(pending) for verdict in verdicts]
 
 
 async def pending_chunks(
@@ -237,13 +422,14 @@ async def pending_chunks(
     limit: int | None,
     source: str | None,
 ) -> list[Chunk]:
-    """List the writable chunks that carry no graph claims yet, in a fixed deterministic order.
+    """List the writable chunks the graph build has never run over, in a fixed deterministic order.
 
-    A chunk counts as pending until at least one claim records it as its source, so a finished
-    build never reprocesses it and a build resumed after an interruption picks up where it stopped.
-    Extraction stamps its entities and facts with the source chunk's scope, so only chunks in
-    scopes the principal may write are pending for it. A reader or public visitor never extracts
-    into someone else's shared graph, that scope's own writers do.
+    A chunk counts as pending until its own `processed_at` is set, so a finished build never
+    reprocesses it and a build resumed after an interruption picks up where it stopped, regardless
+    of whether that earlier pass minted any claim at all. Extraction stamps its entities and facts
+    with the source chunk's scope set, so only chunks in scope sets the principal may write are
+    pending for it. A reader or public visitor never extracts into someone else's shared graph,
+    that scope's own writers do.
 
     principal_id: identity whose row level security visibility and write access scope the chunks.
     limit: maximum number of chunks to return, all of them when null.
@@ -251,8 +437,8 @@ async def pending_chunks(
     """
     selection = (
         select(Chunk)
-        .where(~exists().where(FactClaim.source_chunk_id == Chunk.id))
-        .where(Membership.writable_scope(Chunk.scope, principal_id))
+        .where(Chunk.processed_at.is_(None))
+        .where(Membership.writable_scopes(Chunk.scopes, principal_id))
         .order_by(Chunk.id)
         .limit(limit)
     )
@@ -261,6 +447,22 @@ async def pending_chunks(
         selection = selection.where(Chunk.document_id.in_(titled))
     async with acting_as(principal_id) as session:
         return list(await session.scalars(selection))
+
+
+async def mark_processed(session: AsyncSession, chunk_id: uuid.UUID) -> None:
+    """Stamp one chunk's processed_at so pending_chunks never offers it again.
+
+    Set unconditionally once extraction and consolidation have run over the chunk, whether or not
+    that pass minted any entity or fact, so a chunk whose prose asserts nothing worth keeping is
+    never re-extracted on the next build. Left unset entirely when extraction itself fails, the
+    transient case a later build retries.
+
+    session: open session already acting as the chunk's owning principal.
+    chunk_id: chunk to mark processed.
+    """
+    await session.execute(
+        update(Chunk).where(Chunk.id == chunk_id).values(processed_at=func.now())
+    )
 
 
 async def graph_counts(principal_id: uuid.UUID) -> tuple[int, int]:
@@ -283,18 +485,218 @@ async def graph_counts(principal_id: uuid.UUID) -> tuple[int, int]:
     return entities, facts
 
 
+async def document_tagged_project(session: AsyncSession, document_id: uuid.UUID) -> bool:
+    """Whether any sibling chunk of a document carries the #project tag.
+
+    Read only when a chunk's own text already matched journal.JOURNAL_LINE, never on the common
+    prose-only path. The tag can live in a different chunk than the one carrying the dated line
+    (often the front matter), so every sibling's text is scanned rather than only this chunk's own.
+
+    session: open, principal-scoped session.
+    document_id: the chunk's parent document.
+    """
+    siblings = await session.scalars(select(Chunk.text).where(Chunk.document_id == document_id))
+    return any(journal.is_tagged_project(text) for text in siblings)
+
+
+async def journal_extraction(
+    principal_id: uuid.UUID, chunk: Chunk, document: Document | None
+) -> tuple[list[ExtractedEntity], list[TimedFact]]:
+    """The chunk's dated journal-line title entity and facts, empty when it carries no such line.
+
+    extract.journal's `- YYYY-MM-DD: text` convention is parsed deterministically here, with no
+    LLM call, into facts logged against the note's own title entity; a chunk that carries one of
+    these is never skipped by extract_min_chars purely for being short, since the line itself is
+    already the whole fact.
+
+    principal_id: identity that will own the written claims, whose visibility scopes the
+        #project-tag sibling read.
+    chunk: the chunk whose text is scanned for a dated journal line.
+    document: the chunk's parent document, null when it no longer exists.
+    """
+    if not (journal.JOURNAL_LINE.search(chunk.text) and document is not None and document.title):
+        return [], []
+    async with acting_as(principal_id) as session:
+        tagged_project = await document_tagged_project(session, chunk.document_id)
+    entity = journal.title_entity(document.title, tagged_project)
+    return [entity], journal.journal_facts(chunk.text, document.title)
+
+
+async def llm_extraction(
+    chunk: Chunk, document: Document | None
+) -> tuple[list[ExtractedEntity], list[TimedFact]]:
+    """The combined-call entities and dated facts, empty when the chunk gates out or truncates.
+
+    A chunk first passes the GLiNER2 relevance gate (`serving.EntityGate`, a 205M CPU model
+    scoring the chunk against the ontology's own entity types in milliseconds); a chunk naming
+    none of them returns empty with no LLM call at all. A chunk that clears the gate runs the one
+    combined extraction call (`extract.llm.combined_extract`).
+
+    Raises ChunkExtractionTimedOut when the call exceeds extract_timeout, the caller's signal to
+    abandon the chunk outright rather than write a partial slice. Raises
+    ExtractionUnreachableError when the endpoint itself is unreachable, a systemic failure
+    `build_graph` still surfaces immediately rather than skipping like a per-chunk one.
+
+    chunk: the chunk to extract from, already known to clear extract_min_chars.
+    document: the chunk's parent document, whose created_at seeds an undated fact's fallback.
+    """
+    gate_relevant = True
+    if settings.gliner_gate_enabled:
+        with span("gate"):
+            gate_relevant = await asyncio.to_thread(EntityGate().relevant, chunk.text)
+    if not gate_relevant:
+        logger.info("chunk {} gated out, no ontology-relevant entities", chunk.id)
+        return [], []
+    try:
+        with span("extract"):
+            extraction = await combined_extract(chunk.text)
+    except APITimeoutError as error:
+        logger.warning("extraction timed out on chunk {}, skipping", chunk.id)
+        raise ChunkExtractionTimedOut from error
+    except APIConnectionError as error:
+        raise ExtractionUnreachableError(
+            f"cannot reach the extraction endpoint at {settings.llm_url!r} ({error}); "
+            "confirm AIZK_LLM_URL points at a running server (the vllm-llm compose "
+            "service or a cloud provider)"
+        ) from error
+    except (LengthFinishReasonError, ValidationError):
+        # a chunk rich enough that its structural extraction can never finish inside
+        # extract_max_tokens fails identically on every retry, so it is marked processed with
+        # only its journal facts, if any, rather than left pending to loop forever; raising the
+        # setting and rerunning the build is the deliberate fix, not an automatic one. The same
+        # truncation surfaces two ways: the openai SDK raises LengthFinishReasonError when the
+        # endpoint reports finish_reason "length", but under xgrammar-guided decoding vLLM does
+        # not always report it that way, so a cut-off response instead reaches here as a raw
+        # pydantic ValidationError (an unterminated JSON string) once `structured` tries to parse
+        # it; both are the identical truncation, just caught at two different layers.
+        logger.warning(
+            "chunk {} extraction exceeded extract_max_tokens={}, skipping; raise "
+            "AIZK_EXTRACT_MAX_TOKENS and rerun the build to recover it",
+            chunk.id,
+            settings.extract_max_tokens,
+        )
+        return [], []
+    fallback = document.created_at if document is not None else datetime.now(UTC)
+    return extraction.entities, with_document_fallback(extraction.facts, fallback)
+
+
+async def resolve_entities(
+    writer: GraphWriter, entities: list[ExtractedEntity]
+) -> dict[str, uuid.UUID]:
+    """Resolve every extracted entity through the writer, name to resolved content id.
+
+    writer: this chunk's own GraphWriter, already bound to its owner and scope set.
+    entities: the extracted, deduplicated-by-name entities to resolve.
+    """
+    resolved: dict[str, uuid.UUID] = {}
+    for entity in entities:
+        content_id = await writer.resolve(entity.name, entity.type)
+        if content_id is not None:
+            resolved[entity.name] = content_id
+    return resolved
+
+
+async def write_graph_slice(
+    principal_id: uuid.UUID,
+    chunk: Chunk,
+    entities: list[ExtractedEntity],
+    dated_facts: list[TimedFact],
+) -> set[uuid.UUID]:
+    """Resolve and consolidate one chunk's entities and facts, retrying a transient DB conflict.
+
+    A fresh transaction per attempt, so a deadlock or serialization failure (real under this
+    graph's own concurrency, see is_transient_db_error) simply reruns the whole idempotent write
+    rather than losing the chunk; every mint GraphWriter performs is ON CONFLICT DO NOTHING or an
+    equivalent idempotent upsert, so a retried write is safe.
+
+    principal_id: identity that owns the written claims.
+    chunk: the chunk being resolved and consolidated.
+    entities: this chunk's already-extracted entities, journal and/or LLM sourced.
+    dated_facts: this chunk's already-extracted, dated candidate facts.
+    """
+    resolved: dict[str, uuid.UUID] = {}
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception(is_transient_db_error),
+        stop=stop_after_attempt(4),
+        wait=wait_random_exponential(multiplier=0.05, max=1.0),
+        reraise=True,
+    ):
+        with attempt, span("db_write"):
+            async with acting_as(principal_id) as session:
+                writer = GraphWriter(session, principal_id, tuple(chunk.scopes))
+                resolved = await resolve_entities(writer, entities)
+                await writer.consolidate_facts(dated_facts, resolved, chunk.id)
+                await mark_processed(session, chunk.id)
+    return set(resolved.values())
+
+
+async def extract_and_consolidate(chunk: Chunk, principal_id: uuid.UUID) -> set[uuid.UUID]:
+    """Extract, resolve, and consolidate one chunk's graph slice, return the entities it touched.
+
+    The shared per-chunk core both build_graph's concurrent loop and the pgqueuer worker's
+    extraction entrypoint call, gated end to end by extraction_semaphore so however many chunks
+    are in flight at once, inline or dispatched as concurrent queue jobs, only
+    settings.graph_build_concurrency of them ever hit the LLM endpoint at a time.
+
+    journal_extraction runs first and unconditionally; a chunk that clears extract_min_chars, or
+    carries no dated line at all, then also runs llm_extraction, its entities and facts folding in
+    beside any journal ones rather than replacing them, so a note that mixes prose and a dated log
+    gets both. Every path, short-circuited, gated out, successful, fact-free, or an output too
+    rich for extract_max_tokens to finish, ends by marking the chunk processed so pending_chunks
+    never offers it again; only a timed-out extraction leaves it pending for a later retry, and an
+    unreachable endpoint raises immediately rather than grinding through the rest of the queue.
+
+    chunk: the pending chunk to build a graph slice from.
+    principal_id: identity that owns the written claims.
+    """
+    async with extraction_semaphore():
+        async with acting_as(principal_id) as session:
+            document = await session.get(Document, chunk.document_id)
+        entities, dated_facts = await journal_extraction(principal_id, chunk, document)
+        short = len(chunk.text.strip()) < settings.extract_min_chars
+        if short and not dated_facts:
+            async with acting_as(principal_id) as session:
+                await mark_processed(session, chunk.id)
+            return set()
+        if not short:
+            try:
+                llm_entities, llm_facts = await llm_extraction(chunk, document)
+            except ChunkExtractionTimedOut:
+                return set()
+            entities = [*entities, *llm_entities]
+            dated_facts = [*dated_facts, *llm_facts]
+        touched = await write_graph_slice(principal_id, chunk, entities, dated_facts)
+        logger.info("graph slice from chunk {} done", chunk.id)
+        return touched
+
+
+def raise_unreachable(chunks: list[Chunk], results: list[set[uuid.UUID] | BaseException]) -> None:
+    """Re-raise a systemic ExtractionUnreachableError, or log any other chunk failure and move on.
+
+    chunks: the chunks build_graph dispatched, in the same order as results.
+    results: each chunk's outcome from asyncio.gather(..., return_exceptions=True).
+    """
+    for chunk, result in zip(chunks, results, strict=True):
+        if isinstance(result, ExtractionUnreachableError):
+            raise result
+        if isinstance(result, BaseException):
+            logger.error("chunk {} failed unexpectedly, skipping: {}", chunk.id, result)
+
+
 async def build_graph(
     limit: int | None = None,
     principal_id: uuid.UUID | None = None,
     source: str | None = None,
 ) -> tuple[int, int]:
-    """Build the graph from chunks that have no claims yet and return the counts created.
+    """Build the graph from chunks the build has never run over and return the counts created.
 
-    Iterates the pending chunks in a fixed deterministic order, and for each one extracts a graph
-    slice with the LLM outside any transaction, then opens a fresh owner-scoped transaction to
-    resolve its entities and consolidate its facts. Committing one chunk at a time keeps a slow
-    extraction from holding a write lock and makes the build resumable, since a chunk that has been
-    written is skipped on the next run.
+    Runs extract_and_consolidate over every pending chunk concurrently through asyncio.gather,
+    each one individually gated by the shared extraction_semaphore so the LLM endpoint only ever
+    sees settings.graph_build_concurrency requests in flight at once regardless of how many chunk
+    coroutines are already started and waiting. Each chunk resolves and consolidates on its own
+    fresh owner-scoped transaction, so one slow or failed chunk never blocks another's write: an
+    unanticipated exception from one chunk is logged and skipped by raise_unreachable rather than
+    cancelling every other chunk's own in-flight coroutine, return_exceptions=True's own job.
 
     limit: maximum number of chunks to process, all of them when null.
     principal_id: identity that owns the written claims, the system principal when null.
@@ -306,22 +708,11 @@ async def build_graph(
     # trees, run as a second pass over the graph this builds to serve global queries.
     chunks = await pending_chunks(principal_id, limit, source)
     entities_before, facts_before = await graph_counts(principal_id)
-    for chunk in chunks:
-        # a generation that blows past settings.extract_timeout is abandoned and the chunk left
-        # pending, so one runaway extraction never stalls the build and a later run retries it.
-        try:
-            extraction = await extract_graph(chunk.text)
-            dated_facts = await resolve_timestamps(chunk.text, extraction.facts)
-        except APITimeoutError:
-            logger.warning("extraction timed out on chunk {}, skipping", chunk.id)
-            continue
-        async with acting_as(principal_id) as session:
-            writer = GraphWriter(session, principal_id, chunk.scope)
-            for entity in extraction.entities:
-                await writer.resolve(entity.name, entity.type)
-            for fact in dated_facts:
-                await writer.consolidate(fact, chunk.id)
-        logger.info("graph slice from chunk {} done", chunk.id)
+    results = await asyncio.gather(
+        *(extract_and_consolidate(chunk, principal_id) for chunk in chunks),
+        return_exceptions=True,
+    )
+    raise_unreachable(chunks, results)
     entities_after, facts_after = await graph_counts(principal_id)
     return entities_after - entities_before, facts_after - facts_before
 
@@ -347,6 +738,55 @@ def redirect_entity(
     return replacement, replacement is None
 
 
+def claim_row(claim: FactClaim, content_id: uuid.UUID) -> dict:
+    """One claim's full column set as a plain dict, content_id re-pointed at the corrected row.
+
+    claim: the claim being migrated onto a corrected fact content row.
+    content_id: the corrected content row's own id, the same id the original claim already named.
+    """
+    return {
+        "id": claim.id,
+        "content_id": content_id,
+        "owner_id": claim.owner_id,
+        "scopes": claim.scopes,
+        "valid": claim.valid,
+        "recorded": claim.recorded,
+        "reviewed_at": claim.reviewed_at,
+        "last_accessed": claim.last_accessed,
+        "access_count": claim.access_count,
+        "attributes": claim.attributes,
+        "source_chunk_id": claim.source_chunk_id,
+        "promoted_from": claim.promoted_from,
+    }
+
+
+async def snapshot_claims(session: AsyncSession, content_id: uuid.UUID) -> list[dict]:
+    """Read and expunge a fact content's whole claim history ahead of its cascading delete.
+
+    Content is immutable under row level security, so a fact naming a duplicate is corrected by
+    deleting and re-minting it at the very same content-addressed id rather than an in-place
+    UPDATE; deleting it would otherwise cascade away its claims through their own foreign key, so
+    they are snapshotted here first and reinserted verbatim onto the corrected row, their own
+    bi-temporal history preserved unchanged. The identity map still tracks a claim as persistent
+    once the cascade below removes its physical row, a DB-level FK action the ORM never observes
+    on its own, so each is expunged before its replacement reuses the identical claim id.
+
+    session: session bound to the owner-role admin connection, row level security bypassed.
+    content_id: the fact content whose whole claim history, live and superseded, is snapshotted.
+    """
+    claims = list(
+        await session.scalars(
+            select(FactClaim)
+            .where(FactClaim.content_id == content_id)
+            .execution_options(**{settings.skip_live_gate: True})
+        )
+    )
+    saved = [claim_row(claim, content_id) for claim in claims]
+    for claim in claims:
+        session.expunge(claim)
+    return saved
+
+
 # `repoint_fact_content` below is exercised end to end by
 # `test_build.py::test_dedup_merges_a_slug_twin_and_then_converges` and
 # `test_dedup_drops_a_dangling_fact_naming_a_dropped_duplicate` (confirmed by direct print-based
@@ -362,14 +802,9 @@ async def repoint_fact_content(  # pragma: no cover
 ) -> None:
     """Correct one fact content's subject or object off a duplicate, migrating its claims.
 
-    Content is immutable under row level security, so a fact naming a duplicate is corrected by
-    deleting and re-minting it at the very same content-addressed id rather than an in-place
-    UPDATE, both individually admin-gated operations rather than a forbidden one. Deleting it would
-    otherwise cascade away its claims through their own foreign key, so they are read back out
-    first and reinserted verbatim onto the corrected row, their own bi-temporal history preserved
-    unchanged. A fact whose subject or object was a dropped, unreplaced duplicate is dangling and
-    removed outright instead, its claims cascading away with it since there is nothing left to
-    reinsert them onto.
+    A fact whose subject or object was a dropped, unreplaced duplicate is dangling and removed
+    outright instead, its claims cascading away with it since there is nothing left to reinsert
+    them onto.
 
     session: session bound to the owner-role admin connection, row level security bypassed
         entirely, since a merge must reach every claim any tenant holds on the affected content,
@@ -384,38 +819,7 @@ async def repoint_fact_content(  # pragma: no cover
     if subject_dropped or object_dropped or corrected_subject is None:
         await session.delete(content)
         return
-    # every claim this content ever carried migrates, live and superseded alike, so the corrected
-    # row keeps the exact same bi-temporal history it had before, opting out of the live gate the
-    # way any full-history read of claims does.
-    claims = list(
-        await session.scalars(
-            select(FactClaim)
-            .where(FactClaim.content_id == content_id)
-            .execution_options(**{settings.skip_live_gate: True})
-        )
-    )
-    saved = [
-        {
-            "id": claim.id,
-            "content_id": content_id,
-            "owner_id": claim.owner_id,
-            "scope": claim.scope,
-            "valid": claim.valid,
-            "recorded": claim.recorded,
-            "reviewed_at": claim.reviewed_at,
-            "last_accessed": claim.last_accessed,
-            "access_count": claim.access_count,
-            "attributes": claim.attributes,
-            "source_chunk_id": claim.source_chunk_id,
-            "promoted_from": claim.promoted_from,
-        }
-        for claim in claims
-    ]
-    # the identity map still tracks these as persistent even once the cascade below removes their
-    # physical rows, a DB-level FK action the ORM never observes on its own, so each is expunged
-    # before its replacement below reuses the identical claim id.
-    for claim in claims:
-        session.expunge(claim)
+    saved = await snapshot_claims(session, content_id)
     await session.delete(content)
     await session.flush()
     session.add(
@@ -432,71 +836,99 @@ async def repoint_fact_content(  # pragma: no cover
     session.add_all(FactClaim(**row) for row in saved)
 
 
-async def dedup_entities(
-    principal_id: uuid.UUID | None = None,
+async def find_duplicates(session: AsyncSession) -> dict[uuid.UUID, uuid.UUID | None]:
+    """Group visible entity content by normalized name and type, return the canonical redirect map.
+
+    The RAPTOR tree's summary nodes are derived and rebuilt wholesale, never knowledge the
+    extractor wrote, so they stay out of the dedup that merges and repoints knowledge nodes. The
+    earliest id by byte order stays canonical, so a rerun is idempotent and converges. An entity
+    whose name normalizes to empty was a path the extractor mistook for a thing, so it and its
+    dangling facts are dropped: it names no canonical entry, so every other entity of the same
+    empty key redirects to null.
+
+    session: open session under the caller's own row level security visibility.
+    """
+    entities = sorted(
+        await session.scalars(
+            select(EntityContent).where(EntityContent.type != EntityType.RAPTOR_SUMMARY)
+        ),
+        key=lambda entity: entity.id.bytes,
+    )
+    canonical: dict[tuple[str, str], uuid.UUID] = {}
+    redirect: dict[uuid.UUID, uuid.UUID | None] = {}
+    for entity in entities:
+        normalized = normalize_name(entity.name)
+        keep = canonical.get((entity.type, normalized)) if normalized else None
+        if normalized and keep is None:
+            canonical[(entity.type, normalized)] = entity.id
+            continue
+        redirect[entity.id] = keep
+    return redirect
+
+
+async def affected_fact_ids(
+    session: AsyncSession, redirect: dict[uuid.UUID, uuid.UUID | None]
+) -> list[uuid.UUID]:
+    """Fact content naming at least one duplicate the redirect map will correct or drop.
+
+    session: open session under the caller's own row level security visibility.
+    redirect: duplicate content id to its canonical replacement, from find_duplicates.
+    """
+    return list(
+        await session.scalars(
+            select(FactContent.id).where(
+                or_(FactContent.subject_id.in_(redirect), FactContent.object_id.in_(redirect))
+            )
+        )
+    )
+
+
+async def merge_duplicates(
+    affected_ids: list[uuid.UUID], redirect: dict[uuid.UUID, uuid.UUID | None]
 ) -> int:
+    """Repoint every affected fact and delete every duplicate entity, return the count merged.
+
+    Runs entirely on the owner-role admin connection, bypassing row level security: content's own
+    claim-gated SELECT policy would otherwise hide another tenant's private claim on the very
+    content this merge must migrate, and content's DELETE policy is admin-gated in the first
+    place, so a real structural merge needs the same superuser reach migrations already run with.
+    Repointing and deleting run as two separate transactions, since every repoint must land before
+    a duplicate's own claims (which repoint_fact_content may have just migrated facts onto) are
+    safe to cascade away.
+
+    affected_ids: fact content naming at least one duplicate, from affected_fact_ids.
+    redirect: duplicate content id to its canonical replacement, from find_duplicates.
+    """
+    merged = 0
+    async with admin_session() as session:
+        async with session.begin():
+            for content_id in affected_ids:
+                await repoint_fact_content(session, content_id, redirect)
+        async with session.begin():
+            for duplicate_id in redirect:
+                entity = await session.get(EntityContent, duplicate_id)
+                if entity is not None:  # pragma: no cover - always true within a single pass
+                    await session.delete(entity)
+                    merged += 1
+    return merged
+
+
+async def dedup_entities(principal_id: uuid.UUID | None = None) -> int:
     """Merge entity content sharing a normalized name and type, repoint claims, return the count.
 
-    Loads the entity content visible to `principal_id`, groups it by normalized name and type so
-    slug, spaced, and linked spellings of one thing collapse onto a single canonical content id,
-    finds every fact content naming one of the resulting duplicates, and corrects each one through
-    `repoint_fact_content` before deleting the duplicate entity content itself, whose own claims
-    cascade away through their foreign key. The earliest id by byte order stays canonical, so a
-    rerun is idempotent and converges. The read that finds the duplicates and their facts runs
-    under the caller's own row-level-security visibility, but every write runs on the owner-role
-    admin connection, bypassing row level security entirely: content's own claim-gated SELECT
-    policy would otherwise hide another tenant's private claim on the very content this merge must
-    migrate, and content's DELETE policy is admin-gated in the first place, so a real structural
-    merge needs the same superuser reach migrations already run with, not merely the system
-    principal's own still-RLS-governed session. An entity whose name normalizes to empty was a
-    path the extractor mistook for a thing, so it and its dangling facts are removed outright.
+    Reads the duplicates under the caller's own row-level-security visibility, then merges them on
+    the admin-bypassed connection, the reach a real structural merge needs to migrate every
+    tenant's claim, not merely the ones the merging principal can itself see.
 
     principal_id: identity whose row level security visibility scopes which content this pass can
         find and merge, the system principal when null.
     """
     principal_id = principal_id or settings.system_principal_id
     async with acting_as(principal_id) as session:
-        # the RAPTOR tree's summary nodes are derived and rebuilt wholesale, never knowledge the
-        # extractor wrote, so they stay out of the dedup that merges and repoints knowledge nodes.
-        entities = sorted(
-            await session.scalars(
-                select(EntityContent).where(EntityContent.type != EntityType.RAPTOR_SUMMARY)
-            ),
-            key=lambda entity: entity.id.bytes,
-        )
-        canonical: dict[tuple[str, str], uuid.UUID] = {}
-        redirect: dict[uuid.UUID, uuid.UUID | None] = {}
-        for entity in entities:
-            normalized = normalize_name(entity.name)
-            keep = canonical.get((entity.type, normalized)) if normalized else None
-            if normalized and keep is None:
-                canonical[(entity.type, normalized)] = entity.id
-                continue
-            redirect[entity.id] = keep
+        redirect = await find_duplicates(session)
         if not redirect:
             return 0
-        affected_ids = list(
-            await session.scalars(
-                select(FactContent.id).where(
-                    or_(FactContent.subject_id.in_(redirect), FactContent.object_id.in_(redirect))
-                )
-            )
-        )
-    merged = 0
-    admin = create_async_engine(settings.admin_database_url)
-    try:
-        admin_sessions = async_sessionmaker(admin, expire_on_commit=False)
-        async with admin_sessions(info={"principal": settings.system_principal_id}) as session:
-            async with session.begin():
-                for content_id in affected_ids:
-                    await repoint_fact_content(session, content_id, redirect)
-            async with session.begin():
-                for duplicate_id in redirect:
-                    entity = await session.get(EntityContent, duplicate_id)
-                    if entity is not None:  # pragma: no cover - always true within a single pass
-                        await session.delete(entity)
-                        merged += 1
-    finally:
-        await admin.dispose()
+        affected_ids = await affected_fact_ids(session, redirect)
+    merged = await merge_duplicates(affected_ids, redirect)
     logger.info("deduped {} duplicate entity content rows", merged)
     return merged

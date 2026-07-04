@@ -1,17 +1,18 @@
-from .base import Json, TableBase, aizk_registry
+from .base import Json, MappedBase, TableBase, aizk_registry
 from .embedded import Embedded
-from .fields import halfvec_field, tz_datetime_field
 from .identity import Id, Timestamped
 from .scoped import Scoped
+from .view import ViewBase, create_view_ddl
 
 __all__ = [
     "Embedded",
     "Id",
     "Json",
+    "MappedBase",
     "Scoped",
     "TableBase",
     "Timestamped",
+    "ViewBase",
     "aizk_registry",
-    "halfvec_field",
-    "tz_datetime_field",
+    "create_view_ddl",
 ]

@@ -1,10 +1,10 @@
-import asyncio
 import uuid
+from collections.abc import Iterator
 
+import dbutil
 import networkx as nx
 import pytest
 from factories import build_live_fact
-from graphdb import FakeLLM
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -14,44 +14,45 @@ from aizk.store import EntityClaim, EntityContent, FactClaim, FactContent, LiveF
 UNIT_VECTOR = [1.0] + [0.0] * 1023
 
 
-def edge(subject: uuid.UUID, object_: uuid.UUID) -> LiveFact:
-    """An in-memory binary fact carrying just the subject-to-object edge `detect` reads.
+@pytest.fixture
+def owner(migrated_db: None) -> Iterator[uuid.UUID]:
+    """A freshly reset schema seeding one principal, the owner every DB body acts as."""
+    pid = uuid.uuid4()
 
-    subject: entity the edge starts from.
-    object_: entity the edge points to.
-    """
+    async def setup() -> None:
+        await dbutil.reset_db()
+        await dbutil.seed_principal(pid)
+
+    dbutil.run(setup())
+    yield pid
+
+
+def edge(subject: uuid.UUID, object_: uuid.UUID) -> LiveFact:
+    """One in-memory binary fact carrying just the subject-to-object edge `detect` reads."""
     return build_live_fact(subject_id=subject, object_id=object_)
 
 
 @given(size=st.integers(min_value=3, max_value=6))
-def test_detect_keeps_a_clique_and_drops_a_smaller_component(size: int) -> None:
-    """A clique above the floor forms one community while a disjoint under-floor pair is dropped.
+def test_detect_keeps_a_clique_and_drops_under_floor(size: int) -> None:
+    """A clique above the floor lands in some kept community while a disjoint pair never does.
 
-    The detector's own job is the edge build and the min-size filter over whatever Louvain returns,
-    so the clique members all land in some kept community and the loose pair never does.
+    Also raising the floor past every component's size leaves nothing, so the same seeded graph
+    exercises the min-size filter's keep side and its drop-everything side in one property.
     """
     clique = [uuid.uuid4() for _ in range(size)]
     pair = [uuid.uuid4(), uuid.uuid4()]
     facts = [edge(a, b) for i, a in enumerate(clique) for b in clique[i + 1 :]]
-    facts.append(edge(pair[0], pair[1]))
+    facts.append(edge(*pair))
 
-    clusters = detect(facts, min_size=3)
-
-    assert all(len(cluster) >= 3 for cluster in clusters)
-    assert set().union(*clusters) >= set(clique)
-    assert all(member not in cluster for cluster in clusters for member in pair)
-
-
-@given(size=st.integers(min_value=2, max_value=5))
-def test_detect_drops_everything_below_the_min_size(size: int) -> None:
-    """Raising the floor above the only component's size leaves no community to summarize."""
-    nodes = [uuid.uuid4() for _ in range(size)]
-    facts = [edge(a, b) for i, a in enumerate(nodes) for b in nodes[i + 1 :]]
-    assert detect(facts, min_size=size + 1) == []
+    kept = detect(facts, min_size=3)
+    assert all(len(cluster) >= 3 for cluster in kept)
+    assert set().union(*kept) >= set(clique)
+    assert all(member not in cluster for cluster in kept for member in pair)
+    assert detect(facts, min_size=size + 3) == []
 
 
 def test_detect_returns_nothing_without_edges() -> None:
-    """Unary facts carry no edge, so an edgeless graph yields no communities."""
+    """Unary facts carry no edge, so the graph has no edges and no community is detected."""
     facts = [build_live_fact(subject_id=uuid.uuid4(), object_id=None) for _ in range(3)]
     assert detect(facts, min_size=3) == []
 
@@ -60,11 +61,11 @@ def test_detect_returns_nothing_without_edges() -> None:
 def test_detect_forwards_the_backend_keyword_only_off_the_default(
     monkeypatch: pytest.MonkeyPatch, backend: str
 ) -> None:
-    """The accelerator name reaches Louvain as a keyword, while the in-process default omits it.
+    """The accelerator name reaches Louvain as a keyword while the in-process default omits it.
 
-    Louvain itself is stubbed since whether cugraph partitions on a GPU is networkx's contract, not
-    ours, so the test pins only our own dispatch: the backend keyword is passed when an accelerator
-    is named and left off entirely for plain networkx, the seam a GPU tier flips with no edit.
+    Whether cugraph partitions on a GPU is networkx's contract, not ours, so Louvain is stubbed
+    and only our own dispatch is pinned: the backend keyword rides along when an accelerator is
+    named and is left off entirely for plain networkx, the one seam a GPU tier flips.
     """
     captured: dict[str, object] = {}
 
@@ -77,21 +78,19 @@ def test_detect_forwards_the_backend_keyword_only_off_the_default(
     facts = [edge(a, b) for i, a in enumerate(nodes) for b in nodes[i + 1 :]]
 
     clusters = detect(facts, min_size=3, backend=backend)
-
     assert clusters == [set(nodes)]
     assert captured.get("backend") == (None if backend == "networkx" else backend)
 
 
 @pytest.mark.usefixtures("fake_embedder")
 def test_build_then_search_lands_a_searchable_community(
-    fresh_principal: uuid.UUID, fake_llm: FakeLLM
+    owner: uuid.UUID, fake_llm: object
 ) -> None:
     """A triangle of facts becomes one stored community that a thematic search then surfaces.
 
-    Detection, the LLM summary, the embed, and the row write all run for real off the fake seams,
-    so a non-empty search result proves the whole build-and-rank path landed a row.
+    Detection, the fake LLM summary, the embed, and the row write all run for real off the fake
+    seams, so a non-empty search result proves the whole build-and-rank path landed a row.
     """
-    owner = fresh_principal
 
     async def probe() -> tuple[int, list[tuple[str, str, float]]]:
         nodes = [uuid.uuid4() for _ in range(3)]
@@ -117,17 +116,16 @@ def test_build_then_search_lands_a_searchable_community(
                 for object_ in nodes[i + 1 :]
             ]
             session.add_all(contents)
-            # content and claim share no ORM relationship(), only a bare FK column, so the fact
-            # content above must actually flush before the matching claims below are added.
             await session.flush()
             session.add_all(
                 FactClaim(content_id=content.id, owner_id=owner) for content in contents
             )
         written = await build_communities(principal_id=owner)
-        found = await community_search("the broad theme", principal_id=owner, k=3)
+        async with acting_as(owner) as session:
+            found = await community_search(session, UNIT_VECTOR, k=3)
         return written, found
 
-    written, found = asyncio.run(probe())
+    written, found = dbutil.run(probe())
     assert written >= 1
     assert len(found) >= 1
     label, summary, score = found[0]

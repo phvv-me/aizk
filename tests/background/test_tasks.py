@@ -25,23 +25,21 @@ from aizk.config import settings
 from aizk.eval import EvalReport
 from aizk.store import Watermark
 
-# the closed axis vocabulary the flip label is built from, the toggles recall reads back
+# the closed axis vocabulary the flip label is built from, the toggles recall reads back.
 axes = st.sampled_from(["rerank", "ppr", "communities", "raptor"])
 
 
-@given(config=st.dictionaries(axes, st.booleans(), max_size=4))
+@given(config=st.dictionaries(axes, st.booleans(), min_size=1, max_size=4))
 def test_config_from_label_round_trips_every_toggle(config: dict[str, bool]) -> None:
-    """The flip label parses back to the exact rerank-and-ppr override the winning sweep named."""
+    """The flip label parses back to the exact axis-to-Bool override the winning sweep named."""
     label = ",".join(f"{axis}={value}" for axis, value in config.items())
-    if not label:
-        return
     assert config_from_label(label) == config
 
 
-def test_scheduled_tasks_mirror_the_settings_cadences() -> None:
-    """The registered roster carries the expected names in registration order."""
-    names = [task_cls.name for task_cls in ScheduledTask.implementations()]
-    assert names == [
+def test_the_roster_carries_every_maintenance_pass() -> None:
+    """`implementations()` is the whole roster of passes, each name its own settings prefix."""
+    names = {task_cls.name for task_cls in ScheduledTask.implementations()}
+    assert names == {
         "decay",
         "dedup",
         "communities",
@@ -51,7 +49,18 @@ def test_scheduled_tasks_mirror_the_settings_cadences() -> None:
         "session_promote",
         "insight",
         "curation_review",
-    ]
+    }
+
+
+def test_entrypoint_names_are_prefixed_and_injective() -> None:
+    """Each task mints a distinct queue and cron entrypoint, both name-prefixed, none colliding."""
+    tasks = [task_cls() for task_cls in ScheduledTask.implementations()]
+    queue_names = {task.queue_entrypoint for task in tasks}
+    cron_names = {task.cron_entrypoint for task in tasks}
+    assert all(task.queue_entrypoint == f"aizk_task_{task.name}" for task in tasks)
+    assert all(task.cron_entrypoint == f"aizk_cron_{task.name}" for task in tasks)
+    assert len(queue_names) == len(cron_names) == len(tasks)
+    assert queue_names.isdisjoint(cron_names)
 
 
 @given(
@@ -61,12 +70,14 @@ def test_scheduled_tasks_mirror_the_settings_cadences() -> None:
 def test_each_task_reads_its_own_cadence_and_flag_off_settings(
     flags: list[bool], cron: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every pass's `expression`/`enabled` come straight off its own name-keyed settings fields."""
+    """Every pass's `expression` and `enabled` come straight off its own name-keyed settings."""
     tasks = [task_cls() for task_cls in ScheduledTask.implementations()]
-    overrides = {f"{task.name}_enabled": flag for task, flag in zip(tasks, flags, strict=True)}
+    overrides: dict[str, bool | str] = {
+        f"{task.name}_enabled": flag for task, flag in zip(tasks, flags, strict=True)
+    }
     overrides["decay_cron"] = cron
-    for field, value in overrides.items():
-        monkeypatch.setattr(settings, field, value)
+    for name, value in overrides.items():
+        monkeypatch.setattr(settings, name, value)
     for task in tasks:
         assert task.enabled is getattr(settings, f"{task.name}_enabled")
         assert task.expression == getattr(settings, f"{task.name}_cron")
@@ -138,27 +149,31 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     last: int,
     threshold: int,
 ) -> None:
-    """A growth-gated pass rebuilds and records the new high-water only when the graph grew enough.
+    """A growth-gated pass rebuilds and advances its high-water only when the graph grew enough.
 
-    The background gate's own invariant: build iff the latest-fact count gained at least the
-    threshold since the last build, and on a build the high-water mark advances to the current
-    count so the next pass measures growth from here.
+    The gate's own invariant: build iff the latest-fact count gained at least the threshold since
+    the last build, and on a build the high-water mark advances to the current count so the next
+    pass measures growth from here; below the threshold nothing is built and the mark holds.
     """
     principal = uuid.uuid4()
     builds: list[uuid.UUID] = []
-    set_calls: list[tuple[str, int]] = []
+    set_calls: list[tuple[Watermark.Kind, int]] = []
 
     @asynccontextmanager
     async def fake_acting_as(principal_id: uuid.UUID) -> AsyncIterator[GateSession]:
         yield GateSession(current)
 
     async def fake_read(
-        session: object, owner_id: uuid.UUID, watermark_kind: str, **kw: object
+        session: object, owner_id: uuid.UUID, watermark_kind: Watermark.Kind, **kw: object
     ) -> int:
         return last
 
     async def fake_set_value(
-        session: object, owner_id: uuid.UUID, watermark_kind: str, counter: int = 0, **kw: object
+        session: object,
+        owner_id: uuid.UUID,
+        watermark_kind: Watermark.Kind,
+        counter: int = 0,
+        **kw: object,
     ) -> None:
         set_calls.append((watermark_kind, counter))
 
@@ -169,8 +184,8 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     monkeypatch.setattr(tasks_mod.Watermark, "read", fake_read)
     monkeypatch.setattr(tasks_mod.Watermark, "set_value", fake_set_value)
     monkeypatch.setattr(tasks_mod, build_target, fake_build)
-
     monkeypatch.setattr(settings, threshold_field, threshold)
+
     asyncio.run(task_cls().run(principal))
 
     should_build = current - last >= threshold
@@ -178,10 +193,11 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     assert set_calls == ([(kind, current)] if should_build else [])
 
 
-def report_with(significant_best: str | None) -> EvalReport:
+def report_with(significant_best: str | None, per_config: dict[str, float]) -> EvalReport:
     """An EvalReport carrying a chosen flip signal, the self-improve pass's input.
 
     significant_best: the toggle label a sweep significantly won under, or null for no win.
+    per_config: hit-at-k per toggle, empty to drive the no-best branch.
     """
     return EvalReport(
         n=2,
@@ -189,30 +205,50 @@ def report_with(significant_best: str | None) -> EvalReport:
         ndcg_at_k=0.4,
         mrr=0.5,
         mean_judge=None,
-        per_config={"rerank=True,ppr=True": 0.5, "rerank=False,ppr=True": 0.4},
+        per_config=per_config,
         comparison=None,
         significant_best=significant_best,
     )
 
 
-@given(significant_best=st.none() | st.just("rerank=False,ppr=True"))
-def test_self_improve_flips_settings_in_process_only_on_a_significant_win(
-    monkeypatch: pytest.MonkeyPatch, significant_best: str | None
+@pytest.mark.parametrize(
+    ("significant_best", "per_config", "expected_best", "flipped"),
+    [
+        (
+            None,
+            {"rerank=True,ppr=True": 0.5, "rerank=False,ppr=True": 0.4},
+            "rerank=True,ppr=True",
+            False,
+        ),
+        (
+            "rerank=False,ppr=True",
+            {"rerank=True,ppr=True": 0.5, "rerank=False,ppr=True": 0.4},
+            "rerank=True,ppr=True",
+            True,
+        ),
+        (None, {}, None, False),
+    ],
+    ids=["no-win", "significant-win", "empty-per-config"],
+)
+def test_self_improve_stores_the_scorecard_and_flips_only_on_a_significant_win(
+    monkeypatch: pytest.MonkeyPatch,
+    significant_best: str | None,
+    per_config: dict[str, float],
+    expected_best: str | None,
+    flipped: bool,
 ) -> None:
-    """A significant sweep flips the live settings in-process, a null signal leaves them be.
+    """The scorecard is always stored, and the live settings move only on a significance flip.
 
-    The scorecard is always stored so an admin can read what recall scored, but the global
-    `settings` singleton moves only on the significance flip, never on a raw delta or noise, and
-    the flip lives only in this process (env stays the durable config across a restart).
+    An admin can always read what recall scored, but the global `settings` singleton flips in
+    process only when the sweep names a significant winner, never on a raw delta or noise, and the
+    stored best is the argmax over per_config or null when no config was scored.
     """
-    writes: list[tuple[str, dict | None]] = []
+    writes: list[tuple[Watermark.Kind, dict[str, object] | None]] = []
 
     async def stub_run_eval(
-        questions: object,
-        k: int = 8,
-        principal_id: uuid.UUID = settings.system_principal_id,
+        questions: object, k: int = 8, principal_id: uuid.UUID | None = None
     ) -> EvalReport:
-        return report_with(significant_best)
+        return report_with(significant_best, per_config)
 
     @asynccontextmanager
     async def fake_acting_as(principal_id: uuid.UUID) -> AsyncIterator[None]:
@@ -221,9 +257,9 @@ def test_self_improve_flips_settings_in_process_only_on_a_significant_win(
     async def fake_set_value(
         session: object,
         owner_id: uuid.UUID,
-        kind: str,
+        kind: Watermark.Kind,
         counter: int = 0,
-        payload: dict | None = None,
+        payload: dict[str, object] | None = None,
         **kwargs: object,
     ) -> None:
         writes.append((kind, payload))
@@ -231,15 +267,17 @@ def test_self_improve_flips_settings_in_process_only_on_a_significant_win(
     monkeypatch.setattr(tasks_mod, "run_eval", stub_run_eval)
     monkeypatch.setattr(tasks_mod, "acting_as", fake_acting_as)
     monkeypatch.setattr(tasks_mod.Watermark, "set_value", fake_set_value)
-
     monkeypatch.setattr(settings, "rerank", True)
     monkeypatch.setattr(settings, "ppr", False)
+
     asyncio.run(SelfImproveTask().run(settings.system_principal_id))
 
-    if significant_best is None:
-        assert settings.rerank is True and settings.ppr is False
-    else:
+    (kind, payload) = writes[0]
+    assert [kind for kind, _ in writes] == [Watermark.Kind.scorecard]
+    assert payload is not None
+    assert payload["best"] == expected_best
+    assert payload["significant_best"] == significant_best
+    if flipped:
         assert settings.rerank is False and settings.ppr is True
-
-    kinds = [kind for kind, _ in writes]
-    assert kinds == [Watermark.Kind.scorecard]
+    else:
+        assert settings.rerank is True and settings.ppr is False

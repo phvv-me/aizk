@@ -2,13 +2,13 @@ import uuid
 from datetime import UTC, datetime
 
 from loguru import logger
-from sqlalchemy import func, select, text
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..extract.ontology import EntityType, RelationType
-from ..store import EntityClaim, EntityContent, FactClaim, FactContent, LiveFact, acting_as
-from .dedupe import mint_content
+from ..store import EntityContent, FactClaim, FactContent, LiveFact, acting_as
+from .dedupe import claim_entity, claim_fact, mint_content
 from .ids import entity_id, fact_id
 from .models import InsightReport, Observation
 from .tier_builder import TierBuilder
@@ -32,6 +32,69 @@ def kept_observations(report: InsightReport) -> list[Observation]:
     ]
     significant.sort(key=lambda obs: obs.significance, reverse=True)
     return significant[: settings.insight_max]
+
+
+async def observation_already_claimed(
+    session: AsyncSession, principal_id: uuid.UUID, identity: uuid.UUID
+) -> bool:
+    """Whether this principal already stakes an observes claim on this exact content id, ever.
+
+    session: open session already acting as principal_id.
+    principal_id: identity the observation would be claimed under.
+    identity: content-addressed id for the observation's statement.
+    """
+    claimed = await session.scalar(
+        select(FactClaim.id)
+        .where(
+            FactClaim.content_id == identity,
+            FactClaim.owner_id == principal_id,
+            FactClaim.scopes == [],
+        )
+        .execution_options(**{settings.skip_live_gate: True})
+    )
+    return claimed is not None
+
+
+async def write_observation(
+    session: AsyncSession,
+    principal_id: uuid.UUID,
+    node_id: uuid.UUID,
+    obs: Observation,
+    vector: list[float],
+) -> bool:
+    """Idempotently write one gated observation as an observes fact; return whether it was new.
+
+    session: open session already acting as principal_id.
+    principal_id: identity the observation is claimed under, always privately (empty scopes).
+    node_id: the OBSERVATION_NODE entity content id every observation hangs off.
+    obs: the gated observation to write.
+    vector: the observation's own statement, already embedded.
+    """
+    identity = fact_id(OBSERVATION_NODE, RelationType.OBSERVES, "", obs.statement)
+    if await observation_already_claimed(session, principal_id, identity):
+        return False
+    await mint_content(
+        session,
+        FactContent(
+            id=identity,
+            subject_id=node_id,
+            object_id=None,
+            predicate=RelationType.OBSERVES,
+            statement=obs.statement,
+            embedding=vector,
+        ),
+    )
+    # an observation carries no scope of its own, always private to the principal reflected on,
+    # so it stamps reviewed immediately like any other private write.
+    await claim_fact(
+        session,
+        identity,
+        principal_id,
+        [],
+        attributes={"significance": obs.significance},
+        reviewed_at=datetime.now(UTC),
+    )
+    return True
 
 
 class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
@@ -85,59 +148,18 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
         """Write each gated observation as its own content-addressed, idempotent observes claim."""
         kept = kept_observations(report)
         node_id = entity_id(OBSERVATION_NODE, EntityType.OBSERVATION)
-        written = 0
         async with acting_as(self.principal_id) as session:
             await mint_content(
                 session,
                 EntityContent(id=node_id, name=OBSERVATION_NODE, type=EntityType.OBSERVATION),
             )
-            await session.execute(
-                insert(EntityClaim)
-                .values(content_id=node_id, owner_id=self.principal_id, scope=None)
-                .on_conflict_do_nothing(index_elements=["content_id", "owner_id", "scope"])
+            await claim_entity(session, node_id, self.principal_id, [])
+            written = sum(
+                [
+                    await write_observation(session, self.principal_id, node_id, obs, vector)
+                    for obs, vector in zip(kept, vectors, strict=True)
+                ]
             )
-            for obs, vector in zip(kept, vectors, strict=True):
-                identity = fact_id(OBSERVATION_NODE, RelationType.OBSERVES, "", obs.statement)
-                claimed = await session.scalar(
-                    select(FactClaim.id)
-                    .where(
-                        FactClaim.content_id == identity,
-                        FactClaim.owner_id == self.principal_id,
-                        FactClaim.scope.is_(None),
-                    )
-                    .execution_options(**{settings.skip_live_gate: True})
-                )
-                if claimed is not None:
-                    continue
-                await mint_content(
-                    session,
-                    FactContent(
-                        id=identity,
-                        subject_id=node_id,
-                        object_id=None,
-                        predicate=RelationType.OBSERVES,
-                        statement=obs.statement,
-                        embedding=vector,
-                    ),
-                )
-                await session.execute(
-                    insert(FactClaim)
-                    .values(
-                        content_id=identity,
-                        owner_id=self.principal_id,
-                        scope=None,
-                        attributes={"significance": obs.significance},
-                        # an observation carries no scope of its own, always private to the
-                        # principal reflected on, so it stamps reviewed immediately like any
-                        # other private write
-                        reviewed_at=datetime.now(UTC),
-                    )
-                    .on_conflict_do_nothing(
-                        index_elements=["content_id", "owner_id", "scope"],
-                        index_where=text("upper_inf(recorded)"),
-                    )
-                )
-                written += 1
         logger.info("insight pass wrote {} observations for {}", written, self.principal_id)
         return written
 

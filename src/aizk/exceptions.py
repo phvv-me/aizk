@@ -21,3 +21,12 @@ class OntologyError(ValueError):
 
 class NotGroupAdminError(PermissionError):
     """A principal with neither group-admin nor server-admin standing tried a curation tool."""
+
+
+class ExtractionUnreachableError(RuntimeError):
+    """The graph-extraction chat endpoint refused the connection, not merely one slow call.
+
+    Raised instead of grinding through every remaining pending chunk against a dead endpoint, one
+    `APITimeoutError` per call; names `AIZK_LLM_URL` and the opt-in `vllm-llm` compose profile so
+    the fix is the error message itself rather than a stack trace into httpx.
+    """

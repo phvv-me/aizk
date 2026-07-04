@@ -360,7 +360,7 @@ def corpus_rows(
     rng: the seeded generator the embeddings are drawn from.
     dim: the embedding width.
     """
-    owned: Row = {"owner_id": principal_id, "scope": None}
+    owned: Row = {"owner_id": principal_id, "scopes": []}
     documents: list[Row] = [
         {
             "id": index_id(principal_id, "document", i),
@@ -438,6 +438,28 @@ def corpus_rows(
     }
 
 
+async def insert_rows(session: AsyncSession, rows: dict[type[TableBase], list[Row]]) -> None:
+    """Insert every table's rows in bounded executemany batches, so a large delta streams in.
+
+    session: open, principal-scoped session the inserts write under.
+    rows: the per-table delta rows to insert, corpus_rows' own output.
+    """
+    for table, table_rows in rows.items():
+        for offset in range(0, len(table_rows), INSERT_BATCH):
+            batch = table_rows[offset : offset + INSERT_BATCH]
+            await session.execute(insert(table), batch)
+
+
+def advance_generated(generated: Generated, target: CorpusScale) -> None:
+    """Advance the running tally to the target shape just grown to, in place.
+
+    generated: the running tally, mutated to match target.
+    target: the corpus shape just grown to.
+    """
+    for field in Generated.model_fields:
+        setattr(generated, field, getattr(target, field))
+
+
 async def grow_corpus(
     principal_id: uuid.UUID,
     generated: Generated,
@@ -459,13 +481,9 @@ async def grow_corpus(
     rows = corpus_rows(principal_id, generated, target, rng, settings.embed_dim)
     start = time.perf_counter()
     async with acting_as(principal_id) as session:
-        for table, table_rows in rows.items():
-            for offset in range(0, len(table_rows), INSERT_BATCH):
-                batch = table_rows[offset : offset + INSERT_BATCH]
-                await session.execute(insert(table), batch)
+        await insert_rows(session, rows)
     elapsed = time.perf_counter() - start
-    for field in Generated.model_fields:
-        setattr(generated, field, getattr(target, field))
+    advance_generated(generated, target)
     rate = len(rows[Chunk]) / elapsed if elapsed else 0.0
     logger.info(
         "grew corpus to {size} chunks in {elapsed:.2f}s, {rate:.0f} chunks/s",
@@ -671,6 +689,40 @@ async def purge_principal(principal_id: uuid.UUID) -> None:
         await session.execute(text("DELETE FROM principal WHERE id = :id"), {"id": principal_id})
 
 
+async def measure_size(
+    principal_id: uuid.UUID,
+    query: str,
+    vector: list[float],
+    size: int,
+    generated: Generated,
+    rng: np.random.Generator,
+    k: int,
+    repeats: int,
+) -> ScalePoint:
+    """Grow the corpus to one size and measure it, logging the curve row for this size.
+
+    principal_id: the throwaway principal whose corpus is grown and measured.
+    query: the recall and lexical query text.
+    vector: the precomputed query embedding.
+    size: the target chunk count for this row of the curve.
+    generated: the running tally of rows already inserted, advanced in place.
+    rng: the seeded generator the embeddings are drawn from.
+    k: how many hits and seed facts each recall surfaces.
+    repeats: how many recall and per-lane calls each percentile is read over.
+    """
+    scale = CorpusScale.for_size(size)
+    ingest_rate = await grow_corpus(principal_id, generated, scale, rng)
+    point = await measure_point(principal_id, query, vector, scale, ingest_rate, k, repeats)
+    logger.info(
+        "scale size={size} recall_p95={p95:.1f}ms ppr={ppr:.1f}ms detect={det:.1f}ms",
+        size=size,
+        p95=point.recall_p95_ms,
+        ppr=point.ppr_query_ms,
+        det=point.community_detect_ms,
+    )
+    return point
+
+
 async def run_scale_benchmark(
     sizes: tuple[int, ...] = DEFAULT_SIZES,
     k: int = 8,
@@ -695,26 +747,15 @@ async def run_scale_benchmark(
     """
     budget = budget or Budget()
     rng = np.random.default_rng(seed)
-    embedder = Embedder()
-    [vector] = await embedder.embed([query], mode="query")
+    [vector] = await Embedder().embed([query], mode="query")
     async with system_session() as session:
         principal_id = (await Principal.create(session, "scale-benchmark")).id
     generated = Generated()
     points: list[ScalePoint] = []
     try:
         for size in sorted(sizes):
-            scale = CorpusScale.for_size(size)
-            ingest_rate = await grow_corpus(principal_id, generated, scale, rng)
-            point = await measure_point(
-                principal_id, query, vector, scale, ingest_rate, k, repeats
-            )
-            points.append(point)
-            logger.info(
-                "scale size={size} recall_p95={p95:.1f}ms ppr={ppr:.1f}ms detect={det:.1f}ms",
-                size=size,
-                p95=point.recall_p95_ms,
-                ppr=point.ppr_query_ms,
-                det=point.community_detect_ms,
+            points.append(
+                await measure_size(principal_id, query, vector, size, generated, rng, k, repeats)
             )
     finally:
         if not keep:

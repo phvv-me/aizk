@@ -1,23 +1,21 @@
 import os
 import sys
 import uuid
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from cyclopts import App
 from loguru import logger
-from sqlalchemy.ext.asyncio import create_async_engine
+from mainboard.profiling import enable_spans
 
 from alembic import command
-from alembic.config import Config
 
+from . import ops
 from .background.queue import enqueue_pending, install_queue_schema
 from .background.schedule import run_worker
 from .config import settings
 from .extract.ingest import ingest_text
-from .retrieval import recall
-from .store import Principal, TableBase, system_session, verify_scoped_rls
+from .retrieval import assemble_context_pack
+from .store import Principal, system_session
 
 # env var a Stop hook sets to the session transcript path, the same file Claude Code records the
 # turn-by-turn session to, so capture-session can read it without any argument
@@ -33,36 +31,14 @@ app = App(
 )
 
 
-def alembic_config() -> Config:
-    """Build the alembic Config pointed at the migration scripts shipped inside the package."""
-    config = Config()
-    config.set_main_option("script_location", str(Path(__file__).parent / "store" / "migrations"))
-    config.set_main_option("sqlalchemy.url", settings.admin_database_url)
-    return config
-
-
-def run_alembic[T](fn: Callable[..., T], *args: object, **kwargs: object) -> T:
-    """Run one blocking alembic `command` call on a dedicated worker thread, returning its result.
-
-    alembic's command API is synchronous, but `store/migrations/env.py` opens its DSN through an
-    async engine and drives it with its own top-level `asyncio.run`, which raises when the calling
-    thread already runs a loop, exactly the case a test's `asyncio.run(...)`-driven scenario hits.
-    A private thread carries no loop of its own, so the alembic call is safe to make from a plain
-    synchronous caller and from inside an already-running event loop alike, blocking either way
-    until the migration finishes.
-
-    fn: the alembic `command` callable to run, `command.upgrade` or `command.revision`.
-    args: positional arguments forwarded to `fn`.
-    kwargs: keyword arguments forwarded to `fn`.
-    """
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(fn, *args, **kwargs).result()
-
-
 @app.command
 def migrate() -> None:
-    """Apply database migrations up to head, against the DSN `alembic_config` resolves."""
-    run_alembic(command.upgrade, alembic_config(), "head")
+    """Apply database migrations up to head, the pre-auth bootstrap step `ops.setup` also runs.
+
+    A thin wrapper over `ops.run_alembic`, kept as its own command since a fresh database has no
+    admin principal yet to call the MCP `setup` tool through.
+    """
+    ops.run_alembic(command.upgrade, ops.alembic_config(), "head")
     print("done")
 
 
@@ -75,23 +51,8 @@ def makemigrations(message: str) -> None:
 
     message: short description for the revision, becomes its file slug and migration docstring.
     """
-    run_alembic(command.revision, alembic_config(), message=message, autogenerate=True)
+    ops.run_alembic(command.revision, ops.alembic_config(), message=message, autogenerate=True)
     print("done")
-
-
-async def scoped_rls_violations() -> list[str]:
-    """Reasons the live schema fails the no-leak contract for any registered scoped table.
-
-    Reads the catalog through the owning role, the only role that can see every table's row
-    security flags and policy expressions, checking each Scoped model against `verify_scoped_rls`.
-    """
-    expected = set(TableBase.metadata.info["rls"])
-    admin = create_async_engine(settings.admin_database_url)
-    try:
-        async with admin.connect() as connection:
-            return await connection.run_sync(lambda sync: verify_scoped_rls(sync, expected))
-    finally:
-        await admin.dispose()
 
 
 @app.command
@@ -102,7 +63,7 @@ async def check_rls() -> None:
     scope_read or scope_write policy, or a clause that no longer scopes by owner and membership, so
     the no-leak contract can be gated in CI and checked by hand against any live database.
     """
-    violations = await scoped_rls_violations()
+    violations = await ops.scoped_rls_violations()
     if violations:
         for reason in violations:
             print(reason)
@@ -111,7 +72,7 @@ async def check_rls() -> None:
 
 
 @app.command
-async def worker(batch_size: int = 10) -> None:
+async def worker(batch_size: int = settings.queue_batch_size) -> None:
     """Run the autonomous engine, the queue and the scheduler together, until interrupted.
 
     Drains the on-write extraction and profile jobs and fires the scheduled maintenance passes,
@@ -119,14 +80,22 @@ async def worker(batch_size: int = 10) -> None:
     and curation review, each fanning out one job per principal under its own row level security
     scope, so a single `aizk worker` self-maintains.
 
-    batch_size: maximum number of jobs dequeued per round.
+    batch_size: maximum number of jobs dequeued per round, settings.queue_batch_size by default,
+        sized above settings.graph_build_concurrency so the queue path actually keeps enough
+        chunks in flight to saturate vLLM's continuous batching.
     """
+    if settings.profiling:
+        enable_spans()
     await run_worker(batch_size=batch_size)
 
 
 @app.command
 async def install_queue() -> None:
-    """Install the pgqueuer schema as the owner and grant the app role access."""
+    """Install the pgqueuer schema as the owner and grant the app role access.
+
+    A thin wrapper over the same `install_queue_schema` the MCP `setup` tool runs, kept as its own
+    command for the pre-auth bootstrap case where no admin principal exists to call it through yet.
+    """
     await install_queue_schema()
     print("done")
 
@@ -164,12 +133,12 @@ async def recall_context(
     k: number of hits and seed facts to surface.
     principal: identity whose visibility scopes the recall, the system principal when null.
     """
-    result = await recall(
-        query or PROJECT_CONTEXT_QUERY,
-        principal_id=principal or settings.system_principal_id,
-        k=k,
+    pack = await assemble_context_pack(
+        query or PROJECT_CONTEXT_QUERY, principal_id=principal or settings.system_principal_id, k=k
     )
-    print(result.render())
+    print(
+        "\n".join(f"[{block.lane}] {block.line}" for block in pack.blocks) or "no context recalled"
+    )
 
 
 @app.command

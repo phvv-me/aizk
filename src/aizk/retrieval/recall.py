@@ -1,20 +1,38 @@
+import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Collection, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from loguru import logger
+from mainboard.profiling import span
 from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import ColumnElement, Result, Row, bindparam, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..graph.algos import ppr_expand
-from ..graph.communities import community_search
-from ..graph.raptor import raptor_search
 from ..serving import Embedder, Reranker
 from ..store import EntityContent, FactClaim, FactContent, Profile, SessionItem, acting_as
-from .models import CommunityNote, FactHit, Hit, RaptorNote, RecallResult, SessionNote
-from .query_route import QueryRoute
+from .models import FactHit, Hit, SessionNote
+
+
+@asynccontextmanager
+async def stage(name: str) -> AsyncIterator[None]:
+    """Time one recall stage and emit it at DEBUG as `stage=<name> ms=<elapsed>`, spanned too.
+
+    The one instrumentation seam every lane wraps its own work in, so a `settings.log_level=DEBUG`
+    run prints the whole per-call latency budget with no separate profiler attached, and, once
+    `enable_spans()` is on, the identical window folds into `mainboard.profiling`'s process-wide
+    `Collector` under this same name, nested under whatever span is already open on this task's
+    stack. A disabled span costs one boolean check, so this stays free by default.
+
+    name: label the stage logs, and spans, under.
+    """
+    start = time.perf_counter()
+    with span(name):
+        yield
+    logger.debug("stage={} ms={:.1f}", name, (time.perf_counter() - start) * 1000)
 
 
 def temporal_filter(as_of: datetime | None) -> tuple[list[ColumnElement[bool]], dict[str, bool]]:
@@ -78,18 +96,19 @@ async def hybrid_recall_rows(
     query: natural-language search string, the lexical lane's match text.
     k: fused chunk hits and seed facts the function returns per kind.
     """
-    rows = await session.execute(
-        text("SELECT * FROM hybrid_recall(:qvec, :qtext, :k, :rrf_k, :fusion_depth)").bindparams(
-            bindparam("qvec", type_=HALFVEC(len(vector)))
-        ),
-        {
-            "qvec": vector,
-            "qtext": query,
-            "k": k,
-            "rrf_k": settings.rrf_k,
-            "fusion_depth": settings.fusion_depth,
-        },
-    )
+    async with stage("hybrid_recall_sql"):
+        rows = await session.execute(
+            text(
+                "SELECT * FROM hybrid_recall(:qvec, :qtext, :k, :rrf_k, :fusion_depth)"
+            ).bindparams(bindparam("qvec", type_=HALFVEC(len(vector)))),
+            {
+                "qvec": vector,
+                "qtext": query,
+                "k": k,
+                "rrf_k": settings.rrf_k,
+                "fusion_depth": settings.fusion_depth,
+            },
+        )
     return rows.all()
 
 
@@ -129,6 +148,84 @@ async def latest_facts(
     return fact_hits(rows)
 
 
+async def seed_entities(
+    session: AsyncSession, vector: list[float], as_of: datetime | None
+) -> tuple[list[uuid.UUID], set[uuid.UUID]]:
+    """The closest latest facts' own ids and the entity ids they touch, the multi-hop seed pool.
+
+    Shared by `Recall.neighbor_facts` and `Recall.ppr_facts`, whose own graph_facts_k-wide walk
+    both start from this same closest-facts read before diverging into a one-hop join or a
+    pagerank expansion.
+
+    session: open, principal-scoped session.
+    vector: dense query embedding.
+    as_of: world-time the seed facts must be valid at, the live graph when null.
+    """
+    distance = FactContent.embedding.cosine_distance(vector)
+    gate, opts = temporal_filter(as_of)
+    rows = await session.execute(
+        select(FactContent.id, FactContent.subject_id, FactContent.object_id)
+        .join(FactClaim, FactClaim.content_id == FactContent.id)
+        .where(FactContent.embedding.is_not(None), *gate)
+        .order_by(distance)
+        .limit(settings.graph_facts_k)
+        .execution_options(**opts)
+    )
+    seeds = rows.all()
+    entities = {row.subject_id for row in seeds} | {
+        row.object_id for row in seeds if row.object_id is not None
+    }
+    return [row.id for row in seeds], entities
+
+
+async def facts_near(
+    session: AsyncSession,
+    entity_ids: Collection[uuid.UUID],
+    vector: list[float],
+    as_of: datetime | None,
+    k: int,
+    exclude: Collection[uuid.UUID] = (),
+    margin: float | None = None,
+) -> list[FactHit]:
+    """The latest facts touching any of entity_ids, closest to vector, the multi-hop tail query.
+
+    The shared tail `neighbor_facts` and `ppr_facts` both run once their own seed or pagerank-
+    expanded entity set is ready, differing only in which entities they pass and whether they
+    exclude the seed facts themselves or apply a relevance margin.
+
+    session: open, principal-scoped session.
+    entity_ids: entities a fact must touch as subject or object to match.
+    vector: dense query embedding.
+    as_of: world-time the facts must be valid at, the live graph when null.
+    k: number of facts to return.
+    exclude: fact ids to drop from the result, the seed facts a neighbor read must not repeat.
+    margin: minimum score a fact must clear to be kept, no floor when null.
+    """
+    distance = FactContent.embedding.cosine_distance(vector)
+    gate, opts = temporal_filter(as_of)
+    clauses = [
+        FactContent.embedding.is_not(None),
+        or_(FactContent.subject_id.in_(entity_ids), FactContent.object_id.in_(entity_ids)),
+        *gate,
+    ]
+    if exclude:
+        clauses.append(FactContent.id.not_in(exclude))
+    rows = await session.execute(
+        select(
+            FactContent.statement,
+            FactContent.predicate,
+            FactClaim.valid,
+            distance.label("distance"),
+        )
+        .join(FactClaim, FactClaim.content_id == FactContent.id)
+        .where(*clauses)
+        .order_by(distance)
+        .limit(k)
+        .execution_options(**opts)
+    )
+    return fact_hits(rows, margin=margin)
+
+
 async def session_hits(
     session: AsyncSession,
     vector: list[float],
@@ -155,6 +252,25 @@ async def session_hits(
     return [SessionNote(text=row.text, kind=row.kind, score=1.0 - row.distance) for row in rows]
 
 
+async def top_profile(session: AsyncSession, vector: list[float]) -> str | None:
+    """The stored profile of the entity closest to the query, the portrait lane of a recall.
+
+    Ranks the visible profiled entities by embedding distance to the query and returns the best
+    match's rolled-up summary, so a recall about a known subject opens with its portrait rather
+    than reassembling identity from individual facts. Null when nothing visible is profiled.
+
+    session: open, principal-scoped session.
+    vector: dense query embedding.
+    """
+    return await session.scalar(
+        select(Profile.summary)
+        .join(EntityContent, EntityContent.id == Profile.subject_id)
+        .where(EntityContent.embedding.is_not(None))
+        .order_by(EntityContent.embedding.cosine_distance(vector))
+        .limit(1)
+    )
+
+
 async def graph_search(
     query: str,
     k: int = 20,
@@ -174,8 +290,7 @@ async def graph_search(
     as_of: world-time the facts must be valid at, the live graph when null.
     """
     principal_id = principal_id or settings.system_principal_id
-    embedder = Embedder()
-    [vector] = await embedder.embed([query], mode="query")
+    [vector] = await Embedder().embed([query], mode="query")
     async with acting_as(principal_id) as session:
         hits = await latest_facts(session, vector, k, as_of)
     logger.info("graph search for {query!r} returned {count} facts", query=query, count=len(hits))
@@ -186,14 +301,18 @@ async def rerank_hits(query: str, pool: list[Hit], k: int) -> list[Hit]:
     """Reorder the fused pool with a cross-encoder and keep the top k.
 
     Scores each candidate text directly against the query so the final ranking reflects
-    query-document interaction rather than the rank-only fusion, then truncates to k.
+    query-document interaction rather than the rank-only fusion, then truncates to k. Each
+    candidate is truncated to rerank_snippet_chars before scoring, the returned Hit's own text
+    unaffected, since the endpoint's own latency scales with candidate length and a cross-encoder's
+    verdict is dominated by a passage's early tokens anyway.
 
     query: natural-language search string.
     pool: fused candidates to rescore, ordered best first.
     k: number of results to return.
     """
-    reranker = Reranker()
-    scores = await reranker.rerank(query, [hit.text for hit in pool])
+    snippets = [hit.text[: settings.rerank_snippet_chars] for hit in pool]
+    async with stage("rerank_http"):
+        scores = await Reranker().rerank(query, snippets)
     rescored = [
         hit.model_copy(update={"score": score}) for hit, score in zip(pool, scores, strict=True)
     ]
@@ -300,6 +419,21 @@ async def has_evidence_gap(query: str, hits: list[Hit], facts: list[FactHit]) ->
     return False
 
 
+def log_gap_fill(query: str, added_hits: int, added_facts: int) -> None:
+    """Log how many new hits and facts one gap-fill round added, the diagnostic fill_gap emits.
+
+    query: the original query the gap-fill round widened.
+    added_hits: hits the merge added beyond the first round's own.
+    added_facts: facts the merge added beyond the first round's own.
+    """
+    logger.info(
+        "gap fill for {query!r} added {h} hits and {f} facts",
+        query=query,
+        h=added_hits,
+        f=added_facts,
+    )
+
+
 class Recall:
     """One recall round bound to the session, query, and lane toggles its helpers otherwise repeat.
 
@@ -325,28 +459,12 @@ class Recall:
         as_of: datetime | None,
         ppr: bool,
     ) -> None:
-        self.session = session
-        self.embedder = embedder
-        self.query = query
-        self.vector = vector
-        self.k = k
-        self.as_of = as_of
-        self.ppr = ppr
+        self.session, self.embedder, self.query = session, embedder, query
+        self.vector, self.k, self.as_of, self.ppr = vector, k, as_of, ppr
 
     async def top_profile(self) -> str | None:
-        """The stored profile of the entity closest to the query, the portrait lane of a recall.
-
-        Ranks the visible profiled entities by embedding distance to the query and returns the best
-        match's rolled-up summary, so a recall about a known subject opens with its portrait rather
-        than reassembling identity from individual facts. Null when nothing visible is profiled.
-        """
-        return await self.session.scalar(
-            select(Profile.summary)
-            .join(EntityContent, EntityContent.id == Profile.subject_id)
-            .where(EntityContent.embedding.is_not(None))
-            .order_by(EntityContent.embedding.cosine_distance(self.vector))
-            .limit(1)
-        )
+        """The stored profile of the entity closest to the query, the portrait lane of a recall."""
+        return await top_profile(self.session, self.vector)
 
     async def hybrid_recall(self) -> tuple[list[Hit], list[FactHit], list[FactHit]]:
         """Run the hybrid_recall SQL function once and split its rows into hits, seeds, neighbors.
@@ -376,231 +494,107 @@ class Recall:
         return await session_hits(self.session, self.vector, k)
 
     async def neighbor_facts(self) -> list[FactHit]:
-        """Return the one-hop neighbor facts of the closest latest facts within this round.
-
-        Ranks the visible latest facts by distance to the embedded query, treats the closest
-        settings.graph_facts_k as seeds, collects the entities those seeds touch, then returns the
-        other latest facts adjacent to any of them. The as_of-aware ORM path assemble_context falls
-        back to for a replay round, since hybrid_recall only ever widens the live graph.
-        """
-        distance = FactContent.embedding.cosine_distance(self.vector)
-        gate, opts = temporal_filter(self.as_of)
-        seeds = (
-            await self.session.execute(
-                select(FactContent.id, FactContent.subject_id, FactContent.object_id)
-                .join(FactClaim, FactClaim.content_id == FactContent.id)
-                .where(FactContent.embedding.is_not(None), *gate)
-                .order_by(distance)
-                .limit(settings.graph_facts_k)
-                .execution_options(**opts)
-            )
-        ).all()
-        if not seeds:
+        """The one-hop neighbor facts of this round's closest latest facts, excluding the seeds."""
+        seed_ids, entity_ids = await seed_entities(self.session, self.vector, self.as_of)
+        if not entity_ids:
             return []
-        seed_ids = [row.id for row in seeds]
-        entity_ids = {row.subject_id for row in seeds} | {
-            row.object_id for row in seeds if row.object_id is not None
-        }
-        rows = await self.session.execute(
-            select(
-                FactContent.statement,
-                FactContent.predicate,
-                FactClaim.valid,
-                distance.label("distance"),
-            )
-            .join(FactClaim, FactClaim.content_id == FactContent.id)
-            .where(
-                FactContent.embedding.is_not(None),
-                FactContent.id.not_in(seed_ids),
-                or_(FactContent.subject_id.in_(entity_ids), FactContent.object_id.in_(entity_ids)),
-                *gate,
-            )
-            .order_by(distance)
-            .limit(self.k)
-            .execution_options(**opts)
+        return await facts_near(
+            self.session, entity_ids, self.vector, self.as_of, self.k, exclude=seed_ids
         )
-        return fact_hits(rows)
 
     async def ppr_facts(self) -> list[FactHit]:
-        """Return the facts personalized pagerank reaches from this round's seed entities.
+        """The facts personalized pagerank reaches from this round's seed entities.
 
-        Collects the entity ids the closest valid facts touch, runs ppr_expand to widen them to the
-        associatively related entities a multi-hop walk keeps returning to, then ranks the facts
-        visible at as_of adjacent to those entities by distance to the query, keeping only those
-        whose own statement clears ppr_margin so the lane widens reach without surfacing
-        off-topic hub facts. This is the HippoRAG lane, the facts past the one-hop neighborhood
-        neighbor_facts covers.
+        Widens the seed entities to the associatively related ones a multi-hop walk keeps
+        returning to, then keeps only the reached facts whose own score clears ppr_margin, the
+        HippoRAG lane past the one-hop neighborhood `neighbor_facts` covers.
         """
-        distance = FactContent.embedding.cosine_distance(self.vector)
-        gate, opts = temporal_filter(self.as_of)
-        seeds = await self.session.execute(
-            select(FactContent.subject_id, FactContent.object_id)
-            .join(FactClaim, FactClaim.content_id == FactContent.id)
-            .where(FactContent.embedding.is_not(None), *gate)
-            .order_by(distance)
-            .limit(settings.graph_facts_k)
-            .execution_options(**opts)
+        _, entity_ids = await seed_entities(self.session, self.vector, self.as_of)
+        expanded = (
+            await ppr_expand(self.session, list(entity_ids), top_n=settings.graph_facts_k)
+            if entity_ids
+            else []
         )
-        seed_ids: set[uuid.UUID] = set()
-        for row in seeds:
-            seed_ids.add(row.subject_id)
-            if row.object_id is not None:
-                seed_ids.add(row.object_id)
-        if not seed_ids:
-            return []
-        expanded = await ppr_expand(self.session, list(seed_ids), top_n=settings.graph_facts_k)
         if not expanded:
             return []
-        rows = await self.session.execute(
-            select(
-                FactContent.statement,
-                FactContent.predicate,
-                FactClaim.valid,
-                distance.label("distance"),
-            )
-            .join(FactClaim, FactClaim.content_id == FactContent.id)
-            .where(
-                FactContent.embedding.is_not(None),
-                or_(FactContent.subject_id.in_(expanded), FactContent.object_id.in_(expanded)),
-                *gate,
-            )
-            .order_by(distance)
-            .limit(self.k)
-            .execution_options(**opts)
+        return await facts_near(
+            self.session, expanded, self.vector, self.as_of, self.k, margin=settings.ppr_margin
         )
-        return fact_hits(rows, margin=settings.ppr_margin)
+
+    async def replay_seeds(
+        self, seeds: list[FactHit], neighbors: list[FactHit]
+    ) -> tuple[list[FactHit], list[FactHit]]:
+        """Swap in the as_of-aware ORM seed and neighbor lanes for a historical replay round.
+
+        seeds: the live hybrid_recall seed facts, kept as-is for a live (non-replay) round.
+        neighbors: the live hybrid_recall neighbor facts, kept as-is for a live round.
+        """
+        if self.as_of is None:
+            return seeds, neighbors
+        async with stage("as_of_seed_lanes"):
+            return await self.latest_facts(), await self.neighbor_facts()
+
+    async def multihop_facts(self) -> list[FactHit]:
+        """The pagerank-reached facts when this round's ppr lane is on, empty otherwise."""
+        if not self.ppr:
+            return []
+        async with stage("ppr_facts"):
+            return await self.ppr_facts()
+
+    async def reranked_hits(self, hits: list[Hit]) -> list[Hit]:
+        """This round's chunk hits, reranked once the pool clears rerank_min_pool, else truncated.
+
+        hits: the hybrid_recall chunk pool, already widened to rerank_candidates when rerank is on.
+        """
+        if settings.rerank and len(hits) > settings.rerank_min_pool:
+            return await rerank_hits(self.query, hits, self.k)
+        return hits[: self.k]
 
     async def assemble_context(self) -> tuple[list[Hit], list[FactHit]]:
-        """Build one recall round, the fused hits and the merged seed, neighbor, and ppr facts.
+        """Build one recall round: hybrid hits and facts, the as_of replay, ppr, then rerank.
 
-        The live default round reads hits, seeds, and neighbors off one hybrid_recall call; a
-        replay round keeps its seeds and neighbors on the as_of-aware ORM path instead, since
-        hybrid_recall only ever widens the live graph. Multi-hop facts fold in when ppr is on, and
-        chunk hits are reranked last against the widened pool hybrid_recall already fetched.
+        The live default round reads hits, seeds, and neighbors off one hybrid_recall call, and
+        `replay_seeds` swaps in the as_of-aware ORM path only for a historical round, since
+        hybrid_recall only ever widens the live graph.
         """
         hits, seeds, neighbors = await self.hybrid_recall()
-        if self.as_of is not None:
-            seeds = await self.latest_facts()
-            neighbors = await self.neighbor_facts()
-        multihop = await self.ppr_facts() if self.ppr else []
-        if settings.rerank:
-            hits = await rerank_hits(self.query, hits, self.k)
+        seeds, neighbors = await self.replay_seeds(seeds, neighbors)
+        multihop = await self.multihop_facts()
+        hits = await self.reranked_hits(hits)
         return hits, merge_facts(seeds, neighbors + multihop)
+
+    async def expanded_vector(self, expanded_query: str) -> list[float]:
+        """This round's own vector when the gap-fill query is unchanged, else a fresh embed of it.
+
+        expanded_query: the query `expand_query` widened, possibly identical to this round's own.
+        """
+        if expanded_query == self.query:
+            return self.vector
+        async with stage("gap_fill_embed"):
+            [vector] = await self.embedder.embed([expanded_query], mode="query")
+        return vector
 
     async def fill_gap(
         self, hits: list[Hit], facts: list[FactHit]
     ) -> tuple[list[Hit], list[FactHit]]:
         """Run one extra targeted round when the first recall left a gap, then merge it in.
 
-        Expands the query with the best evidence already found, re-embeds it, assembles the hit
-        and fact lanes through a second Recall bound to the expanded query and vector on the
-        same shared session, and merges only the new items so a thin first recall widens once.
-        Bounded to this single round so latency stays sane, the EviMem-style re-retrieval.
+        Expands the query with the best evidence already found, assembles the hit and fact lanes
+        through a second Recall bound to the expanded query on the same shared session, and merges
+        only the new items so a thin first recall widens once. Bounded to this single round so
+        latency stays sane, the EviMem-style re-retrieval.
 
         hits: the hits the first round recalled.
         facts: the facts the first round recalled.
         """
         expanded_query = expand_query(self.query, hits, facts)
-        [vector] = await self.embedder.embed([expanded_query], mode="query")
-        expanded_round = Recall(
+        vector = await self.expanded_vector(expanded_query)
+        more_hits, more_facts = await Recall(
             self.session, self.embedder, expanded_query, vector, self.k, self.as_of, self.ppr
+        ).assemble_context()
+        merged_hits, merged_facts = (
+            merge_hits(hits, more_hits, settings.rerank_candidates),
+            merge_facts(facts, more_facts),
         )
-        more_hits, more_facts = await expanded_round.assemble_context()
-        merged_hits = merge_hits(hits, more_hits, settings.rerank_candidates)
-        merged_facts = merge_facts(facts, more_facts)
-        logger.info(
-            "gap fill for {query!r} added {h} hits and {f} facts",
-            query=self.query,
-            h=len(merged_hits) - len(hits),
-            f=len(merged_facts) - len(facts),
-        )
+        log_gap_fill(self.query, len(merged_hits) - len(hits), len(merged_facts) - len(facts))
         return merged_hits, merged_facts
-
-
-async def recall(
-    query: str,
-    principal_id: uuid.UUID | None = None,
-    k: int = 8,
-    as_of: datetime | None = None,
-    scope: uuid.UUID | None = None,
-) -> RecallResult:
-    """Recall the fused chunk and graph context for a query, the agent's one retrieval entrypoint.
-
-    Opens one `Recall` round for the reranked hits and merged seed, neighbor, and pagerank facts,
-    issuing one extra targeted round if recall_gap_fill is on and the context comes back thin, and
-    folds in community summaries for a thematic query. When routing is on, the query's route
-    narrows the fixed ppr and raptor mix to the route's own lanes, resolved into plain locals
-    rather than mutating `settings`.
-
-    query: natural-language query to recall context for.
-    principal_id: identity whose row level security visibility scopes the recall, the system
-        principal when null.
-    k: number of fused hits and of seed facts to surface.
-    as_of: world-time the graph facts must be valid at, the live graph when null.
-    scope: group id narrowing every lane's read to that group's composed graph, the whole visible
-        union when null.
-    """
-    principal_id = principal_id or settings.system_principal_id
-    embedder = Embedder()
-    [vector] = await embedder.embed([query], mode="query")
-    async with acting_as(principal_id, scope) as session:
-        if settings.query_routing:
-            plan = QueryRoute.plan(query)
-            thematic = plan.communities
-            ppr_on = plan.ppr
-            raptor_on = plan.raptor
-        else:
-            thematic = QueryRoute.is_thematic(query)
-            ppr_on = settings.ppr
-            raptor_on = settings.raptor
-        round_ = Recall(session, embedder, query, vector, k, as_of, ppr_on)
-        hits, facts = await round_.assemble_context()
-        if settings.recall_gap_fill and await has_evidence_gap(query, hits, facts):
-            hits, facts = await round_.fill_gap(hits, facts)
-        session_notes = (
-            await round_.session_hits(settings.session_recall_k)
-            if settings.session_recall_k
-            else []
-        )
-        await FactClaim.record_access(session, [fact.statement for fact in facts])
-        communities = (
-            [
-                CommunityNote(label=label, summary=summary, score=score)
-                for label, summary, score in await community_search(
-                    query, principal_id, scope=scope, k=3
-                )
-            ]
-            if thematic
-            else []
-        )
-        # thematic picks the root-level summaries for a broad query and leaf summaries for a
-        # pointed one.
-        raptor = (
-            [
-                RaptorNote(label=label, summary=summary, level=level, score=score)
-                for label, summary, level, score in await raptor_search(
-                    query, principal_id, thematic=thematic, k=settings.raptor_k, scope=scope
-                )
-            ]
-            if raptor_on
-            else []
-        )
-        profile = await round_.top_profile() if settings.profiles else None
-    logger.info(
-        "recall {query!r} bundled {hits} hits, {facts} facts, {comms} comms, {raptor} raptor",
-        query=query,
-        hits=len(hits),
-        facts=len(facts),
-        comms=len(communities),
-        raptor=len(raptor),
-    )
-    return RecallResult(
-        query=query,
-        hits=hits,
-        facts=facts,
-        communities=communities,
-        raptor=raptor,
-        session=session_notes,
-        profile=profile,
-        as_of=as_of,
-    )

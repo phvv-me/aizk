@@ -1,21 +1,12 @@
-import asyncio
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import NamedTuple
 
+import dbutil
 import pytest
 from factories import build_live_fact
-from graphdb import (
-    FakeLLM,
-    add_member,
-    add_principals,
-    create_group,
-    delete_group,
-    drop_principals,
-    purge_owner,
-)
+from sqlalchemy import text
 
 from aizk.config import settings
 from aizk.graph.curation_review import (
@@ -26,252 +17,208 @@ from aizk.graph.curation_review import (
     visible_canon,
 )
 from aizk.graph.models import CurationReview, CurationVerdict
-from aizk.store import (
-    EntityClaim,
-    EntityContent,
-    FactClaim,
-    FactContent,
-    Watermark,
-    acting_as,
-)
+from aizk.store import Group, Watermark, acting_as, system_session
 
 
-class Reviewer(NamedTuple):
-    """A curated group with an admin member (the reviewer) and a writer whose claims it judges.
-
-    reviewer: admin member the review pass runs as, the fan-out's own per-principal identity.
-    writer: writer member whose claims land pending for the reviewer to judge.
-    group: the curated scope both belong to.
-    """
+class Brain(NamedTuple):
+    """A curated group with an admin reviewer and a writer whose claims it judges."""
 
     reviewer: uuid.UUID
     writer: uuid.UUID
     group: uuid.UUID
 
 
-@asynccontextmanager
-async def reviewer_brain(*, curated: bool = True) -> AsyncIterator[Reviewer]:
-    """Yield a seeded curated group with an admin reviewer and a writer, torn down on exit."""
-    reviewer, writer = uuid.uuid4(), uuid.uuid4()
-    await add_principals(reviewer, writer)
-    group = await create_group(f"review-{uuid.uuid4().hex[:8]}", curated=curated)
-    await add_member(reviewer, group, role="admin")
-    await add_member(writer, group, role="writer")
-    try:
-        yield Reviewer(reviewer, writer, group)
-    finally:
-        await delete_group(group)
-        for principal in (reviewer, writer):
-            await purge_owner(principal)
-        await drop_principals(reviewer, writer)
+@pytest.fixture
+def brain(migrated_db: None) -> Iterator[Brain]:
+    """A reset schema seeding the system principal, a curated group, its admin, and one writer."""
+    reviewer, writer, group = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    async def setup() -> None:
+        await dbutil.reset_db()
+        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
+        await dbutil.seed_principal(reviewer)
+        await dbutil.seed_principal(writer)
+        await dbutil.seed_group(group, name=f"review-{group}", curated=True)
+        await dbutil.seed_membership(reviewer, group, "admin")
+        await dbutil.seed_membership(writer, group, "writer")
+
+    dbutil.run(setup())
+    yield Brain(reviewer, writer, group)
 
 
 async def plant_claim(
-    owner: uuid.UUID, scope: uuid.UUID | None, statement: str, reviewed_at: datetime | None
+    owner: uuid.UUID, group: uuid.UUID, statement: str, reviewed: datetime | None
 ) -> uuid.UUID:
-    """Insert one entity and a fact claim naming it, stamped with a given reviewed_at.
+    """Seed one entity and a fact claim in a group's scope, stamped reviewed or left pending."""
+    entity, content, claim = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    await dbutil.admin_exec(
+        "INSERT INTO entity_content (id, name, type) VALUES (:id, :name, 'Concept')",
+        {"id": entity, "name": statement},
+    )
+    await dbutil.admin_exec(
+        "INSERT INTO fact_content (id, subject_id, predicate, statement) "
+        "VALUES (:id, :subject, 'related_to', :statement)",
+        {"id": content, "subject": entity, "statement": statement},
+    )
+    await dbutil.admin_exec(
+        "INSERT INTO fact_claim (id, content_id, owner_id, scopes, reviewed_at) "
+        "VALUES (:id, :content, :owner, CAST(:scopes AS uuid[]), :reviewed)",
+        {
+            "id": claim,
+            "content": content,
+            "owner": owner,
+            "scopes": [str(group)],
+            "reviewed": reviewed,
+        },
+    )
+    return claim
 
-    owner: principal that owns both claims.
-    scope: group the claims are shared with, private when null.
-    statement: the fact's natural-language statement, unique per call so ids never collide.
-    reviewed_at: the review stamp to seed, null for a pending claim.
-    """
-    entity_content, entity_claim = uuid.uuid4(), uuid.uuid4()
-    fact_content, fact_claim = uuid.uuid4(), uuid.uuid4()
-    async with acting_as(owner) as session:
-        session.add(EntityContent(id=entity_content, name=statement, type="Concept"))
-        await session.flush()
-        session.add(
-            EntityClaim(id=entity_claim, content_id=entity_content, owner_id=owner, scope=scope)
+
+async def claim_state(claim_id: uuid.UUID) -> tuple[bool, bool]:
+    """Whether a claim still exists and, if so, whether it is reviewed, read past every gate."""
+    async with dbutil.admin_engine().connect() as connection:
+        result = await connection.execute(
+            text("SELECT reviewed_at FROM fact_claim WHERE id = :id"), {"id": claim_id}
         )
-        session.add(
-            FactContent(
-                id=fact_content,
-                subject_id=entity_content,
-                predicate="related_to",
-                statement=statement,
-            )
-        )
-        await session.flush()
-        session.add(
-            FactClaim(
-                id=fact_claim,
-                content_id=fact_content,
-                owner_id=owner,
-                scope=scope,
-                reviewed_at=reviewed_at,
-            )
-        )
-    return fact_claim
+        row = result.first()
+    return row is not None, row is not None and row[0] is not None
 
 
-async def claim_state(owner: uuid.UUID, claim_id: uuid.UUID) -> tuple[bool, bool]:
-    """Whether a claim still exists and, if so, whether it is reviewed, read as its owner.
-
-    owner: identity the read acts as.
-    claim_id: claim to inspect.
-    """
-    async with acting_as(owner) as session:
-        row = await session.get(
-            FactClaim, claim_id, execution_options={settings.skip_live_gate: True}
-        )
-    return row is not None, row is not None and row.reviewed_at is not None
-
-
-def test_render_review_prompt_lists_the_canon_then_the_pending_claims_by_id() -> None:
-    """The rendered prompt names each pending claim's id and statement below the approved canon."""
-    claim = build_live_fact(statement="a pending claim")
-
-    rendered = render_review_prompt(["an approved fact"], [claim])
-
-    assert "Approved canon." in rendered
-    assert "- an approved fact" in rendered
-    assert f"id={claim.id} statement=a pending claim" in rendered
-
-
-def test_render_review_prompt_names_an_empty_canon_explicitly() -> None:
-    """A fresh group with no approved canon yet still renders a legible prompt, never a blank."""
-    rendered = render_review_prompt([], [])
-    assert "(no approved canon yet)" in rendered
-
-
-def test_curated_groups_administered_filters_to_admin_role_and_curated_only(
-    requires_db: None,
+@pytest.mark.parametrize(
+    ("canon", "pending_statements", "expected"),
+    [
+        (["an approved fact"], ["a pending claim"], "id="),
+        ([], [], "(no approved canon yet)"),
+    ],
+)
+def test_render_review_prompt_lists_canon_then_pending_by_id(
+    canon: list[str], pending_statements: list[str], expected: str
 ) -> None:
-    """Only a curated group where the principal holds the admin role is returned.
+    """The prompt names the approved canon, then each pending claim by id, never a blank canon."""
+    pending = [build_live_fact(statement=stmt) for stmt in pending_statements]
+    rendered = render_review_prompt(canon, pending)
+    assert "Approved canon." in rendered and "Pending claims." in rendered
+    assert expected in rendered
+    for claim in pending:
+        assert f"id={claim.id} statement={claim.statement}" in rendered
 
-    A reader-role membership in the same curated group and an admin-role membership in an
-    uncurated one both stay off the roster, so the pass never reviews a group it cannot actually
-    curate or one that was never curated in the first place.
+
+def test_curated_groups_administered_filters_to_admin_and_curated(brain: Brain) -> None:
+    """Only a curated group the principal admins is returned, a reader or writer role excluded.
+
+    An admin role in an uncurated group and a reader role in another curated group both stay off
+    the roster, and the writer never administers anything, so the pass reviews only what it can.
     """
 
     async def probe() -> tuple[set[uuid.UUID], set[uuid.UUID]]:
-        async with reviewer_brain() as brain:
-            uncurated = await create_group(f"open-{uuid.uuid4().hex[:8]}", curated=False)
-            await add_member(brain.reviewer, uncurated, role="admin")
-            try:
-                administered = await curated_groups_administered(brain.reviewer)
-                writer_side = await curated_groups_administered(brain.writer)
-                return {g.id for g in administered}, {g.id for g in writer_side}
-            finally:
-                await delete_group(uncurated)
+        uncurated, other = uuid.uuid4(), uuid.uuid4()
+        await dbutil.seed_group(uncurated, name=f"open-{uncurated}", curated=False)
+        await dbutil.seed_group(other, name=f"canon-{other}", curated=True)
+        await dbutil.seed_membership(brain.reviewer, uncurated, "admin")
+        await dbutil.seed_membership(brain.reviewer, other, "reader")
+        administered = await curated_groups_administered(brain.reviewer)
+        writer_side = await curated_groups_administered(brain.writer)
+        return {g.id for g in administered}, {g.id for g in writer_side}
 
-    administered, writer_side = asyncio.run(probe())
-    assert administered  # the curated group the reviewer administers is somewhere in the roster
-    assert writer_side == set()  # a writer-role membership never counts as administering
+    administered, writer_side = dbutil.run(probe())
+    assert administered == {brain.group}
+    assert writer_side == set()
 
 
-def test_visible_canon_returns_only_reviewed_claims_newest_first(requires_db: None) -> None:
+def test_visible_canon_returns_only_reviewed_claims_newest_first(brain: Brain) -> None:
     """The canon carries approved claims only, ordered most-recently-recorded first."""
 
     async def probe() -> list[str]:
-        async with reviewer_brain() as brain:
-            await plant_claim(brain.writer, brain.group, "still pending", None)
-            await plant_claim(brain.writer, brain.group, "older approved", datetime.now(UTC))
-            await plant_claim(brain.writer, brain.group, "newer approved", datetime.now(UTC))
-            async with acting_as(brain.reviewer) as session:
-                group = (await curated_groups_administered(brain.reviewer))[0]
-                return await visible_canon(session, group)
+        await plant_claim(brain.writer, brain.group, "still pending", None)
+        await plant_claim(brain.writer, brain.group, "older approved", datetime.now(UTC))
+        await plant_claim(brain.writer, brain.group, "newer approved", datetime.now(UTC))
+        async with system_session() as session:
+            group = await session.get(Group, brain.group)
+            assert group is not None
+            return await visible_canon(session, group)
 
-    canon = asyncio.run(probe())
+    canon = dbutil.run(probe())
     assert "still pending" not in canon
     assert canon.index("newer approved") < canon.index("older approved")
 
 
-def test_review_group_skips_when_no_pending_claims_exist(requires_db: None) -> None:
-    """A group with an empty queue is skipped outright, no judge call and no watermark write."""
+def test_review_group_skips_an_empty_queue(brain: Brain) -> None:
+    """A group with no pending claim is skipped outright, no judge call and no watermark write."""
 
     async def probe() -> tuple[int, int]:
-        async with reviewer_brain() as brain:
-            group = (await curated_groups_administered(brain.reviewer))[0]
-            return await review_group(brain.reviewer, group)
+        group = (await curated_groups_administered(brain.reviewer))[0]
+        return await review_group(brain.reviewer, group)
 
-    assert asyncio.run(probe()) == (0, 0)
+    assert dbutil.run(probe()) == (0, 0)
 
 
 @pytest.mark.usefixtures("fake_embedder")
-def test_review_group_approves_and_rejects_per_verdict_and_updates_the_watermark(
-    requires_db: None, fake_llm: FakeLLM
+def test_review_group_approves_rejects_and_advances_the_watermark(
+    brain: Brain, fake_llm: object
 ) -> None:
     """Each pending claim is approved or rejected per its verdict, and the watermark advances."""
 
-    async def probe() -> tuple[bool, bool, bool, bool, int]:
-        async with reviewer_brain() as brain:
-            keep = await plant_claim(brain.writer, brain.group, "a solid claim", None)
-            drop = await plant_claim(brain.writer, brain.group, "a shaky claim", None)
-            fake_llm.completions.responses[CurationReview] = CurationReview(
+    async def probe() -> tuple[bool, bool, bool, tuple[int, int], int]:
+        keep = await plant_claim(brain.writer, brain.group, "a solid claim", None)
+        drop = await plant_claim(brain.writer, brain.group, "a shaky claim", None)
+        fake_llm.register(
+            CurationReview,
+            CurationReview(
                 verdicts=[
                     CurationVerdict(claim=keep, approve=True, reason="consistent with canon"),
                     CurationVerdict(claim=drop, approve=False, reason="unsupported"),
                 ]
+            ),
+        )
+        group = (await curated_groups_administered(brain.reviewer))[0]
+        counts = await review_group(brain.reviewer, group)
+        keep_exists, keep_reviewed = await claim_state(keep)
+        drop_exists, _ = await claim_state(drop)
+        async with acting_as(brain.reviewer) as session:
+            watermark = await Watermark.read(
+                session, brain.reviewer, Watermark.Kind.curation_pending, ref=str(brain.group)
             )
+        return keep_exists, keep_reviewed, drop_exists, counts, watermark
 
-            approved, rejected = await review_group(
-                brain.reviewer, (await curated_groups_administered(brain.reviewer))[0]
-            )
-
-            keep_exists, keep_reviewed = await claim_state(brain.writer, keep)
-            drop_exists, _ = await claim_state(brain.writer, drop)
-            async with acting_as(brain.reviewer) as session:
-                watermark = await Watermark.read(
-                    session,
-                    brain.reviewer,
-                    Watermark.Kind.curation_pending,
-                    ref=str(brain.group),
-                )
-            return (
-                keep_exists,
-                keep_reviewed,
-                drop_exists,
-                (approved, rejected) == (1, 1),
-                watermark,
-            )
-
-    keep_exists, keep_reviewed, drop_exists, counted, watermark = asyncio.run(probe())
-    assert keep_exists is True and keep_reviewed is True
+    keep_exists, keep_reviewed, drop_exists, counts, watermark = dbutil.run(probe())
+    assert keep_exists and keep_reviewed
     assert drop_exists is False
-    assert counted is True
+    assert counts == (1, 1)
     assert watermark == 2
 
 
 @pytest.mark.usefixtures("fake_embedder")
 def test_review_group_is_debounced_once_the_pending_count_repeats(
-    requires_db: None, fake_llm: FakeLLM
+    brain: Brain, fake_llm: object
 ) -> None:
     """A queue sitting at the same pending count as the last pass is skipped, no repeat judge call.
 
-    The seeded verdict deliberately names a claim id outside the pending set, so the one real
-    pending claim never resolves and the queue count stays put between the two calls, the case
-    that tells debounce-on-count apart from the trivially skipped empty queue.
+    The verdict names a claim id outside the pending set, so the one real pending claim never
+    resolves and the count stays put between passes, telling debounce-on-count apart from the
+    trivially skipped empty queue.
     """
 
     async def probe() -> tuple[tuple[int, int], tuple[int, int], int]:
-        async with reviewer_brain() as brain:
-            await plant_claim(brain.writer, brain.group, "never matched by a verdict", None)
-            fake_llm.completions.responses[CurationReview] = CurationReview(
+        await plant_claim(brain.writer, brain.group, "never matched by a verdict", None)
+        fake_llm.register(
+            CurationReview,
+            CurationReview(
                 verdicts=[CurationVerdict(claim=uuid.uuid4(), approve=True, reason="off-target")]
-            )
-            group = (await curated_groups_administered(brain.reviewer))[0]
+            ),
+        )
+        group = (await curated_groups_administered(brain.reviewer))[0]
+        first = await review_group(brain.reviewer, group)
+        before = len(fake_llm.completions.calls)
+        second = await review_group(brain.reviewer, group)
+        after = len(fake_llm.completions.calls)
+        return first, second, after - before
 
-            first = await review_group(brain.reviewer, group)
-            calls_before = len(fake_llm.completions.calls)
-            second = await review_group(brain.reviewer, group)
-            calls_after = len(fake_llm.completions.calls)
-            return first, second, calls_after - calls_before
-
-    first, second, extra_calls = asyncio.run(probe())
-    assert first == (0, 0)  # the off-target verdict matched nothing, so nothing was resolved
+    first, second, extra_calls = dbutil.run(probe())
+    assert first == (0, 0)  # the off-target verdict matched nothing, so nothing resolved
     assert second == (0, 0)  # debounced this time, the pending count sat unchanged
     assert extra_calls == 0  # the debounced run never re-asked the model
 
 
-def test_review_curated_groups_aggregates_the_judged_count_across_every_group(
-    requires_db: None,
-) -> None:
+def test_review_curated_groups_aggregates_across_every_group(brain: Brain) -> None:
     """With nothing pending anywhere the aggregate across every administered group is zero."""
-
-    async def probe() -> int:
-        async with reviewer_brain() as brain:
-            return await review_curated_groups(brain.reviewer)
-
-    assert asyncio.run(probe()) == 0
+    assert dbutil.run(review_curated_groups(brain.reviewer)) == 0

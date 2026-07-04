@@ -3,6 +3,7 @@ import uuid
 from loguru import logger
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..exceptions import NotVisibleError
@@ -10,7 +11,7 @@ from ..store import EntityClaim, EntityContent, LiveFact, Membership, Profile, a
 from .models import ProfileReport
 from .tier_builder import TierBuilder
 
-Grounding = tuple[str, uuid.UUID | None, list[str]]
+Grounding = tuple[str, list[uuid.UUID], list[str]]
 
 
 class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
@@ -24,48 +25,60 @@ class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
         self.subject_id = subject_id
         self.profile_id: uuid.UUID | None = None
 
-    async def gather(self) -> Grounding:
-        """The subject's name, a representative scope, and its latest facts.
+    async def subject_entity(self, session: AsyncSession) -> EntityContent:
+        """This profile's subject content, raising when it is not visible to this principal."""
+        entity = await session.get(EntityContent, self.subject_id)
+        if entity is None:
+            raise NotVisibleError(f"entity {self.subject_id} is not visible to build a profile")
+        return entity
 
-        Raises when the subject content is not visible at all. The representative scope is this
-        principal's own private claim on the content when one exists, else whichever of its own
-        claims sorts first, a display attribute only, never part of `Profile`'s own uniqueness
-        (`owner_id`, `subject_id`), since one entity content can carry several of this principal's
-        claims across different scopes while it still gets exactly one rolled-up profile.
+    async def representative_scopes(self, session: AsyncSession) -> list[uuid.UUID]:
+        """A display-only scope set for this subject, never part of Profile's own uniqueness.
+
+        This principal's own private claim on the content when one exists, else whichever of its
+        own claims sorts first (the empty private array orders ahead of any non-empty set under
+        Postgres's own array comparison, so `ORDER BY scopes` alone already prefers it): one entity
+        content can carry several of this principal's claims across different scope sets while it
+        still gets exactly one rolled-up profile, keyed only on (owner_id, subject_id).
         """
-        async with acting_as(self.principal_id) as session:
-            entity = await session.get(EntityContent, self.subject_id)
-            if entity is None:
-                raise NotVisibleError(
-                    f"entity {self.subject_id} is not visible to build a profile"
-                )
-            scope = await session.scalar(
-                select(EntityClaim.scope)
+        scopes = await session.scalar(
+            select(EntityClaim.scopes)
+            .where(
+                EntityClaim.content_id == self.subject_id,
+                EntityClaim.owner_id == self.principal_id,
+            )
+            .order_by(EntityClaim.scopes)
+            .limit(1)
+        )
+        return list(scopes or [])
+
+    async def subject_statements(self, session: AsyncSession) -> list[str]:
+        """This subject's visible latest fact statements, oldest first."""
+        return list(
+            await session.scalars(
+                # `live_fact` already carries the current-and-reviewed gate
+                select(LiveFact.statement)
                 .where(
-                    EntityClaim.content_id == self.subject_id,
-                    EntityClaim.owner_id == self.principal_id,
-                )
-                .order_by(EntityClaim.scope.is_not(None), EntityClaim.scope)
-                .limit(1)
-            )
-            statements = list(
-                await session.scalars(
-                    # `live_fact` already carries the current-and-reviewed gate
-                    select(LiveFact.statement)
-                    .where(
-                        or_(
-                            LiveFact.subject_id == self.subject_id,
-                            LiveFact.object_id == self.subject_id,
-                        )
+                    or_(
+                        LiveFact.subject_id == self.subject_id,
+                        LiveFact.object_id == self.subject_id,
                     )
-                    .order_by(func.lower(LiveFact.recorded))
                 )
+                .order_by(func.lower(LiveFact.recorded))
             )
-            return entity.name, scope, statements
+        )
+
+    async def gather(self) -> Grounding:
+        """The subject's name, a representative scope set, and its latest facts."""
+        async with acting_as(self.principal_id) as session:
+            entity = await self.subject_entity(session)
+            scopes = await self.representative_scopes(session)
+            statements = await self.subject_statements(session)
+            return entity.name, scopes, statements
 
     def body(self, grounding: Grounding) -> str:
         """Render the subject's name and latest facts as the structured call's user turn."""
-        name, _scope, statements = grounding
+        name, _scopes, statements = grounding
         facts = "Facts:\n" + "\n".join(f"- {statement}" for statement in statements)
         return f"Entity: {name}\n\n{facts}"
 
@@ -82,12 +95,12 @@ class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
         pattern, so a rebuild racing a concurrent one lands as one row rather than a duplicate
         insert or a lost update between a separate select and flush.
         """
-        name, scope, statements = grounding
+        name, scopes, statements = grounding
         statement = (
             insert(Profile)
             .values(
                 owner_id=self.principal_id,
-                scope=scope,
+                scopes=scopes,
                 subject_id=self.subject_id,
                 summary=report.summary,
                 embedding=vectors[0],
@@ -148,7 +161,7 @@ async def refresh_profiles(
                 select(EntityClaim.content_id)
                 .where(
                     EntityClaim.owner_id == principal_id,
-                    Membership.writable_scope(EntityClaim.scope, principal_id),
+                    Membership.writable_scopes(EntityClaim.scopes, principal_id),
                 )
                 .distinct()
                 .order_by(EntityClaim.content_id)

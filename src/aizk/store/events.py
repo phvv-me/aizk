@@ -12,15 +12,17 @@ from .models import FactClaim
 def bind_principal(
     session: Session, transaction: SessionTransaction, connection: Connection
 ) -> None:
-    """Bind app.uid and app.scope for the transaction from the session's own acting identity.
+    """Bind app.uid and app.scopes for the transaction from the session's own acting identity.
 
     A global ORM-level listener rather than a per-engine Core `begin` hook, so every session ever
     opened through `async_session` binds the GUCs the moment its transaction starts, with no
     per-engine wiring to remember at construction. Reads the acting principal and the optional
     narrowing lens straight off `session.info`, the dict `acting_as` stamps at construction, so the
     identity travels with the session object itself rather than through a ContextVar bound around
-    it. Transaction-local (the true argument to set_config) so a pooled connection never carries a
-    scope into the next transaction, and still bound on every transaction regardless, since that
+    it. The lens binds as a Postgres array literal (`{a,b,c}`), the same `CAST(... AS UUID[])`
+    `rls.current_setting` already applies to a scalar GUC parsing it with no extra step on the read
+    side. Transaction-local (the true argument to set_config) so a pooled connection never carries
+    a scope into the next transaction, and still bound on every transaction regardless, since that
     per-request rebind is the tenancy mechanism itself. `postgres.conf` (`docker-compose.yml`)
     declares the anonymous uuid and an empty lens as the GUCs' own defaults, so a session opened
     outside `acting_as`, carrying neither key, already binds to exactly that fallback here.
@@ -30,10 +32,11 @@ def bind_principal(
     connection: the DBAPI connection the transaction runs on, the GUCs bind to.
     """
     uid = session.info.get("principal") or settings.anonymous_principal_id
-    narrowed = session.info.get("lens")
+    narrowed = session.info.get("lens") or ()
+    lens = "{" + ",".join(str(group_id) for group_id in narrowed) + "}" if narrowed else ""
     connection.execute(
-        text("SELECT set_config('app.uid', :uid, true), set_config('app.scope', :lens, true)"),
-        {"uid": str(uid), "lens": str(narrowed) if narrowed else ""},
+        text("SELECT set_config('app.uid', :uid, true), set_config('app.scopes', :lens, true)"),
+        {"uid": str(uid), "lens": lens},
     )
 
 

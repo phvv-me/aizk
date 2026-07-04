@@ -3,18 +3,17 @@ from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 
 import asyncpg
-from asyncpg.exceptions import DuplicateObjectError, DuplicateTableError
+from asyncpg.exceptions import DuplicateFunctionError, DuplicateObjectError, DuplicateTableError
 from loguru import logger
 from pgqueuer import Queries
 from pgqueuer.db import AsyncpgDriver
 from pgqueuer.errors import DuplicateJobError
 
 from ..config import settings
-from ..extract.llm import extract_triples, resolve_timestamps
-from ..graph.build import GraphWriter, pending_chunks
+from ..graph.build import extract_and_consolidate, pending_chunks
 from ..graph.profiles import build_profile
 from ..store import Chunk, Watermark, acting_as
-from .payloads import ChunkJob, ProfileJob
+from .payloads import ChunkJob, JobPayload, ProfileJob
 
 # the on-write entrypoint, one durable job per pending chunk, building its graph slice then
 # chaining a debounced profile rebuild for every entity the slice touched
@@ -40,11 +39,46 @@ async def queue_connection() -> AsyncIterator[asyncpg.Connection]:
         await connection.close()
 
 
+@asynccontextmanager
+async def queue_queries() -> AsyncIterator[Queries]:
+    """Open a short connection on the app DSN and hand back its pgqueuer Queries, closing after.
+
+    The one seam every enqueue path in this module shares, so a `Queries` is never hand-assembled
+    from a raw connection more than once.
+    """
+    async with queue_connection() as connection:
+        yield Queries(AsyncpgDriver(connection))
+
+
+async def enqueue_deduped(
+    queries: Queries, entrypoint: str, payload: JobPayload, dedupe_key: str
+) -> bool:
+    """Enqueue one job, deduplicated on its own key, returning whether it was newly queued.
+
+    Every enqueue path shares this one try/except, `DuplicateJobError` the documented signal that
+    a job with this dedupe_key is already waiting or in flight, harmless to swallow.
+
+    queries: the open pgqueuer session this job enqueues through.
+    entrypoint: the worker entrypoint name the job is dispatched to.
+    payload: the job's own typed payload, encoded to bytes before enqueue.
+    dedupe_key: the key pgqueuer deduplicates concurrent enqueues of the same work on.
+    """
+    try:
+        await queries.enqueue(entrypoint, payload.encode(), dedupe_key=dedupe_key)
+    except DuplicateJobError:
+        return False
+    return True
+
+
 async def process_chunk(chunk_id: uuid.UUID, principal_id: uuid.UUID) -> list[uuid.UUID]:
     """Build one chunk's graph slice under its owner and return the entity ids it touched.
 
-    Extracts and dates outside any write, then resolves entities and consolidates facts inside one
-    owner-scoped transaction, bumping a dirty watermark for every touched entity.
+    The durable per-job wrapper around extract_and_consolidate, the same core build_graph's
+    inline concurrent loop runs, so the queue worker and force_rebuild extract, resolve, and
+    consolidate identically and share the one extraction_semaphore concurrency ceiling. Bumps a
+    dirty watermark for every touched entity on top, the on-write signal a debounced profile
+    rebuild reads, since that chaining is this queue path's own concern rather than the shared
+    core's.
 
     chunk_id: chunk whose graph slice to build.
     principal_id: identity that owns the written entities and facts.
@@ -54,22 +88,13 @@ async def process_chunk(chunk_id: uuid.UUID, principal_id: uuid.UUID) -> list[uu
     if chunk is None:
         logger.warning("chunk {} not visible to {}, skipping", chunk_id, principal_id)
         return []
-    extraction = await extract_triples(chunk.text)
-    dated_facts = await resolve_timestamps(chunk.text, extraction.facts)
-    touched: set[uuid.UUID] = set()
-    async with acting_as(principal_id) as session:
-        writer = GraphWriter(session, principal_id, chunk.scope)
-        for entity in extraction.entities:
-            resolved = await writer.resolve(entity.name, entity.type)
-            if resolved is not None:
-                touched.add(resolved)
-        for fact in dated_facts:
-            await writer.consolidate(fact, chunk.id)
-        for entity_id in touched:
-            await Watermark.bump(
-                session, principal_id, Watermark.Kind.entity_dirty, ref=str(entity_id)
-            )
-    logger.info("graph slice from chunk {} done", chunk_id)
+    touched = await extract_and_consolidate(chunk, principal_id)
+    if touched:
+        async with acting_as(principal_id) as session:
+            for entity_id in touched:
+                await Watermark.bump(
+                    session, principal_id, Watermark.Kind.entity_dirty, ref=str(entity_id)
+                )
     return list(touched)
 
 
@@ -102,16 +127,18 @@ async def enqueue_pending(
     """
     principal_id = principal_id or settings.system_principal_id
     chunks = await pending_chunks(principal_id, limit, source)
-    queued = 0
-    async with queue_connection() as connection:
-        queries = Queries(AsyncpgDriver(connection))
-        for chunk in chunks:
-            job = ChunkJob(chunk_id=chunk.id, principal_id=principal_id)
-            try:
-                await queries.enqueue(EXTRACT_ENTRYPOINT, job.encode(), dedupe_key=str(chunk.id))
-            except DuplicateJobError:
-                continue  # already waiting or in flight, the documented harmless re-enqueue
-            queued += 1
+    async with queue_queries() as queries:
+        queued = sum(
+            [
+                await enqueue_deduped(
+                    queries,
+                    EXTRACT_ENTRYPOINT,
+                    ChunkJob(chunk_id=chunk.id, principal_id=principal_id),
+                    str(chunk.id),
+                )
+                for chunk in chunks
+            ]
+        )
     logger.info("enqueued {} pending chunks", queued)
     return queued
 
@@ -128,16 +155,26 @@ async def enqueue_profiles(entity_ids: Iterable[uuid.UUID], principal_id: uuid.U
     entity_ids = list(entity_ids)
     if not entity_ids:
         return
-    async with queue_connection() as connection:
-        queries = Queries(AsyncpgDriver(connection))
+    async with queue_queries() as queries:
         for entity_id in entity_ids:
-            job = ProfileJob(entity_id=entity_id, principal_id=principal_id)
-            try:
-                await queries.enqueue(
-                    PROFILE_ENTRYPOINT, job.encode(), dedupe_key=f"profile:{entity_id}"
-                )
-            except DuplicateJobError:
-                continue  # a rebuild for this entity is already queued or in flight
+            await enqueue_deduped(
+                queries,
+                PROFILE_ENTRYPOINT,
+                ProfileJob(entity_id=entity_id, principal_id=principal_id),
+                f"profile:{entity_id}",
+            )
+
+
+async def grant_queue_access(connection: asyncpg.Connection, role: str) -> None:
+    """Grant the app role DML on the queue tables and USAGE on their serial sequences.
+
+    connection: open connection on the owner DSN, since only the owner may GRANT.
+    role: the restricted app role the worker and enqueue paths connect as.
+    """
+    for table in QUEUE_TABLES:
+        await connection.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {role}")
+    for sequence in QUEUE_SEQUENCES:
+        await connection.execute(f"GRANT USAGE, SELECT ON SEQUENCE {sequence} TO {role}")
 
 
 async def install_queue_schema() -> None:
@@ -151,13 +188,9 @@ async def install_queue_schema() -> None:
     try:
         try:
             await Queries(AsyncpgDriver(connection)).install()
-        except (DuplicateObjectError, DuplicateTableError):
+        except (DuplicateFunctionError, DuplicateObjectError, DuplicateTableError):
             logger.info("pgqueuer schema already installed")
-        role = settings.app_role
-        for table in QUEUE_TABLES:
-            await connection.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO {role}")
-        for sequence in QUEUE_SEQUENCES:
-            await connection.execute(f"GRANT USAGE, SELECT ON SEQUENCE {sequence} TO {role}")
+        await grant_queue_access(connection, settings.app_role)
     finally:
         await connection.close()
     logger.info("pgqueuer schema installed and granted to {}", settings.app_role)

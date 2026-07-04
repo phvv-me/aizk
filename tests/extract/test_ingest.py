@@ -1,154 +1,102 @@
-import asyncio
+import hashlib
 import uuid
 from pathlib import Path
 
+import dbutil
 import pytest
-from sqlalchemy import text
+from hypothesis import given
+from hypothesis import strategies as st
+from sqlalchemy import text as sql
 
-from aizk.cli import migrate
-from aizk.config import settings
-from aizk.extract.ingest import (
-    ingest_image,
-    ingest_path,
-    ingest_text,
-    is_text,
-    record_reference,
-)
+from aizk.config import Settings
+from aizk.extract.ingest import content_hash, contextual_lexical, ingest_path, ingest_text
 from aizk.store import acting_as
 
 
-async def purge(marker: str) -> None:
-    """Delete as the system owner every document this test created, keeping the live db clean.
-
-    marker: the per-run token embedded in each created title or uri.
-    """
-    async with acting_as(settings.system_principal_id) as session:
-        await session.execute(
-            text("DELETE FROM document WHERE title LIKE :pat OR source_uri LIKE :pat"),
-            {"pat": f"%{marker}%"},
-        )
+@given(text=st.text())
+def test_content_hash_is_the_stable_sha256_of_the_utf8_bytes(text: str) -> None:
+    """The digest is the sha256 hex of the utf-8 bytes and repeats for identical content."""
+    digest = content_hash(text)
+    assert digest == hashlib.sha256(text.encode("utf-8")).hexdigest()
+    assert content_hash(text) == digest
 
 
-async def count_documents(marker: str) -> int:
-    """Count the documents this test created, the rows a marker matches.
-
-    marker: the per-run token embedded in each created title or uri.
-    """
-    async with acting_as(settings.system_principal_id) as session:
-        return await session.scalar(
-            text("SELECT count(*) FROM document WHERE title LIKE :pat"), {"pat": f"%{marker}%"}
-        )
+def test_contextual_lexical_prepends_the_title_when_enabled(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With contextual bm25 on and a title present the lexical lane text is title-prefixed."""
+    monkeypatch.setattr(settings, "contextual_bm25", True)
+    assert contextual_lexical("Title", "body span") == "Title\nbody span"
 
 
-@pytest.fixture
-def migrated_db(requires_db: None) -> None:
-    """Ensure the live schema exists before a DB-integration ingest, skipping with no Postgres.
-
-    requires_db: the gate that skips the test when the Postgres DSN host is unreachable.
-    """
-    migrate()
-
-
-@pytest.fixture
-def fake_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Turn rerank off for the duration of one test, alongside the fake_embedder fixture.
-
-    The ingest lane never reranks, and the fake embedder returns vectors at the configured
-    embed_dim width the halfvec column accepts, so a write lands under it with no model or network.
-    """
-    monkeypatch.setattr(settings, "rerank", False)
+@pytest.mark.parametrize(
+    ("bm25", "title"),
+    [(False, "Title"), (True, "   "), (False, "")],
+    ids=["flag-off", "blank-title", "off-and-blank"],
+)
+def test_contextual_lexical_is_null_when_off_or_titleless(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, bm25: bool, title: str
+) -> None:
+    """The lexical preamble is dropped when the flag is off or the stripped title is blank."""
+    monkeypatch.setattr(settings, "contextual_bm25", bm25)
+    assert contextual_lexical(title, "body span") is None
 
 
-@pytest.mark.usefixtures("migrated_db", "fake_embedder", "fake_settings")
-def test_ingest_text_dedupes_on_content() -> None:
+@pytest.mark.usefixtures("migrated_db", "fake_embedder")
+def test_ingest_text_dedupes_on_content_hash(settings: Settings) -> None:
     """Remembering the same text twice lands one document and returns its id both times."""
-    marker = uuid.uuid4().hex
-    body = f"a remembered note {marker} about the bi-temporal memory spine"
-    title = f"note {marker}"
-    try:
-        first = asyncio.run(ingest_text(body, title=title))
-        second = asyncio.run(ingest_text(body, title=title))
-        assert isinstance(first, uuid.UUID)
-        assert first == second
-        assert asyncio.run(count_documents(marker)) == 1
-    finally:
-        asyncio.run(purge(marker))
+    title = f"note {uuid.uuid4().hex}"
+
+    async def body() -> tuple[uuid.UUID, uuid.UUID, int]:
+        await dbutil.reset_db()
+        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
+        note = "a remembered note about the bi-temporal memory spine across time"
+        first = await ingest_text(note, title=title)
+        second = await ingest_text(note, title=title)
+        async with acting_as(settings.system_principal_id) as session:
+            count = await session.scalar(
+                sql("SELECT count(*) FROM document WHERE title = :t"), {"t": title}
+            )
+        return first, second, count
+
+    first, second, count = dbutil.run(body())
+    assert isinstance(first, uuid.UUID)
+    assert first == second
+    assert count == 1
 
 
-def test_ingest_path_admits_only_text_and_code() -> None:
-    """The directory walk admits text and code paths only, no markup or binary document format."""
-    assert is_text(Path("note.md"))
-    assert is_text(Path("module.py"))
-    assert not is_text(Path("scan.pdf"))
-    assert not is_text(Path("report.docx"))
+@pytest.mark.usefixtures("migrated_db", "fake_embedder")
+def test_ingest_path_routes_each_lane_dedupes_and_skips_the_rest(
+    settings: Settings, tmp_path: Path
+) -> None:
+    """A directory ingest stores one document per chunked file, routed to its lane, then dedupes.
 
-
-@pytest.mark.usefixtures("migrated_db", "fake_embedder", "fake_settings")
-def test_ingest_path_walks_each_lane_dedupes_and_skips_binary_files(tmp_path: Path) -> None:
-    """A directory ingest stores one document per chunked text file, skipping the rest.
-
-    The empty note produces no chunks, so the walk skips it without a document, the pdf carries a
-    suffix outside TEXT_SUFFIXES so the walk never even reads it, aizk leaving that to the coding
-    agent that already parses its own documents, while the prose and code files each land one, and
-    a re-ingest of the same content stores none.
+    Python routes through the code chunker to a `code` document and markdown through the prose one
+    to a `note`, the empty note yields no chunks so it is skipped without a document, the pdf sits
+    outside the text filter so the walk never reads it, and a re-ingest of the same content stores
+    none.
     """
-    marker = uuid.uuid4().hex
-    (tmp_path / f"{marker}-note.md").write_text(
-        f"# {marker} note\n\nthe spine remembers facts across time.\n", encoding="utf-8"
+    (tmp_path / "note.md").write_text(
+        "# note\n\nthe spine remembers facts across time.\n", encoding="utf-8"
     )
-    (tmp_path / f"{marker}-code.py").write_text(
-        f"def {marker.replace('-', '_')[:8]}_fn(value):\n    return value + 1\n", encoding="utf-8"
-    )
-    (tmp_path / f"{marker}-empty.md").write_text("", encoding="utf-8")
-    (tmp_path / f"{marker}-scan.pdf").write_bytes(b"%PDF-1.4 not really a pdf " + marker.encode())
-    try:
-        ingested = asyncio.run(ingest_path(tmp_path))
-        assert ingested == 2
-        assert asyncio.run(ingest_path(tmp_path)) == 0
-        assert asyncio.run(count_documents(marker)) == 2
-    finally:
-        asyncio.run(purge(marker))
+    (tmp_path / "code.py").write_text("def fn(value):\n    return value + 1\n", encoding="utf-8")
+    (tmp_path / "empty.md").write_text("", encoding="utf-8")
+    (tmp_path / "scan.pdf").write_bytes(b"%PDF-1.4 not really a pdf")
 
+    async def body() -> tuple[int, int, list[str]]:
+        await dbutil.reset_db()
+        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
+        first = await ingest_path(tmp_path)
+        again = await ingest_path(tmp_path)
+        async with acting_as(settings.system_principal_id) as session:
+            rows = await session.execute(
+                sql("SELECT kind FROM document WHERE source_uri LIKE :pat ORDER BY kind"),
+                {"pat": f"%{tmp_path.name}%"},
+            )
+            kinds = list(rows.scalars().all())
+        return first, again, kinds
 
-def test_record_reference_dedupes_on_uri(migrated_db: None) -> None:
-    """Recording the same uri twice lands one chunkless reference and returns its id both times."""
-    marker = uuid.uuid4().hex
-    uri = f"https://example.test/{marker}"
-    try:
-        first = asyncio.run(record_reference(uri))
-        second = asyncio.run(record_reference(uri))
-        assert isinstance(first, uuid.UUID)
-        assert first == second
-    finally:
-        asyncio.run(purge(marker))
-
-
-@pytest.mark.usefixtures("migrated_db", "fake_embedder", "fake_settings")
-def test_ingest_image_dedupes_and_stores_one_chunk(tmp_path: Path) -> None:
-    """An image embeds through the multimodal lane into one captioned chunk, deduped on bytes."""
-    marker = uuid.uuid4().hex
-    image = tmp_path / f"{marker}.png"
-    image.write_bytes(b"\x89PNG\r\n\x1a\n" + marker.encode("ascii"))
-    caption = f"a photo marked {marker}"
-    try:
-        first = asyncio.run(ingest_image(image, caption=caption))
-        second = asyncio.run(ingest_image(image, caption=caption))
-        assert isinstance(first, uuid.UUID)
-        assert first == second
-
-        async def stored() -> tuple[str, int]:
-            async with acting_as(settings.system_principal_id) as session:
-                kind = await session.scalar(
-                    text("SELECT kind FROM document WHERE id = :i"), {"i": first}
-                )
-                chunks = await session.scalar(
-                    text("SELECT count(*) FROM chunk WHERE document_id = :i AND text = :t"),
-                    {"i": first, "t": caption},
-                )
-                return kind, chunks
-
-        kind, chunks = asyncio.run(stored())
-        assert kind == "image"
-        assert chunks == 1
-    finally:
-        asyncio.run(purge(marker))
+    first, again, kinds = dbutil.run(body())
+    assert first == 2
+    assert again == 0
+    assert kinds == ["code", "note"]

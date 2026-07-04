@@ -1,6 +1,7 @@
 import abc
 import uuid
 from collections.abc import Awaitable, Callable
+from functools import partial
 
 from loguru import logger
 from patos import FrozenModel, Registry
@@ -10,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..eval import run_eval
+from ..eval import EvalReport, run_eval
 from ..graph.build import dedup_entities
 from ..graph.communities import build_communities
 from ..graph.curation_review import review_curated_groups
@@ -71,32 +72,32 @@ class ScheduledTask(Registry, FrozenModel, abc.ABC):
         principal_id: identity whose slice of the pass runs.
         """
 
+    async def run_job(self, job: Job) -> None:
+        """Run this task's per-principal body under the principal its dequeued payload names.
+
+        job: dequeued job whose payload names the principal.
+        """
+        assert job.payload is not None
+        await self.run(TaskJob.decode(job.payload).principal_id)
+
+    async def fire_cron(self, fan_out: FanOut, schedule: Schedule) -> None:
+        """Fan this task out across the principal roster on its cron cadence.
+
+        fan_out: enqueues one per-principal job for this task across the roster.
+        schedule: the cron schedule pgqueuer fired this run from, unused past selecting this task.
+        """
+        await fan_out(self)
+
     def register(self, pg: PgQueuer, fan_out: FanOut) -> None:
         """Register this task's queue entrypoint always, and its cron fan-out only when enabled.
 
         pg: the PgQueuer application the entrypoints attach to.
         fan_out: enqueues one per-principal job for this task across the roster.
         """
-
-        @pg.entrypoint(self.queue_entrypoint)
-        async def run_principal_job(job: Job) -> None:
-            """Run this task's per-principal body under the principal its payload names.
-
-            job: dequeued job whose payload names the principal.
-            """
-            assert job.payload is not None
-            await self.run(TaskJob.decode(job.payload).principal_id)
-
+        pg.entrypoint(self.queue_entrypoint)(self.run_job)
         if not self.enabled:
             return
-
-        @pg.schedule(self.cron_entrypoint, self.expression)
-        async def fire(schedule: Schedule) -> None:
-            """Fan this task out across the principal roster on its cron cadence.
-
-            schedule: the cron schedule pgqueuer fired this run from.
-            """
-            await fan_out(self)
+        pg.schedule(self.cron_entrypoint, self.expression)(partial(self.fire_cron, fan_out))
 
 
 async def latest_fact_count(session: AsyncSession) -> int:
@@ -105,6 +106,37 @@ async def latest_fact_count(session: AsyncSession) -> int:
     session: an open session already acting as the pass's principal.
     """
     return await session.scalar(select(func.count()).select_from(LiveFact)) or 0
+
+
+async def run_if_grown(
+    principal_id: uuid.UUID,
+    kind: Watermark.Kind,
+    threshold: int,
+    build: Callable[[], Awaitable[None]],
+    label: str,
+) -> None:
+    """Run a growth-gated rebuild only once the graph grew by threshold facts since its watermark.
+
+    The shared body of `CommunitiesTask` and `RaptorTask`, whose only difference is which watermark
+    kind gates them, how large a growth threshold they wait for, and which builder they run. Reads
+    the current fact count once; below the threshold it only logs and returns, otherwise it runs
+    the builder and advances the watermark to the count just measured.
+
+    principal_id: identity whose slice of the pass runs.
+    kind: the watermark kind the growth is measured and persisted against.
+    threshold: facts of growth required before the builder runs again.
+    build: the zero-argument rebuild to run once growth clears the threshold.
+    label: the pass name logged when growth has not yet cleared the threshold.
+    """
+    async with acting_as(principal_id) as session:
+        current = await latest_fact_count(session)
+        last = await Watermark.read(session, principal_id, kind)
+    if current - last < threshold:
+        logger.info("{} pass skipped for {}, {} new facts", label, principal_id, current - last)
+        return
+    await build()
+    async with acting_as(principal_id) as session:
+        await Watermark.set_value(session, principal_id, kind, counter=current)
 
 
 def config_from_label(label: str) -> dict[str, bool]:
@@ -120,6 +152,56 @@ def config_from_label(label: str) -> dict[str, bool]:
         axis, _, value = pair.partition("=")
         overrides[axis] = value == "True"
     return overrides
+
+
+def per_config_best(per_config: dict[str, float]) -> str | None:
+    """The swept config label with the highest score, null when nothing was scored.
+
+    per_config: hit-at-k keyed by the rerank/ppr toggle label, EvalReport's own per_config field.
+    """
+    return max(per_config, key=lambda label: per_config[label]) if per_config else None
+
+
+async def store_scorecard(
+    session: AsyncSession, principal_id: uuid.UUID, report: EvalReport, best: str | None
+) -> None:
+    """Persist the weekly self-eval scorecard as the scorecard watermark's payload.
+
+    session: an open session already acting as principal_id.
+    principal_id: identity the scorecard is stored under.
+    report: the freshly scored recall-quality report.
+    best: the argmax over report.per_config, null when nothing was scored.
+    """
+    await Watermark.set_value(
+        session,
+        principal_id,
+        Watermark.Kind.scorecard,
+        counter=report.n,
+        payload={
+            "hit_at_k": report.hit_at_k,
+            "ndcg_at_k": report.ndcg_at_k,
+            "mrr": report.mrr,
+            "per_config": report.per_config,
+            "best": best,
+            "significant_best": report.significant_best,
+        },
+    )
+
+
+def apply_significant_win(significant_best: str | None) -> dict[str, bool]:
+    """Flip the live settings singleton to a significant sweep win, the EvolveMem adaptive loop.
+
+    Mutates `settings` in-process only; env stays the durable config across a restart. Returns the
+    flipped fields, empty when there was no significant win to apply.
+
+    significant_best: the swept config label that beat the current one, null when none did.
+    """
+    if significant_best is None:
+        return {}
+    flip = config_from_label(significant_best)
+    for axis, value in flip.items():
+        setattr(settings, axis, value)
+    return flip
 
 
 class DecayTask(ScheduledTask):
@@ -146,19 +228,13 @@ class CommunitiesTask(ScheduledTask):
     name = "communities"
 
     async def run(self, principal_id: uuid.UUID) -> None:
-        async with acting_as(principal_id) as session:
-            current = await latest_fact_count(session)
-            last = await Watermark.read(session, principal_id, Watermark.Kind.fact_count)
-        if current - last < settings.communities_every_n_facts:
-            logger.info(
-                "community pass skipped for {}, {} new facts", principal_id, current - last
-            )
-            return
-        await build_communities(principal_id=principal_id)
-        async with acting_as(principal_id) as session:
-            await Watermark.set_value(
-                session, principal_id, Watermark.Kind.fact_count, counter=current
-            )
+        await run_if_grown(
+            principal_id,
+            Watermark.Kind.fact_count,
+            settings.communities_every_n_facts,
+            partial(build_communities, principal_id=principal_id),
+            "community",
+        )
 
 
 class RaptorTask(ScheduledTask):
@@ -167,17 +243,13 @@ class RaptorTask(ScheduledTask):
     name = "raptor"
 
     async def run(self, principal_id: uuid.UUID) -> None:
-        async with acting_as(principal_id) as session:
-            current = await latest_fact_count(session)
-            last = await Watermark.read(session, principal_id, Watermark.Kind.raptor_fact_count)
-        if current - last < settings.raptor_every_n_facts:
-            logger.info("raptor pass skipped for {}, {} new facts", principal_id, current - last)
-            return
-        await build_raptor(principal_id=principal_id)
-        async with acting_as(principal_id) as session:
-            await Watermark.set_value(
-                session, principal_id, Watermark.Kind.raptor_fact_count, counter=current
-            )
+        await run_if_grown(
+            principal_id,
+            Watermark.Kind.raptor_fact_count,
+            settings.raptor_every_n_facts,
+            partial(build_raptor, principal_id=principal_id),
+            "raptor",
+        )
 
 
 class ProfileRefreshTask(ScheduledTask):
@@ -201,30 +273,11 @@ class SelfImproveTask(ScheduledTask):
 
     async def run(self, principal_id: uuid.UUID) -> None:
         report = await run_eval(None, principal_id=principal_id)
-        best = (
-            max(report.per_config, key=lambda label: report.per_config[label])
-            if report.per_config
-            else None
-        )
+        best = per_config_best(report.per_config)
         async with acting_as(principal_id) as session:
-            await Watermark.set_value(
-                session,
-                principal_id,
-                Watermark.Kind.scorecard,
-                counter=report.n,
-                payload={
-                    "hit_at_k": report.hit_at_k,
-                    "ndcg_at_k": report.ndcg_at_k,
-                    "mrr": report.mrr,
-                    "per_config": report.per_config,
-                    "best": best,
-                    "significant_best": report.significant_best,
-                },
-            )
-        if report.significant_best is not None:
-            flip = config_from_label(report.significant_best)
-            for axis, value in flip.items():
-                setattr(settings, axis, value)
+            await store_scorecard(session, principal_id, report, best)
+        flip = apply_significant_win(report.significant_best)
+        if flip:
             logger.info("self-improve flipped {} for {} in-process", flip, principal_id)
         logger.info(
             "self-improve scored {} items for {}, best {}, flipped {}",

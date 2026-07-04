@@ -1,9 +1,9 @@
 import uuid
 from datetime import datetime
+from typing import cast
 
+from sqlalchemy import DateTime, func
 from sqlmodel import Field
-
-from .fields import tz_datetime_field
 
 
 class Id:
@@ -22,9 +22,28 @@ class Id:
 
 
 class Timestamped:
-    """A first-seen `created_at` server-stamped on insert.
+    """A first-seen `created_at` and a last-write `updated_at`, both server-stamped.
 
-    created_at: first-seen timestamp.
+    Both fields build their columns from `sa_column_kwargs`, never a literal
+    `sa_column=Column(...)`, so every subclass gets its own fresh `Column` rather than sharing
+    one physical instance across tables.
+
+    created_at: first-seen timestamp, stamped on insert and never touched again.
+    updated_at: last-write timestamp, stamped on insert and bumped on every ORM-flush `UPDATE`
+        (SQLAlchemy's `onupdate`), so a raw upsert that never goes through the ORM's own
+        `UPDATE`, `Watermark`'s `on_conflict_do_update` set clause, still has to stamp
+        `"updated_at": func.now()` itself.
     """
 
-    created_at: datetime = tz_datetime_field()
+    created_at: datetime = Field(
+        default=None,
+        nullable=False,
+        sa_type=cast(type[datetime], DateTime(timezone=True)),
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    updated_at: datetime = Field(
+        default=None,
+        nullable=False,
+        sa_type=cast(type[datetime], DateTime(timezone=True)),
+        sa_column_kwargs={"server_default": func.now(), "onupdate": func.now()},
+    )

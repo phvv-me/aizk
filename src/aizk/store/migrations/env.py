@@ -30,18 +30,21 @@ def do_run_migrations(connection: Connection) -> None:
         vchord_bm25 lane's `chunk.bm25` column and its index are the one deliberately-unmapped
         column in the schema, a bm25vector type the ORM has no ann for, kept in sync by a
         migration-owned trigger and read only through a text() statement, so they are excluded the
-        same way rather than misread as drift. `live_fact` is hand-written view DDL, reflected as
-        an ordinary table since autogenerate cannot tell a view from a table at all; the ORM side
-        is excluded by `LiveFact`'s `info={"is_view": True}` tag, while the reflected side, a
-        plain `Table` carrying no such info, is excluded by name.
+        same way rather than misread as drift. Every `ViewBase` view (`live_fact` today) is
+        hand-written `CREATE VIEW` DDL, reflected as an ordinary table since autogenerate cannot
+        tell a view from a table at all; the ORM side is excluded by its own `info={"is_view":
+        True}` tag, while the reflected side, a plain `Table` carrying no such info, is excluded
+        by the `views` name set `store.mixins.view.register_view` stamps onto the shared metadata,
+        so a future view needs no edit here.
         """
+        views = target_metadata.info.get("views", set())
         if type_ == "table" and object.info.get("is_view"):
             return False
         if type_ == "column" and reflected and compare_to is None:
             return not (name == "bm25" and object.table.name == "chunk")
         if type_ == "index" and reflected and compare_to is None:
-            return name != "ix_chunk_bm25" and object.table.name != "live_fact"
-        if type_ == "table" and reflected and compare_to is None and name == "live_fact":
+            return name != "ix_chunk_bm25" and object.table.name not in views
+        if type_ == "table" and reflected and compare_to is None and name in views:
             return False
         if type_ != "table" or not reflected or compare_to is not None:
             return True

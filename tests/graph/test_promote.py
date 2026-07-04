@@ -1,13 +1,12 @@
-import asyncio
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
 from typing import NamedTuple
 
+import dbutil
 import pytest
-from graphdb import add_principals, drop_principals, purge_owner
 from sqlalchemy import text
 
+from aizk.exceptions import NotVisibleError, ScopeNotFoundError
 from aizk.graph.promote import promote
 from aizk.store import (
     Chunk,
@@ -17,21 +16,13 @@ from aizk.store import (
     FactClaim,
     FactContent,
     acting_as,
-    async_session,
 )
 
 UNIT_VECTOR = [1.0] + [0.0] * 1023
 
 
-class Lattice(NamedTuple):
-    """The principals and the bridging group one promotion is probed against.
-
-    promoter: owner of the private source and a member of the target team.
-    member: a second principal in the target team who owns nothing.
-    outsider: a principal in no shared group, who must stay blind to the copy.
-    team: the target group's id.
-    team_name: the group's name, the surface form promote resolves the scope from.
-    """
+class Grid(NamedTuple):
+    """The principals and the bridging team one promotion is probed against."""
 
     promoter: uuid.UUID
     member: uuid.UUID
@@ -40,49 +31,23 @@ class Lattice(NamedTuple):
     team_name: str
 
 
-@asynccontextmanager
-async def lattice(*, joined: bool = True) -> AsyncIterator[Lattice]:
-    """Seed three principals and a team the promoter and member share, tearing it all down on exit.
+@pytest.fixture
+def grid(migrated_db: None) -> Iterator[Grid]:
+    """A reset schema seeding three principals and one team, memberships added per test."""
+    lattice = Grid(uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), f"team-{uuid.uuid4()}")
 
-    joined: whether the promoter is enrolled in the team, false to probe the publish-right guard.
-    """
-    grid = Lattice(
-        promoter=uuid.uuid4(),
-        member=uuid.uuid4(),
-        outsider=uuid.uuid4(),
-        team=uuid.uuid4(),
-        team_name=f"team {uuid.uuid4().hex}",
-    )
-    await add_principals(grid.promoter, grid.member, grid.outsider)
-    async with async_session()() as session, session.begin():
-        await session.execute(
-            text("INSERT INTO group_ (id, name) VALUES (:t, :name)"),
-            {"t": grid.team, "name": grid.team_name},
-        )
-        rows = [{"p": grid.member, "t": grid.team}]
-        if joined:
-            rows.append({"p": grid.promoter, "t": grid.team})
-        await session.execute(
-            text("INSERT INTO membership (principal_id, group_id) VALUES (:p, :t)"), rows
-        )
-    try:
-        yield grid
-    finally:
-        for principal in (grid.promoter, grid.member, grid.outsider):
-            await purge_owner(principal)
-        async with async_session()() as session, session.begin():
-            await session.execute(
-                text("DELETE FROM membership WHERE group_id = :t"), {"t": grid.team}
-            )
-            await session.execute(text("DELETE FROM group_ WHERE id = :t"), {"t": grid.team})
-        await drop_principals(grid.promoter, grid.member, grid.outsider)
+    async def setup() -> None:
+        await dbutil.reset_db()
+        for principal in (lattice.promoter, lattice.member, lattice.outsider):
+            await dbutil.seed_principal(principal)
+        await dbutil.seed_group(lattice.team, name=lattice.team_name)
+
+    dbutil.run(setup())
+    yield lattice
 
 
 async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
-    """Plant a private document with one chunk, one entity, and one fact owned by the promoter.
-
-    promoter: owner of every private row, the only principal who may read it.
-    """
+    """Plant a private document with one chunk, one entity, and one fact owned by the promoter."""
     document, chunk, entity = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     async with acting_as(promoter) as session:
         session.add(
@@ -105,78 +70,73 @@ async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
 
 
 async def visible_copy(reader: uuid.UUID, source: uuid.UUID) -> uuid.UUID | None:
-    """The id of the promoted copy a reader can see, null when blind to it.
-
-    reader: principal whose visibility scopes the lookup.
-    source: the original document the copy points back to.
-    """
+    """The id of the promoted copy a reader can see, null when blind to it."""
     async with acting_as(reader) as session:
         return await session.scalar(
             text("SELECT id FROM document WHERE promoted_from = :src"), {"src": source}
         )
 
 
-@pytest.mark.usefixtures("migrated_db")
-def test_promote_copies_into_scope_and_an_outsider_stays_blind() -> None:
-    """A copy lands in team scope a member reads, the outsider stays blind, source untouched."""
+def test_promote_copies_into_scope_and_an_outsider_stays_blind(grid: Grid) -> None:
+    """A copy lands in team scope a member reads, the outsider stays blind, the source untouched.
 
-    async def probe() -> tuple[
-        int, uuid.UUID | None, uuid.UUID | None, uuid.UUID | None, uuid.UUID | None
-    ]:
-        async with lattice() as grid:
-            source = await seed_source(grid.promoter)
-            count = await promote(source, grid.team_name, principal_id=grid.promoter)
-            async with acting_as(grid.promoter) as session:
-                source_scope = await session.scalar(
-                    text("SELECT scope FROM document WHERE id = :id"), {"id": source}
-                )
-            return (
-                count,
-                await visible_copy(grid.promoter, source),
-                await visible_copy(grid.member, source),
-                await visible_copy(grid.outsider, source),
-                source_scope,
+    The count sums the document, its chunks, and its facts, the copy points back at the source
+    through promoted_from, a team member reads the same copy, an outsider in no shared group reads
+    nothing, and the source keeps its private empty scope set, never widened by the promotion.
+    """
+
+    async def probe() -> tuple[int, uuid.UUID | None, uuid.UUID | None, uuid.UUID | None, list]:
+        await dbutil.seed_membership(grid.promoter, grid.team, "writer")
+        await dbutil.seed_membership(grid.member, grid.team, "reader")
+        source = await seed_source(grid.promoter)
+        count = await promote(source, grid.team_name, principal_id=grid.promoter)
+        async with acting_as(grid.promoter) as session:
+            source_scopes = await session.scalar(
+                text("SELECT scopes FROM document WHERE id = :id"), {"id": source}
             )
+        return (
+            count,
+            await visible_copy(grid.promoter, source),
+            await visible_copy(grid.member, source),
+            await visible_copy(grid.outsider, source),
+            list(source_scopes),
+        )
 
-    count, promoter_sees, member_sees, outsider_sees, source_scope = asyncio.run(probe())
-    assert count >= 1
+    count, promoter_sees, member_sees, outsider_sees, source_scopes = dbutil.run(probe())
+    assert count == 3  # the document, its one chunk, and its one fact
     assert promoter_sees is not None
     assert member_sees == promoter_sees
     assert outsider_sees is None
-    assert source_scope is None
+    assert source_scopes == []
 
 
-@pytest.mark.usefixtures("migrated_db")
-def test_promote_into_an_unknown_scope_raises() -> None:
+def test_promote_into_an_unknown_scope_raises(grid: Grid) -> None:
     """Naming a group that does not exist fails before any copy is written."""
 
     async def probe() -> None:
-        async with lattice() as grid:
-            with pytest.raises(ValueError, match="no scope named"):
-                await promote(uuid.uuid4(), "no such team", principal_id=grid.promoter)
+        await dbutil.seed_membership(grid.promoter, grid.team, "writer")
+        with pytest.raises(ScopeNotFoundError, match="no scope named"):
+            await promote(uuid.uuid4(), "no such team", principal_id=grid.promoter)
 
-    asyncio.run(probe())
+    dbutil.run(probe())
 
 
-@pytest.mark.usefixtures("migrated_db")
-def test_promote_by_a_non_member_raises() -> None:
+def test_promote_by_a_non_member_raises(grid: Grid) -> None:
     """Membership, not the scope predicate alone, is the publish right, so a non-member fails."""
 
     async def probe() -> None:
-        async with lattice(joined=False) as grid:
-            with pytest.raises(ValueError, match="may not publish"):
-                await promote(uuid.uuid4(), grid.team_name, principal_id=grid.promoter)
+        with pytest.raises(ValueError, match="may not publish"):
+            await promote(uuid.uuid4(), grid.team_name, principal_id=grid.promoter)
 
-    asyncio.run(probe())
+    dbutil.run(probe())
 
 
-@pytest.mark.usefixtures("migrated_db")
-def test_promote_of_an_invisible_document_raises() -> None:
+def test_promote_of_an_invisible_document_raises(grid: Grid) -> None:
     """A member promoting a document they cannot see is refused before any copy is written."""
 
     async def probe() -> None:
-        async with lattice() as grid:
-            with pytest.raises(ValueError, match="no visible document"):
-                await promote(uuid.uuid4(), grid.team_name, principal_id=grid.promoter)
+        await dbutil.seed_membership(grid.promoter, grid.team, "writer")
+        with pytest.raises(NotVisibleError, match="no visible document"):
+            await promote(uuid.uuid4(), grid.team_name, principal_id=grid.promoter)
 
-    asyncio.run(probe())
+    dbutil.run(probe())

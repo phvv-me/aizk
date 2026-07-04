@@ -1,30 +1,57 @@
 services:
   db:
     image: tensorchord/vchord-suite:pg18-latest
+    # the compose-level ${VAR:-default} substitutions below are filled from the project's own
+    # .env (compose auto-loads it from this file's directory, no env_file needed for these), the
+    # single file `.env.example` documents field for field alongside `config/settings.py`'s own
+    # defaults, so a password or port changed once here is the same edit `Settings` picks up.
     environment:
+      # POSTGRES_USER stays the fixed "aizk" literal, not a var: it is the owning role every
+      # migration and `initdb/roles.sh` connects as, and `Settings.admin_database_url` hardcodes
+      # the same literal role name, only the password travels through the environment.
       POSTGRES_USER: aizk
-      POSTGRES_PASSWORD: aizk
-      POSTGRES_DB: aizk
+      POSTGRES_PASSWORD: ${AIZK_ADMIN_PASSWORD:-aizk}
+      POSTGRES_DB: ${AIZK_DB_NAME:-aizk}
+    # unlike the interpolations above, which compose resolves on the host before the container
+    # ever starts, `roles.sh` runs its own shell inside the container and needs AIZK_APP_PASSWORD
+    # as a real environment variable there to read; env_file passes the whole .env through as
+    # container env for exactly that, `required: false` so a checkout with no .env yet (only the
+    # committed .env.example) still starts clean on every field's own default.
+    env_file:
+      - path: .env
+        required: false
     ports:
-      - "5433:5432"
+      - "${AIZK_DB_PORT:-5433}:5432"
     # the image's own CMD (`docker inspect tensorchord/vchord-suite:pg18-latest`) already carries
     # shared_preload_libraries and search_path, and a compose `command:` replaces CMD outright
     # rather than appending to it, so both are repeated here verbatim alongside the two declared
-    # GUC defaults this stack adds: app.uid and app.scope, the identity and reading-lens settings
+    # GUC defaults this stack adds: app.uid and app.scopes, the identity and reading-lens settings
     # `store/events.py`'s bind_principal sets per transaction. A custom "class.name" GUC needs no
     # extension or placeholder to declare it, a bare `-c app.uid=...` is enough, and with a real
     # default in place an untouched session already reads the anonymous principal and the
     # unnarrowed lens rather than the empty-string placeholder an undeclared custom GUC reverts to.
+    # Deliberately left out of .env: `Settings.anonymous_principal_id`'s own docstring calls this
+    # exact zero uuid "fixed, not configurable", since the RLS moat predicate's `::uuid` cast
+    # depends on every unscoped session binding it, so making it an env knob would dress an
+    # invariant up as a choice. app.scopes has no settings counterpart at all, an unnarrowed
+    # session is simply Postgres's own empty-string GUC default, which `current_setting`'s own
+    # `nullif(..., '')` reads back as null rather than an empty-array cast.
     command:
       - postgres
       - -c
-      - shared_preload_libraries=vchord,vchord_bm25,vector,pg_tokenizer
+      # pg_stat_statements rides alongside the vchord suite's own libraries so every profiling
+      # wave's Postgres-side query stats (Phase 2's build-slice and recall measurements) come
+      # from the catalog view rather than an ad-hoc EXPLAIN ANALYZE per query; loading a shared
+      # library only ever takes effect on the next Postgres start, `ops.setup`'s own
+      # `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` is the idempotent other half that
+      # makes the view queryable once this restart has happened.
+      - shared_preload_libraries=vchord,vchord_bm25,vector,pg_tokenizer,pg_stat_statements
       - -c
       - search_path="$$user", public, bm25_catalog, tokenizer_catalog
       - -c
       - app.uid=00000000-0000-0000-0000-000000000000
       - -c
-      - app.scope=
+      - app.scopes=
     volumes:
       # pg18+ images store data under a major-version-specific subdirectory (pg_ctlcluster-style),
       # so the mount point is the parent dir now, not .../data directly
@@ -33,7 +60,9 @@ services:
       # restricted aizk_app role and its schema-wide default privileges, so 0001_init never has
       # to create the role itself. Postgres runs every /docker-entrypoint-initdb.d/ script exactly
       # once, only when the data directory is empty, so a `down -v && up` is required to re-run it.
-      - ./initdb/roles.sql:/docker-entrypoint-initdb.d/roles.sql:ro
+      # A .sh script (not .sql) so it can read AIZK_APP_PASSWORD from its own container env rather
+      # than hardcoding the role's password inline.
+      - ./initdb/roles.sh:/docker-entrypoint-initdb.d/roles.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U aizk -d aizk"]
       interval: 5s
@@ -43,33 +72,35 @@ services:
   # vLLM serves Qwen3-VL-Embedding-2B over an OpenAI-compatible /v1/embeddings, so the model loads
   # in this container, never inside aizk. --runner pooling is the current flag (--task embed was
   # removed), is_matryoshka lets a request set dimensions=1024 to truncate the native 2048-d output.
-  # FP8 is the Ada 4090's native path, so the weights load quantized, and a 0.15 memory fraction
+  # FP8 is the Ada 4090's native path, so the weights load quantized, and a 0.30 memory fraction
   # leaves room for the reranker and the chat model to co-reside on the same 24 GB card. Every
   # serving knob below is an .env var with an inline default, so flipping precision or model is an
   # .env edit and never a yaml one. Bound to localhost only because vLLM ships unauthenticated;
-  # never expose it on a public address.
+  # never expose it on a public address. AIZK_EMBED_CHECKPOINT (the HF weights to load) and
+  # AIZK_EMBED_MODEL (the served alias `config/settings.py`'s embed_model must match) are two
+  # different vars on purpose, since the checkpoint path is not a usable served name.
   vllm-emb:
     image: vllm/vllm-openai:v0.24.0
     command:
       - "--model"
-      - "${EMBED_MODEL:-Qwen/Qwen3-VL-Embedding-2B}"
+      - "${AIZK_EMBED_CHECKPOINT:-Qwen/Qwen3-VL-Embedding-2B}"
       - "--runner"
       - "pooling"
       - "--quantization"
-      - "${EMBED_QUANTIZATION:-fp8}"
+      - "${AIZK_EMBED_QUANTIZATION:-fp8}"
       - "--gpu-memory-utilization"
-      - "${EMBED_GPU_MEM_UTIL:-0.30}"
+      - "${AIZK_EMBED_GPU_MEM_UTIL:-0.30}"
       # cap the context far below the model's 262K native length; embeddings only see short chunks,
       # and sizing the KV cache for 262K needs 28 GiB and overflows the 4090
       - "--max-model-len"
-      - "${EMBED_MAX_MODEL_LEN:-8192}"
+      - "${AIZK_EMBED_MAX_MODEL_LEN:-8192}"
       - "--served-model-name"
-      - "qwen3-vl-emb"
+      - "${AIZK_EMBED_MODEL:-qwen3-vl-emb}"
       - "--trust-remote-code"
       - "--hf-overrides"
       - '{"is_matryoshka": true}'
     ports:
-      - "127.0.0.1:${EMBED_PORT:-8000}:8000"
+      - "127.0.0.1:${AIZK_EMBED_PORT:-8000}:8000"
     ipc: host
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
@@ -86,23 +117,27 @@ services:
   # chat model on the one GPU. Qwen3-Reranker ships as a causal LM, so vLLM needs the hf-overrides
   # below to route it through Qwen3ForSequenceClassification and read the yes/no classifier token
   # vLLM scores from, plus the reranker's own chat template, both required for the /v1/rerank and
-  # /v1/score endpoints to work; FP8 and a 0.20 memory fraction keep it within the shared 4090. The
-  # served model name must match AIZK_RERANK_MODEL so the request's model id resolves here.
+  # /v1/score endpoints to work; FP8 and a 0.32 memory fraction keep it within the shared 4090,
+  # trimmed from 0.35 to make room for the vllm-llm service added alongside it (0.30 + 0.32 + 0.35
+  # is the proven three-way split on this 24 GB card).
+  # AIZK_RERANK_MODEL feeds both --model and --served-model-name, unlike the embedder, since the
+  # reranker's HF checkpoint id already reads fine as a served name, and it must match
+  # `config/settings.py`'s own rerank_model default for the request's model id to resolve here.
   vllm-rerank:
     image: vllm/vllm-openai:v0.24.0
     command:
       - "--model"
-      - "${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
+      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
       - "--runner"
       - "pooling"
       - "--quantization"
-      - "${RERANK_QUANTIZATION:-fp8}"
+      - "${AIZK_RERANK_QUANTIZATION:-fp8}"
       - "--gpu-memory-utilization"
-      - "${RERANK_GPU_MEM_UTIL:-0.35}"
+      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.32}"
       - "--max-model-len"
-      - "${RERANK_MAX_MODEL_LEN:-8192}"
+      - "${AIZK_RERANK_MAX_MODEL_LEN:-8192}"
       - "--served-model-name"
-      - "${RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
+      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
       - "--trust-remote-code"
       - "--hf-overrides"
       - >-
@@ -111,7 +146,7 @@ services:
       - "--chat-template"
       - "examples/pooling/score/template/qwen3_reranker.jinja"
     ports:
-      - "127.0.0.1:${RERANK_PORT:-8001}:8000"
+      - "127.0.0.1:${AIZK_RERANK_PORT:-8001}:8000"
     ipc: host
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
@@ -124,29 +159,66 @@ services:
               capabilities: ["gpu"]
 
   # vLLM serves the graph-extraction chat model over an OpenAI-compatible /v1/chat/completions,
-  # the third co-resident model on the same 4090, reached by aizk's instructor client at llm_url.
-  # FP8 and a 0.45 memory fraction give the chat model the largest share of the three, since its KV
-  # cache scales with the extraction context rather than the short chunks the other two lanes see.
-  # opt-in profile: an 8B fp8 LLM beside the embedder and reranker overflows a 24 GB card,
-  # so extraction defaults to an external endpoint (Ollama or a cloud provider via
-  # AIZK_LLM_URL) and this service starts only with `docker compose --profile llm up`.
+  # the third co-resident model on the same 4090, reached by aizk's `structured` seam at llm_url.
+  # A default-on service now, not an opt-in profile: extraction replaced Ollama with this
+  # co-resident vLLM lane, a 0.30 memory fraction sized to fit beside the embedder (0.30) and the
+  # reranker (0.35) on one 24 GB card. Model defaults to Gemma 4 E2B (the Efficient series, 2.3B
+  # effective, Apache 2.0), the official Google w4a16 QAT checkpoint in compressed-tensors format
+  # (`google/gemma-4-E2B-it-qat-w4a16-ct`), ungated, day-0 vLLM support, JSON/function-calling
+  # trained. E4B (`google/gemma-4-E4B-it-qat-w4a16-ct`) was the first choice but ruled out twice
+  # over: its process footprint measured a fixed ~9.23 GiB against only ~9.59 GiB physically free
+  # once the embedder and reranker hold their own share, a margin under 400 MiB that persisted
+  # identically across five tuning attempts (gpu-memory-utilization 0.35/0.32/0.34, max-num-seqs
+  # 48/16/12, with and without PYTORCH_CUDA_ALLOC_CONF=expandable_segments); and separately, even
+  # standalone with the whole GPU to itself, E4B could not reliably answer the combined call's
+  # strict-mode JSON schema at all on this vLLM version (v0.24.0) — every attempt (a trivial
+  # one-sentence input included) ran to extract_max_tokens without ever emitting valid JSON,
+  # while the identical call against E2B worked cleanly across 3000+ real chunks. E2B's 7.23 GiB
+  # footprint fits with room to spare and its structured output was fully reliable throughout.
+  # Qwen3.5-4B was ruled out earlier still: it ships no official GPTQ-Int4 at 4B, and its
+  # Gated-DeltaNet hybrid architecture adds a fixed-size Mamba cache block per concurrent sequence
+  # on top of the ordinary KV cache, which capped real concurrency near 12-13 sequences on this
+  # shared card regardless of max-model-len; Gemma 4's local/global attention hybrid carries no
+  # such extra per-sequence floor, so ordinary `--gpu-memory-utilization`/`--max-model-len` tuning
+  # behaves predictably. vLLM auto-detects the compressed-tensors quant config from the
+  # checkpoint, so AIZK_LLM_QUANTIZATION is still named explicitly, matching how every other
+  # service here names its own quantization instead of relying on autodetection silently.
+  # --enable-prefix-caching and --enable-chunked-prefill raise throughput under aizk's own
+  # concurrent chunk load; --max-num-seqs matches settings.graph_build_concurrency so this
+  # pipeline's own concurrency is what saturates vLLM's continuous batching, and structured output
+  # already runs through vLLM's default xgrammar backend with no flag needed. Gemma 4 answers
+  # directly with no thinking preamble unless a `<|think|>` token is placed in the system prompt,
+  # the opposite default of Qwen3's hybrid-thinking models, so AIZK_LLM_CHAT_TEMPLATE_KWARGS stays
+  # at its empty default, no extra_body needed to keep the combined call's output compact.
+  # AIZK_LLM_CHECKPOINT/AIZK_LLM_MODEL split the same way as the embedder's, checkpoint path
+  # versus served alias, and the alias must match `config/settings.py`'s own llm_model default.
   vllm-llm:
-    profiles: ["llm"]
     image: vllm/vllm-openai:v0.24.0
+    # PyTorch's own suggested fix for allocator fragmentation under a tight shared budget; kept
+    # even though E2B has room to spare, since it cost nothing during the E4B tuning search and
+    # buys headroom back for anyone who switches AIZK_LLM_CHECKPOINT to the larger model.
+    environment:
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
     command:
       - "--model"
-      - "${LLM_MODEL:-Qwen/Qwen3-8B-FP8}"
+      - "${AIZK_LLM_CHECKPOINT:-google/gemma-4-E2B-it-qat-w4a16-ct}"
       - "--quantization"
-      - "${LLM_QUANTIZATION:-fp8}"
+      - "${AIZK_LLM_QUANTIZATION:-compressed-tensors}"
       - "--gpu-memory-utilization"
-      - "${LLM_GPU_MEM_UTIL:-0.45}"
+      - "${AIZK_LLM_GPU_MEM_UTIL:-0.35}"
       - "--max-model-len"
-      - "${LLM_MAX_MODEL_LEN:-16384}"
+      - "${AIZK_LLM_MAX_MODEL_LEN:-8192}"
+      - "--max-num-seqs"
+      - "${AIZK_LLM_MAX_NUM_SEQS:-48}"
+      - "--kv-cache-dtype"
+      - "${AIZK_LLM_KV_CACHE_DTYPE:-fp8}"
+      - "--enable-prefix-caching"
+      - "--enable-chunked-prefill"
       - "--served-model-name"
-      - "qwen3-llm"
+      - "${AIZK_LLM_MODEL:-gemma4-e2b-llm}"
       - "--trust-remote-code"
     ports:
-      - "127.0.0.1:${LLM_PORT:-8002}:8000"
+      - "127.0.0.1:${AIZK_LLM_PORT:-8002}:8000"
     ipc: host
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface

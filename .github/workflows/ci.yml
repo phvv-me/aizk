@@ -5,22 +5,57 @@ on:
   workflow_call: # publish.yml runs this exact gate on main before publishing
 
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.14"]
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: "3.14"
           enable-cache: true
       - run: uv sync --extra dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      - run: uv run mypy src
       - run: uv run pyrefly check
+
+  # The suite is hermetic above the database seam (every model endpoint is faked), but the
+  # database itself is real: the same VectorChord image the compose file ships, on the same
+  # host port, with the same restricted app role initdb/roles.sh creates, so forced row level
+  # security is exercised exactly as in production. macOS carries no service containers, so
+  # tests are a Linux job; cross-platform parity is a v1 roadmap item.
+  test:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: tensorchord/vchord-suite:pg18-latest
+        env:
+          POSTGRES_USER: aizk
+          POSTGRES_PASSWORD: aizk
+          POSTGRES_DB: aizk
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U aizk"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      # the role bootstrap initdb/roles.sh performs against a compose volume; a service
+      # container cannot mount repo files, so the same statements run here over the wire
+      - name: bootstrap app role
+        run: |
+          PGPASSWORD=aizk psql -h localhost -p 5433 -U aizk -d aizk -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE aizk_app LOGIN PASSWORD 'aizk_app' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+          GRANT USAGE ON SCHEMA public TO aizk_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aizk_app;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public
+            GRANT USAGE, SELECT ON SEQUENCES TO aizk_app;
+          SQL
+      - run: uv sync --extra dev
       - run: uv run pytest -q

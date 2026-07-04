@@ -13,6 +13,19 @@ other current facts touching a dense_fact's subject or object entities. The fina
 row's lane as kind (chunk/fact/neighbor) over one typed column set wide enough for every lane, null
 in whichever half a lane does not use.
 
+dense_chunk and lexical_chunk read `chunk` alone, deferring the `document` join to chunk_scored
+rather than joining before each lane's own ORDER BY/LIMIT the way an earlier version did: chunk
+carries its own owner_id/scope and RLS policy, so the join bought no visibility the row didn't
+already have, only document_title/source_uri/promoted display columns neither lane needs to rank
+by. EXPLAIN ANALYZE against a seeded corpus showed the pre-join shape defeating both the vchordrq
+and vchord_bm25 index's own ORDER BY/LIMIT scan, forcing a row_number() window function to
+materialize and sort the full joined table before either lane's LIMIT ever applied (the bm25 lane
+alone went from 62ms to 5ms once deferred); joining only the k fusion survivors, not the two lanes'
+fusion_depth candidates each, is also strictly less join work. The domain invariant this leans on,
+that a chunk's owner_id/scope always match its parent document's (both stamped together at
+ingest), is exactly why document's own RLS predicate was always redundant here, never a widened
+read.
+
 bm25_backend: which lexical lane the chunk search uses, vchord_bm25 for the bundled VectorChord BM25
     index over a tokenized bm25vector column, or tsvector for the native Postgres full-text
     ts_rank path, the only branch this template carries.
@@ -37,25 +50,23 @@ RETURNS TABLE (
 )
 LANGUAGE sql STABLE AS $$
 WITH dense_chunk AS (
-    SELECT c.id AS id, d.title AS document_title, d.source_uri AS source_uri,
-           c.text AS text, d.promoted_from IS NOT NULL AS promoted,
+    SELECT c.id AS id, c.document_id AS document_id, c.text AS text,
            row_number() OVER (ORDER BY c.embedding <=> qvec) AS rank
-    FROM chunk c JOIN document d ON d.id = c.document_id
+    FROM chunk c
     WHERE c.embedding IS NOT NULL
     ORDER BY c.embedding <=> qvec
     LIMIT fusion_depth
 ),
 {% if bm25_backend == "vchord_bm25" %}
 lexical_chunk AS (
-    SELECT id, document_title, source_uri, text, promoted,
+    SELECT id, document_id, text,
            row_number() OVER (ORDER BY raw_rank) AS rank
     FROM (
-        SELECT c.id AS id, d.title AS document_title, d.source_uri AS source_uri,
-               c.text AS text, d.promoted_from IS NOT NULL AS promoted,
+        SELECT c.id AS id, c.document_id AS document_id, c.text AS text,
                c.bm25 <&> to_bm25query(
                    '{{ bm25_index }}', tokenize(qtext, '{{ bm25_tokenizer }}')
                ) AS raw_rank
-        FROM chunk c JOIN document d ON d.id = c.document_id
+        FROM chunk c
         ORDER BY raw_rank
         LIMIT fusion_depth
     ) ranked
@@ -63,31 +74,35 @@ lexical_chunk AS (
 ),
 {% else %}
 lexical_chunk AS (
-    SELECT c.id AS id, d.title AS document_title, d.source_uri AS source_uri,
-           c.text AS text, d.promoted_from IS NOT NULL AS promoted,
-           row_number() OVER (
-               ORDER BY ts_rank(c.tsv, plainto_tsquery('english', qtext)) DESC
-           ) AS rank
-    FROM chunk c JOIN document d ON d.id = c.document_id
-    WHERE c.tsv @@ plainto_tsquery('english', qtext)
-    ORDER BY ts_rank(c.tsv, plainto_tsquery('english', qtext)) DESC
-    LIMIT fusion_depth
+    SELECT id, document_id, text,
+           row_number() OVER (ORDER BY raw_rank DESC) AS rank
+    FROM (
+        SELECT c.id AS id, c.document_id AS document_id, c.text AS text,
+               ts_rank(c.tsv, plainto_tsquery('english', qtext)) AS raw_rank
+        FROM chunk c
+        WHERE c.tsv @@ plainto_tsquery('english', qtext)
+        ORDER BY raw_rank DESC
+        LIMIT fusion_depth
+    ) ranked
 ),
 {% endif %}
 fused_chunk AS (
-    SELECT id, document_title, source_uri, text, promoted,
+    SELECT id, document_id, text,
            sum(1.0 / (rrf_k + rank)) AS rrf_score
     FROM (
         SELECT * FROM dense_chunk
         UNION ALL
         SELECT * FROM lexical_chunk
     ) lanes
-    GROUP BY id, document_title, source_uri, text, promoted
+    GROUP BY id, document_id, text
 ),
 chunk_scored AS (
-    SELECT id, document_title, source_uri, text, promoted,
-           rrf_score + (CASE WHEN promoted THEN {{ promoted_bonus }} ELSE 0 END) AS score
-    FROM fused_chunk
+    SELECT fc.id, d.title AS document_title, d.source_uri AS source_uri, fc.text,
+           d.promoted_from IS NOT NULL AS promoted,
+           fc.rrf_score
+               + (CASE WHEN d.promoted_from IS NOT NULL THEN {{ promoted_bonus }} ELSE 0 END)
+               AS score
+    FROM fused_chunk fc JOIN document d ON d.id = fc.document_id
     ORDER BY score DESC
     LIMIT k
 ),

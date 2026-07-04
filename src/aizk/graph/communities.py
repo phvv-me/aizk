@@ -3,9 +3,9 @@ import uuid
 import networkx as nx
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..serving import Embedder
 from ..store import Community, EntityContent, LiveFact, acting_as
 from .models import CommunitySummary
 from .tier_builder import TierBuilder
@@ -136,33 +136,28 @@ async def build_communities(
 
 
 async def community_search(
-    query: str,
-    principal_id: uuid.UUID | None = None,
+    session: AsyncSession,
+    vector: list[float],
     k: int = 3,
-    scope: uuid.UUID | None = None,
 ) -> list[tuple[str, str, float]]:
-    """Rank stored community summaries against a query, return the closest as label and summary.
+    """Rank stored community summaries against an already-embedded query, closest first.
 
-    Embeds the query and ranks the row-level-security-visible communities by cosine distance to
-    their summary embedding, returning the top k as label, summary, and a similarity score. This is
-    the global lane recall folds in when a query reads thematic rather than pointed.
+    Ranks the row-level-security-visible communities by cosine distance to their summary
+    embedding and returns the top k as label, summary, and a similarity score. This is the global
+    lane recall folds in when a query reads thematic rather than pointed. Takes the caller's own
+    open, already principal- and scope-scoped session and an already-embedded query vector rather
+    than opening a session or embedding of its own, since recall's one round already holds both and
+    a second session here would open a second connection nested inside the first for no reason.
 
-    query: natural-language thematic query.
-    principal_id: identity whose row level security visibility scopes the communities, the system
-        principal when null.
+    session: open, principal- and scope-scoped session the caller already holds.
+    vector: dense query embedding.
     k: number of community summaries to return.
-    scope: group id narrowing the read to that group's composed graph, the whole visible union
-        when null.
     """
-    principal_id = principal_id or settings.system_principal_id
-    embedder = Embedder()
-    [vector] = await embedder.embed([query], mode="query")
     distance = Community.embedding.cosine_distance(vector)
-    async with acting_as(principal_id, scope) as session:
-        rows = await session.execute(
-            select(Community.label, Community.summary, distance.label("distance"))
-            .where(Community.embedding.is_not(None))
-            .order_by(distance)
-            .limit(k)
-        )
-        return [(row.label, row.summary, 1.0 - row.distance) for row in rows]
+    rows = await session.execute(
+        select(Community.label, Community.summary, distance.label("distance"))
+        .where(Community.embedding.is_not(None))
+        .order_by(distance)
+        .limit(k)
+    )
+    return [(row.label, row.summary, 1.0 - row.distance) for row in rows]

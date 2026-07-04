@@ -50,7 +50,7 @@ async def visible_canon(session: AsyncSession, group: Group) -> list[str]:
     return list(
         await session.scalars(
             select(LiveFact.statement)
-            .where(LiveFact.scope == group.id, LiveFact.reviewed_at.is_not(None))
+            .where(LiveFact.scopes.contains([group.id]), LiveFact.reviewed_at.is_not(None))
             .order_by(LiveFact.recorded.desc())
             .limit(settings.curation_review_canon_k)
         )
@@ -79,51 +79,88 @@ async def judge_pending(canon: list[str], pending: list[LiveFact]) -> CurationRe
     )
 
 
+def sort_verdicts(
+    pending: list[LiveFact], review: CurationReview
+) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    """Split the pending queue into approved and rejected claim ids, from the judge's own verdicts.
+
+    pending: the pending claims that were judged.
+    review: the judge's per-claim verdicts, echoing back the claim id each judges.
+    """
+    verdicts = {verdict.claim: verdict.approve for verdict in review.verdicts}
+    approved = [claim.id for claim in pending if verdicts.get(claim.id) is True]
+    rejected = [claim.id for claim in pending if verdicts.get(claim.id) is False]
+    return approved, rejected
+
+
+async def debounced(principal_id: uuid.UUID, group: Group, pending_count: int) -> bool:
+    """Whether the pending queue is empty or unchanged since the last review, the pass's skip
+    signal.
+
+    Unlike the total fact count `CommunitiesTask`/`RaptorTask` gate on, which only ever grows, a
+    pending queue also shrinks as claims are judged, so the skip condition is an unchanged count
+    since the last pass, catching both a still-empty queue and one unchanged since last time.
+
+    principal_id: the admin member this pass reviews on behalf of, the watermark's own owner.
+    group: the curated group being reviewed.
+    pending_count: how many claims are pending right now.
+    """
+    async with acting_as(principal_id) as session:
+        last = await Watermark.read(
+            session, principal_id, Watermark.Kind.curation_pending, ref=str(group.id)
+        )
+    return pending_count == 0 or pending_count == last
+
+
+async def apply_verdicts(
+    group_id: uuid.UUID, approved: list[uuid.UUID], rejected: list[uuid.UUID]
+) -> None:
+    """Approve and reject the judged claims, on the system-elevated session a curated write needs.
+
+    A still-pending claim is invisible to every reader but its own author under the ordinary
+    curation gate, so the read that found it and the write that resolves it both run under the
+    system principal's elevated reach; `curated_groups_administered` already vetted this pass's own
+    principal as the group's own admin member before this ever runs.
+
+    group_id: the curated group whose queue is being resolved.
+    approved: claim ids the judge approved.
+    rejected: claim ids the judge rejected.
+    """
+    async with system_session() as session:
+        group_row = await session.get(Group, group_id)
+        assert group_row is not None  # vetted moments ago by curated_groups_administered
+        if approved:
+            await group_row.approve_facts(session, approved)
+        if rejected:
+            await group_row.reject_facts(session, rejected)
+
+
 async def review_group(principal_id: uuid.UUID, group: Group) -> tuple[int, int]:
     """Judge one curated group's pending queue and approve or reject each claim, return the count.
 
-    Debounced on pending count: unlike the total fact count `CommunitiesTask`/`RaptorTask` gate on,
-    which only ever grows, a pending queue also shrinks as claims are judged, so the skip condition
-    is an unchanged count since the last pass, catching both a still-empty queue and one unchanged
-    since last time. The pending read and the approve-or-reject write run under the system
-    principal's elevated reach, since a still-pending claim is invisible to every reader but its
-    own author under the ordinary curation gate; `curated_groups_administered` already vetted this
-    principal as the group's own admin member before this ever runs. The watermark itself is this
-    principal's own private bookkeeping row, so it is read and written under this principal's own
-    session instead, the scope its write policy's WITH CHECK actually admits.
+    The watermark itself is this principal's own private bookkeeping row, so it is read and
+    written under this principal's own session, the scope its write policy's WITH CHECK admits.
 
     principal_id: the admin member this pass reviews on behalf of, the watermark's own owner.
     group: the curated group to review.
     """
     async with system_session() as session:
         pending = await group.pending_facts(session)
-    current = len(pending)
-    async with acting_as(principal_id) as session:
-        last = await Watermark.read(
-            session, principal_id, Watermark.Kind.curation_pending, ref=str(group.id)
+    if await debounced(principal_id, group, len(pending)):
+        logger.info(
+            "curation review skipped for group {}, {} still pending", group.id, len(pending)
         )
-    if current == 0 or current == last:
-        logger.info("curation review skipped for group {}, {} still pending", group.id, current)
         return 0, 0
     async with system_session() as session:
         canon = await visible_canon(session, group)
-    review = await judge_pending(canon, pending)
-    verdicts = {verdict.claim: verdict.approve for verdict in review.verdicts}
-    approved = [claim.id for claim in pending if verdicts.get(claim.id) is True]
-    rejected = [claim.id for claim in pending if verdicts.get(claim.id) is False]
-    async with system_session() as session:
-        group_row = await session.get(Group, group.id)
-        assert group_row is not None  # vetted moments ago by curated_groups_administered
-        if approved:
-            await group_row.approve_facts(session, approved)
-        if rejected:
-            await group_row.reject_facts(session, rejected)
+    approved, rejected = sort_verdicts(pending, await judge_pending(canon, pending))
+    await apply_verdicts(group.id, approved, rejected)
     async with acting_as(principal_id) as session:
         await Watermark.set_value(
             session,
             principal_id,
             Watermark.Kind.curation_pending,
-            counter=current,
+            counter=len(pending),
             ref=str(group.id),
         )
     logger.info(
@@ -131,7 +168,7 @@ async def review_group(principal_id: uuid.UUID, group: Group) -> tuple[int, int]
         group.id,
         len(approved),
         len(rejected),
-        current,
+        len(pending),
     )
     return len(approved), len(rejected)
 

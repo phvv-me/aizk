@@ -1,8 +1,58 @@
-/* aizk accent. Loads after base.css, sets only the
-   --brand-* hooks. The shared base maps them onto Material. */
+/* aizk brand. Loads after base.css. Monochrome and square.
+
+   The docs read as ink on paper in the light scheme and as clay lines
+   on black in the dark scheme. No accent hue anywhere, links carry
+   an underline instead of a color, and every corner is square. */
 
 :root {
-  --brand-primary: #f59e0b;
-  --brand-primary-dark: #d97706;
-  --brand-accent: #f59e0b;
+  --brand-primary: #000000;
+  --brand-primary-dark: #000000;
+  --brand-accent: #000000;
+}
+
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #ffffff;
+  --md-code-bg-color: #f2f2f2;
+  --md-accent-fg-color: #000000;
+  --md-typeset-a-color: #000000;
+}
+
+[data-md-color-scheme="slate"] {
+  --brand-accent: #ffffff;
+  --md-default-bg-color: #000000;
+  --md-code-bg-color: #111111;
+  --md-accent-fg-color: #ffffff;
+  --md-typeset-a-color: #ffffff;
+  --md-default-fg-color: #e8e8e8;
+}
+
+/* links are told apart by the underline, never by a hue */
+.md-typeset a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* the header seam follows the scheme instead of an accent hue */
+.md-header {
+  border-bottom-color: #ffffff;
+}
+
+[data-md-color-scheme="default"] .md-header {
+  border-bottom-color: #000000;
+}
+
+/* square edges everywhere the base rounds them */
+.md-typeset .grid.cards > ul > li,
+.md-typeset pre > code,
+.md-typeset .admonition,
+.md-typeset details,
+.md-typeset code,
+.md-search__form,
+.md-button {
+  border-radius: 0 !important;
+}
+
+.md-typeset .grid.cards > ul > li:hover {
+  transform: none;
+  box-shadow: none;
 }

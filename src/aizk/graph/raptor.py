@@ -6,11 +6,10 @@ import networkx as nx
 from loguru import logger
 from pgvector.utils import HalfVector
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..extract.ontology import EntityType
-from ..serving import Embedder
 from ..store import (
     Community,
     EntityClaim,
@@ -19,6 +18,7 @@ from ..store import (
     FactContent,
     acting_as,
 )
+from .admin import admin_session
 from .models import Node, RaptorReport
 from .tier_builder import TierBuilder
 
@@ -252,6 +252,76 @@ def part_of_claim(principal_id: uuid.UUID, content_id: uuid.UUID) -> FactClaim:
     )
 
 
+def summary_claim(
+    principal_id: uuid.UUID, content: EntityContent, level: int, summary: str
+) -> EntityClaim:
+    """One freshly minted RAPTOR summary's claim, stamped with its tree level and own text.
+
+    principal_id: identity that owns the tree.
+    content: the summary's own freshly minted entity content.
+    level: the level number this summary was rolled up to.
+    summary: the summary's own paragraph, duplicated onto the claim so recall reads it with no
+        extra join back to content.
+    """
+    return EntityClaim(
+        content_id=content.id,
+        owner_id=principal_id,
+        attributes={"level": level, "summary": summary},
+    )
+
+
+async def rolled_up_parent(
+    principal_id: uuid.UUID,
+    members: list[Node],
+    level: int,
+    new_parents: list[tuple[Node, list[float]]],
+) -> tuple[Node, EntityContent | None]:
+    """A non-singleton cluster's parent node, and its freshly minted content when this cluster
+    itself wrote one rather than reusing a redundant parent an earlier cluster this level minted.
+
+    principal_id: identity that owns the written summary content and claim.
+    members: this cluster's level-below members, at least two.
+    level: the level number a newly minted summary is stamped with.
+    new_parents: the parents already minted this level, shared across every cluster's builder.
+    """
+    builder = RaptorTierBuilder(principal_id, members, level, new_parents)
+    await builder.build()
+    assert builder.result is not None  # a non-singleton cluster always rolls up to a parent
+    return builder.result, builder.content
+
+
+async def write_level(
+    principal_id: uuid.UUID,
+    contents: list[EntityContent],
+    claims: list[EntityClaim],
+    edges: list[tuple[uuid.UUID, Node]],
+) -> None:
+    """Write one level's freshly minted summary content, claims, and part_of edges, in one go.
+
+    `FactContent.id` is client-generated (`Id.id`'s `default_factory=uuid.uuid7`), already
+    populated the moment the object is constructed, so every claim below already knows the content
+    id it stakes with no round trip to flush it first. The flush between the two `add_all` calls is
+    still required: content and claim share no ORM `relationship()` for SQLAlchemy's unit-of-work
+    to auto-order the insert on, only a bare FK column, so a claim added in the same batch as its
+    content can flush ahead of it and violate the FK.
+
+    principal_id: identity that owns every row written.
+    contents: this level's freshly minted summary content, empty when every cluster reused a
+        redundant parent or was a singleton.
+    claims: this level's freshly minted summary claims, one per entry in contents.
+    edges: every member-to-parent part_of edge this level's clusters resolved, new or reused alike.
+    """
+    async with acting_as(principal_id) as session:
+        edge_contents = [part_of_content(child_id, parent) for child_id, parent in edges]
+        session.add_all(contents)
+        session.add_all(edge_contents)
+        await session.flush()
+        session.add_all(claims)
+        session.add_all(
+            part_of_claim(principal_id, edge_content.id) for edge_content in edge_contents
+        )
+
+
 async def build_level(
     principal_id: uuid.UUID,
     nodes: list[Node],
@@ -261,12 +331,12 @@ async def build_level(
     """Build one tree level from a clustering of the level below, return its nodes and write count.
 
     A singleton cluster is carried up unchanged, the prune that keeps RAPTOR from minting a summary
-    node that just restates one child. A multi-member cluster runs its own RaptorTierBuilder, which
-    rolls it up, embeds it outside any transaction, and either reuses a redundant parent already
-    minted this level or stages a fresh summary entity content plus this principal's own claim on
-    it; every member of a built cluster then gets a part_of edge to its parent regardless. The
-    staged content, claims, and edges are written in one owner-scoped transaction at the end, so a
-    slow rollup never holds a write lock.
+    node that just restates one child. A multi-member cluster's parent comes from rolled_up_parent,
+    which rolls it up, embeds it outside any transaction, and either reuses a redundant parent
+    already minted this level or stages a fresh summary entity content plus this principal's own
+    claim on it; every member of a built cluster then gets a part_of edge to its parent regardless
+    of whether the parent was freshly minted or reused. write_level then writes everything staged
+    in one owner-scoped transaction, so a slow rollup never holds a write lock.
 
     principal_id: identity that owns the written summary content, claims, and part_of edges.
     nodes: the level-below nodes the clusters index into.
@@ -283,56 +353,26 @@ async def build_level(
         if len(members) == 1:
             next_nodes.append(members[0])
             continue
-        builder = RaptorTierBuilder(principal_id, members, level, new_parents)
-        await builder.build()
-        assert builder.result is not None  # a non-singleton cluster always rolls up to a parent
-        if builder.content is not None:
-            contents.append(builder.content)
-            claims.append(
-                EntityClaim(
-                    content_id=builder.content.id,
-                    owner_id=principal_id,
-                    attributes={"level": level, "summary": builder.result.summary},
-                )
-            )
-            next_nodes.append(builder.result)
-        edges.extend((member.entity_id, builder.result) for member in members)
-    async with acting_as(principal_id) as session:
-        # `FactContent.id` is client-generated (`Id.id`'s `default_factory=uuid.uuid7`), already
-        # populated the moment the object is constructed, so every claim below already knows the
-        # content id it stakes with no round trip to flush it first. The flush between the two
-        # `add_all` calls is still required: content and claim share no ORM `relationship()` for
-        # SQLAlchemy's unit-of-work to auto-order the insert on, only a bare FK column, so a claim
-        # added in the same batch as its content can flush ahead of it and violate the FK.
-        edge_contents = [part_of_content(child_id, parent) for child_id, parent in edges]
-        session.add_all(contents)
-        session.add_all(edge_contents)
-        await session.flush()
-        session.add_all(claims)
-        session.add_all(
-            part_of_claim(principal_id, edge_content.id) for edge_content in edge_contents
-        )
+        parent, content = await rolled_up_parent(principal_id, members, level, new_parents)
+        if content is not None:
+            contents.append(content)
+            claims.append(summary_claim(principal_id, content, level, parent.summary))
+            next_nodes.append(parent)
+        edges.extend((member.entity_id, parent) for member in members)
+    await write_level(principal_id, contents, claims, edges)
     logger.info(
         "raptor level {} built {} summaries over {} nodes", level, len(contents), len(nodes)
     )
     return next_nodes, len(contents)
 
 
-async def leaf_nodes(principal_id: uuid.UUID) -> list[Node]:
-    """Clear any prior tree and mint the level-0 leaves, one summary entity per community.
+async def stale_tree_content(principal_id: uuid.UUID) -> list[uuid.UUID]:
+    """This principal's own prior RAPTOR tree content ids, read ahead of a rebuild.
 
-    Plain RAPTOR builds its tree over text chunks, but here the leaves are the single-level
-    communities the global lane already detected, so the recursive summaries climb above them. The
-    prior tree's content is deleted first so a rebuild is idempotent, the delete cascading its
-    claims and part_of edges through the foreign keys; content carries no owner of its own and no
-    ordinary DELETE policy at all, so this step runs on the owner-role admin connection, bypassing
-    row level security entirely, after first reading which content this principal's own prior tree
-    claimed. Returns the leaves, empty when fewer than two communities exist to cluster.
-
-    principal_id: identity that owns the tree and whose visibility scopes the communities read.
+    principal_id: identity whose prior tree, if any, is found.
     """
     async with acting_as(principal_id) as session:
-        stale = list(
+        return list(
             await session.scalars(
                 select(EntityClaim.content_id)
                 .join(EntityContent, EntityContent.id == EntityClaim.content_id)
@@ -342,47 +382,78 @@ async def leaf_nodes(principal_id: uuid.UUID) -> list[Node]:
                 )
             )
         )
-    if stale:
-        admin = create_async_engine(settings.admin_database_url)
-        try:
-            async with admin.begin() as connection:
-                await connection.execute(delete(EntityContent).where(EntityContent.id.in_(stale)))
-        finally:
-            await admin.dispose()
+
+
+async def clear_stale_tree(principal_id: uuid.UUID) -> None:
+    """Delete a principal's prior RAPTOR tree content wholesale, so a rebuild is idempotent.
+
+    Content carries no owner of its own and no ordinary DELETE policy at all, so this runs on the
+    owner-role admin connection, bypassing row level security entirely; the delete cascades its
+    claims and part_of edges away through their foreign keys.
+
+    principal_id: identity whose prior tree, if any, is cleared.
+    """
+    stale = await stale_tree_content(principal_id)
+    if not stale:
+        return
+    async with admin_session() as session:
+        await session.execute(delete(EntityContent).where(EntityContent.id.in_(stale)))
+        await session.commit()
+
+
+def leaf_content(community: Community) -> EntityContent:
+    """One community's level-0 leaf entity content, ready to mint.
+
+    community: the single-level community this leaf summarizes, already known embedded.
+    """
+    return EntityContent(
+        id=uuid.uuid4(),
+        name=community.label,
+        type=EntityType.RAPTOR_SUMMARY,
+        embedding=community.embedding,
+    )
+
+
+def leaf_claim(principal_id: uuid.UUID, leaf: EntityContent, community: Community) -> EntityClaim:
+    """One level-0 leaf's claim, its attributes carrying a backreference to its own community.
+
+    principal_id: identity that owns the tree.
+    leaf: the leaf's own freshly minted entity content.
+    community: the community this leaf summarizes.
+    """
+    return EntityClaim(
+        content_id=leaf.id,
+        owner_id=principal_id,
+        attributes={"level": 0, "summary": community.summary, "community": str(community.id)},
+    )
+
+
+async def leaf_nodes(principal_id: uuid.UUID) -> list[Node]:
+    """Clear any prior tree and mint the level-0 leaves, one summary entity per community.
+
+    Plain RAPTOR builds its tree over text chunks, but here the leaves are the single-level
+    communities the global lane already detected, so the recursive summaries climb above them.
+    Returns the leaves, empty when fewer than two communities exist to cluster.
+
+    principal_id: identity that owns the tree and whose visibility scopes the communities read.
+    """
+    await clear_stale_tree(principal_id)
     async with acting_as(principal_id) as session:
         communities = list(
             await session.scalars(select(Community).where(Community.embedding.is_not(None)))
         )
         if len(communities) < 2:
             return []
-        leaves = [
-            EntityContent(
-                id=uuid.uuid4(),
-                name=community.label,
-                type=EntityType.RAPTOR_SUMMARY,
-                embedding=community.embedding,
-            )
-            for community in communities
-        ]
+        leaves = [leaf_content(community) for community in communities]
         session.add_all(leaves)
         # content and claim share no ORM `relationship()`, only a bare FK column, so the leaves
         # must actually flush before the matching claims are added, the same ordering
-        # `build_level` observes, or a claim can insert ahead of the content row it stakes.
+        # `write_level` observes, or a claim can insert ahead of the content row it stakes.
         await session.flush()
         session.add_all(
-            EntityClaim(
-                content_id=leaf.id,
-                owner_id=principal_id,
-                attributes={
-                    "level": 0,
-                    "summary": community.summary,
-                    "community": str(community.id),
-                },
-            )
+            leaf_claim(principal_id, leaf, community)
             for leaf, community in zip(leaves, communities, strict=True)
         )
-    # the query filtered to embedded communities, so each embedding is present here, unwrapped from
-    # its HalfVector into the float list the clustering iterates.
     return [
         Node(
             entity_id=leaf.id,
@@ -425,34 +496,31 @@ async def build_raptor(
     return written
 
 
-async def raptor_levels(principal_id: uuid.UUID, scope: uuid.UUID | None = None) -> list[int]:
+async def raptor_levels(session: AsyncSession) -> list[int]:
     """The sorted summary levels above the leaves, the levels recall can retrieve from.
 
     Reads the distinct level tags of the visible summary claims and keeps those above the level-0
     leaves, so recall knows which level answers a broad query and which a pointed one. Empty until
     a tree has been built.
 
-    principal_id: identity whose row level security visibility scopes the levels.
-    scope: group id narrowing the read to that group's composed graph, the whole visible union
-        when null.
+    session: open, principal- and scope-scoped session the caller already holds.
     """
     depth = EntityClaim.attributes["level"].as_integer()
-    async with acting_as(principal_id, scope) as session:
-        rows = await session.scalars(
-            select(depth)
-            .join(EntityContent, EntityContent.id == EntityClaim.content_id)
-            .where(EntityContent.type == EntityType.RAPTOR_SUMMARY, depth >= 1)
-            .distinct()
-        )
-        return sorted(rows)
+    rows = await session.scalars(
+        select(depth)
+        .join(EntityContent, EntityContent.id == EntityClaim.content_id)
+        .where(EntityContent.type == EntityType.RAPTOR_SUMMARY, depth >= 1)
+        .distinct()
+    )
+    return sorted(rows)
 
 
 async def raptor_search(
+    session: AsyncSession,
     query: str,
-    principal_id: uuid.UUID | None = None,
+    vector: list[float],
     thematic: bool = True,
     k: int = 3,
-    scope: uuid.UUID | None = None,
 ) -> list[tuple[str, str, int, float]]:
     """Rank the level-appropriate summaries against a query, broad to root, pointed to the leaf.
 
@@ -460,37 +528,33 @@ async def raptor_search(
     whole area into one paragraph, a pinned query reads the lowest summary level above the
     communities, the finer summaries nearer the facts, and a mid-abstraction query in between reads
     a middle tier. Returns the top k as label, summary, level, and a similarity score, the lane
-    recall folds in beside the community summaries.
+    recall folds in beside the community summaries. Takes the caller's own open session and an
+    already-embedded query vector rather than opening a session or embedding of its own, since
+    recall's one round already holds both and a second session here would open a second connection
+    nested inside the first for no reason.
 
-    query: natural-language query to rank the summaries against.
-    principal_id: identity whose row level security visibility scopes the summaries, the system
-        principal when null.
+    session: open, principal- and scope-scoped session the caller already holds.
+    query: natural-language query, read only for its specificity when the round is not thematic.
+    vector: dense query embedding.
     thematic: whether the query is broad, reading the root level rather than the leaf summaries.
     k: number of summaries to return.
-    scope: group id narrowing the read to that group's composed graph, the whole visible union
-        when null.
     """
-
-    principal_id = principal_id or settings.system_principal_id
-    levels = await raptor_levels(principal_id, scope)
+    levels = await raptor_levels(session)
     if not levels:
         return []
     level = target_level(levels, query, thematic)
-    embedder = Embedder()
-    [vector] = await embedder.embed([query], mode="query")
     distance = EntityContent.embedding.cosine_distance(vector)
     depth = EntityClaim.attributes["level"].as_integer()
     summary = EntityClaim.attributes["summary"].astext
-    async with acting_as(principal_id, scope) as session:
-        rows = await session.execute(
-            select(EntityContent.name, summary, distance.label("distance"))
-            .join(EntityClaim, EntityClaim.content_id == EntityContent.id)
-            .where(
-                EntityContent.type == EntityType.RAPTOR_SUMMARY,
-                depth == level,
-                EntityContent.embedding.is_not(None),
-            )
-            .order_by(distance)
-            .limit(k)
+    rows = await session.execute(
+        select(EntityContent.name, summary, distance.label("distance"))
+        .join(EntityClaim, EntityClaim.content_id == EntityContent.id)
+        .where(
+            EntityContent.type == EntityType.RAPTOR_SUMMARY,
+            depth == level,
+            EntityContent.embedding.is_not(None),
         )
-        return [(row.name, row[1], level, 1.0 - row.distance) for row in rows]
+        .order_by(distance)
+        .limit(k)
+    )
+    return [(row.name, row[1], level, 1.0 - row.distance) for row in rows]

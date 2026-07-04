@@ -1,8 +1,10 @@
 import uuid
 
+from mainboard.profiling import span
+
 from ..config import settings
-from .models import Block, RecallResult
-from .recall import recall
+from .lanes import recall
+from .models import Block, ContextPack, Hit, RecallResult
 
 # characters per token the budget estimate assumes, the common rule of thumb that one token runs
 # about four characters of English, so the pack sizes itself without loading a real tokenizer.
@@ -24,6 +26,16 @@ def estimate_tokens(text: str) -> int:
     return -(-len(text) // CHARS_PER_TOKEN)
 
 
+def source_block(hit: Hit) -> Block:
+    """Render one chunk hit as a `sources` lane block: a score-prefixed title over its snippet.
+
+    hit: the fused chunk hit to render.
+    """
+    title = hit.document_title or hit.source_uri or "untitled"
+    snippet = " ".join(hit.text.split())[: settings.snippet_chars]
+    return Block(lane="sources", line=f"[{round(hit.score, 3)}] {title}\n  {snippet}")
+
+
 def context_blocks(result: RecallResult) -> list[Block]:
     """Render a recall bundle as ordered Block lines, the budget fills in priority order.
 
@@ -33,63 +45,61 @@ def context_blocks(result: RecallResult) -> list[Block]:
 
     result: the fused recall bundle to lay out.
     """
-    blocks: list[Block] = []
-    if result.profile:
-        blocks.append(Block(lane="profile", line=result.profile))
-    blocks += [
-        Block(lane="overview", line=f"- L{n.level} {n.label}: {n.summary}") for n in result.raptor
+    lanes: list[list[Block]] = [
+        [Block(lane="profile", line=result.profile)] if result.profile else [],
+        [
+            Block(lane="overview", line=f"- L{n.level} {n.label}: {n.summary}")
+            for n in result.raptor
+        ],
+        [Block(lane="communities", line=f"- {n.label}: {n.summary}") for n in result.communities],
+        [Block(lane="facts", line=f"- ({f.predicate}) {f.statement}") for f in result.facts],
+        [Block(lane="working memory", line=f"- [{s.kind}] {s.text}") for s in result.session],
+        [source_block(hit) for hit in result.hits],
     ]
-    blocks += [
-        Block(lane="communities", line=f"- {n.label}: {n.summary}") for n in result.communities
-    ]
-    blocks += [Block(lane="facts", line=f"- ({f.predicate}) {f.statement}") for f in result.facts]
-    blocks += [Block(lane="working memory", line=f"- [{s.kind}] {s.text}") for s in result.session]
-    blocks += [
-        Block(
-            lane="sources",
-            line=(
-                f"[{round(h.score, 3)}] {h.document_title or h.source_uri or 'untitled'}\n"
-                f"  {' '.join(h.text.split())[: settings.snippet_chars]}"
-            ),
-        )
-        for h in result.hits
-    ]
-    return blocks
+    return [block for lane in lanes for block in lane]
 
 
-def pack_context(result: RecallResult, token_budget: int) -> str:
-    """Assemble the recalled lanes into a prompt-ready pack that fits inside the token budget.
+def block_cost(block: Block, opened: set[str]) -> int:
+    """The token cost of keeping one more block: its line, plus its header the first time it opens.
 
-    Lays the lanes down in priority order and keeps each block while it fits, stopping at the
-    first block that would cross the budget so the whole pack is always under it, then groups the
-    kept blocks by lane under their headers in the order the lanes first appear. An empty recall
-    renders the one no-context line rather than a bundle of blank sections.
+    block: the candidate block a budget fill is considering.
+    opened: lanes already charged their header cost earlier in the same fill.
+    """
+    header = estimate_tokens(f"{block.lane}:") if block.lane not in opened else 0
+    return header + estimate_tokens(block.line) + 1
 
-    result: the fused recall bundle to pack.
-    token_budget: the token ceiling the assembled pack must stay within.
+
+def fit_to_budget(blocks: list[Block], token_budget: int) -> tuple[list[Block], int]:
+    """Keep the leading blocks that fit inside token_budget, stopping at the first that would not.
+
+    A block's own priority order already reflects the widening-to-narrowing lane order, so keeping
+    a strict prefix rather than picking and choosing preserves that order in the packed result.
+
+    blocks: candidate blocks in priority order.
+    token_budget: the token ceiling the kept blocks must stay within.
     """
     used = 0
     kept: list[Block] = []
     opened: set[str] = set()
-    for block in context_blocks(result):
-        # a lane's header is charged the first time it opens, and one token covers the newline
-        # that joins the line in, so the running total is an upper bound on the rendered pack and
-        # a total under budget guarantees the assembled string is too.
-        header = estimate_tokens(f"{block.lane}:") if block.lane not in opened else 0
-        cost = header + estimate_tokens(block.line) + 1
+    for block in blocks:
+        cost = block_cost(block, opened)
         if used + cost > token_budget:
             break
         used += cost
         opened.add(block.lane)
         kept.append(block)
-    if not kept:
-        return f"no memory recalled for {result.query!r}"
-    sections: list[str] = []
-    for header in LANE_ORDER:
-        lines = [block.line for block in kept if block.lane == header]
-        if lines:
-            sections.append(f"{header}:\n" + "\n".join(lines))
-    return "\n\n".join(sections)
+    return kept, used
+
+
+@span
+def pack_context(result: RecallResult, token_budget: int) -> ContextPack:
+    """Fit the recalled lanes into a token-budgeted `ContextPack`, broad view first, sources last.
+
+    result: the fused recall bundle to pack.
+    token_budget: the token ceiling the assembled pack must stay within.
+    """
+    kept, used = fit_to_budget(context_blocks(result), token_budget)
+    return ContextPack(query=result.query, blocks=kept, budget=token_budget, used_tokens=used)
 
 
 async def assemble_context_pack(
@@ -97,9 +107,9 @@ async def assemble_context_pack(
     principal_id: uuid.UUID | None = None,
     token_budget: int | None = None,
     k: int = 8,
-    scope: uuid.UUID | None = None,
-) -> str:
-    """Recall for a query and pack the fused lanes into a token-budgeted, prompt-ready context.
+    scopes: tuple[uuid.UUID, ...] = (),
+) -> ContextPack:
+    """Recall for a query and pack the fused lanes into a token-budgeted `ContextPack`.
 
     Reuses recall under its own acting_as so the pack rides the same fused facts, profiles,
     community and RAPTOR summaries, and working items a recall surfaces, then fits them to the
@@ -110,9 +120,9 @@ async def assemble_context_pack(
         principal when null.
     token_budget: the token ceiling, the configured default when null.
     k: how many hits and seed facts the underlying recall surfaces.
-    scope: group id narrowing the read to that group's composed graph, the whole visible union
-        when null.
+    scopes: group ids narrowing the read to that combination's composed graph, the whole visible
+        union when empty.
     """
     principal_id = principal_id or settings.system_principal_id
-    result = await recall(query, principal_id=principal_id, k=k, scope=scope)
+    result = await recall(query, principal_id=principal_id, k=k, scopes=scopes)
     return pack_context(result, token_budget or settings.context_token_budget)

@@ -1,19 +1,20 @@
-from .consolidation import ConsolidationVerdict
+from .consolidation import BatchConsolidationVerdict, ConsolidationVerdict
 from .extraction import (
     ExtractedEntity,
-    ExtractedFact,
     Extraction,
-    FactTimestamp,
+    LLMEntity,
+    LLMExtraction,
+    LLMFact,
     TimedFact,
-    TimestampResolution,
 )
 
 __all__ = [
+    "BatchConsolidationVerdict",
     "ConsolidationVerdict",
     "ExtractedEntity",
-    "ExtractedFact",
     "Extraction",
-    "FactTimestamp",
+    "LLMEntity",
+    "LLMExtraction",
+    "LLMFact",
     "TimedFact",
-    "TimestampResolution",
 ]

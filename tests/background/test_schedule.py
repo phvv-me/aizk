@@ -1,8 +1,10 @@
 import asyncio
 import uuid
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
+from bg_doubles import FakeJob, RecordingPg, RecordingQueue
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -14,34 +16,27 @@ from aizk.background.schedule import fan_out, run_worker
 from aizk.background.tasks import ScheduledTask
 from aizk.config import settings
 
+InstallSeam = Callable[[object], RecordingQueue]
 task_classes = st.sampled_from(sorted(ScheduledTask.implementations(), key=lambda cls: cls.name))
 crons = st.sampled_from(["0 3 * * *", "30 4 * * 0", "*/15 * * * *"])
 
 
-def test_entrypoint_names_are_prefixed_and_injective() -> None:
-    """Each registered task mints a distinct queue and cron entrypoint, none colliding."""
-    tasks = [task_cls() for task_cls in ScheduledTask.implementations()]
-    for task in tasks:
-        assert task.queue_entrypoint.startswith("aizk_task_")
-        assert task.cron_entrypoint.startswith("aizk_cron_")
-        assert task.queue_entrypoint != task.cron_entrypoint
-    queue_names = [task.queue_entrypoint for task in tasks]
-    cron_names = [task.cron_entrypoint for task in tasks]
-    assert len(queue_names) == len(set(queue_names))
-    assert len(cron_names) == len(set(cron_names))
-
-
 @given(task_cls=task_classes, principals=st.lists(st.uuids(), max_size=6, unique=True))
 def test_fan_out_enqueues_one_deduped_job_per_principal(
-    monkeypatch: pytest.MonkeyPatch, queue_seam, task_cls: type[ScheduledTask], principals
+    monkeypatch: pytest.MonkeyPatch,
+    queue_seam: InstallSeam,
+    task_cls: type[ScheduledTask],
+    principals: list[uuid.UUID],
 ) -> None:
     """The RLS-safe fan-out reads the roster once then queues exactly one job per principal.
 
     The load-bearing no-leak boundary: each job targets the task's own entrypoint, carries one
-    principal's id, and is deduped on the task-and-principal pair, so no pass ever writes a second
-    principal's rows in the same transaction.
+    principal's id, and is deduped on the task-and-principal pair, so a fire that lands while the
+    last is still draining re-enqueues nothing and no pass writes a second principal's rows.
     """
-    recorder = queue_seam(schedule_mod)
+    # the enqueue seam (AsyncpgDriver/Queries/asyncpg) now lives entirely in queue.queue_queries,
+    # which fan_out drains through, so the recorder is installed on the queue module, not schedule
+    recorder = queue_seam(queue_mod)
     roster_reads: list[None] = []
 
     async def fake_list_all(session: object) -> list[SimpleNamespace]:
@@ -74,16 +69,17 @@ def test_fan_out_enqueues_one_deduped_job_per_principal(
 @given(task_cls=task_classes, expression=crons, enabled=st.booleans())
 def test_register_wires_the_queue_always_and_the_cron_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
-    pg_factory,
-    job_factory,
+    pg_factory: type[RecordingPg],
+    job_factory: type[FakeJob],
     task_cls: type[ScheduledTask],
     expression: str,
     enabled: bool,
 ) -> None:
     """The queue body registers regardless of cadence, the cron fan-out only when the task is on.
 
-    Also drives the two registered bodies: the queue body runs the per-principal pass under the
-    principal its payload names, and the cron body fans the task out across the roster.
+    Drives both registered bodies too: the queue body runs the per-principal pass under the
+    principal its payload names, and, when enabled, the cron body fires the fan-out for this task
+    on exactly the crontab expression the task read off settings.
     """
     pg = pg_factory()
     body_calls: list[uuid.UUID] = []
@@ -92,7 +88,6 @@ def test_register_wires_the_queue_always_and_the_cron_only_when_enabled(
         body_calls.append(principal_id)
 
     monkeypatch.setattr(task_cls, "run", record_body)
-
     fanned: list[ScheduledTask] = []
 
     async def fake_fan_out(task: ScheduledTask) -> None:
@@ -121,14 +116,17 @@ def test_register_wires_the_queue_always_and_the_cron_only_when_enabled(
 
 @pytest.mark.parametrize("profile_on_write", [True, False], ids=["chained", "skipped"])
 def test_run_worker_registers_every_entrypoint_and_chains_profiles_only_when_on(
-    monkeypatch: pytest.MonkeyPatch, pg_factory, job_factory, profile_on_write: bool
+    monkeypatch: pytest.MonkeyPatch,
+    pg_factory: type[RecordingPg],
+    job_factory: type[FakeJob],
+    profile_on_write: bool,
 ) -> None:
     """The worker wires the on-write chain and every scheduled pass, chaining profiles only if on.
 
     The single worker registers the extract and profile entrypoints plus each task's queue and cron
-    bodies, starts both loops, and closes its connection. Driving the extract body then proves the
-    build slice chains a debounced profile rebuild under profile-on-write and never with it off,
-    and the profile body rebuilds the named entity when the chain is live.
+    bodies, starts both loops with the batch size, and closes its connection. Driving the extract
+    body proves the build chains a debounced profile rebuild under profile-on-write and never with
+    it off, and the profile body rebuilds exactly the entity its payload names.
     """
     pg = pg_factory()
     closed: list[bool] = []
@@ -162,8 +160,8 @@ def test_run_worker_registers_every_entrypoint_and_chains_profiles_only_when_on(
     monkeypatch.setattr(schedule_mod, "process_chunk", fake_process_chunk)
     monkeypatch.setattr(schedule_mod, "enqueue_profiles", fake_enqueue_profiles)
     monkeypatch.setattr(schedule_mod, "process_profile", fake_process_profile)
-
     monkeypatch.setattr(settings, "profile_on_write", profile_on_write)
+
     asyncio.run(run_worker(batch_size=7))
 
     assert {EXTRACT_ENTRYPOINT, PROFILE_ENTRYPOINT} <= set(pg.entrypoints)

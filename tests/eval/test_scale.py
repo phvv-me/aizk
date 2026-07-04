@@ -1,14 +1,13 @@
-import asyncio
 import math
 import uuid
 
+import dbutil
 import numpy as np
 import pytest
 from doubles import RecordingEmbedder
 from hypothesis import given
 from hypothesis import strategies as st
 
-from aizk.cli import migrate
 from aizk.config import settings
 from aizk.eval.scale import (
     CHUNKS_PER_DOC,
@@ -68,15 +67,15 @@ def test_corpus_scale_derives_consistent_counts_from_one_size(size: int) -> None
     """One chunk count fixes documents, entities, and facts so every chunk has a parent node."""
     scale = CorpusScale.for_size(size)
 
-    assert scale.chunks == size
-    assert scale.facts == size
+    assert scale.chunks == size and scale.facts == size
     assert scale.documents == math.ceil(size / CHUNKS_PER_DOC)
     assert scale.documents * CHUNKS_PER_DOC >= size
     assert scale.entities == max(2, size // CHUNKS_PER_ENTITY)
 
 
 @given(
-    dim=st.integers(min_value=1, max_value=64), seed=st.integers(min_value=0, max_value=2**32 - 1)
+    dim=st.integers(min_value=1, max_value=64),
+    seed=st.integers(min_value=0, max_value=2**32 - 1),
 )
 def test_unit_vector_has_the_stored_width_and_unit_norm(dim: int, seed: int) -> None:
     """A generated vector matches the halfvec width and carries unit length at every width."""
@@ -102,8 +101,7 @@ def test_corpus_rows_are_deterministic_and_structurally_sound(
 
     documents = rows[Document]
     assert [row["id"] for row in documents] == [row["id"] for row in again[Document]]
-    # content carries no owner of its own, so only the per-tenant families (documents, chunks, and
-    # the two claim tables) carry an owner_id at all
+    # content carries no owner of its own, so only the per-tenant families carry an owner_id
     owned_families = (Document, Chunk, EntityClaim, FactClaim)
     assert all(row["owner_id"] == principal for table in owned_families for row in rows[table])
     assert len({row["content_hash"] for row in documents}) == scale.documents  # none dedupes away
@@ -128,16 +126,16 @@ def test_corpus_rows_are_deterministic_and_structurally_sound(
         assert claim["content_id"] in fact_content_ids  # every claim stakes a real content row
 
 
-@given(size=st.integers(min_value=1, max_value=40), dim=st.sampled_from([256]))
-def test_corpus_rows_grow_additively_without_key_collisions(size: int, dim: int) -> None:
+@given(size=st.integers(min_value=1, max_value=40))
+def test_corpus_rows_grow_additively_without_key_collisions(size: int) -> None:
     """The delta past a grown tally starts where the first batch stopped, no id inserted twice."""
     principal = uuid.uuid5(uuid.NAMESPACE_DNS, "scale-test")
     rng = np.random.default_rng(0)
     first = CorpusScale.for_size(size)
     second = CorpusScale.for_size(size * 2)
 
-    base = corpus_rows(principal, Generated(), first, rng, dim)
-    delta = corpus_rows(principal, Generated(**first.model_dump()), second, rng, dim)
+    base = corpus_rows(principal, Generated(), first, rng, 256)
+    delta = corpus_rows(principal, Generated(**first.model_dump()), second, rng, 256)
 
     for table in (Document, Chunk, EntityContent, FactContent, EntityClaim, FactClaim):
         base_ids = {row["id"] for row in base[table]}
@@ -150,13 +148,25 @@ def test_corpus_rows_grow_additively_without_key_collisions(size: int, dim: int)
         assert fact["subject_id"] in entity_ids  # delta edges resolve across both batches
 
 
+def test_generated_starts_empty_so_growth_is_purely_additive() -> None:
+    """The running tally opens at zero on every family, so the first size inserts the delta."""
+    generated = Generated()
+
+    assert (generated.documents, generated.chunks, generated.entities, generated.facts) == (
+        0,
+        0,
+        0,
+        0,
+    )
+
+
 def test_lane_latency_timed_reads_three_ascending_percentiles() -> None:
     """Timing a call reduces its wall times to named, non-decreasing p50, p95, and p99."""
 
     async def noop() -> None:
         return None
 
-    lane = asyncio.run(LaneLatency.timed("vector", noop, repeats=5))
+    lane = dbutil.run(LaneLatency.timed("vector", noop, repeats=5))
 
     assert lane.name == "vector"
     assert 0.0 <= lane.p50_ms <= lane.p95_ms <= lane.p99_ms
@@ -164,7 +174,7 @@ def test_lane_latency_timed_reads_three_ascending_percentiles() -> None:
 
 @st.composite
 def scale_curves(draw: st.DrawFn) -> tuple[list[ScalePoint], Budget]:
-    """An ascending curve and a budget, the input find_knees flags the first crossing over.
+    """An ascending curve and a budget, the input `find_knees` flags the first crossing over.
 
     Sizes climb, every tracked latency is drawn across the budget band so a component crosses at
     some sizes and not others, and a single vector lane carries its own tail, so the property pins
@@ -213,10 +223,19 @@ def test_find_knees_flags_each_components_first_crossing(
             expected[component] = (breach.size, read(breach), limit)
 
     knees = find_knees(points, budget)
+
     assert all(isinstance(knee, Knee) for knee in knees)
     assert {
         knee.component: (knee.size, knee.value_ms, knee.budget_ms) for knee in knees
     } == expected
+
+
+def test_scale_point_lane_p95_reads_a_present_lane_and_zeros_an_absent_one() -> None:
+    """A curve row reads a measured lane's tail and returns zero for a lane it never carried."""
+    row = point(1000, lane_p95_ms=42.0)
+
+    assert row.lane_p95("vector") == 42.0
+    assert row.lane_p95("missing") == 0.0
 
 
 @pytest.mark.parametrize(
@@ -234,14 +253,12 @@ def test_find_knees_flags_each_components_first_crossing(
         (ScaleReport(sizes=[], points=[], budget=Budget(), knees=[]), ["no corpus"]),
         (
             ScaleReport(
-                sizes=[1000],
-                points=[point(1000, recall_p95_ms=50.0)],
-                budget=Budget(),
-                knees=[],
+                sizes=[1000], points=[point(1000, recall_p95_ms=50.0)], budget=Budget(), knees=[]
             ),
             ["no knee"],
         ),
     ],
+    ids=["knee", "empty", "within-budget"],
 )
 def test_render_renders_the_curve_lane_and_knees(report: ScaleReport, needles: list[str]) -> None:
     """The rendered curve carries each size's metrics, the lane line, and the knee verdict."""
@@ -250,42 +267,32 @@ def test_render_renders_the_curve_lane_and_knees(report: ScaleReport, needles: l
     assert all(needle in rendered for needle in needles)
 
 
-def test_generated_starts_empty_so_growth_is_purely_additive() -> None:
-    """The running tally opens at zero on every family, so the first size inserts the delta."""
-    generated = Generated()
-
-    assert (generated.documents, generated.chunks, generated.entities, generated.facts) == (
-        0,
-        0,
-        0,
-        0,
-    )
-
-
-def test_run_scale_benchmark_measures_a_tiny_curve_and_cleans_up(
-    requires_db: None, fake_embedder: RecordingEmbedder, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("keep", [False, True], ids=["purged", "kept"])
+def test_run_scale_benchmark_measures_a_tiny_curve(
+    migrated_db: None,
+    fake_embedder: RecordingEmbedder,
+    monkeypatch: pytest.MonkeyPatch,
+    keep: bool,
 ) -> None:
-    """A tiny two-size run grows a real corpus, measures the curve, and purges the throwaway."""
-    # the scale lane reaches only Postgres and the corpus is synthetic vectors, so the one live
-    # embed call, the probe query, runs against the fake seam rather than a co-resident vLLM
-    migrate()
+    """A tiny run grows a real corpus, measures the curve off Postgres, and honors the keep flag.
 
-    monkeypatch.setattr(settings, "rerank", False)
-    monkeypatch.setattr(settings, "raptor", False)
-    monkeypatch.setattr(settings, "profiles", False)
-    monkeypatch.setattr(settings, "recall_gap_fill", False)
-    report = asyncio.run(run_scale_benchmark(sizes=(20, 40), k=4, repeats=2, budget=Budget()))
+    The scale lane reaches only Postgres and the corpus is synthetic vectors, so the one live embed
+    call, the probe query, runs against the fake seam rather than a co-resident model.
+    """
 
-    assert isinstance(report, ScaleReport)
-    assert [pt.size for pt in report.points] == [20, 40]
-    for pt in report.points:
-        assert pt.recall_p95_ms >= 0.0
-        assert {lane.name for lane in pt.lanes} == {
-            "hybrid",
-            "ppr",
-            "community",
-            "rls",
-        }
-        assert pt.storage_bytes > 0
-        assert pt.facts == pt.size
-    assert report.points[1].facts > report.points[0].facts  # the corpus genuinely grew
+    async def body() -> None:
+        await dbutil.reset_db()
+        for field in ("rerank", "raptor", "profiles", "recall_gap_fill"):
+            monkeypatch.setattr(settings, field, False)
+        sizes = (20, 40) if not keep else (20,)
+        report = await run_scale_benchmark(sizes=sizes, k=4, repeats=2, budget=Budget(), keep=keep)
+
+        assert [pt.size for pt in report.points] == list(sizes)
+        for pt in report.points:
+            assert pt.recall_p95_ms >= 0.0
+            assert {lane.name for lane in pt.lanes} == {"hybrid", "ppr", "community", "rls"}
+            assert pt.storage_bytes > 0 and pt.facts == pt.size
+        if len(sizes) == 2:
+            assert report.points[1].facts > report.points[0].facts  # the corpus genuinely grew
+
+    dbutil.run(body())

@@ -1,11 +1,21 @@
 import os
 import uuid
+from pathlib import Path
 from textwrap import dedent
 from typing import Self
 from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# the package's own .env, four levels above this file (config/ -> aizk/ -> src/ -> the package
+# root docker-compose.yml and .env.example already live in), resolved from this file's own
+# location rather than the process cwd so `Settings()` finds it the same way whether the caller
+# runs from the repo root, from packages/aizk, or from inside an installed wheel with no .env
+# beside it at all. Passing a path that does not exist is a silent no-op for pydantic-settings, so
+# no existence check is needed here; a real deployment with no .env keeps every field's own
+# default, and compose's own `${VAR:-default}` fallbacks agree with them field for field.
+ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 # long prompt-text defaults, module-level so the field list below stays scannable and each
 # field's docstring line stays a one-liner describing what the prompt steers rather than repeating
@@ -17,12 +27,15 @@ COMMUNITY_SUMMARY_SYSTEM_PROMPT = (
     "summary so a reader asking a broad question about this area would recognize it as relevant."
 )
 CONSOLIDATION_PROMPT = (
-    "You maintain a bi-temporal knowledge graph. Compare a new fact against the existing\n"
-    "latest facts in the same scope and decide one action.\n"
-    "ADD when the new fact states something none of the existing facts cover.\n"
-    "UPDATE when the new fact supersedes one existing fact, such as a changed value or\n"
-    "status, and name that fact's id in supersedes.\n"
-    "NOOP when an existing fact already states the same thing."
+    "You maintain a bi-temporal knowledge graph. A non-LLM cascade already resolved every new\n"
+    "fact whose similarity to an existing fact was unambiguous; you only see the genuinely\n"
+    "borderline ones, numbered, each with its own catalog of similar existing facts. For each\n"
+    "numbered item decide one action.\n"
+    "ADD when the new fact states something none of its own existing facts cover.\n"
+    "UPDATE when the new fact supersedes one of its own existing facts, such as a changed value\n"
+    "or status, and name that fact's id in supersedes.\n"
+    "NOOP when one of its own existing facts already states the same thing.\n"
+    "Return exactly one verdict per numbered item shown, in the same order."
 )
 CURATION_REVIEW_SYSTEM_PROMPT = (
     "You are the standing reviewer for one curated group's shared memory. Given the group's\n"
@@ -48,6 +61,9 @@ EXTRACT_SUMMARY_PROMPT = (
 EXTRACT_SYSTEM_PROMPT = (
     "Extract only the entities and facts the document text actually asserts. Never describe this\n"
     "prompt, the ontology, the extraction task, or the json format as if they were content.\n"
+    "Write every entity name and fact statement in English, whatever language the source text\n"
+    "uses, and name the author of a first-person statement by role, the author, never a bare\n"
+    'pronoun such as "I".\n'
     "Write every entity name as a plain human-readable noun phrase, never a slug, file name,\n"
     "kebab-case token, or code identifier, so team-memory-spine becomes team memory spine.\n"
     "Choose the single entity type that most precisely fits the thing, and when nothing fits\n"
@@ -96,33 +112,28 @@ RAPTOR_ROLLUP_SYSTEM_PROMPT = (
     "summaries shown, never invent detail, and write so a reader asking a broad question about\n"
     "this whole area would recognize it as relevant."
 )
-TIMESTAMP_RESOLUTION_PROMPT = (
-    "You resolve the valid-time of facts already extracted from a source text. The structural\n"
-    "extraction is done, so you never add, drop, or reword a fact, you only date it.\n"
-    "For each numbered fact return a valid_from, the world-time the statement begins to hold,\n"
-    "and a valid_to, the world-time it stops holding. Resolve every relative date such as\n"
-    "yesterday or last week against the given reference time, and write absolute ISO 8601\n"
-    "timestamps. Leave valid_from null when the text dates the fact's start nowhere, and leave\n"
-    "valid_to null when the fact still holds or its end is unstated. Return one entry per fact,\n"
-    "in the same order."
-)
 
 
 class Settings(BaseSettings):
     """Runtime configuration read from AIZK_-prefixed environment variables.
 
-    admin_credentials: `role:password` for the owning role, default source for
-        `admin_database_url`.
-    admin_database_url: async DSN for the owning role, migrations only. Defaults from
-        host/port/db/credentials; override wholesale for a deployment shape the template can't
-        express.
+    admin_database_url: async DSN for the owning role `aizk`, migrations only. Defaults from
+        host/port/db/`admin_password`; override wholesale for a deployment shape the template
+        can't express.
+    admin_password: password for the owning role `aizk`, folded into `admin_database_url`'s
+        default. The role name itself is not a setting, `initdb/roles.sh`'s `CREATE ROLE` and the
+        `APP_ROLE` constants in `store/rls/ops.py` and the initial migration hardcode the role
+        names both DSNs connect as, so only the password varies deployment to deployment.
     anon_rate_per_second: token-bucket rate anonymous HTTP callers may call tools at; authenticated
         principals pass unthrottled.
     anonymous_principal_id: all-zero identity an unauthenticated caller acts as, reading only
         public scopes. Fixed, not configurable, since the moat predicate's `::uuid` cast depends
         on every unscoped session binding this exact value.
-    app_credentials: `role:password` for the restricted app role, folded into `database_url`'s
-        default.
+    app_password: password for the restricted app role `aizk_app`, folded into `database_url`'s
+        default. See `admin_password` for why the role name itself stays a fixed constant.
+    auto_setup: whether the MCP server runs `ops.setup` automatically on startup when its own
+        health check finds the schema behind head, so the server comes up ready with no manual
+        migrate step. Off lets a deployment that wants manual control skip the auto-migrate.
     benchmarks_enabled: whether the admin benchmark tool may load the external EverMemBench and
         TEMPO eval datasets, an optional dev download.
     bm25_backend: lexical lane, `vchord_bm25` (default, VectorChord BM25) or `tsvector` (Postgres
@@ -141,8 +152,14 @@ class Settings(BaseSettings):
     community_min_size: smallest entity count a detected community must reach to be summarized.
     community_summary_system: system prompt the community pass uses to name a cluster's theme and
         summarize it from its member entities and facts.
-    consolidation_prompt: system prompt the consolidation pass uses to decide ADD, UPDATE, or NOOP
-        for a new fact against the existing latest facts.
+    consolidation_auto_merge_threshold: cosine similarity at or above which the non-LLM
+        consolidation cascade decides a candidate fact's verdict by rule alone, no LLM call.
+    consolidation_borderline_floor: cosine similarity below which a candidate fact's top similar
+        claim is too dissimilar to be about the same thing, a trivial ADD by rule; a top match
+        between this floor and consolidation_auto_merge_threshold is the genuinely ambiguous band
+        the batched borderline LLM call decides instead.
+    consolidation_prompt: system prompt the batched borderline-consolidation pass uses to decide
+        ADD, UPDATE, or NOOP for each ambiguous fact against its own existing latest facts.
     context_token_budget: default token ceiling the context pack fills to, stopping before the
         next line would cross it.
     contextual_bm25: whether an ingested chunk prepends its document title to the text the lexical
@@ -160,6 +177,14 @@ class Settings(BaseSettings):
         (`AIZK_DATABASE_URL`) for a deployment shape the template can't express.
     db_host: hostname of the Postgres server both DSN templates default against.
     db_name: database name both DSN templates default against.
+    db_null_pool: use NullPool instead of a real connection pool for the app-role engine. The
+        pytest suite's `conftest.py` sets this since many tests each spin their own asyncio event
+        loop and a pooled asyncpg connection cannot cross loops; production wants the real pool.
+    db_pool_max_overflow: extra connections the app-role pool opens above `db_pool_size` under
+        burst load before a checkout blocks, only relevant when `db_null_pool` is off.
+    db_pool_size: steady-state connections the app-role pool keeps open, only relevant when
+        `db_null_pool` is off; a pooled checkout costs no new TCP/TLS handshake, the 20-34ms a
+        fresh `NullPool` connection paid per call.
     db_port: port of the Postgres server both DSN templates default against.
     decay_cron: crontab the decay fan-out fires on, daily before dawn by default.
     decay_enabled: whether the scheduler fans the daily decay pass out across principals.
@@ -192,6 +217,9 @@ class Settings(BaseSettings):
         empty to leave default ontology extraction in place.
     extract_max_tokens: hard cap on extraction/consolidation output tokens, a guard against
         unbounded generation.
+    extract_min_chars: fewest characters of prose a chunk must carry before the build spends an
+        extraction call on it; a shorter chunk is marked processed with no entities or facts, a
+        heading or a stray line never worth the LLM round trip.
     extract_preferences_prompt: preferences strategy's focus, layered on the ontology prompt,
         steering toward durable choices and habits.
     extract_strategy: extraction strategy the build path runs, `ontology` (closed-vocab default),
@@ -208,6 +236,21 @@ class Settings(BaseSettings):
         before reciprocal-rank fusion merges down to the requested k.
     gap_seed_terms: best already-recalled statements that seed the expanded gap-fill query, kept
         small so the extra round stays targeted.
+    gliner_gate_device: torch device (or `map_location` value) the gliner2 gate loads on, `cpu` by
+        default since the local GPU is already spoken for by the embed/rerank/llm vLLM trio.
+    gliner_gate_enabled: whether the gliner2 relevance gate runs ahead of the combined extraction
+        call at all; a chunk it clears skips the LLM call entirely.
+    gliner_gate_model: gliner2 checkpoint the gate loads, the 205M unified extraction model.
+    gliner_gate_threshold: confidence a chunk's best entity match must clear to count as relevant
+        to the ontology, below which the gate skips the LLM call for that chunk. Calibrated
+        against real prose: filler text topped out around 0.5, ontology-bearing text sat at 0.9+,
+        so 0.7 sits in the wide gap between them.
+    graph_build_concurrency: pending chunks a graph build extracts and consolidates at once, the
+        `asyncio.Semaphore` width shared by `build_graph`'s inline loop and the pgqueuer worker's
+        extraction entrypoint, so both paths hit the LLM endpoint at the same bounded concurrency
+        regardless of how many chunk jobs pgqueuer itself has dispatched as concurrent tasks;
+        matches the compose vllm-llm service's own `--max-num-seqs` so this pipeline's own
+        concurrency is what saturates vLLM's continuous batching, not a starved queue.
     graph_facts_k: number of latest facts retrieved per graph search.
     index_backend: vector index the halfvec columns use, `vchordrq` (default, RAM-frugal) or
         `hnsw` (portable fallback); both share the cosine op. Drives both the migration DDL and
@@ -225,7 +268,13 @@ class Settings(BaseSettings):
         the latest facts.
     llm_api_key: bearer token for the chat endpoint, defaulting to the ambient OPENAI_API_KEY; set
         to a cloud provider's key (e.g. CEREBRAS_API_KEY) when pointing llm_url at one.
-    llm_model: chat model id used to extract triples and decide consolidation.
+    llm_chat_template_kwargs: extra `chat_template_kwargs` merged into every `structured` call's
+        `extra_body`, empty by default so a stock load sends none and never risks a hosted
+        OpenAI-shaped provider rejecting an unrecognized field. The local vllm-llm deployment sets
+        it to `{"enable_thinking": false}` to disable a hybrid-thinking model's own `<think>`
+        preamble, which would otherwise burn the combined call's token budget on reasoning the
+        closed ontology schema never asked for.
+    llm_model: chat model id used to extract entities, facts, and dates in the combined call.
     llm_provider: label recording which provider llm_url points at (`vllm` local, `cerebras`
         hosted), surfaced in diagnostics; the url is the client's real source of truth.
     llm_request_timeout: HTTP-level ceiling on the `AsyncOpenAI` client request, generous so a
@@ -250,6 +299,10 @@ class Settings(BaseSettings):
         entity from pulling in the whole graph.
     ppr_max_hops: how many hops the bounded local walk follows out from the seeds before stopping.
     principal: identity the MCP server and hook commands act as until an auth seam resolves one.
+    profiling: whether `mainboard.profiling.span` recording is turned on at startup, off by
+        default so an unmeasured deployment pays only the one boolean check each span reads. The
+        `serve_mcp` and `worker` entrypoints call `enable_spans()` once when this is set; the
+        admin `profile_report` tool reads the process-wide `Collector` it feeds.
     profile_on_write: whether a finished extraction enqueues a debounced profile rebuild for each
         touched entity, refreshing its portrait without waiting for the weekly pass.
     profile_refresh_cron: crontab the full profile refresh fires on, weekly by default.
@@ -260,6 +313,10 @@ class Settings(BaseSettings):
     promoted_bonus: additive score bump the chunk-lane fusion gives a hit whose document carries
         promote provenance, letting audited/admin-published knowledge outrank an equally-ranked
         unpromoted hit.
+    queue_batch_size: pgqueuer jobs `aizk worker` dequeues per round, sized above
+        graph_build_concurrency so the queue path actually keeps enough chunks in flight to
+        saturate vLLM's continuous batching rather than the dequeue width itself becoming the
+        bottleneck a smaller extraction_semaphore would otherwise hide.
     query_routing: whether recall classifies a query as local/global/multi-hop and narrows the
         retrieval mix to that route, default-off until the eval A/B proves it beats the fixed mix.
     raptor: whether recall folds in RAPTOR summaries, root level for a broad query and leaf level
@@ -293,9 +350,18 @@ class Settings(BaseSettings):
     rerank_api_key: bearer token for the api reranker endpoint, empty for a local server that
         ignores it.
     rerank_candidates: width of the fused pool handed to the reranker before keeping the top k.
+    rerank_min_pool: fewest fused candidates a pool must carry before reranking pays for itself;
+        a pool at or under this size skips the cross-encoder round trip entirely, since fusion's
+        own order already reflects every candidate when there is nothing left to reorder or trim.
     rerank_model: served model name the /v1/rerank endpoint answers to, matching the co-resident
         vllm-rerank --served-model-name.
     rerank_request_timeout: wall-clock ceiling on one /v1/rerank HTTP request.
+    rerank_snippet_chars: characters of each candidate's text the cross-encoder scores against the
+        query, truncated before the /v1/rerank call since the endpoint's own latency scales with
+        candidate length; the stored and returned hit text is never truncated, only what the
+        reranker itself reads. A cross-encoder's relevance judgment is dominated by a passage's
+        early tokens, so trading the tail of a long chunk for a materially faster rerank round
+        trip costs little precision.
     rerank_url: base URL of the OpenAI-compatible /v1/rerank endpoint, the co-resident
         vllm-rerank container on its own port by default.
     rrf_k: reciprocal-rank-fusion smoothing constant shared by the chunk-lane and chunk-fact
@@ -314,8 +380,9 @@ class Settings(BaseSettings):
         oldest beyond the cap are promoted regardless of age, the overflow half of the trigger.
     session_recall_k: how many still-working session items a recall folds in beside the graph,
         zero to leave the session tier out of recall entirely.
-    similar_facts: similar latest facts of the same subject to weigh before consolidating a new
-        one, the candidate pool decide_consolidation chooses ADD, UPDATE, or NOOP over.
+    similar_facts: similar latest facts of the same subject `graph.consolidation.rank_pool` keeps
+        per candidate, the pool `decide_by_rule` and the batched borderline call choose ADD,
+        UPDATE, or NOOP over.
     skip_live_gate: execution-option key opting a fact read out of the session listener's live
         gate, for reads that must see superseded rows (as_of replay, raw counts, promote-copy).
     snippet_chars: characters a hit or fact snippet is truncated to when rendered into a recall
@@ -323,9 +390,6 @@ class Settings(BaseSettings):
     system_principal_id: identity that owns rows ingested before the visibility lattice existed
         and that a scheduled background pass acts as when a caller does not name a per-principal
         one.
-    timestamp_resolution_prompt: system prompt the timestamp pass resolves each extracted fact's
-        valid-time window with, run after structural extraction so date parsing never competes
-        with it.
     zitadel_client_id: client id of the aizk resource server registered at the issuer, the
         identity the introspection call authenticates as.
     zitadel_client_secret: client secret paired with zitadel_client_id for the introspection call,
@@ -336,13 +400,18 @@ class Settings(BaseSettings):
     zitadel_jwks_url: JWKS endpoint the issuer publishes its signing keys at, to verify tokens.
     """
 
-    model_config = SettingsConfigDict(env_prefix="AIZK_")
+    # extra="ignore": .env also carries compose-only container knobs (AIZK_EMBED_CHECKPOINT,
+    # AIZK_EMBED_GPU_MEM_UTIL, and their rerank/llm counterparts) that vLLM reads and Settings
+    # never does, so the dotenv loader must tolerate names with no matching field rather than
+    # raising on them.
+    model_config = SettingsConfigDict(env_prefix="AIZK_", env_file=ENV_FILE, extra="ignore")
 
-    admin_credentials: str = "aizk:aizk"
     admin_database_url: str = ""
+    admin_password: str = "aizk"
     anon_rate_per_second: float = 1.0
     anonymous_principal_id: uuid.UUID = uuid.UUID(int=0)
-    app_credentials: str = "aizk_app:aizk_app"
+    app_password: str = "aizk_app"
+    auto_setup: bool = True
     benchmarks_enabled: bool = False
     bm25_backend: str = "vchord_bm25"
     chunk_denylist: str = (
@@ -357,6 +426,8 @@ class Settings(BaseSettings):
     community_backend: str = "networkx"
     community_min_size: int = 3
     community_summary_system: str = COMMUNITY_SUMMARY_SYSTEM_PROMPT
+    consolidation_auto_merge_threshold: float = 0.9
+    consolidation_borderline_floor: float = 0.75
     consolidation_prompt: str = CONSOLIDATION_PROMPT
     context_token_budget: int = 2048
     contextual_bm25: bool = False
@@ -367,6 +438,9 @@ class Settings(BaseSettings):
     database_url: str = ""
     db_host: str = "localhost"
     db_name: str = "aizk"
+    db_null_pool: bool = False
+    db_pool_max_overflow: int = 10
+    db_pool_size: int = 10
     db_port: int = 5433
     decay_cron: str = "0 3 * * *"
     decay_enabled: bool = True
@@ -389,6 +463,7 @@ class Settings(BaseSettings):
     eval_sample_questions: int = 10
     extract_custom_prompt: str = ""
     extract_max_tokens: int = 2048
+    extract_min_chars: int = 80
     extract_preferences_prompt: str = EXTRACT_PREFERENCES_PROMPT
     extract_strategy: str = "ontology"
     extract_summary_prompt: str = EXTRACT_SUMMARY_PROMPT
@@ -397,6 +472,11 @@ class Settings(BaseSettings):
     extract_timeout: float = 90.0
     fusion_depth: int = 50
     gap_seed_terms: int = 2
+    gliner_gate_device: str = "cpu"
+    gliner_gate_enabled: bool = True
+    gliner_gate_model: str = "fastino/gliner2-base-v1"
+    gliner_gate_threshold: float = 0.7
+    graph_build_concurrency: int = 48
     graph_facts_k: int = 20
     # vchordrq keeps the RaBitQ quantized codes in RAM and streams the full halfvec rows from SSD,
     # the RAM-frugal default. Flip both defaults to hnsw + tsvector for a managed Postgres that
@@ -409,7 +489,8 @@ class Settings(BaseSettings):
     insight_min_significance: float = 0.6
     insight_system: str = INSIGHT_SYSTEM_PROMPT
     llm_api_key: str = Field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
-    llm_model: str = "qwen3-llm"
+    llm_chat_template_kwargs: dict[str, bool] = {}
+    llm_model: str = "gemma4-e2b-llm"
     llm_provider: str = "vllm"
     llm_request_timeout: float = 600.0
     llm_url: str = "http://localhost:8002/v1"
@@ -425,12 +506,14 @@ class Settings(BaseSettings):
     ppr_max_fanout: int = 50
     ppr_max_hops: int = 3
     principal: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    profiling: bool = False
     profile_on_write: bool = True
     profile_refresh_cron: str = "0 5 * * 0"
     profile_refresh_enabled: bool = True
     profile_system: str = PROFILE_SYSTEM_PROMPT
     profiles: bool = True
     promoted_bonus: float = 0.01
+    queue_batch_size: int = 64
     query_routing: bool = False
     raptor: bool = True
     raptor_cron: str = "30 4 * * 0"
@@ -450,8 +533,10 @@ class Settings(BaseSettings):
     rerank: bool = True
     rerank_api_key: str = ""
     rerank_candidates: int = 50
+    rerank_min_pool: int = 3
     rerank_model: str = "Qwen/Qwen3-Reranker-4B"
     rerank_request_timeout: float = 120.0
+    rerank_snippet_chars: int = 320
     rerank_url: str = "http://localhost:8001/v1"
     rrf_k: int = 60
     self_improve_cron: str = "0 6 * * 0"
@@ -466,7 +551,6 @@ class Settings(BaseSettings):
     skip_live_gate: str = "aizk_skip_live_gate"
     snippet_chars: int = 280
     system_principal_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-    timestamp_resolution_prompt: str = TIMESTAMP_RESOLUTION_PROMPT
     zitadel_client_id: str = ""
     zitadel_client_secret: str = ""
     zitadel_introspect_url: str = ""
@@ -475,22 +559,23 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def default_dsns(self) -> Self:
-        """Fill an unset `database_url`/`admin_database_url` from the host/port/db and credentials.
+        """Fill an unset `database_url`/`admin_database_url` from the host/port/db and passwords.
 
         Only when the field is still its empty default: an explicit value, whether a constructor
         kwarg or the `AIZK_DATABASE_URL`/`AIZK_ADMIN_DATABASE_URL` env override, always wins
         outright, the escape a cloud profile needs to point at a differently shaped deployment, TLS
         params or a managed host included, that the `db_host`/`db_port`/`db_name` template alone
-        cannot express.
+        cannot express. The role names are the fixed `aizk_app`/`aizk` constants `admin_password`'s
+        docstring explains, only the passwords come from settings.
         """
         if not self.database_url:
             self.database_url = (
-                f"postgresql+asyncpg://{self.app_credentials}@{self.db_host}:{self.db_port}"
+                f"postgresql+asyncpg://aizk_app:{self.app_password}@{self.db_host}:{self.db_port}"
                 f"/{self.db_name}"
             )
         if not self.admin_database_url:
             self.admin_database_url = (
-                f"postgresql+asyncpg://{self.admin_credentials}@{self.db_host}:{self.db_port}"
+                f"postgresql+asyncpg://aizk:{self.admin_password}@{self.db_host}:{self.db_port}"
                 f"/{self.db_name}"
             )
         return self

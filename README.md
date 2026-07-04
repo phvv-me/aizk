@@ -27,6 +27,12 @@ pip install aizk
 import aizk
 ```
 
+## Configuration
+
+Every docker-compose knob, the `initdb/roles.sh` role password, and every `Settings` default live
+in one file, `.env.example`. Copy it to `.env` and edit; docker compose and the app both read the
+same `AIZK_`-prefixed variables, so one edit moves both.
+
 ## Documentation
 
 Full documentation lives at [https://phvv.me/aizk](https://phvv.me/aizk).

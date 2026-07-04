@@ -16,6 +16,7 @@ from .qa import QA
 
 if TYPE_CHECKING:
     from mainboard import Meter
+    from ranx import Qrels, Run
 
 # a pgvector halfvec stores each element in two bytes, so a stored vector's footprint is the
 # embedding width times this, the storage signal the Matryoshka dimensions axis trades quality for.
@@ -245,6 +246,56 @@ async def measure_config(
     )
 
 
+async def measure_configs(
+    configs: list[SweepConfig], gold: list[QA], principal_id: uuid.UUID, k: int
+) -> dict[str, Measurement]:
+    """Measure every config in the grid and return its raw scores, latencies, and memory peaks.
+
+    configs: the grid points to measure, in the order the report lists them.
+    gold: the evaluation items that carry an expected fact.
+    principal_id: identity whose row level security visibility scopes the recall.
+    k: number of hits and seed facts each recall surfaces.
+    """
+    return {
+        config.label: await measure_config(config, gold, principal_id, k) for config in configs
+    }
+
+
+def config_runs(measured: dict[str, Measurement]) -> list[Run]:
+    """Render each config's measured scores as a named ranx Run, in measured order.
+
+    measured: the raw measurement per config label, measure_configs' own output.
+    """
+    from ranx import Run
+
+    return [Run(measurement.scores, name=label) for label, measurement in measured.items()]
+
+
+def score_runs(
+    qrels: Qrels, runs: list[Run], baseline: str, metrics: list[str]
+) -> tuple[dict[str, dict[str, float]], str | None, str | None]:
+    """Score the configs' runs, a full significance comparison when there are at least two.
+
+    qrels: the shared relevance judgments every run is scored against.
+    runs: the configs' named ranx runs, in grid order.
+    baseline: the label the significance comparison and single-run fallback both key off of.
+    metrics: the ranx metric list, recall@k first and ndcg@k second.
+
+    Returns each run's per-metric scores keyed by label, the rendered comparison table (null for a
+    single config), and the label that significantly beats the baseline (null when none does).
+    """
+    from ranx import compare, evaluate
+
+    if len(runs) < 2:
+        single = evaluate(qrels, runs[0], metrics)
+        assert isinstance(single, dict)  # a metric list always evaluates to a per-metric dict
+        return {baseline: single}, None, None
+    report = compare(qrels, runs, metrics=metrics)
+    scored = {run.name: report.results[run.name] for run in runs}
+    best = significant_winner(report.to_dict(), baseline, metrics[1], settings.self_improve_max_p)
+    return scored, str(report), best
+
+
 def config_result(
     config: SweepConfig,
     scored: dict[str, float],
@@ -292,7 +343,7 @@ async def run_sweep(
     matrix: the axis grid to sweep, the default toggle grid when null.
     gold: pre-built evaluation items, such as a benchmark's, bypassing question synthesis.
     """
-    from ranx import Qrels, Run, compare, evaluate
+    from ranx import Qrels
 
     principal_id = principal_id or settings.system_principal_id
     matrix = matrix or SweepMatrix()
@@ -302,26 +353,12 @@ async def run_sweep(
     configs = build_matrix(matrix)
     if not gold:
         return SweepReport(n=0, k=k, results=[], comparison=None, best_label=None)
-    qrels = Qrels({f"q{index}": {"rel": 1} for index in range(len(gold))})
     metrics = [f"recall@{k}", f"ndcg@{k}", "mrr"]
-    measured: dict[str, Measurement] = {}
-    runs: list[Run] = []
-    for config in configs:
-        measured[config.label] = await measure_config(config, gold, principal_id, k)
-        runs.append(Run(measured[config.label].scores, name=config.label))
-    if len(runs) >= 2:
-        report = compare(qrels, runs, metrics=metrics)
-        scored = {label: report.results[label] for label in measured}
-        comparison: str | None = str(report)
-        best_label = significant_winner(
-            report.to_dict(), configs[0].label, metrics[1], settings.self_improve_max_p
-        )
-    else:
-        single = evaluate(qrels, runs[0], metrics)
-        assert isinstance(single, dict)  # a metric list always evaluates to a per-metric dict
-        scored = {configs[0].label: single}
-        comparison = None
-        best_label = None
+    qrels = Qrels({f"q{index}": {"rel": 1} for index in range(len(gold))})
+    measured = await measure_configs(configs, gold, principal_id, k)
+    scored, comparison, best_label = score_runs(
+        qrels, config_runs(measured), configs[0].label, metrics
+    )
     results = [
         config_result(config, scored[config.label], measured[config.label], metrics)
         for config in configs

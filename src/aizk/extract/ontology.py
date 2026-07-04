@@ -62,10 +62,12 @@ class RelationType(StrEnum):
     """The closed vocabulary of predicates a fact may assert, mirroring `EntityType`'s role for
     the graph's edges.
 
-    Pydantic renders this enum natively, so `ExtractedFact` annotates its `predicate` field with
-    this class directly and the endpoint's grammar-constrained decoding keeps every value inside
-    it. Every member but `OBSERVES` is one the extractor may emit. `OBSERVES` is the predicate the
-    reflective insight pass stamps on observations it writes back, structural like
+    Pydantic renders this enum natively, so `TimedFact` and the combined call's wire-format
+    `LLMFact` both annotate their `predicate` field with this class directly and the endpoint's
+    grammar-constrained decoding keeps every value inside it. Every member but `OBSERVES` is one
+    the extractor may emit. `OBSERVES` is the predicate
+    every system-written fact carries instead, the reflective insight pass's own derived
+    observations and `extract.journal`'s deterministic dated-line parse alike, structural like
     `EntityType.RAPTOR_SUMMARY`/`OBSERVATION`.
     """
 

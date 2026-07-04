@@ -10,22 +10,23 @@ from .engine import async_session
 
 @asynccontextmanager
 async def acting_as(
-    principal_id: uuid.UUID, scope: uuid.UUID | None = None
+    principal_id: uuid.UUID, scopes: tuple[uuid.UUID, ...] = ()
 ) -> AsyncGenerator[AsyncSession]:
     """Open a session whose transaction runs as a given principal under row level security.
 
-    Stamps `session.info` with the acting principal and the optional single-group reading lens
-    right at construction, `{"principal": principal_id, "lens": scope}`, the identity
-    `events.bind_principal`'s `after_begin` listener reads back to bind the app.uid and app.scope
+    Stamps `session.info` with the acting principal and the optional scope-set reading lens right
+    at construction, `{"principal": principal_id, "lens": scopes}`, the identity
+    `events.bind_principal`'s `after_begin` listener reads back to bind the app.uid and app.scopes
     GUCs. The session carries its own acting identity this way rather than through a ContextVar
     threaded around it, so every read and write the block issues, however many sessions it opens,
-    is scoped to this principal, narrowed to `scope` when one is given.
+    is scoped to this principal, narrowed to the lens `scopes` projects when one is given.
 
     principal_id: identity whose visibility the session acts under.
-    scope: group id to narrow reads to, or null for the full visible union.
+    scopes: group ids to narrow reads to (a claim's own set must be contained in this lens and
+        non-empty), or an empty tuple for the full visible union with no lens at all.
     """
     async with (
-        async_session()(info={"principal": principal_id, "lens": scope}) as session,
+        async_session()(info={"principal": principal_id, "lens": scopes}) as session,
         session.begin(),
     ):
         yield session

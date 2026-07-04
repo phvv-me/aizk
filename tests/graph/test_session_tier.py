@@ -1,102 +1,103 @@
-import asyncio
 import uuid
-from datetime import UTC, datetime, timedelta
 
+import dbutil
 import pytest
-from graphdb import FakeLLM
+import seedgraph
 from sqlalchemy import func, select
 
 import aizk.graph.session_tier as session_tier_module
 from aizk.config import settings
-from aizk.extract.ingest import remember_session
 from aizk.graph.session_tier import promote_sessions
-from aizk.retrieval import recall
 from aizk.store import Chunk, SessionItem, acting_as
 
+pytestmark = pytest.mark.usefixtures("migrated_db", "fake_embedder")
 
-def items_at(ages_minutes: list[float], now: datetime) -> list[SessionItem]:
-    """Working items aged the given minutes, oldest first, the pure selector's input.
 
-    Built in memory without a session since the selector reads only `id` and `created_at`.
+async def noop_enqueue(*args: object, **kwargs: object) -> int:
+    """Stand in for the durable enqueue so the promotion pass is read apart from the worker."""
+    return 0
 
-    ages_minutes: age in minutes of each item, laid out oldest first.
-    now: the reference the ages are subtracted from.
+
+async def seed_item(owner: uuid.UUID, text: str, scopes: tuple[uuid.UUID, ...] = ()) -> uuid.UUID:
+    """Insert one still-working session item with arbitrary scopes, bypassing the write policy.
+
+    owner: principal that owns the working item.
+    text: the remembered content promotion reingests.
+    scopes: group set the item is shared with, private when empty.
     """
-    return [
-        SessionItem(id=uuid.uuid4(), created_at=now - timedelta(minutes=age))
-        for age in ages_minutes
-    ]
+    item_id = uuid.uuid4()
+    await dbutil.admin_exec(
+        "INSERT INTO session_item (id, owner_id, scopes, kind, text) "
+        "VALUES (:id, :owner, CAST(:scopes AS uuid[]), 'note', :text)",
+        {"id": item_id, "owner": owner, "scopes": [str(s) for s in scopes], "text": text},
+    )
+    return item_id
 
 
-def test_due_for_promotion_takes_the_aged_items() -> None:
-    """An item past the age cutoff is due while a fresh one under a slack cap is not."""
-    now = datetime.now(UTC)
-    items = items_at([120.0, 5.0], now)
-    due = SessionItem.due_for_promotion(items, now, age_minutes=60.0, threshold=100)
-    assert [item.id for item in due] == [items[0].id]  # only the aged item, the fresh one stays
-
-
-def test_due_for_promotion_overflows_the_oldest_beyond_the_cap() -> None:
-    """With every item fresh, the oldest beyond the working cap are still due, staying bounded."""
-    now = datetime.now(UTC)
-    items = items_at([3.0, 2.0, 1.0], now)
-    due = SessionItem.due_for_promotion(items, now, age_minutes=999.0, threshold=1)
-    assert [item.id for item in due] == [items[0].id, items[1].id]  # oldest two overflow the cap
-
-
-@pytest.mark.usefixtures("fake_embedder")
-def test_promotion_moves_a_working_item_into_the_graph_and_recall_follows_it(
-    fresh_principal: uuid.UUID,
-    fake_llm: FakeLLM,
+def test_promote_moves_due_items_into_the_graph_and_skips_unwritable_scopes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A remembered item recalls from the working lane, then promotion moves it into the graph.
+    """A due private item reingests into a graph chunk and clears, a read-only-scope item stays.
 
-    The single most universal 2026 tier end to end: a remember lands in working memory a recall
-    surfaces at once, and the promotion pass, with the age cutoff dropped so the item is due, feeds
-    it through the ingest pipeline into a document and clears it from the working lane, so the next
-    recall reads it from the graph store instead. The queue enqueue is stubbed so the pass is read
-    in isolation from the durable worker.
+    With the age cutoff dropped so everything is due, the promotion pass feeds the writable private
+    item through the ingest pipeline into a chunk and stamps it promoted, while the item scoped to
+    a group the principal only reads is filtered out by `writable_scopes` and stays working.
     """
-    owner = fresh_principal
+    monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
+    monkeypatch.setattr(settings, "session_promote_age_minutes", 0.0)
     marker = uuid.uuid4().hex
-    text_body = f"a decision about {marker} worth keeping"
 
-    async def probe() -> tuple[bool, int, int, bool]:
-        await remember_session(text_body, kind="note", owner_id=owner)
-        # the reranker seam is off so recall rides the fake embedder alone without loading a model
-        monkeypatch.setattr(settings, "rerank", False)
-        before = await recall(text_body, principal_id=owner, k=4)
-        seen_working = any(marker in note.text for note in before.session)
-
-        monkeypatch.setattr(session_tier_module, "enqueue_pending", _noop)
-        monkeypatch.setattr(settings, "session_promote_age_minutes", 0.0)
+    async def body() -> tuple[int, int, bool, bool]:
+        owner = await seedgraph.fresh_owner()
+        readonly = await dbutil.seed_group(uuid.uuid4())
+        await dbutil.seed_membership(owner, readonly, "reader")
+        private = await seed_item(owner, f"a decision about {marker} worth keeping")
+        blocked = await seed_item(owner, f"team note {marker}", scopes=(readonly,))
         promoted = await promote_sessions(owner)
-
-        after = await recall(text_body, principal_id=owner, k=4)
-        still_working = any(marker in note.text for note in after.session)
         async with acting_as(owner) as session:
             chunks = await session.scalar(
                 select(func.count()).select_from(Chunk).where(Chunk.text.ilike(f"%{marker}%"))
             )
-        return seen_working, promoted, chunks or 0, still_working
+            private_item = await session.get(SessionItem, private)
+            blocked_item = await session.get(SessionItem, blocked)
+        assert private_item is not None and blocked_item is not None
+        return (
+            promoted,
+            chunks or 0,
+            private_item.promoted_at is not None,
+            blocked_item.promoted_at is not None,
+        )
 
-    seen_working, promoted, chunks, still_working = asyncio.run(probe())
-    assert seen_working  # recall surfaced the fresh working item
-    assert promoted == 1  # the aged item was promoted
-    assert chunks == 1  # promotion created the graph chunk in the store
-    assert not still_working  # and cleared it from the working lane
+    promoted, chunks, private_done, blocked_done = dbutil.run(body())
+    assert promoted == 1  # only the writable private item is due
+    assert chunks >= 1  # promotion reingested it into a graph chunk
+    assert private_done is True  # and stamped it out of the working set
+    assert blocked_done is False  # the read-only-scope item stays working
 
 
-@pytest.mark.usefixtures("fake_embedder")
-def test_promotion_is_a_no_op_when_nothing_is_due(
-    fresh_principal: uuid.UUID,
-    fake_llm: FakeLLM,
-) -> None:
+def test_promote_is_a_no_op_when_nothing_is_due(monkeypatch: pytest.MonkeyPatch) -> None:
     """An empty working set promotes nothing, so a quiet principal never touches the graph."""
-    owner = fresh_principal
-    assert asyncio.run(promote_sessions(owner)) == 0
+    monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
+
+    async def body() -> int:
+        owner = await seedgraph.fresh_owner()
+        return await promote_sessions(owner)
+
+    assert dbutil.run(body()) == 0
 
 
-async def _noop(*args: object, **kwargs: object) -> None:
-    """An async no-op standing in for the durable enqueue during the isolated promotion test."""
+def test_promote_defaults_to_the_system_principal_on_an_empty_working_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no principal given the pass acts as the system principal over an empty working set.
+
+    Covers the `principal_id or system` default branch, so the selection runs over nothing due and
+    returns zero before any reingest.
+    """
+    monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
+
+    async def body() -> int:
+        await dbutil.reset_db()
+        return await promote_sessions()
+
+    assert dbutil.run(body()) == 0

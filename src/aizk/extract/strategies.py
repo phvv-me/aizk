@@ -1,8 +1,5 @@
-from loguru import logger
-
 from ..config import settings
-from .llm import structured
-from .llm.triples import extract_triples
+from .llm import combined_extract, extract_with_system
 from .models import Extraction
 from .ontology import ONTOLOGY_PROMPT
 
@@ -14,6 +11,12 @@ SUMMARY_SYSTEM = f"{ONTOLOGY_PROMPT}\n{settings.extract_summary_prompt}"
 # the preferences strategy's focus, layered on the ontology, steering the model to the durable
 # choices and habits a person holds, the Decision, Pattern, and Gotcha facts a profile is built on.
 PREFERENCES_SYSTEM = f"{ONTOLOGY_PROMPT}\n{settings.extract_preferences_prompt}"
+
+# the named strategies whose system prompt is fixed at import time, the dispatch table
+# extract_graph reads by settings.extract_strategy; "custom" is handled separately since its own
+# prompt is read live off settings rather than frozen here, and the unmatched default falls
+# through to combined_extract.
+STRATEGY_SYSTEMS: dict[str, str] = {"summary": SUMMARY_SYSTEM, "preferences": PREFERENCES_SYSTEM}
 
 
 def custom_system() -> str:
@@ -31,29 +34,15 @@ def custom_system() -> str:
 async def extract_graph(text: str) -> Extraction:
     """Extract a graph slice from a span under the strategy settings.extract_strategy names.
 
-    The ontology default and an empty custom prompt delegate to `extract_triples` so that path
+    The ontology default and an empty custom prompt delegate to `combined_extract` so that path
     stays byte-for-byte deterministic for the property suite. Summary, preferences, and a filled
-    custom prompt each layer their own focus on the shared ontology guidance before running the
-    one LLM seam.
+    custom prompt each layer their own focus on the shared ontology guidance, but still run
+    through the same compact wire schema and dating cascade `extract_with_system` shares with it.
 
     text: the source span to extract from.
     """
     strategy = settings.extract_strategy
-    if strategy == "summary":
-        system = SUMMARY_SYSTEM
-    elif strategy == "preferences":
-        system = PREFERENCES_SYSTEM
-    elif strategy == "custom" and settings.extract_custom_prompt:
-        system = custom_system()
-    else:
-        return await extract_triples(text)
-
-    extraction = await structured(system, text, Extraction)
-    logger.info(
-        "{} extracted {} entities and {} facts from {} chars",
-        strategy,
-        len(extraction.entities),
-        len(extraction.facts),
-        len(text),
-    )
-    return extraction
+    if strategy == "custom" and settings.extract_custom_prompt:
+        return await extract_with_system(custom_system(), text)
+    system = STRATEGY_SYSTEMS.get(strategy)
+    return await extract_with_system(system, text) if system else await combined_extract(text)

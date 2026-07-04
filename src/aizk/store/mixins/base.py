@@ -15,12 +15,31 @@ type Json = bool | int | float | str | None | list["Json"] | dict[str, "Json"]
 aizk_registry = registry()
 
 
-class TableBase(SQLModel, registry=aizk_registry):
-    """Declarative base shared by every aizk ORM model, auto-naming each table from its class.
+def derive_tablename(name: str) -> str:
+    """Singular snake_case table name derived from a class name, `_`-suffixed on a reserved word.
+
+    `SessionItem` derives to `session_item`; `Group` collides with GROUP, a reserved word in
+    `RESERVED_WORDS` (the postgresql dialect's own catalog, the dialect every DSN in this codebase
+    dials), so it derives to `group_` instead, avoiding the manual quoting every raw `text()`
+    statement touching an unsuffixed `group` would otherwise need. Shared by `TableBase`'s own
+    `__tablename__` and `ViewBase`'s, so a table and a view can never derive the reserved-word
+    suffix two different ways.
+
+    name: the class name to derive a table name from.
+    """
+    derived = inflection.underscore(name)
+    return f"{derived}_" if derived in RESERVED_WORDS else derived
+
+
+class MappedBase(SQLModel, registry=aizk_registry):
+    """Serialization and typed-table surface shared by every mapped class, table or view alike.
 
     A SQLModel base rather than a plain SQLAlchemy `DeclarativeBase`, so every concrete model is
     simultaneously the mapped ORM class and its own pydantic schema, and `record()` reads back a
-    json-ready row through `model_dump` instead of a hand-walked mapper column list.
+    json-ready row through `model_dump` instead of a hand-walked mapper column list. `TableBase`
+    maps a real table declaratively (`table=True`) and `ViewBase` maps a read-only view
+    imperatively onto its own `__view_select__`, but both reach the identical mapped `Table` seam
+    and the identical `record()` contract from here.
     """
 
     # hybrid_property descriptors (FactClaim.is_current) carry no pydantic-core schema of their
@@ -31,24 +50,33 @@ class TableBase(SQLModel, registry=aizk_registry):
     # the generated lexical mirror is rebuilt by the schema, so both stay out of every dump.
     record_excluded: ClassVar[frozenset[str]] = frozenset({"embedding", "tsv"})
 
-    # SQLAlchemy's declarative machinery sets this once the class is mapped (`table=True`), but
-    # sqlmodel never types it, unlike SQLAlchemy's own `DeclarativeBase.__table__`; declaring it
-    # here gives every concrete model a typed `cls.__table__.c` seam onto the real mapped
-    # `Column` objects, the one place `FactClaim` reaches for it to sidestep the class-level
-    # `InstrumentedAttribute` gap on a plain (non-`Mapped[...]`) `Field` column.
+    # SQLAlchemy's declarative machinery sets this once the class is mapped, but sqlmodel never
+    # types it, unlike SQLAlchemy's own `DeclarativeBase.__table__`; declaring it here gives every
+    # concrete model a typed `cls.__table__.c` seam onto the real mapped `Column` objects, the one
+    # place `FactClaim` reaches for it to sidestep the class-level `InstrumentedAttribute` gap on
+    # a plain (non-`Mapped[...]`) `Field` column.
     __table__: ClassVar[Table]
+    __tablename__: ClassVar[str]
+
+    def record(self) -> dict[str, Json]:
+        """Serialize any mapped row to a json-ready record tagged with its table name.
+
+        `model_dump` walks pydantic's own field set, which for a mapped class is exactly its
+        columns, relationships never among them, so every model serializes without hand-listing
+        its fields. The tag key is `table` since a column named `kind` already means something on
+        some rows.
+        """
+        return {"table": self.__tablename__} | self.model_dump(
+            mode="json", exclude=set(self.record_excluded)
+        )
+
+
+class TableBase(MappedBase):
+    """Declarative base shared by every aizk ORM table, auto-naming each table from its class."""
 
     @declared_attr.directive
     def __tablename__(cls) -> str:
-        """Singular snake_case derived from the class name, suffixed with `_` on a reserved word.
-
-        `SessionItem` derives to `session_item`; `Group` collides with GROUP, a reserved word in
-        `RESERVED_WORDS` (the postgresql dialect's own catalog, the dialect every DSN in this
-        codebase dials), so it derives to `group_` instead, avoiding the manual quoting every raw
-        `text()` statement touching an unsuffixed `group` would otherwise need.
-        """
-        name = inflection.underscore(cls.__name__)
-        return f"{name}_" if name in RESERVED_WORDS else name
+        return derive_tablename(cls.__name__)
 
     # sqlmodel's own `__tablename__` is `ClassVar[str | Callable[..., str]]` in its annotation
     # but redefined in the same class body through a bare `@declared_attr`, so pyrefly's override
@@ -60,15 +88,3 @@ class TableBase(SQLModel, registry=aizk_registry):
     # "unmanaged access" warning pre-mapping), so the seam is a same-object recast rather than a
     # renamed helper function.
     __tablename__ = cast("declared_attr[str]", __tablename__)
-
-    def record(self) -> dict[str, Json]:
-        """Serialize any mapped row to a json-ready record tagged with its table name.
-
-        `model_dump` walks pydantic's own field set, which for a SQLModel table class is exactly
-        its mapped columns, relationships never among them, so every model serializes without
-        hand-listing its fields. The tag key is `table` since a column named `kind` already means
-        something on some rows.
-        """
-        return {"table": self.__tablename__} | self.model_dump(
-            mode="json", exclude=set(self.record_excluded)
-        )

@@ -60,6 +60,22 @@ dependencies = [
   # time rather than splitting the whole file into lines by hand
   "jsonlines>=4.0,<5",
   "patos",
+  # declarative PostgreSQL row level security for SQLAlchemy and Alembic, store/rls/'s dependency.
+  # A direct git reference, not a PyPI name: the `rls` name on PyPI is DelfinaCare's upstream,
+  # whose API our fork reworked, so the bare name would install the wrong library. PyPI rejects
+  # direct-URL dependencies, which is why the release workflow stays manually gated until the
+  # fork ships under its own PyPI name.
+  "rls @ git+https://github.com/phvv-me/rls",
+  # the span/timing profiler behind `settings.profiling`, wired through recall and the build
+  "mainboard>=0.0.8",
+  # the durable queue and cron scheduler the background worker drains
+  "pgqueuer>=0.10,<1",
+  # the strict absolute-format half of the fact-dating cascade
+  "dateparser>=1.2,<2",
+  # transient-deadlock retry around the per-chunk write transaction
+  "tenacity>=9,<10",
+  # the 205M extraction gate scoring chunks against the ontology before any LLM call
+  "gliner2>=0.1",
 ]
 
 [project.scripts]
@@ -141,13 +157,23 @@ module = ["aizk.config", "aizk.retrieve"]
 disallow_any_explicit = false
 
 [tool.pytest.ini_options]
-addopts = "-q -ra --strict-markers --cov=aizk --cov-report=term-missing"
+# importlib import mode gives each test file a unique module identity by path, so same-basename
+# files in different subpackages (e.g. retrieval/test_models.py and eval/test_models.py) never
+# collide the way prepend mode's basename import does. The flat helper imports (`import dbutil`)
+# keep resolving through `pythonpath` since that governs the regular sys.path, not test discovery.
+addopts = "-q -ra --strict-markers --import-mode=importlib --cov=aizk --cov-report=term-missing"
 testpaths = ["tests"]
 pythonpath = ["tests"]
+markers = ["integration: needs the live GPU model services, deselected by default"]
 
 [tool.coverage.run]
 source = ["aizk"]
 branch = true
+# Alembic migrations are DDL executed out-of-process by `alembic upgrade` at bootstrap, never
+# imported into the pytest process, so they are integration-verified (the schema migrates and
+# `verify_scoped_rls` passes) rather than unit-covered. Excluding them keeps the reported number a
+# faithful measure of the application code the suite actually exercises.
+omit = ["*/store/migrations/*"]
 
 [tool.coverage.report]
 show_missing = true

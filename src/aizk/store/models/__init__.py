@@ -1,15 +1,19 @@
-from .chunk import Chunk
-from .community import Community
-from .document import Document
-from .entity import EntityClaim, EntityContent
-from .fact import FactClaim, FactContent
-from .group import Group
-from .live_fact import LiveFact
-from .membership import Membership
-from .principal import Principal
-from .profile import Profile
-from .session_item import SessionItem
-from .watermark import Watermark
+from .tables import (
+    Chunk,
+    Community,
+    Document,
+    EntityClaim,
+    EntityContent,
+    FactClaim,
+    FactContent,
+    Group,
+    Membership,
+    Principal,
+    Profile,
+    SessionItem,
+    Watermark,
+)
+from .views import LiveFact
 
 __all__ = [
     "Chunk",
