@@ -30,17 +30,17 @@ class ScheduledTask(Registry, FrozenModel, abc.ABC):
     """One background maintenance pass the scheduler fans out across the principals.
 
     A concrete subclass names itself with an explicit `name` matching its settings prefix
-    (`decay`, `dedup`, ...) and implements `run`; `expression` and `enabled` then read straight off
+    (`decay`, `dedup`, ...) and implements `run`. `expression` and `enabled` then read straight off
     `{name}_cron`/`{name}_enabled` on the live settings, so a subclass carries no state of its own
     and `ScheduledTask.implementations()` is the whole roster of passes.
 
     Evaluated procrastinate (https://procrastinate.readthedocs.io) as a replacement for pgqueuer
     and kept pgqueuer. procrastinate's `@app.task(queueing_lock=)` matches pgqueuer's `dedupe_key`
-    one for one, but two gaps rule it out: it ships no asyncpg connector, only
+    one for one, but two gaps rule it out. It ships no asyncpg connector, only
     `psycopg`/`Psycopg2Connector`/`AiopgConnector`, so adopting it means a second Postgres driver
-    alongside the asyncpg one every other engine and connection here already shares; and
-    `@app.periodic(cron=...)` fires its decorated task on a cron tick with a bare timestamp, with
-    no notion of fanning that tick into one job per principal, so `schedule.fan_out`'s no-leak
+    alongside the asyncpg one every other engine and connection here already shares. Its
+    `@app.periodic(cron=...)` also fires its decorated task on a cron tick with a bare timestamp,
+    with no notion of fanning that tick into one job per principal, so `schedule.fan_out`'s no-leak
     boundary would have to be hand-written again underneath it. Since the registry survives either
     way and the driver swap is a real cost with no offsetting code reduction, pgqueuer stays.
     """
@@ -119,7 +119,7 @@ async def run_if_grown(
 
     The shared body of `CommunitiesTask` and `RaptorTask`, whose only difference is which watermark
     kind gates them, how large a growth threshold they wait for, and which builder they run. Reads
-    the current fact count once; below the threshold it only logs and returns, otherwise it runs
+    the current fact count once. Below the threshold it only logs and returns, otherwise it runs
     the builder and advances the watermark to the count just measured.
 
     principal_id: identity whose slice of the pass runs.
@@ -157,7 +157,8 @@ def config_from_label(label: str) -> dict[str, bool]:
 def per_config_best(per_config: dict[str, float]) -> str | None:
     """The swept config label with the highest score, null when nothing was scored.
 
-    per_config: hit-at-k keyed by the rerank/ppr toggle label, EvalReport's own per_config field.
+    per_config: hit-at-k keyed by the rerank/ppr (multi-hop personalized-pagerank) toggle label,
+        EvalReport's own per_config field.
     """
     return max(per_config, key=lambda label: per_config[label]) if per_config else None
 
@@ -191,7 +192,7 @@ async def store_scorecard(
 def apply_significant_win(significant_best: str | None) -> dict[str, bool]:
     """Flip the live settings singleton to a significant sweep win, the EvolveMem adaptive loop.
 
-    Mutates `settings` in-process only; env stays the durable config across a restart. Returns the
+    Mutates `settings` in-process only. Env stays the durable config across a restart. Returns the
     flipped fields, empty when there was no significant win to apply.
 
     significant_best: the swept config label that beat the current one, null when none did.
@@ -223,7 +224,9 @@ class DedupTask(ScheduledTask):
 
 
 class CommunitiesTask(ScheduledTask):
-    """Rebuild communities once the graph grew by `communities_every_n_facts`, the weekly gate."""
+    """Rebuild communities, clusters of related entities detected from the fact graph, once it
+    grew by `communities_every_n_facts` facts, the weekly gate.
+    """
 
     name = "communities"
 
@@ -238,7 +241,9 @@ class CommunitiesTask(ScheduledTask):
 
 
 class RaptorTask(ScheduledTask):
-    """Rebuild the RAPTOR tree once the graph grew by `raptor_every_n_facts`, the RAPTOR gate."""
+    """Rebuild the RAPTOR tree, the hierarchical summary tree recall reads for thematic queries,
+    once the graph grew by `raptor_every_n_facts` facts, the RAPTOR gate.
+    """
 
     name = "raptor"
 
@@ -265,7 +270,7 @@ class SelfImproveTask(ScheduledTask):
     """Score recall, store the scorecard, and flip on a significant win, the weekly self-eval pass.
 
     A significant win flips the live `settings` singleton in-process, the EvolveMem adaptive loop,
-    but only for this process's lifetime since env stays the durable config across a restart; no
+    but only for this process's lifetime since env stays the durable config across a restart. No
     significant win means nothing is flipped, so the live config never moves on noise.
     """
 

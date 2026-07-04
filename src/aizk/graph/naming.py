@@ -27,7 +27,7 @@ def normalize_name(name: str) -> str:
     Case-folds with `str.casefold()` before handing off to slugify, since slugify's own
     transliteration table is not casefold-consistent across scripts (Georgian Mtavruli and
     Mkhedruli letters transliterate to different Latin output for what `str.casefold()` treats as
-    the same letter); folding first makes the two forms converge before slugify ever sees them.
+    the same letter). Folding first makes the two forms converge before slugify ever sees them.
 
     name: raw entity surface form proposed by extraction.
     """

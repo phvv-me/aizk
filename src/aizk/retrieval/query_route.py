@@ -40,7 +40,8 @@ MULTIHOP_MARKERS = (
 
 
 def named_entity_count(query: str) -> int:
-    """Count the capitalized words past the first, a cheap stand-in for the named entities a query.
+    """Count the capitalized words past the first, a cheap stand-in for the named entities a query
+    carries.
 
     Skips the leading word so a sentence-initial capital like How or When is not miscounted as a
     name, leaving only the mid-sentence capitals that actually mark proper nouns, the signal the

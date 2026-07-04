@@ -21,8 +21,8 @@ class ViewBase(MappedBase):
 
     A concrete subclass declares its own `__view_select__` and is mapped automatically the moment
     its class statement finishes, mirroring how a `TableBase` subclass is mapped by `table=True`.
-    The hook is `__pydantic_init_subclass__`, not `__init_subclass__`: SQLModel's pydantic field
-    collection deletes a fresh subclass's raw annotated attributes immediately after
+    The hook is `__pydantic_init_subclass__`, not `__init_subclass__`, since SQLModel's pydantic
+    field collection deletes a fresh subclass's raw annotated attributes immediately after
     `__init_subclass__` fires, and that delete raises once instrumented attributes already sit
     over the same names, so mapping must wait until pydantic is done with the class, which is
     exactly when `__pydantic_init_subclass__` runs. A subclass that leaves `__view_select__`
@@ -32,7 +32,7 @@ class ViewBase(MappedBase):
 
     @classmethod
     def __view_select__(cls) -> Select:
-        """The `SELECT` this view is defined by; every concrete subclass overrides this."""
+        """The `SELECT` this view is defined by. Every concrete subclass overrides this."""
         raise NotImplementedError
 
     @classmethod
@@ -48,7 +48,7 @@ def register_view(view: type[ViewBase]) -> None:
 
     Called by `ViewBase.__pydantic_init_subclass__` for every subclass declaring its own
     `__view_select__`, never by hand. The first selected column is always the view's primary key,
-    the `id` every view in this codebase leads with; `info={"is_view": True}` and the `views`
+    the `id` every view in this codebase leads with. `info={"is_view": True}` and the `views`
     name set on the shared metadata are what `store.migrations.env`'s autogenerate
     `include_object` filter and `create_view_ddl`'s own callers key off to leave a view out of
     the table-diff surface.
@@ -74,10 +74,10 @@ def register_view(view: type[ViewBase]) -> None:
 def create_view_ddl(name: str, select: Select) -> str:
     """The `CREATE VIEW ... WITH (security_invoker = true)` DDL for one view's `SELECT`.
 
-    `security_invoker = true` is load-bearing: a default (security_definer-like) view runs as the
-    view's owning role rather than the querying session and silently bypasses row level security,
-    so every view over an RLS-protected table needs it. Compiled with literal binds so the DDL
-    carries no bound parameters, which a `CREATE VIEW` statement cannot take.
+    `security_invoker = true` is load-bearing, since a default (security_definer-like) view runs
+    as the view's owning role rather than the querying session and silently bypasses row level
+    security, so every view over an RLS-protected table needs it. Compiled with literal binds so
+    the DDL carries no bound parameters, which a `CREATE VIEW` statement cannot take.
 
     name: view name, `derive_tablename`'s output for the `ViewBase` subclass.
     select: the `SELECT` the view is defined by, `cls.__view_select__()`'s return value.

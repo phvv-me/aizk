@@ -9,7 +9,8 @@ class EvalReport(FrozenModel):
     ndcg_at_k: ranx ndcg@k under the current settings, rewarding the expected fact ranking high.
     mrr: ranx mean reciprocal rank of the expected fact under the current settings.
     mean_judge: mean answerability the LLM judge gave, null when judging is off.
-    per_config: hit-at-k keyed by the rerank and ppr toggle the recall was scored under.
+    per_config: hit-at-k keyed by the rerank and ppr (multi-hop personalized-pagerank) toggle the
+        recall was scored under.
     comparison: ranx.compare significance table across the toggles, null when there is no gold.
     significant_best: the toggle label that significantly beats the current config on ndcg, the
         self-improve flip signal, null when no sweep clears the significance threshold over it.

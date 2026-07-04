@@ -10,9 +10,9 @@ class Id:
     """A client-generated uuid primary key, the one surrogate-id strategy every table but the
     identity join tables shares.
 
-    uuid7 over uuid4: its leading bits carry a millisecond timestamp, so ids generated close in
-    time sort close together, keeping new rows landing at one edge of the primary key's b-tree
-    instead of a uuid4's fully random insert point scattering writes across the whole index.
+    Picks uuid7 over uuid4 since its leading bits carry a millisecond timestamp, so ids generated
+    close in time sort close together, keeping new rows landing at one edge of the primary key's
+    b-tree instead of a uuid4's fully random insert point scattering writes across the whole index.
 
     id: stable identity, generated client-side on insert unless the caller passes its own
         content-addressed uuid5, as entities and facts do.

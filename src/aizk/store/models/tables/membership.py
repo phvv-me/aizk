@@ -19,9 +19,9 @@ class Membership(TableBase, table=True):
     role: standing within the group. Any role grants read visibility, while writing into the
         group's scope requires writer or admin, the read/write split the write policies enforce.
 
-    Carries no `principal` or `group` relationship of its own: every read site already holds the
-    id and looks the row up directly rather than navigating from a loaded `Membership`, so the two
-    would-be relationships stay unwritten rather than shipped unused.
+    Carries no `principal` or `group` relationship of its own, since every read site already holds
+    the id and looks the row up directly rather than navigating from a loaded `Membership`, so the
+    two would-be relationships stay unwritten rather than shipped unused.
     """
 
     class Role(StrEnum):

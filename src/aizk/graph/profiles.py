@@ -37,7 +37,7 @@ class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
 
         This principal's own private claim on the content when one exists, else whichever of its
         own claims sorts first (the empty private array orders ahead of any non-empty set under
-        Postgres's own array comparison, so `ORDER BY scopes` alone already prefers it): one entity
+        Postgres's own array comparison, so `ORDER BY scopes` alone already prefers it). One entity
         content can carry several of this principal's claims across different scope sets while it
         still gets exactly one rolled-up profile, keyed only on (owner_id, subject_id).
         """

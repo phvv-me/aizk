@@ -51,8 +51,9 @@ SCOPED_TABLES = (
 class Group(Id, TableBase, table=True):
     """A sharing scope a principal can belong to, the unit rows are scoped against.
 
-    Maps to the `group_` table: GROUP is a reserved SQL keyword, and `TableBase.__tablename__`
-    suffixes the auto-derived name with `_` on any such collision rather than needing a manual pin.
+    Maps to the `group_` table, since GROUP is a reserved SQL keyword, and
+    `TableBase.__tablename__` suffixes the auto-derived name with `_` on any such collision rather
+    than needing a manual pin.
 
     id: stable identity, generated client-side on insert.
     name: unique human-readable label the tools resolve a scope by.
@@ -216,7 +217,7 @@ class Group(Id, TableBase, table=True):
         """Drop colliding claims, then demote every scoped row naming this group back to private.
 
         A `uuid[]` scope-set column carries no foreign key, Postgres has no such constraint on an
-        array element, so nothing cascades on its own when a group is deleted: this method is the
+        array element, so nothing cascades on its own when a group is deleted. This method is the
         explicit demotion `ON DELETE SET NULL` gave a singleton `scope` column for free. It
         widens, never narrows, an id containing group B out of a set never becomes `{A}`, the
         whole set resets to `{}` together, so `{A, B}` demotes to fully private rather than
@@ -224,7 +225,7 @@ class Group(Id, TableBase, table=True):
         `entity_claim`/`fact_claim`'s own uniqueness treats every private claim on the same
         content by the same owner as one identity, so an owner who already privately claims a node
         and also claimed it inside this group would collide the moment both land on the same empty
-        set; the redundant about-to-be-demoted claim is simply the one to drop first, since the
+        set. The redundant about-to-be-demoted claim is simply the one to drop first, since the
         owner already privately holds the same content. Both passes run on the owner-role admin
         connection rather than the ordinary app session, since they must reach every owner's rows,
         not only the caller's own visible slice.
@@ -324,7 +325,7 @@ class Group(Id, TableBase, table=True):
 
         Runs under a session already acting as the system principal, which the curation-admin row
         level security policy always lets through for a curated group, so the write succeeds
-        regardless of the calling group or server admin's own membership; `require_admin` is the
+        regardless of the calling group or server admin's own membership. `require_admin` is the
         gate that already vetted them before this ever runs.
 
         session: open session, already acting as the system principal.

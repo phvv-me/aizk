@@ -62,7 +62,7 @@ async def write_observation(
     obs: Observation,
     vector: list[float],
 ) -> bool:
-    """Idempotently write one gated observation as an observes fact; return whether it was new.
+    """Idempotently write one gated observation as an observes fact, returning whether it was new.
 
     session: open session already acting as principal_id.
     principal_id: identity the observation is claimed under, always privately (empty scopes).

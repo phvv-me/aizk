@@ -35,7 +35,7 @@ def _curation_admin_policies(table: Table) -> list[rls.Policy]:
     curated rows, `FactClaim`'s own addition to `Scoped`'s default set.
 
     Postgres combines multiple PERMISSIVE policies for one command with OR, so these ride alongside
-    `Scoped`'s ordinary scope policies as an additive escape rather than replacing them: a curated
+    `Scoped`'s ordinary scope policies as an additive escape rather than replacing them. A curated
     group's own admin member keeps reaching its rows through the ordinary scope policies, and a
     server admin, or a principal separately administering every group a row's set names, reaches it
     through these instead. A curated group's canon is centrally governed, so a server admin may
@@ -43,7 +43,8 @@ def _curation_admin_policies(table: Table) -> list[rls.Policy]:
     `auth.groups.require_group_admin` already vouches for at the application layer before any of
     these rows are ever touched. INSERT carries no admin policy, since review only approves or
     rejects a claim a member already wrote, never mints one. Lives beside `FactClaim`, its only
-    caller, rather than on `ScopeLattice` itself: no other table in the schema needs this escape.
+    caller, rather than on `ScopeLattice` itself, since no other table in the schema needs this
+    escape.
 
     table: `FactClaim.__table__`, read for its own `owner_id`/`scopes` columns through
         `ScopeLattice`.
@@ -119,7 +120,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     inserting a new one with a fresh open `recorded`, so history is never overwritten, and the
     partial unique index below enforces at most one *live* claim per container per content.
 
-    Declared before `FactContent` in this file, not just after: `store.rls.register`'s
+    Declared before `FactContent` in this file, not just after, since `store.rls.register`'s
     mapper-construction hook calls `FactContent.__rls_policies__` synchronously the moment
     `FactContent`'s own class statement finishes, before the rest of the module runs, so it can
     only resolve a bare `FactClaim` name already bound in module globals by then, not one defined
@@ -134,7 +135,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         the statement still holds, and a null range means no claim is made about its world-time
         extent at all.
     recorded: transaction-time range this container has known this version under, lower is the
-        write time and an open upper bound means this is the live version; consolidation closes it
+        write time and an open upper bound means this is the live version. Consolidation closes it
         to retire a version rather than deleting the row.
     reviewed_at: when this claim cleared curated-group review and joined the visible canon, stamped
         immediately on write for a private scope or an uncurated group, null while it sits pending
@@ -231,10 +232,10 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 
         The single definition of "current", shared by `is_current_expression`, the do_orm_execute
         loader-criteria listener, and `visible_at`'s live branch. Reached through `cls.__table__.c`
-        rather than the mapped `cls.recorded`/`cls.valid` attributes: a plain SQLModel `Field`
-        column carries no `Mapped[...]` wrapper, so a class-level attribute access on it types as
-        the bare pydantic field rather than the `InstrumentedAttribute` that carries
-        `.is_`/`.contains`; the underlying `Column` always has that typed API, mapped or not.
+        rather than the mapped `cls.recorded`/`cls.valid` attributes, since a plain SQLModel
+        `Field` column carries no `Mapped[...]` wrapper, so a class-level attribute access on it
+        types as the bare pydantic field rather than the `InstrumentedAttribute` that carries
+        `.is_`/`.contains`. The underlying `Column` always has that typed API, mapped or not.
         """
         columns = cls.__table__.c
         return and_(
@@ -246,7 +247,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     def is_current(self) -> bool:
         """Whether this claim is the live version with an open valid-time window right now.
 
-        Mirrors `is_current_expression` in Python: `recorded` is still open and, when `valid` is
+        Mirrors `is_current_expression` in Python. `recorded` is still open and, when `valid` is
         set, now falls inside it.
         """
         now = datetime.now(UTC)
@@ -267,7 +268,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     def created_at(self) -> datetime:
         """When this claim was first recorded, an ergonomic mirror of `recorded`'s lower bound.
 
-        Every other table's own `created_at` is a first-seen timestamp; a claim already carries
+        Every other table's own `created_at` is a first-seen timestamp. A claim already carries
         that moment as the lower bound of its bi-temporal `recorded` range, so this adds no column
         of its own, just the same friendlier name the rest of the schema already uses.
         """
@@ -286,9 +287,9 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 
         Embedding cosine cannot tell a contradicted claim from a duplicate, so validity is enforced
         structurally on the read path. With no as_of this is just `is_current`. With an as_of it
-        replays history: the claim whose `recorded` range contained that instant and whose `valid`
-        window, if any, also contained it. Listed explicitly only on this replay path, since the
-        live branch normally applies through the do_orm_execute listener instead.
+        replays history, matching the claim whose `recorded` range contained that instant and
+        whose `valid` window, if any, also contained it. Listed explicitly only on this replay
+        path, since the live branch normally applies through the do_orm_execute listener instead.
 
         as_of: world-time to read the graph at, the live latest graph when null.
         """
@@ -374,7 +375,7 @@ class FactContent(Id, Embedded, TableBase, table=True):
     """The immutable, deduplicated structure of a graph edge, content-addressed and tenant-free.
 
     The triple, its statement, and its embedding are the structural knowledge two containers share
-    when they independently extract the identical fact: two owners writing the same subject,
+    when they independently extract the identical fact. Two owners writing the same subject,
     predicate, object, and statement land one content row, each holding their own bi-temporal
     `FactClaim` on it. All curation, decay, and access-tracking state lives on the claim instead,
     since it is inherently per-container, never structural.

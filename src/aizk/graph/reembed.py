@@ -41,7 +41,7 @@ async def rewrite_embeddings(
     An ORM `Session`, not a bare `Connection`, is what makes the batched `update(model)` calls
     below target one row per dict by primary key, a `Session`-level bulk-update feature a plain
     Core connection never applies, which would otherwise set every row in the table to each batch
-    entry's values in turn. Returns how many rows were rewritten; the caller owns the session's own
+    entry's values in turn. Returns how many rows were rewritten. The caller owns the session's own
     transaction boundary and visibility (`acting_as` for a per-tenant table, the admin engine for a
     deduplicated content table content's own UPDATE policy refuses under row level security).
 
@@ -91,7 +91,7 @@ async def reembed_content_table(
     """Re-embed every row of one deduplicated content table, return how many vectors changed.
 
     Content carries no owner of its own and no UPDATE policy at all under row level security, so
-    an ordinary `acting_as` session can never rewrite its embedding column; this runs instead on
+    an ordinary `acting_as` session can never rewrite its embedding column. This runs instead on
     the owner-role admin engine, the same connection migrations use. A model change benefits every
     claim on the content at once, with no per-principal repetition needed.
 

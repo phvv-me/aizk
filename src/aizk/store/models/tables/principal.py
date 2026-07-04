@@ -56,7 +56,7 @@ class Principal(Id, Timestamped, TableBase, table=True):
         """Whether a principal may manage the operational surface, the one admin gate.
 
         Reads the principal's is_admin column off the caller's own already-open session, with an
-        unknown principal reading as false; the migration seeds the system principal with the flag
+        unknown principal reading as false. The migration seeds the system principal with the flag
         already set, so a fresh single-user stack self-administers from the first migration with no
         separate root-principal short-circuit. Principal carries no row level security of its own,
         so any open session reads every row regardless of that session's own acting principal, and
@@ -140,7 +140,7 @@ class Principal(Id, Timestamped, TableBase, table=True):
         off. An introspection url routes tokens through the live RFC 7662 round-trip, which also
         catches a token revoked before expiry, falling back to the offline JWKS check with no
         per-call network trip when absent. `verifier` is the entrypoint that forwards the live
-        settings here; call that instead unless a test needs to pin a specific settings tuple.
+        settings here. Call that instead unless a test needs to pin a specific settings tuple.
 
         issuer: base issuer URL whose tokens are accepted, empty to leave the Zitadel path off.
         jwks_uri: JWKS endpoint the offline signature path fetches keys from.

@@ -49,8 +49,8 @@ def parse_date(text: str) -> datetime | None:
 def resolve_valid_from(explicit: str | None, statement: str) -> datetime | None:
     """Resolve one fact's valid_from from its own text with no LLM call.
 
-    The combined extraction call's own date field wins when the model named one; otherwise a date
-    parsed out of the fact's own statement text; null when neither carries one. The final
+    The combined extraction call's own date field wins when the model named one, otherwise a date
+    parsed out of the fact's own statement text, and null when neither carries one. The final
     fallback, the source document's own timestamp, is `with_document_fallback`'s concern once a
     whole chunk's facts are in hand, since only the caller knows the document.
 

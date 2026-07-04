@@ -27,7 +27,7 @@ def estimate_tokens(text: str) -> int:
 
 
 def source_block(hit: Hit) -> Block:
-    """Render one chunk hit as a `sources` lane block: a score-prefixed title over its snippet.
+    """Render one chunk hit as a `sources` lane block, a score-prefixed title over its snippet.
 
     hit: the fused chunk hit to render.
     """
@@ -60,7 +60,7 @@ def context_blocks(result: RecallResult) -> list[Block]:
 
 
 def block_cost(block: Block, opened: set[str]) -> int:
-    """The token cost of keeping one more block: its line, plus its header the first time it opens.
+    """The token cost of keeping one more block, its line plus its header the first time it opens.
 
     block: the candidate block a budget fill is considering.
     opened: lanes already charged their header cost earlier in the same fill.
@@ -111,9 +111,10 @@ async def assemble_context_pack(
 ) -> ContextPack:
     """Recall for a query and pack the fused lanes into a token-budgeted `ContextPack`.
 
-    Reuses recall under its own acting_as so the pack rides the same fused facts, profiles,
-    community and RAPTOR summaries, and working items a recall surfaces, then fits them to the
-    budget. The one prompt-ready assembly an agent reads without choosing the lane mix itself.
+    Reuses recall, which already opens and scopes its own database session, so the pack rides
+    the same fused facts, profiles, community and RAPTOR summaries, and working items a recall
+    surfaces, then fits them to the budget. The one prompt-ready assembly an agent reads without
+    choosing the lane mix itself.
 
     query: what to assemble context about.
     principal_id: identity whose row level security visibility scopes the recall, the system

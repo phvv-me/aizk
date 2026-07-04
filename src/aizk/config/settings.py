@@ -118,13 +118,13 @@ class Settings(BaseSettings):
     """Runtime configuration read from AIZK_-prefixed environment variables.
 
     admin_database_url: async DSN for the owning role `aizk`, migrations only. Defaults from
-        host/port/db/`admin_password`; override wholesale for a deployment shape the template
+        host/port/db/`admin_password`. Override wholesale for a deployment shape the template
         can't express.
     admin_password: password for the owning role `aizk`, folded into `admin_database_url`'s
         default. The role name itself is not a setting, `initdb/roles.sh`'s `CREATE ROLE` and the
         `APP_ROLE` constants in `store/rls/ops.py` and the initial migration hardcode the role
         names both DSNs connect as, so only the password varies deployment to deployment.
-    anon_rate_per_second: token-bucket rate anonymous HTTP callers may call tools at; authenticated
+    anon_rate_per_second: token-bucket rate anonymous HTTP callers may call tools at. Authenticated
         principals pass unthrottled.
     anonymous_principal_id: all-zero identity an unauthenticated caller acts as, reading only
         public scopes. Fixed, not configurable, since the moat predicate's `::uuid` cast depends
@@ -137,17 +137,17 @@ class Settings(BaseSettings):
     benchmarks_enabled: whether the admin benchmark tool may load the external EverMemBench and
         TEMPO eval datasets, an optional dev download.
     bm25_backend: lexical lane, `vchord_bm25` (default, VectorChord BM25) or `tsvector` (Postgres
-        full-text fallback); only vchord_bm25 builds the bm25vector column and its `<&>` index.
+        full-text fallback). Only vchord_bm25 builds the bm25vector column and its `<&>` index.
     chunk_denylist: comma-separated `identify` tags the code chunker treats as prose, parsed by
         `chunk_denylist_languages`. A denylist not an allowlist, so a new language routes to the
         code lane with no edit here.
     chunk_size: target characters per chunk, honored by both the prose and code chunkers.
-    communities_cron: crontab the community fan-out fires on; gated per principal by
+    communities_cron: crontab the community fan-out fires on, gated per principal by
         communities_every_n_facts so a quiet graph is not re-summarized.
     communities_enabled: whether the scheduler fans community detection out across principals.
     communities_every_n_facts: facts a principal's graph must gain since the last community build
         before a rebuild.
-    community_backend: networkx graph backend Louvain detection runs on; a registered accelerator
+    community_backend: networkx graph backend Louvain detection runs on. A registered accelerator
         like cugraph can swap in at no code change.
     community_min_size: smallest entity count a detected community must reach to be summarized.
     community_summary_system: system prompt the community pass uses to name a cluster's theme and
@@ -155,7 +155,7 @@ class Settings(BaseSettings):
     consolidation_auto_merge_threshold: cosine similarity at or above which the non-LLM
         consolidation cascade decides a candidate fact's verdict by rule alone, no LLM call.
     consolidation_borderline_floor: cosine similarity below which a candidate fact's top similar
-        claim is too dissimilar to be about the same thing, a trivial ADD by rule; a top match
+        claim is too dissimilar to be about the same thing, a trivial ADD by rule. A top match
         between this floor and consolidation_auto_merge_threshold is the genuinely ambiguous band
         the batched borderline LLM call decides instead.
     consolidation_prompt: system prompt the batched borderline-consolidation pass uses to decide
@@ -164,7 +164,7 @@ class Settings(BaseSettings):
         next line would cross it.
     contextual_bm25: whether an ingested chunk prepends its document title to the text the lexical
         bm25/tsvector lanes index (the Anthropic contextual-retrieval lever). Only the lexical
-        column carries the preamble; the dense embedding and displayed text stay the raw span.
+        column carries the preamble. The dense embedding and displayed text stay the raw span.
     curation_review_canon_k: how many of a curated group's approved claims ground the review
         pass's judgment of its pending queue, the only material the judge may reason over.
     curation_review_cron: crontab the curation-review fan-out fires on, weekly after insight.
@@ -173,24 +173,24 @@ class Settings(BaseSettings):
     curation_review_system: system prompt the curation-review pass uses to approve or reject each
         pending claim against a curated group's visible canon.
     database_url: async DSN for the restricted app role row level security is enforced under.
-        Defaults to the host/port/db/credentials template; override wholesale
+        Defaults to the host/port/db/credentials template. Override wholesale
         (`AIZK_DATABASE_URL`) for a deployment shape the template can't express.
     db_host: hostname of the Postgres server both DSN templates default against.
     db_name: database name both DSN templates default against.
     db_null_pool: use NullPool instead of a real connection pool for the app-role engine. The
         pytest suite's `conftest.py` sets this since many tests each spin their own asyncio event
-        loop and a pooled asyncpg connection cannot cross loops; production wants the real pool.
+        loop and a pooled asyncpg connection cannot cross loops. Production wants the real pool.
     db_pool_max_overflow: extra connections the app-role pool opens above `db_pool_size` under
         burst load before a checkout blocks, only relevant when `db_null_pool` is off.
     db_pool_size: steady-state connections the app-role pool keeps open, only relevant when
-        `db_null_pool` is off; a pooled checkout costs no new TCP/TLS handshake, the 20-34ms a
+        `db_null_pool` is off. A pooled checkout costs no new TCP/TLS handshake, the 20-34ms a
         fresh `NullPool` connection paid per call.
     db_port: port of the Postgres server both DSN templates default against.
     decay_cron: crontab the decay fan-out fires on, daily before dawn by default.
     decay_enabled: whether the scheduler fans the daily decay pass out across principals.
     decay_floor: relevance floor a latest fact must clear to stay in the live graph. An untouched
         fact holds 0.5 relevance at one half-life and 0.25 at two, so this floor forgets facts
-        unreached for roughly two half-lives; a single access lifts a fact back above it.
+        unreached for roughly two half-lives. A single access lifts a fact back above it.
     decay_half_life_days: age in days at which an unaccessed fact's relevance halves, the decay
         pass's forgetting rate.
     dedup_cron: crontab the dedup fan-out fires on, nightly by default.
@@ -198,7 +198,7 @@ class Settings(BaseSettings):
     embed_api_key: bearer token for the embeddings endpoint, empty for a local server that ignores
         it.
     embed_batch_size: how many texts one /v1/embeddings request carries.
-    embed_dim: embedding width stored as a pgvector halfvec; drives both DDL column width and the
+    embed_dim: embedding width stored as a pgvector halfvec. Drives both DDL column width and the
         `dimensions` truncation every embed request asks the Matryoshka checkpoint for.
     embed_instruction_document: instruction prepended to a stored document in the Qwen3-Embedding
         Instruct/Query wrapper, empty by default since the reference deployment embeds documents
@@ -218,19 +218,19 @@ class Settings(BaseSettings):
     extract_max_tokens: hard cap on extraction/consolidation output tokens, a guard against
         unbounded generation.
     extract_min_chars: fewest characters of prose a chunk must carry before the build spends an
-        extraction call on it; a shorter chunk is marked processed with no entities or facts, a
+        extraction call on it. A shorter chunk is marked processed with no entities or facts, a
         heading or a stray line never worth the LLM round trip.
     extract_preferences_prompt: preferences strategy's focus, layered on the ontology prompt,
         steering toward durable choices and habits.
     extract_strategy: extraction strategy the build path runs, `ontology` (closed-vocab default),
-        `summary`, `preferences`, or `custom`; every strategy still validates against the closed
+        `summary`, `preferences`, or `custom`. Every strategy still validates against the closed
         ontology.
     extract_summary_prompt: summary strategy's focus, layered on the ontology prompt, steering
         toward the few highest-level entities and claims.
     extract_system_prompt: ontology default strategy's focus, the few-shot guidance keeping
         extracted entity names and facts well formed.
     extract_temperature: sampling temperature for extraction, zero for reproducible output.
-    extract_timeout: per-call wall-clock ceiling on an extraction or consolidation generation; a
+    extract_timeout: per-call wall-clock ceiling on an extraction or consolidation generation. A
         runaway response is skipped rather than stalling the build.
     fusion_depth: candidate pool depth each of the dense and lexical chunk lanes contributes
         before reciprocal-rank fusion merges down to the requested k.
@@ -239,21 +239,21 @@ class Settings(BaseSettings):
     gliner_gate_device: torch device (or `map_location` value) the gliner2 gate loads on, `cpu` by
         default since the local GPU is already spoken for by the embed/rerank/llm vLLM trio.
     gliner_gate_enabled: whether the gliner2 relevance gate runs ahead of the combined extraction
-        call at all; a chunk it clears skips the LLM call entirely.
+        call at all. A chunk it clears skips the LLM call entirely.
     gliner_gate_model: gliner2 checkpoint the gate loads, the 205M unified extraction model.
     gliner_gate_threshold: confidence a chunk's best entity match must clear to count as relevant
         to the ontology, below which the gate skips the LLM call for that chunk. Calibrated
-        against real prose: filler text topped out around 0.5, ontology-bearing text sat at 0.9+,
+        against real prose, filler text topped out around 0.5, ontology-bearing text sat at 0.9+,
         so 0.7 sits in the wide gap between them.
     graph_build_concurrency: pending chunks a graph build extracts and consolidates at once, the
         `asyncio.Semaphore` width shared by `build_graph`'s inline loop and the pgqueuer worker's
         extraction entrypoint, so both paths hit the LLM endpoint at the same bounded concurrency
-        regardless of how many chunk jobs pgqueuer itself has dispatched as concurrent tasks;
-        matches the compose vllm-llm service's own `--max-num-seqs` so this pipeline's own
+        regardless of how many chunk jobs pgqueuer itself has dispatched as concurrent tasks.
+        Matches the compose vllm-llm service's own `--max-num-seqs` so this pipeline's own
         concurrency is what saturates vLLM's continuous batching, not a starved queue.
     graph_facts_k: number of latest facts retrieved per graph search.
     index_backend: vector index the halfvec columns use, `vchordrq` (default, RAM-frugal) or
-        `hnsw` (portable fallback); both share the cosine op. Drives both the migration DDL and
+        `hnsw` (portable fallback). Both share the cosine op. Drives both the migration DDL and
         the Embedded mixin's `embedding_index`, so they must agree.
     insight_cron: crontab the insight fan-out fires on, weekly after self-improve.
     insight_enabled: whether the scheduler fans the reflective insight pass out across principals,
@@ -266,7 +266,7 @@ class Settings(BaseSettings):
         low-value self-talk out of the graph.
     insight_system: system prompt the insight pass uses to derive higher-level observations from
         the latest facts.
-    llm_api_key: bearer token for the chat endpoint, defaulting to the ambient OPENAI_API_KEY; set
+    llm_api_key: bearer token for the chat endpoint, defaulting to the ambient OPENAI_API_KEY. Set
         to a cloud provider's key (e.g. CEREBRAS_API_KEY) when pointing llm_url at one.
     llm_chat_template_kwargs: extra `chat_template_kwargs` merged into every `structured` call's
         `extra_body`, empty by default so a stock load sends none and never risks a hosted
@@ -276,11 +276,12 @@ class Settings(BaseSettings):
         closed ontology schema never asked for.
     llm_model: chat model id used to extract entities, facts, and dates in the combined call.
     llm_provider: label recording which provider llm_url points at (`vllm` local, `cerebras`
-        hosted), surfaced in diagnostics; the url is the client's real source of truth.
+        hosted), surfaced in diagnostics. The url is the client's real source of truth.
     llm_request_timeout: HTTP-level ceiling on the `AsyncOpenAI` client request, generous so a
-        slow local model isn't cut off mid-stream; extract_timeout is the tighter per-call ceiling.
+        slow local model isn't cut off mid-stream, while extract_timeout is the tighter per-call
+        ceiling.
     llm_url: base URL of the OpenAI-compatible chat endpoint for graph extraction, local vLLM by
-        default; point at any OpenAI-compatible provider's url to switch (e.g. Cerebras).
+        default. Point at any OpenAI-compatible provider's url to switch (e.g. Cerebras).
     log_level: loguru sink level aizk's diagnostics are emitted at, empty to disable the logger
         entirely rather than filter it.
     louvain_seed: fixed seed for Louvain partitioning, so the same graph yields the same
@@ -301,7 +302,7 @@ class Settings(BaseSettings):
     principal: identity the MCP server and hook commands act as until an auth seam resolves one.
     profiling: whether `mainboard.profiling.span` recording is turned on at startup, off by
         default so an unmeasured deployment pays only the one boolean check each span reads. The
-        `serve_mcp` and `worker` entrypoints call `enable_spans()` once when this is set; the
+        `serve_mcp` and `worker` entrypoints call `enable_spans()` once when this is set. The
         admin `profile_report` tool reads the process-wide `Collector` it feeds.
     profile_on_write: whether a finished extraction enqueues a debounced profile rebuild for each
         touched entity, refreshing its portrait without waiting for the weekly pass.
@@ -342,7 +343,7 @@ class Settings(BaseSettings):
         answers the query, off by default so the common path pays no model call.
     recall_gap_min_hits: fewest hits a recall may carry before it counts as an evidence gap worth
         one extra round.
-    recall_gap_min_score: best-hit score a recall must clear or it counts as a gap; zero disables
+    recall_gap_min_score: best-hit score a recall must clear or it counts as a gap. Zero disables
         the check, leaving only the hit-count floor.
     reembed_batch: how many rows one re-embed batch carries when `reembed` walks a stored table in
         bounded chunks after a model or width change.
@@ -350,15 +351,15 @@ class Settings(BaseSettings):
     rerank_api_key: bearer token for the api reranker endpoint, empty for a local server that
         ignores it.
     rerank_candidates: width of the fused pool handed to the reranker before keeping the top k.
-    rerank_min_pool: fewest fused candidates a pool must carry before reranking pays for itself;
-        a pool at or under this size skips the cross-encoder round trip entirely, since fusion's
+    rerank_min_pool: fewest fused candidates a pool must carry before reranking pays for itself.
+        A pool at or under this size skips the cross-encoder round trip entirely, since fusion's
         own order already reflects every candidate when there is nothing left to reorder or trim.
     rerank_model: served model name the /v1/rerank endpoint answers to, matching the co-resident
         vllm-rerank --served-model-name.
     rerank_request_timeout: wall-clock ceiling on one /v1/rerank HTTP request.
     rerank_snippet_chars: characters of each candidate's text the cross-encoder scores against the
         query, truncated before the /v1/rerank call since the endpoint's own latency scales with
-        candidate length; the stored and returned hit text is never truncated, only what the
+        candidate length. The stored and returned hit text is never truncated, only what the
         reranker itself reads. A cross-encoder's relevance judgment is dominated by a passage's
         early tokens, so trading the tail of a long chunk for a materially faster rerank round
         trip costs little precision.
@@ -387,14 +388,14 @@ class Settings(BaseSettings):
         gate, for reads that must see superseded rows (as_of replay, raw counts, promote-copy).
     snippet_chars: characters a hit or fact snippet is truncated to when rendered into a recall
         bundle or a context pack, the display-width budget both renderers share.
-    system_principal_id: identity that owns rows ingested before the visibility lattice existed
-        and that a scheduled background pass acts as when a caller does not name a per-principal
-        one.
+    system_principal_id: identity that owns rows ingested before the visibility lattice, the
+        owner-and-scope model every row's row level security policy compiles from, existed, and
+        that a scheduled background pass acts as when a caller does not name a per-principal one.
     zitadel_client_id: client id of the aizk resource server registered at the issuer, the
         identity the introspection call authenticates as.
     zitadel_client_secret: client secret paired with zitadel_client_id for the introspection call,
         held by the resource server and never the caller.
-    zitadel_introspect_url: RFC 7662 introspection endpoint; empty keeps the offline JWKS path,
+    zitadel_introspect_url: RFC 7662 introspection endpoint. Empty keeps the offline JWKS path,
         set to validate each token against the issuer instead, catching revocation before expiry.
     zitadel_issuer: base issuer URL whose JWTs are accepted, empty to leave the Zitadel path off.
     zitadel_jwks_url: JWKS endpoint the issuer publishes its signing keys at, to verify tokens.
@@ -561,12 +562,12 @@ class Settings(BaseSettings):
     def default_dsns(self) -> Self:
         """Fill an unset `database_url`/`admin_database_url` from the host/port/db and passwords.
 
-        Only when the field is still its empty default: an explicit value, whether a constructor
-        kwarg or the `AIZK_DATABASE_URL`/`AIZK_ADMIN_DATABASE_URL` env override, always wins
-        outright, the escape a cloud profile needs to point at a differently shaped deployment, TLS
-        params or a managed host included, that the `db_host`/`db_port`/`db_name` template alone
-        cannot express. The role names are the fixed `aizk_app`/`aizk` constants `admin_password`'s
-        docstring explains, only the passwords come from settings.
+        This only fires when the field is still its empty default. An explicit value, whether a
+        constructor kwarg or the `AIZK_DATABASE_URL`/`AIZK_ADMIN_DATABASE_URL` env override,
+        always wins outright, the escape a cloud profile needs to point at a differently shaped
+        deployment, TLS params or a managed host included, that the `db_host`/`db_port`/`db_name`
+        template alone cannot express. The role names are the fixed `aizk_app`/`aizk` constants
+        `admin_password`'s docstring explains, only the passwords come from settings.
         """
         if not self.database_url:
             self.database_url = (

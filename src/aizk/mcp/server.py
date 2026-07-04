@@ -59,7 +59,7 @@ from .principal import ADMIN_TAG, current_principal, require_admin, require_iden
 async def startup_check(mcp: FastMCP) -> AsyncIterator[None]:
     """Ensure the database is ready before serving, auto-applying setup when it falls behind.
 
-    Runs the same health read the `health` admin tool exposes once at process start; a schema
+    Runs the same health read the `health` admin tool exposes once at process start, and a schema
     behind head runs `ops.setup` inline and logs what it applied, so the server comes up ready
     with no manual migrate step. Skipped when `settings.auto_setup` is off, the manual-control
     opt-out for a deployment that wants to run its own migrations.
@@ -150,8 +150,8 @@ async def recall(query: str, scopes: str | None = None, k: int = 8) -> RecallRes
     query: what to recall context about.
     scopes: comma-separated group names narrowing the read to that combination's composed graph
         (`"finance,business"` reads only what is scoped to exactly that pair together), the whole
-        visible union of private and every member and public scope otherwise. A lens excludes the
-        caller's own private layer, reachable only with no scopes named at all.
+        visible union of private and every member and public scope otherwise. Naming any scopes
+        excludes the caller's own private notes, which surface only when scopes is left null.
     k: how many hits and seed facts to surface.
     """
     principal = current_principal()
@@ -186,7 +186,7 @@ async def remember(text: str, scopes: str | None = None, kind: str = "note") -> 
 async def get_context(
     query: str, scopes: str | None = None, token_budget: int | None = None
 ) -> ContextPack:
-    """Assemble a token-budgeted, prompt-ready context pack for a query, the one lane mix.
+    """Assemble a token-budgeted, prompt-ready context pack for a query, mixing every source.
 
     Recalls for the query and packs the fused profiles, community and RAPTOR summaries, facts,
     and still-working session items into blocks that fit the token budget, the broad view first
@@ -224,8 +224,8 @@ async def timeline(
 ) -> list[TimelineEntry]:
     """Read the weekly-review timeline, the claims recorded in the trailing window, newest first.
 
-    Facts are the events table: every claim recorded in the window surfaces regardless of its own
-    valid-time, a note's dated journal lines and any other recently learned fact alike.
+    Facts work like an events table, so every claim recorded in the window surfaces regardless of
+    its own valid-time, a note's dated journal lines and any other recently learned fact alike.
 
     since_days: how many trailing days to read, a week by default.
     entity: when set, only facts whose subject or object name matches this substring.
@@ -252,7 +252,7 @@ async def projects(scopes: str | None = None) -> list[ProjectSummary]:
 async def resolve_group_admin(session: AsyncSession, group: str) -> Group:
     """Resolve a group name and refuse the call unless the caller administers it, group back.
 
-    Shared by the curation tools: resolves the scope name, then checks the caller holds the
+    Shared by the curation tools, it resolves the scope name, then checks the caller holds the
     group's own admin membership role or the server-wide admin flag, raising a `ToolError` a
     non-admin caller reads plainly rather than the domain `NotGroupAdminError` it wraps. `Group`
     and `Membership` carry no row level security of their own, so reading and checking them
@@ -399,10 +399,10 @@ async def sweep(
 ) -> SweepReport:
     """Sweep the config grid and report quality, latency, and memory for each config.
 
-    Ranges recall over the rerank, ppr, and query-routing toggles by default, widened by the
-    comma-separated Matryoshka widths when given, and reports recall@k, ndcg@k, and mrr with a
-    significance table alongside the per-config latency and memory the mainboard meter measured,
-    the demonstration of quality and cost.
+    Ranges recall over the rerank, ppr (personalized pagerank), and query-routing toggles by
+    default, widened by the comma-separated Matryoshka widths when given, and reports recall@k,
+    ndcg@k, and mrr with a significance table alongside the per-config latency and memory the
+    mainboard meter measured, the demonstration of quality and cost.
 
     questions_file: a file of one question per line, or null to synthesize them from facts.
     k: how many hits and seed facts each recall surfaces.
@@ -543,7 +543,7 @@ async def export_scope(path: str) -> export.ExportReport:
 async def profile_report() -> ProfileReport:
     """Report the process-wide span timing stats mainboard.profiling collected, slowest first.
 
-    Reads the same default `Collector` every enabled `span(...)` call folds into; empty when
+    Reads the same default `Collector` every enabled `span(...)` call folds into. Empty when
     `settings.profiling` never called `enable_spans()`, since nothing was ever recorded.
     """
     return ProfileReport(stats=default_collector().stats())
@@ -561,10 +561,10 @@ async def tasks_status() -> TasksStatus:
 
 @server.admin_tool
 async def setup() -> SetupReport:
-    """Bring the database to a ready state: migrate to head and install the queue schema.
+    """Bring the database to a ready state, migrating to head and installing the queue schema.
 
     Idempotent, the same call the startup lifespan runs automatically when its own health check
-    finds the schema behind head; run this by hand to apply sooner or to see exactly what moved.
+    finds the schema behind head. Run this by hand to apply sooner or to see exactly what moved.
     """
     return await ops.setup()
 
@@ -573,9 +573,9 @@ async def setup() -> SetupReport:
 async def health() -> HealthReport:
     """Report the engine's schema, row security, row-count, queue, and serving-endpoint state.
 
-    The one operational snapshot: alembic current versus head, any row-level-security drift,
-    live row counts past that security, the autonomous queue's own depth and lag, and whether
-    the embed, rerank, and llm serving endpoints answer.
+    The one operational snapshot, covering alembic current versus head, any row-level-security
+    drift, live row counts past that security, the autonomous queue's own depth and lag, and
+    whether the embed, rerank, and llm serving endpoints answer.
     """
     return await ops.health()
 
@@ -659,8 +659,8 @@ async def remove_member(principal: str, group: str) -> MembershipChange:
 async def publish_group(group: str, public: bool = True) -> GroupFlag:
     """Publish a group so anyone can read its rows, or unpublish it back to members-only.
 
-    The shared-brain switch: a published group's graph is readable by any caller, anonymous
-    strangers included, while writing keeps requiring an explicit writer membership.
+    The shared-brain switch, since a published group's graph becomes readable by any caller,
+    anonymous strangers included, while writing keeps requiring an explicit writer membership.
 
     group: name of the group to publish or unpublish.
     public: true to publish, false to make members-only again.
@@ -676,7 +676,7 @@ async def curate_group(group: str, curated: bool = True) -> GroupFlag:
     """Curate or uncurate a group, flipping whether its writes must clear group-admin review.
 
     A curated group's writes land pending until a group admin approves them through `pending` and
-    `approve`, the review loop that keeps the group's floor to verified knowledge; uncurating a
+    `approve`, the review loop that keeps the group's floor to verified knowledge. Uncurating a
     group returns it to writing straight through like any ordinary shared scope.
 
     group: name of the group to curate or uncurate.

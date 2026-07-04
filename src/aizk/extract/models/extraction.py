@@ -10,10 +10,10 @@ class LLMEntity(FrozenModel):
     """One entity in the combined extraction call's compact wire schema.
 
     Short single-letter keys hold the call's own output near the ~250-token budget the combined
-    call targets, since every entity and fact in a chunk repeats these keys; both fields here are
+    call targets, since every entity and fact in a chunk repeats these keys. Both fields here are
     categorical (a name, an enum) rather than free text, the case `LLMFact`'s own docstring found
     a small model still follows reliably at one letter. Converted to `ExtractedEntity` immediately
-    after parsing; nothing downstream of `combined_extract` ever sees this shape.
+    after parsing, nothing downstream of `combined_extract` ever sees this shape.
 
     n: plain human-readable noun phrase, never a slug or identifier.
     t: ontology entity type.
@@ -28,7 +28,7 @@ class LLMFact(FrozenModel):
 
     Entities, relations, and an optional date all come back from the one call this schema shapes.
     `s`/`p`/`o` stay short keys for the token-budget reason `LLMEntity` explains, but `statement`
-    and `date` keep their full names: measured against Gemma 4 E2B, a two-letter key on a
+    and `date` keep their full names. Measured against Gemma 4 E2B, a two-letter key on a
     free-text field (`st`/`d`) collapsed the model's own output to the literal string `"true"` on
     every fact, while the categorical/name fields (`s`/`p`/`o`/`n`/`t`) stayed reliable at one
     letter. A small model apparently needs a semantically anchored key to generate free text under
@@ -94,7 +94,7 @@ class TimedFact(FrozenModel):
         `extract.dating.resolve_valid_from` and its document-timestamp fallback from the model's
         own date, a date found in the statement text, or the source document's own timestamp, in
         that order, so a fact is never left undated.
-    valid_to: end of the world-time window, null while still holding; nothing in this pipeline
+    valid_to: end of the world-time window, null while still holding. Nothing in this pipeline
         ever sets it, since only a single reference date is resolved per fact.
     """
 

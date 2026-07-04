@@ -73,7 +73,7 @@ class Embedder(Singleton):
 
     A thin HTTP client to the co-resident vLLM container behind `embed_url`. A `patos` singleton,
     built once from `settings` at first construction, so the endpoint, model, and width are fixed
-    for the deployment's lifetime. Text batches ride `AsyncEmbeddings.create`; images ride a
+    for the deployment's lifetime. Text batches ride `AsyncEmbeddings.create`. Images ride a
     chat-style `messages` request, the Qwen3-VL-Embedding shape vLLM accepts as a superset of the
     OpenAI embeddings API. Both lanes request `dimensions=embed_dim` and trust the server to
     truncate server-side rather than re-checking every row itself.

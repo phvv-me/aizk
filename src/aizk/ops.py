@@ -91,7 +91,7 @@ class EndpointHealth(FrozenModel):
 
 
 class HealthReport(FrozenModel):
-    """The engine's operational snapshot: schema, row security, row counts, queue, and endpoints.
+    """The engine's operational snapshot, schema, row security, row counts, queue, and endpoints.
 
     migration: alembic migration state.
     rls_violations: reasons a scoped table fails the no-leak contract, empty when clean.
@@ -222,7 +222,7 @@ async def grant_app_role_privileges() -> None:
 
     `roles.sh` only ever runs once, against the original database's fresh volume at container
     init, so a later database on the same Postgres instance (a scratch database for a bounded
-    test, say) never receives its schema USAGE, per-table CRUD, or default-privilege grants; a
+    test, say) never receives its schema USAGE, per-table CRUD, or default-privilege grants. A
     fresh database migrated to head still has every Scoped table's own `apply_scoped_rls` grant
     (0001_init's per-table belt), but an unscoped table such as `group_`, `membership`, or
     `principal` carries none. This closes that gap so `setup` alone, with no manual psql grant,
@@ -253,7 +253,7 @@ async def enable_query_stats() -> None:
     `shared_preload_libraries` names the module yet, but the view stays unqueryable ("pg_stat_
     statements must be loaded via shared_preload_libraries") until Postgres restarts with the
     updated `command` (`docker-compose.yml`'s own comment on the `db` service). This call stays
-    idempotent and safe either side of that restart; the except below is a second line of
+    idempotent and safe either side of that restart. The except below is a second line of
     defense in case a future extension version raises at create time instead, so `setup` never
     breaks on either behavior.
     """
@@ -274,9 +274,9 @@ async def enable_query_stats() -> None:
 
 
 async def setup() -> SetupReport:
-    """Bring the database to a ready state: migrate to head, install the queue schema, grant CRUD.
+    """Bring the database to a ready state, migrate to head, install the queue schema, grant CRUD.
 
-    Idempotent, safe to run against a fresh database or an already-current one: alembic no-ops at
+    Idempotent, safe to run against a fresh database or an already-current one, alembic no-ops at
     head, `install_queue_schema` tolerates an already-installed schema,
     `grant_app_role_privileges` is a plain idempotent GRANT set, and `enable_query_stats`
     tolerates a not-yet-restarted Postgres, so this is the one bootstrap call the MCP `setup`
@@ -300,7 +300,7 @@ async def health() -> HealthReport:
     """Read the engine's schema, row security, row-count, queue, and serving-endpoint state.
 
     Every section reads independently and none depends on another's result, so a caller wanting
-    only the schema half still pays the full read; `setup`'s own health probe reuses this rather
+    only the schema half still pays the full read. `setup`'s own health probe reuses this rather
     than a narrower schema-only check, since a startup diagnostic is cheap next to serving traffic.
     """
     current = await alembic_current()

@@ -51,7 +51,7 @@ def is_transient_db_error(error: BaseException) -> bool:
     claiming entity content at once), two chunks racing to mint the same entity is exactly the
     shape of contention that trips this, so `write_graph_slice`'s retry loop retries on it rather
     than losing a chunk to noise. SQLAlchemy's asyncpg dialect has no explicit mapping for either
-    error, so it arrives wrapped twice: `DBAPIError.orig` holds the dialect's own emulated DBAPI
+    error, so it arrives wrapped twice, `DBAPIError.orig` holds the dialect's own emulated DBAPI
     exception, and that exception's own `.orig` holds the real asyncpg error this checks.
 
     error: the exception `write_graph_slice`'s retry loop caught.
@@ -85,17 +85,18 @@ class ChunkExtractionTimedOut(Exception):
 class GraphWriter:
     """One graph-write round bound to the session, owner, and scope set every write in it shares.
 
-    resolve and consolidate_facts both re-thread (session, owner_id, scopes) through every call;
+    resolve and consolidate_facts both re-thread (session, owner_id, scopes) through every call, so
     binding them once here turns each repeated argument list into a `self` read. write_graph_slice
     opens one GraphWriter per chunk on its owner-scoped transaction, the shared core both
     build_graph's concurrent loop and background.queue.process_chunk's durable job call.
 
     Every mint below is an idempotent `INSERT ... ON CONFLICT DO NOTHING`, on content's own id for
     the deduplicated structural row and on the claim table's own uniqueness for this container's
-    stake, so two owners independently extracting the identical entity or fact land the exact same
-    statements whichever one runs first: content is minted once and shared, each owner's own claim
-    rides beside it, and neither a primary-key collision nor a success/failure timing difference
-    ever tells one owner whether the other's private content already existed.
+    stake (a container is the owner-plus-scopes tenant a claim belongs to), so two owners
+    independently extracting the identical entity or fact land the exact same statements whichever
+    one runs first. Content is minted once and shared, each owner's own claim rides beside it, and
+    neither a primary-key collision nor a success/failure timing difference ever tells one owner
+    whether the other's private content already existed.
 
     session: an open session already acting as owner_id under row level security.
     owner_id: principal that owns a newly created claim.
@@ -117,7 +118,7 @@ class GraphWriter:
         """The reviewed_at stamp a claim newly written by this writer should carry, resolved once.
 
         A private scope set and a set naming no curated group always resolve to now, unchanged
-        single-user and ordinary-sharing behavior; a set naming a curated group resolves to now
+        single-user and ordinary-sharing behavior. A set naming a curated group resolves to now
         only when the owner already holds its admin membership role in every curated group named,
         otherwise to null, landing the claim pending review. Reads the group and membership rows
         once per writer and caches the answer, since every claim this writer consolidates shares
@@ -173,7 +174,7 @@ class GraphWriter:
         id, that fast path returns immediately with no embedding call. Otherwise
         `match_or_mint_entity` embeds the cleaned name and cosine matches the entity content
         already visible to this container (through one of its own or a shared claim) within the
-        same type: a match above settings.entity_resolution_threshold still mints this container's
+        same type. A match above settings.entity_resolution_threshold still mints this container's
         own claim on that content before returning its id, since visibility through another
         tenant's claim is not this container's own stake, and consolidate_facts resolves every
         fact's subject and object through this same map, so a claim that never lands here is a
@@ -244,7 +245,7 @@ class GraphWriter:
     ) -> dict[uuid.UUID, list[LiveFact]]:
         """Every visible latest claim for a set of subjects, one query for a whole chunk's batch.
 
-        The non-LLM consolidation cascade's batched read: rather than one `ORDER BY <vector>`
+        The non-LLM consolidation cascade's batched read. Rather than one `ORDER BY <vector>`
         query per candidate fact, this fetches the unordered pool for every distinct subject a
         chunk's candidates name at once, and `graph.consolidation.rank_pool` then ranks each
         candidate's own slice of the pool by cosine similarity in Python, since a single SQL
@@ -275,7 +276,7 @@ class GraphWriter:
         (`graph.consolidation.decide_by_rule`). Whatever is left, the genuinely borderline
         candidates whose top match falls in the ambiguous cosine band, resolves in one further
         batched LLM call (`decide_consolidations_batch`) rather than one per fact, so a chunk
-        never pays more than two LLM calls total: the combined extraction call and this one.
+        never pays more than two LLM calls total, the combined extraction call and this one.
 
         facts: the extracted, dated candidate facts from one chunk.
         resolved: entity surface name to resolved content id, from this chunk's own `resolve`
@@ -324,7 +325,7 @@ class GraphWriter:
         """Close the claim an UPDATE verdict supersedes, clamping its valid range non-inverted.
 
         The superseding fact's own valid_from is the natural close point, but a backdated
-        correction can name a start earlier than the retired claim's own; clamping to its lower
+        correction can name a start earlier than the retired claim's own. Clamping to its lower
         bound keeps the range non-inverted (an immediately-closed window) rather than raising a
         range-order violation the database itself would refuse.
 
@@ -407,7 +408,7 @@ def merged_verdicts(
     """Fill each null, genuinely-ambiguous slot with the batched LLM's own verdict, in order.
 
     Every slot is non-null once filled (the caller's own `assert verdict is not None` documents
-    it); the return type stays `| None` only so it matches `verdicts`' own declared type at the
+    it). The return type stays `| None` only so it matches `verdicts`' own declared type at the
     reassignment `consolidate_facts` makes, list element types being invariant.
 
     verdicts: the non-LLM cascade's own decisions, null wherever it deferred.
@@ -505,7 +506,7 @@ async def journal_extraction(
     """The chunk's dated journal-line title entity and facts, empty when it carries no such line.
 
     extract.journal's `- YYYY-MM-DD: text` convention is parsed deterministically here, with no
-    LLM call, into facts logged against the note's own title entity; a chunk that carries one of
+    LLM call, into facts logged against the note's own title entity. A chunk that carries one of
     these is never skipped by extract_min_chars purely for being short, since the line itself is
     already the whole fact.
 
@@ -528,7 +529,7 @@ async def llm_extraction(
     """The combined-call entities and dated facts, empty when the chunk gates out or truncates.
 
     A chunk first passes the GLiNER2 relevance gate (`serving.EntityGate`, a 205M CPU model
-    scoring the chunk against the ontology's own entity types in milliseconds); a chunk naming
+    scoring the chunk against the ontology's own entity types in milliseconds). A chunk naming
     none of them returns empty with no LLM call at all. A chunk that clears the gate runs the one
     combined extraction call (`extract.llm.combined_extract`).
 
@@ -606,7 +607,7 @@ async def write_graph_slice(
 
     A fresh transaction per attempt, so a deadlock or serialization failure (real under this
     graph's own concurrency, see is_transient_db_error) simply reruns the whole idempotent write
-    rather than losing the chunk; every mint GraphWriter performs is ON CONFLICT DO NOTHING or an
+    rather than losing the chunk. Every mint GraphWriter performs is ON CONFLICT DO NOTHING or an
     equivalent idempotent upsert, so a retried write is safe.
 
     principal_id: identity that owns the written claims.
@@ -638,12 +639,12 @@ async def extract_and_consolidate(chunk: Chunk, principal_id: uuid.UUID) -> set[
     are in flight at once, inline or dispatched as concurrent queue jobs, only
     settings.graph_build_concurrency of them ever hit the LLM endpoint at a time.
 
-    journal_extraction runs first and unconditionally; a chunk that clears extract_min_chars, or
+    journal_extraction runs first and unconditionally. A chunk that clears extract_min_chars, or
     carries no dated line at all, then also runs llm_extraction, its entities and facts folding in
     beside any journal ones rather than replacing them, so a note that mixes prose and a dated log
     gets both. Every path, short-circuited, gated out, successful, fact-free, or an output too
     rich for extract_max_tokens to finish, ends by marking the chunk processed so pending_chunks
-    never offers it again; only a timed-out extraction leaves it pending for a later retry, and an
+    never offers it again. Only a timed-out extraction leaves it pending for a later retry, and an
     unreachable endpoint raises immediately rather than grinding through the rest of the queue.
 
     chunk: the pending chunk to build a graph slice from.
@@ -694,7 +695,7 @@ async def build_graph(
     each one individually gated by the shared extraction_semaphore so the LLM endpoint only ever
     sees settings.graph_build_concurrency requests in flight at once regardless of how many chunk
     coroutines are already started and waiting. Each chunk resolves and consolidates on its own
-    fresh owner-scoped transaction, so one slow or failed chunk never blocks another's write: an
+    fresh owner-scoped transaction, so one slow or failed chunk never blocks another's write. An
     unanticipated exception from one chunk is logged and skipped by raise_unreachable rather than
     cancelling every other chunk's own in-flight coroutine, return_exceptions=True's own job.
 
@@ -765,7 +766,7 @@ async def snapshot_claims(session: AsyncSession, content_id: uuid.UUID) -> list[
 
     Content is immutable under row level security, so a fact naming a duplicate is corrected by
     deleting and re-minting it at the very same content-addressed id rather than an in-place
-    UPDATE; deleting it would otherwise cascade away its claims through their own foreign key, so
+    UPDATE. Deleting it would otherwise cascade away its claims through their own foreign key, so
     they are snapshotted here first and reinserted verbatim onto the corrected row, their own
     bi-temporal history preserved unchanged. The identity map still tracks a claim as persistent
     once the cascade below removes its physical row, a DB-level FK action the ORM never observes
@@ -843,7 +844,7 @@ async def find_duplicates(session: AsyncSession) -> dict[uuid.UUID, uuid.UUID | 
     extractor wrote, so they stay out of the dedup that merges and repoints knowledge nodes. The
     earliest id by byte order stays canonical, so a rerun is idempotent and converges. An entity
     whose name normalizes to empty was a path the extractor mistook for a thing, so it and its
-    dangling facts are dropped: it names no canonical entry, so every other entity of the same
+    dangling facts are dropped. It names no canonical entry, so every other entity of the same
     empty key redirects to null.
 
     session: open session under the caller's own row level security visibility.
@@ -888,7 +889,7 @@ async def merge_duplicates(
 ) -> int:
     """Repoint every affected fact and delete every duplicate entity, return the count merged.
 
-    Runs entirely on the owner-role admin connection, bypassing row level security: content's own
+    Runs entirely on the owner-role admin connection, bypassing row level security. Content's own
     claim-gated SELECT policy would otherwise hide another tenant's private claim on the very
     content this merge must migrate, and content's DELETE policy is admin-gated in the first
     place, so a real structural merge needs the same superuser reach migrations already run with.

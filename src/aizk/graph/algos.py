@@ -22,7 +22,7 @@ async def ppr_expand(
     k-hop recursive CTE, capped at settings.ppr_max_hops hops and settings.ppr_max_fanout
     neighbors per node, then runs networkx personalized pagerank over that local subgraph,
     teleporting back to the seeds present in it with damping settings.ppr_alpha and returning the
-    top_n highest-scoring non-seed entities — the HippoRAG signal, the entities a multi-hop walk
+    top_n highest-scoring non-seed entities, the HippoRAG signal of the entities a multi-hop walk
     keeps returning to. Bounding the walk in the database keeps memory and latency tied to the
     local neighborhood rather than the whole corpus. Reading `LiveFact` rather than the raw claim
     table keeps a superseded edge out of the walk with no separate visibility gate to hand-repeat.

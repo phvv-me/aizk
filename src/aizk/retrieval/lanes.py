@@ -24,7 +24,7 @@ class Lane(Protocol):
     """One independent slice of a recall, run on its own pooled session and fused afterward.
 
     Stateless value objects, one instance per kind is enough, mirroring `lote`'s scheduler
-    registry: a lane reads whatever it needs off `RecallContext` and returns its own `LaneResult`
+    registry. A lane reads whatever it needs off `RecallContext` and returns its own `LaneResult`
     slice, never anyone else's.
     """
 
@@ -32,7 +32,8 @@ class Lane(Protocol):
 
 
 class CoreLane:
-    """The chunk-and-fact round every recall needs: assemble, gap-fill when thin, record access."""
+    """The chunk-and-fact round every recall needs, assembling, gap-filling when thin, and
+    recording access."""
 
     async def run(self, session: AsyncSession, ctx: RecallContext) -> LaneResult:
         round_ = Recall(session, Embedder(), ctx.query, ctx.vector, ctx.k, ctx.as_of, ctx.ppr_on)
@@ -69,7 +70,7 @@ class CommunityLane:
 
 
 class RaptorLane:
-    """The RAPTOR summary-tree lane: root summaries when thematic, leaf summaries otherwise."""
+    """The RAPTOR summary-tree lane, root summaries when thematic and leaf summaries otherwise."""
 
     async def run(self, session: AsyncSession, ctx: RecallContext) -> LaneResult:
         if not ctx.raptor_on:
@@ -111,7 +112,7 @@ async def run_lane[T](
     A single `AsyncSession` cannot run two statements at once, so recall's independent lanes each
     check out their own connection from the pool and run concurrently under `asyncio.gather`
     rather than serializing behind one shared session. Cheap only because the app-role engine
-    pools real connections; a fresh `NullPool` connection per lane would have traded one latency
+    pools real connections. A fresh `NullPool` connection per lane would have traded one latency
     tax for five.
 
     principal_id: identity whose row level security visibility the lane's session acts under.
@@ -176,7 +177,7 @@ def route(query: str) -> tuple[bool, bool, bool]:
     """Classify a query into its (thematic, ppr_on, raptor_on) lane gates.
 
     Reads `QueryRoute.plan` when query routing is on, narrowing the fixed lane mix to the route's
-    own lanes; otherwise falls back to the fixed settings toggles with only the thematic gate
+    own lanes. Otherwise falls back to the fixed settings toggles with only the thematic gate
     itself classified, the unrouted default.
 
     query: the natural-language query being recalled.
@@ -218,8 +219,8 @@ async def recall(
     """Recall the fused chunk and graph context for a query, the agent's one retrieval entrypoint.
 
     Binds one `RecallContext`, fans it out across every lane in `LANES` concurrently, then fuses
-    the lanes' own slices into one `RecallResult`, the algorithm read straight off this method:
-    build the context, run the lanes, fuse them.
+    the lanes' own slices into one `RecallResult`. Building the context, running the lanes, and
+    fusing them is the whole algorithm, read straight off this method.
 
     query: natural-language query to recall context for.
     principal_id: identity whose row level security visibility scopes the recall, the system

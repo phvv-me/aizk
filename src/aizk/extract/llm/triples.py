@@ -161,10 +161,10 @@ async def decide_consolidations_batch(
     """Decide ADD/UPDATE/NOOP for every borderline fact in one call.
 
     The non-LLM consolidation cascade (`graph.consolidation.decide_by_rule`) already resolves
-    every candidate whose top similar claim falls outside the ambiguous cosine band; this is the
+    every candidate whose top similar claim falls outside the ambiguous cosine band. This is the
     batched tier it defers to for the rest, one call for a whole chunk's borderline facts together
     rather than one round trip per fact, the lever that keeps a chunk to at most two LLM calls
-    total: the combined extraction call and this one.
+    total, the combined extraction call and this one.
 
     candidates: each borderline fact paired with its own similar existing claims, the same
         catalog a single-fact judge would have read, batched into one prompt instead.

@@ -13,7 +13,7 @@ class LiveFact(ViewBase):
 
     The view is `fact_claim JOIN fact_content WHERE FactClaim.is_current`, so a caller that only
     ever wants the live graph reads through this class instead of re-deriving the same temporal
-    predicate and the same claim-to-content join by hand on every query; `__view_select__` below
+    predicate and the same claim-to-content join by hand on every query. `__view_select__` below
     is that predicate's one SQL rendering, the source both the mapped columns and the migration's
     `CREATE VIEW` DDL (`store.mixins.view.create_view_ddl`) are built from. `security_invoker =
     true` on the view means every read still runs under the calling session's own row level

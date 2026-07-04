@@ -17,7 +17,7 @@ async def target_groups(
 ) -> list[uuid.UUID]:
     """The target group ids named by a comma-separated scope list, vetted as writable.
 
-    Fails fast with a clear error before any row is written; the write policies would otherwise
+    Fails fast with a clear error before any row is written. The write policies would otherwise
     refuse a copy into a scope set the promoter holds no writer role in every group of, but the
     error that surfaces from a refused write is far less legible than this early, explicit check.
 
@@ -155,7 +155,7 @@ async def promote(
 ) -> int:
     """Copy a document and its chunks into a wider scope set, and claim its facts there too.
 
-    References flow one way up the lattice, private to team to org and never down: promotion reads
+    References flow one way up the lattice, private to team to org and never down. Promotion reads
     the source under the promoter's visibility and writes a fresh copy owned by the promoter into
     the target group set, never mutating the source. The document copy carries promoted_from
     pointing back to the original for provenance. A curated target reviews the claimed facts

@@ -203,7 +203,8 @@ async def routing_ab(
 
 
 class ToggleSweepResult(FrozenModel):
-    """The rerank/ppr toggle sweep's own scored outcome, before the judge or final assembly.
+    """The rerank/ppr (multi-hop personalized-pagerank) toggle sweep's own scored outcome, before
+    the judge or final assembly.
 
     per_config: hit-at-k keyed by the rerank/ppr toggle label.
     headline: the ranx metric values for the current live toggle combination.

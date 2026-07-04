@@ -61,7 +61,7 @@ def verify_scoped_rls(
     connection: synchronous connection used to read the catalog.
     expected: table names every Scoped model registered in `metadata.info['rls']`.
     declared: `table -> policies` to verify against, the live registry's own
-        `TableBase.metadata.info["rls_policies"]` by default; a test passes its own mapping to
+        `TableBase.metadata.info["rls_policies"]` by default. A test passes its own mapping to
         verify a synthetic probe table that carries no mapped model of its own.
     """
     policy_registry = declared if declared is not None else TableBase.metadata.info["rls_policies"]

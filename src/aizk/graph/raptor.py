@@ -136,10 +136,11 @@ def redundant_parent(
 ) -> Node | None:
     """Return a parent already built this level whose summary near-duplicates a new one, else null.
 
-    The DTCRS prune of plain RAPTOR's over-generation. Soft clustering hands one child to several
-    clusters, so two parents at a level end up saying nearly the same thing, and this finds the
-    first existing parent within the redundancy threshold so the caller reuses it rather than
-    write a second near-identical summary node, re-pointing the new cluster's children onto it.
+    A fix, from the DTCRS paper, for plain RAPTOR's tendency to over-generate near-duplicate
+    summaries. Soft clustering hands one child to several clusters, so two parents at a level end
+    up saying nearly the same thing, and this finds the first existing parent within the
+    redundancy threshold so the caller reuses it rather than write a second near-identical summary
+    node, re-pointing the new cluster's children onto it.
 
     parents: the parents already decided for this level, each with its summary vector.
     vector: the candidate parent summary's vector.
@@ -154,7 +155,7 @@ def redundant_parent(
 class RaptorTierBuilder(TierBuilder[list[Node], RaptorReport]):
     """One non-singleton cluster's structured-rollup pass, one climb of the RAPTOR tree.
 
-    `result` is always set after `build`, the node every member's part_of edge points to; `content`
+    `result` is always set after `build`, the node every member's part_of edge points to. `content`
     is set only when a new summary was minted, the DTCRS prune against over-generation, so the
     level build knows which nodes still need writing once every cluster is done.
 
@@ -301,7 +302,7 @@ async def write_level(
     `FactContent.id` is client-generated (`Id.id`'s `default_factory=uuid.uuid7`), already
     populated the moment the object is constructed, so every claim below already knows the content
     id it stakes with no round trip to flush it first. The flush between the two `add_all` calls is
-    still required: content and claim share no ORM `relationship()` for SQLAlchemy's unit-of-work
+    still required, content and claim share no ORM `relationship()` for SQLAlchemy's unit-of-work
     to auto-order the insert on, only a bare FK column, so a claim added in the same batch as its
     content can flush ahead of it and violate the FK.
 
@@ -334,7 +335,7 @@ async def build_level(
     node that just restates one child. A multi-member cluster's parent comes from rolled_up_parent,
     which rolls it up, embeds it outside any transaction, and either reuses a redundant parent
     already minted this level or stages a fresh summary entity content plus this principal's own
-    claim on it; every member of a built cluster then gets a part_of edge to its parent regardless
+    claim on it. Every member of a built cluster then gets a part_of edge to its parent regardless
     of whether the parent was freshly minted or reused. write_level then writes everything staged
     in one owner-scoped transaction, so a slow rollup never holds a write lock.
 
@@ -388,7 +389,7 @@ async def clear_stale_tree(principal_id: uuid.UUID) -> None:
     """Delete a principal's prior RAPTOR tree content wholesale, so a rebuild is idempotent.
 
     Content carries no owner of its own and no ordinary DELETE policy at all, so this runs on the
-    owner-role admin connection, bypassing row level security entirely; the delete cascades its
+    owner-role admin connection, bypassing row level security entirely. The delete cascades its
     claims and part_of edges away through their foreign keys.
 
     principal_id: identity whose prior tree, if any, is cleared.

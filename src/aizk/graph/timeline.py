@@ -70,7 +70,7 @@ async def timeline(
 ) -> list[TimelineEntry]:
     """List the claims recorded in the last since_days, newest first, the weekly-review read.
 
-    Facts are the events table: a claim's own recorded transaction-time range is the log line,
+    Facts are the events table, a claim's own recorded transaction-time range is the log line,
     so this reads every claim (live or since superseded, opting out of the live gate the way any
     full-history read does) whose recorded range overlaps the trailing window, regardless of the
     fact's own valid-time. A note's dated journal lines (extract.journal) are exactly this shape,

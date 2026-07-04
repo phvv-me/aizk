@@ -79,7 +79,7 @@ async def run_worker(batch_size: int = 10) -> None:
 
     The extraction entrypoint carries its own `concurrency_limit=settings.graph_build_concurrency`
     so it always has that many chunks in flight regardless of how many cheap profile-rebuild or
-    scheduled-task jobs share the same dequeue round; `batch_size` must still comfortably exceed
+    scheduled-task jobs share the same dequeue round. `batch_size` must still comfortably exceed
     that width for pgqueuer to ever dequeue enough extraction jobs to fill it, the queue-side half
     of the fix, `settings.queue_batch_size` by default. `max_concurrent_tasks` is set well above
     `batch_size` since pgqueuer requires at least twice the batch size and this worker otherwise

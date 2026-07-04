@@ -26,15 +26,15 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
     embedding: halfvec dense vector, null until embedded.
     processed_at: when the graph build last ran extraction and consolidation over this chunk, null
         until the first pass. Set regardless of whether that pass minted any claim, so `chunk`'s
-        own column, not an anti-join against `fact_claim`, is what `pending_chunks` reads; a chunk
+        own column, not an anti-join against `fact_claim`, is what `pending_chunks` reads. A chunk
         whose prose asserts nothing worth keeping still finished a real pass and stays finished.
     owner_id: principal that owns the row, enforced by row level security.
     scopes: group set the row is shared with, an implicit intersection when it names more than
         one, empty when private to the owner.
 
-    Carries no `document` relationship of its own: every read site already holds the document id
-    (`Chunk.document_id`, the indexed FK) and filters or joins on it directly rather than
-    navigating from a loaded `Chunk`, so a back-reference here would ship unused.
+    Carries no `document` relationship of its own, since every read site already holds the
+    document id (`Chunk.document_id`, the indexed FK) and filters or joins on it directly rather
+    than navigating from a loaded `Chunk`, so a back-reference here would ship unused.
     """
 
     # indexed: promote's document-ordered rebuild and build_graph's source-title filter both

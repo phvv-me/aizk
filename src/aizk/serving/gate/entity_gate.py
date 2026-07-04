@@ -8,7 +8,7 @@ class EntityGate(Singleton):
     """The single GLiNER2 relevance gate, a 205M CPU-fast pre-filter ahead of the LLM extraction
     call.
 
-    Scores a chunk against the ontology's own entity types in milliseconds; a chunk that names
+    Scores a chunk against the ontology's own entity types in milliseconds. A chunk that names
     none of them clears no LLM call at all, `graph.build.extract_and_consolidate`'s own gate ahead
     of `extract.llm.combined_extract`. In-process only, no serving lane exists for it since it is
     too fast relative to an HTTP round trip to be worth one. A `patos` singleton, the checkpoint
@@ -19,8 +19,8 @@ class EntityGate(Singleton):
     labels: the schema every chunk is scored against, the ontology's extractable entity type
         names minus `Concept`. Concept is the extractor's own explicit catch-all ("when nothing
         fits use Concept"), and calibration against real prose showed it matches nearly any noun
-        phrase (a plain "the weather" scored 0.79), which would make the gate pass everything;
-        dropping it widened the measured separation between filler and ontology-bearing text from
+        phrase (a plain "the weather" scored 0.79), which would make the gate pass everything.
+        Dropping it widened the measured separation between filler and ontology-bearing text from
         roughly 0.5-0.8 down to 0.0-0.5 for filler and 0.9+ for the real thing.
     threshold: the confidence a chunk's best entity match must clear to count as relevant.
     """
@@ -52,7 +52,7 @@ class EntityGate(Singleton):
     def relevant(self, text: str) -> bool:
         """Whether a chunk names at least one entity of the ontology's own types.
 
-        A synchronous, CPU-bound forward pass; `graph.build.extract_and_consolidate` runs it
+        A synchronous, CPU-bound forward pass. `graph.build.extract_and_consolidate` runs it
         through `asyncio.to_thread` so one chunk's gate check never blocks another's concurrent
         extraction on the event loop.
 

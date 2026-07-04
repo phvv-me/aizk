@@ -8,13 +8,13 @@ from ..serving import Embedder
 
 
 class TierBuilder[GroundingT, ReportT: FrozenModel](ABC):
-    """Template method for a graph tier's report pass: gather, summarize, embed, then store.
+    """Template method for a graph tier's report pass, gather, summarize, embed, then store.
 
     Every tier (community, RAPTOR rollup, profile, insight) grounds an LLM call in graph facts,
-    embeds the report, and writes it back; `build` is that shape end to end, so it lives once here
+    embeds the report, and writes it back. `build` is that shape end to end, so it lives once here
     instead of copy-pasted with slight variations across every tier's own module. `gather` may read
-    material a caller already fetched under RLS on this instance's behalf, the way a per-cluster or
-    per-level pass shares one read across many builder instances.
+    material a caller already fetched under row level security on this instance's behalf, the way a
+    per-cluster or per-level pass shares one read across many builder instances.
 
     principal_id: identity that owns the written rows and whose visibility scopes the grounding.
     """
@@ -43,10 +43,10 @@ class TierBuilder[GroundingT, ReportT: FrozenModel](ABC):
     async def upsert(
         self, grounding: GroundingT, report: ReportT, vectors: list[list[float]]
     ) -> int:
-        """Write the report and its embeddings back, one per text; return how many rows written."""
+        """Write the report and its embeddings back, one per text. Return how many rows written."""
 
     async def build(self) -> int:
-        """Gather, summarize, embed, and store one tier pass; return how many rows were written.
+        """Gather, summarize, embed, and store one tier pass. Return how many rows were written.
 
         Skips the model calls entirely when there is nothing to gather or nothing to embed.
         """

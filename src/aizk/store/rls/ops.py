@@ -207,7 +207,7 @@ def compare_scoped_rls(
 
     A table with no FORCE or no row security at all gets the whole-table `ApplyScopedRlsOp`
     bootstrap, the shape a brand-new Scoped model or a force-stripped table both need. A table
-    already protected gets the fine-grained differ instead: `rls.drifted_policies` compares each
+    already protected gets the fine-grained differ instead. `rls.drifted_policies` compares each
     declared policy's compiled, normalized clause against the live catalog's, so only the policies
     that actually changed are dropped and recreated, and any live policy no longer declared is
     dropped on its own.

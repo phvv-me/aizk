@@ -19,7 +19,8 @@ def register_policies(mapper: Mapper, class_: type) -> None:
     expressions can already reach `cls.__table__.c` for the columns they scope, the reason this
     runs as a mapper-construction hook rather than inside `Scoped.__init_subclass__`, which fires
     before the table exists. A class with no `__rls_policies__` classmethod, every non-scoped
-    table, is left untouched: the declaration is opt-in per model and this hook never edits one.
+    table, is left untouched, since the declaration is opt-in per model and this hook never edits
+    one.
 
     mapper: the mapper SQLAlchemy just finished constructing.
     class_: the mapped class the mapper belongs to.

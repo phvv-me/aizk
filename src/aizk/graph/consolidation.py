@@ -26,7 +26,7 @@ def rank_pool(vector: list[float], pool: list[LiveFact]) -> list[tuple[LiveFact,
 
     `GraphWriter.live_facts_by_subject` fetches a subject's whole pool once for every candidate
     that names it, since a single SQL statement cannot `ORDER BY` a different query vector per
-    row; this is the per-candidate ranking that reads instead of a second round trip.
+    row. This is the per-candidate ranking that reads instead of a second round trip.
 
     vector: the new statement's already-embedded dense vector.
     pool: the subject's visible latest claims, unordered.
@@ -49,7 +49,7 @@ def decide_by_rule(
     No existing claim of the same subject is a trivial ADD. A top match under
     `settings.consolidation_borderline_floor` is too dissimilar to be about the same thing,
     another trivial ADD. A top match at or above `settings.consolidation_auto_merge_threshold`
-    decides deterministically: the same predicate and object is a near-duplicate NOOP, the same
+    decides deterministically. The same predicate and object is a near-duplicate NOOP, the same
     predicate with a different object is an UPDATE superseding it, and a different predicate is a
     genuinely different assertion, ADD. A top match strictly between the two thresholds is
     genuinely ambiguous and returns null, deferring to the batched borderline LLM call.

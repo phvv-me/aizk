@@ -18,7 +18,7 @@ aizk_registry = registry()
 def derive_tablename(name: str) -> str:
     """Singular snake_case table name derived from a class name, `_`-suffixed on a reserved word.
 
-    `SessionItem` derives to `session_item`; `Group` collides with GROUP, a reserved word in
+    `SessionItem` derives to `session_item`. `Group` collides with GROUP, a reserved word in
     `RESERVED_WORDS` (the postgresql dialect's own catalog, the dialect every DSN in this codebase
     dials), so it derives to `group_` instead, avoiding the manual quoting every raw `text()`
     statement touching an unsuffixed `group` would otherwise need. Shared by `TableBase`'s own

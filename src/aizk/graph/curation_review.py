@@ -11,10 +11,11 @@ from .models import CurationReview
 
 
 async def curated_groups_administered(principal_id: uuid.UUID) -> list[Group]:
-    """The curated groups this principal holds the admin membership role in.
+    """The curated groups (groups whose writes need admin review before they count as approved
+    canon) this principal holds the admin membership role in.
 
     `Membership` and `Group` carry no row level security of their own, so this reads the same
-    under this principal's own session as it would under any other; the review pass's own
+    under this principal's own session as it would under any other. The review pass's own
     elevated reach into each group's pending queue and canon is scoped separately per group in
     `review_group`, never here.
 
@@ -101,7 +102,8 @@ async def debounced(principal_id: uuid.UUID, group: Group, pending_count: int) -
     pending queue also shrinks as claims are judged, so the skip condition is an unchanged count
     since the last pass, catching both a still-empty queue and one unchanged since last time.
 
-    principal_id: the admin member this pass reviews on behalf of, the watermark's own owner.
+    principal_id: the admin member this pass reviews on behalf of, who owns the watermark, the
+        stored row recording last time's pending count.
     group: the curated group being reviewed.
     pending_count: how many claims are pending right now.
     """
@@ -119,7 +121,7 @@ async def apply_verdicts(
 
     A still-pending claim is invisible to every reader but its own author under the ordinary
     curation gate, so the read that found it and the write that resolves it both run under the
-    system principal's elevated reach; `curated_groups_administered` already vetted this pass's own
+    system principal's elevated reach. `curated_groups_administered` already vetted this pass's own
     principal as the group's own admin member before this ever runs.
 
     group_id: the curated group whose queue is being resolved.

@@ -23,10 +23,10 @@ class ScopeLattice:
 
     A scoped table builds an instance from its own mapped table (`ScopeLattice(cls.__table__)`),
     so every predicate compiles against the real `owner_id`/`scopes` columns rather than a bare
-    cross-file stand-in a caller had to import back. That self-table qualification is harmless: the
-    `rls` library's own catalog comparator (`rls.normalize._unqualify`) already strips a policy's
-    own-table column qualification before ever comparing compiled text to the live catalog, so a
-    drift check never sees it.
+    cross-file stand-in a caller had to import back. That self-table qualification is harmless
+    since the `rls` library's own catalog comparator (`rls.normalize._unqualify`) already strips a
+    policy's own-table column qualification before ever comparing compiled text to the live
+    catalog, so a drift check never sees it.
 
     owner_id: the table's own owner column, read from `table.c` at construction.
     scopes: the table's own scope-set column, read from `table.c` at construction.
@@ -57,9 +57,9 @@ class ScopeLattice:
     def empty_scopes(cls) -> ColumnElement:
         """The empty-array literal every "private" comparison and coalesce fallback shares.
 
-        A fresh cast each call, not a shared instance: SQLAlchemy expressions are cheap, immutable
-        value objects, and every call site compiles to the identical text either way, the only
-        thing a drift check or a query plan ever compares.
+        A fresh cast each call, not a shared instance, since SQLAlchemy expressions are cheap,
+        immutable value objects, and every call site compiles to the identical text either way,
+        the only thing a drift check or a query plan ever compares.
         """
         return sa.cast(sa.literal("{}"), ARRAY(sa.Uuid()))
 
@@ -123,11 +123,11 @@ class ScopeLattice:
         """A row is readable when its scope set clears the reading lens and the reader has
         standing.
 
-        The lens narrows rather than widens: with `app.scopes` unset every row standing already
+        The lens narrows rather than widens. With `app.scopes` unset every row standing already
         reaches is visible, and with it set only a row whose own scope set is fully contained by
         the lens and is not itself the empty private set passes, the composed-graph projection of
         one subset out of the caller's whole visible union. A private row (`cardinality(scopes) =
-        0`) is excluded once a lens is set: it stays reachable only with no lens at all, since a
+        0`) is excluded once a lens is set. It stays reachable only with no lens at all, since a
         lens is "a different space" for that combination of groups, not a wider window onto the
         owner's own private layer. Standing itself is ownership, a scope set the reader stands in
         every member of (shared membership), or a scope set that is exactly one public group's
@@ -156,7 +156,7 @@ class ScopeLattice:
     def write(self) -> ColumnElement[bool]:
         """A row is writable when it is the actor's own private row or a scope set they write into.
 
-        Visibility never implies write access: a reader member and a public-group visitor read the
+        Visibility never implies write access. A reader member and a public-group visitor read the
         shared graph but cannot touch it, and ownership alone cannot publish into a scope, the moat
         the promote path relies on. Writing a multi-group row needs writer-or-admin standing in
         *every* group the set names, the same containment shape `read`'s member branch uses, so a
@@ -203,7 +203,7 @@ class Scoped:
 
     owner_id: principal that owns the row, enforced by row level security.
     scopes: the groups this row is shared with, an implicit intersection container rather than one
-        administered group: empty is private to the owner, a singleton is the familiar one-group
+        administered group. Empty is private to the owner, a singleton is the familiar one-group
         share, and a larger set is the composed graph of every group named, visible only to a
         caller standing in every one of them. `uuid[]` carries no foreign key of its own, Postgres
         has no such constraint on an array element, so a deleted group demotes every row whose set

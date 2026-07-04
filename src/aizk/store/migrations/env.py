@@ -32,7 +32,7 @@ def do_run_migrations(connection: Connection) -> None:
         migration-owned trigger and read only through a text() statement, so they are excluded the
         same way rather than misread as drift. Every `ViewBase` view (`live_fact` today) is
         hand-written `CREATE VIEW` DDL, reflected as an ordinary table since autogenerate cannot
-        tell a view from a table at all; the ORM side is excluded by its own `info={"is_view":
+        tell a view from a table at all. The ORM side is excluded by its own `info={"is_view":
         True}` tag, while the reflected side, a plain `Table` carrying no such info, is excluded
         by the `views` name set `store.mixins.view.register_view` stamps onto the shared metadata,
         so a future view needs no edit here.

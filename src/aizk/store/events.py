@@ -64,7 +64,7 @@ def require_tenant_context(state: ORMExecuteState) -> None:
 def apply_live_temporal_gate(state: ORMExecuteState) -> None:
     """Gate every live-graph claim read to the current, reviewed version, one loader criteria.
 
-    `with_loader_criteria` registers one combined predicate on each top-level select: the temporal
+    `with_loader_criteria` registers one combined predicate on each top-level select, the temporal
     `FactClaim.is_current` gate together with the curation gate that hides a claim still pending
     review from everyone but its author, `FactClaim.reviewed_at IS NOT NULL OR
     FactClaim.owner_id == <acting principal>`. Both live in the one lambda closing over the acting

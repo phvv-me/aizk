@@ -38,7 +38,7 @@ async def export_scope(
     """Dump the principal-visible documents, chunks, entity/fact content, and claims to a JSONL.
 
     Runs entirely under `acting_as` so row level security decides exactly which rows leave, the
-    principal's own and its group-shared scopes and no other tenant's; content's read-through-a-
+    principal's own and its group-shared scopes and no other tenant's. Content's read-through-a-
     claim policy means only content this principal's claims actually reach ever leaves too. The
     claim reads opt out of the live gate so superseded history and both temporal windows are
     dumped, not only the currently-valid edges. Emits only, no import path back in.

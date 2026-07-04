@@ -38,7 +38,7 @@ async def stage(name: str) -> AsyncIterator[None]:
 def temporal_filter(as_of: datetime | None) -> tuple[list[ColumnElement[bool]], dict[str, bool]]:
     """The extra claim predicates and execution options that gate a fact read at a world-time.
 
-    The live graph relies on the do_orm_execute listener's live gate and adds nothing here; a
+    The live graph relies on the do_orm_execute listener's live gate and adds nothing here. A
     historical replay lists `visible_at(as_of)` itself and opts the listener out, since the as_of
     gate deliberately drops the is_latest filter the live gate keeps.
 
@@ -87,7 +87,7 @@ async def hybrid_recall_rows(
 ) -> Sequence[Row]:
     """Call the hybrid_recall SQL function, one round trip fusing chunks and live facts.
 
-    Feeds rrf_k and fusion_depth from live settings at call time; the trusted-first promoted bonus
+    Feeds rrf_k and fusion_depth from live settings at call time. The trusted-first promoted bonus
     is baked into the function body instead, since a SQL-language function takes no config of its
     own.
 
@@ -470,7 +470,7 @@ class Recall:
         """Run the hybrid_recall SQL function once and split its rows into hits, seeds, neighbors.
 
         Widens the chunk pool to rerank_candidates when rerank is on so the cross-encoder has real
-        candidates to choose from; the fact and neighbor lanes stay capped at this round's k either
+        candidates to choose from. The fact and neighbor lanes stay capped at this round's k either
         way, since only the chunk lane is ever reranked.
         """
         depth = settings.rerank_candidates if settings.rerank else self.k
@@ -551,7 +551,7 @@ class Recall:
         return hits[: self.k]
 
     async def assemble_context(self) -> tuple[list[Hit], list[FactHit]]:
-        """Build one recall round: hybrid hits and facts, the as_of replay, ppr, then rerank.
+        """Build one recall round, hybrid hits and facts, the as_of replay, ppr, then rerank.
 
         The live default round reads hits, seeds, and neighbors off one hybrid_recall call, and
         `replay_seeds` swaps in the as_of-aware ORM path only for a historical round, since
