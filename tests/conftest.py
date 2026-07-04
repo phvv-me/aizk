@@ -80,6 +80,44 @@ _db = urlsplit(_settings.database_url)
 DB_UP = _port_open(_db.hostname, _db.port)
 
 
+def ensure_test_database() -> None:
+    """Create and migrate the isolated test database when a fresh Postgres lacks it.
+
+    A brand-new environment (CI's service container, a new dev machine) carries only the
+    server and the roles, so the suite bootstraps its own database and brings it to head
+    through the same `ops.setup()` the MCP server runs at startup, migrations, queue schema,
+    and app-role grants alike. Idempotent, one alembic no-op when everything already exists.
+    """
+    import asyncio
+
+    from sqlalchemy import NullPool, text
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from aizk import ops
+
+    async def bootstrap() -> None:
+        maintenance = make_url(_settings.admin_database_url).set(database="postgres")
+        engine = create_async_engine(maintenance, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+        name = _settings.db_name
+        try:
+            async with engine.connect() as connection:
+                exists = await connection.scalar(
+                    text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": name}
+                )
+                if not exists:
+                    await connection.execute(text(f'CREATE DATABASE "{name}"'))
+        finally:
+            await engine.dispose()
+        await ops.setup()
+
+    asyncio.run(bootstrap())
+
+
+if DB_UP:
+    ensure_test_database()
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Register the markers the suite uses so `--strict-markers` never rejects one."""
     config.addinivalue_line(
