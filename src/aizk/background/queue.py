@@ -188,7 +188,7 @@ async def install_queue_schema() -> None:
     try:
         try:
             await Queries(AsyncpgDriver(connection)).install()
-        except (DuplicateFunctionError, DuplicateObjectError, DuplicateTableError):
+        except DuplicateFunctionError, DuplicateObjectError, DuplicateTableError:
             logger.info("pgqueuer schema already installed")
         await grant_queue_access(connection, settings.app_role)
     finally:

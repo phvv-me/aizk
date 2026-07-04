@@ -559,7 +559,7 @@ async def llm_extraction(
             "confirm AIZK_LLM_URL points at a running server (the vllm-llm compose "
             "service or a cloud provider)"
         ) from error
-    except (LengthFinishReasonError, ValidationError):
+    except LengthFinishReasonError, ValidationError:
         # a chunk rich enough that its structural extraction can never finish inside
         # extract_max_tokens fails identically on every retry, so it is marked processed with
         # only its journal facts, if any, rather than left pending to loop forever; raising the

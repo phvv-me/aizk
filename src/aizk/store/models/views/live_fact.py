@@ -97,5 +97,3 @@ class LiveFact(ViewBase):
             .select_from(claim.join(content, content.c.id == claim.c.content_id))
             .where(FactClaim.is_current)
         )
-
-

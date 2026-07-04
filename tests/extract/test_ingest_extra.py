@@ -3,11 +3,11 @@ from pathlib import Path
 
 import dbutil
 import pytest
+from doubles import RecordingEmbedder
 from sqlalchemy import text
 
 from aizk.config import settings
 from aizk.extract.ingest import ingest_image, record_reference, remember_session
-from doubles import RecordingEmbedder
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 

@@ -14,9 +14,12 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --extra dev
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pyrefly check
+      # the rls on PyPI is the upstream fork base; overlay our fork until it ships under its own name
+      - run: uv pip install --reinstall "rls @ git+https://github.com/phvv-me/rls"
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+      # known ORM-expression errors live in the baseline; only NEW errors fail the gate
+      - run: uv run --no-sync pyrefly check --baseline .pyrefly-baseline.json
 
   # The suite is hermetic above the database seam (every model endpoint is faked), but the
   # database itself is real: the same VectorChord image the compose file ships, on the same
@@ -58,4 +61,6 @@ jobs:
             GRANT USAGE, SELECT ON SEQUENCES TO aizk_app;
           SQL
       - run: uv sync --extra dev
-      - run: uv run pytest -q
+      # the rls on PyPI is the upstream fork base; overlay our fork until it ships under its own name
+      - run: uv pip install --reinstall "rls @ git+https://github.com/phvv-me/rls"
+      - run: uv run --no-sync pytest -q

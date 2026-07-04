@@ -60,12 +60,12 @@ dependencies = [
   # time rather than splitting the whole file into lines by hand
   "jsonlines>=4.0,<5",
   "patos",
-  # declarative PostgreSQL row level security for SQLAlchemy and Alembic, store/rls/'s dependency.
-  # A direct git reference, not a PyPI name: the `rls` name on PyPI is DelfinaCare's upstream,
-  # whose API our fork reworked, so the bare name would install the wrong library. PyPI rejects
-  # direct-URL dependencies, which is why the release workflow stays manually gated until the
-  # fork ships under its own PyPI name.
-  "rls @ git+https://github.com/phvv-me/rls",
+  # declarative PostgreSQL row level security for SQLAlchemy and Alembic, store/rls/'s
+  # dependency. The bare name is wrong on PyPI (it belongs to DelfinaCare's upstream, whose API
+  # our fork reworked), so [tool.uv.sources] below points uv at the fork while the monorepo's
+  # chefe manifest overrides it with the local path. The PyPI release stays manually gated
+  # until the fork ships under its own PyPI name a plain pip resolve can trust.
+  "rls",
   # the span/timing profiler behind `settings.profiling`, wired through recall and the build
   "mainboard>=0.0.8",
   # the durable queue and cron scheduler the background worker drains
@@ -80,6 +80,22 @@ dependencies = [
 
 [project.scripts]
 aizk = "aizk.cli:app"
+
+# sqlmodel's released 0.0.39 caps sqlalchemy below 2.1 while this codebase deliberately runs
+# the 2.1 beta (native ENUM/DOMAIN handling, Range[datetime]); the monorepo forces the same
+# resolution through chefe's dependency-overrides, and this is uv's spelling of that override
+# for standalone and CI installs. Plain pip cannot express an override, which is the second
+# reason (after the rls git reference) the PyPI release stays manually gated until sqlmodel
+# ships SQLAlchemy 2.1 support.
+[tool.uv]
+override-dependencies = ["sqlalchemy[asyncio]>=2.1.0b3,<3"]
+
+# no [tool.uv.sources] for rls even though the bare name resolves to the upstream fork base:
+# pixi reads uv sources too, and the monorepo's chefe manifest already carries the local-path
+# override, so a git source here makes the two resolvers fight over conflicting URLs. CI
+# overlays the fork explicitly after sync (see .github/workflows/ci.yml), and a standalone
+# checkout does the same one `uv pip install` — both warts disappear when the fork ships
+# under its own PyPI name.
 
 [project.optional-dependencies]
 dev = [
@@ -134,6 +150,16 @@ reportMissingModuleSource = false
 [tool.pyrefly]
 project-includes = ["src", "tests"]
 search-path = ["src", "tests", "."]
+# SQLModel on the SQLAlchemy 2.1 beta has no usable typing for column expressions (a class
+# attribute is a plain Python type to the checker but a Column at query time, so every
+# `Model.field.in_(...)` read fails), and no plugin bridges the gap yet. The ORM surface is
+# therefore treated as untyped, the same documented pattern the monorepo applies to other
+# unstubbed heavy deps, keeping the checker sharp on everything that is not a query
+# expression. Revisit when SQLModel exposes SQLAlchemy-2.1-native Mapped typing. The column
+# expressions on our own model attributes stay visible to the checker, so those known errors
+# live in .pyrefly-baseline.json and CI gates on NEW errors only (--baseline), the same
+# no-new-error-kinds standard the codebase already worked to.
+replace-imports-with-any = ["sqlmodel", "sqlmodel.*", "sqlalchemy", "sqlalchemy.*"]
 
 [tool.mypy]
 python_version = "3.14"
