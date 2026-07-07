@@ -52,9 +52,12 @@ def patch_pg_tool(
         stdout: BinaryIO | None = None,
         stderr: int | None = None,
     ) -> FakeProcess:
-        record["args"] = list(args)
-        record["stdin"] = stdin
-        record["stdout"] = stdout
+        # the scalar keys keep the FIRST invocation (the pg tool under test); `calls` accumulates
+        # every argv so the post-restore tokenizer probe is assertable too
+        record.setdefault("args", list(args))
+        record.setdefault("stdin", stdin)
+        record.setdefault("stdout", stdout)
+        record.setdefault("calls", []).append(list(args))  # type: ignore[union-attr]
         if stdout is not None and archive:
             stdout.write(archive)
         return FakeProcess(returncode, reported_stderr)
@@ -94,6 +97,41 @@ def test_restore_streams_the_archive_and_cleans_the_configured_database(
     assert "--clean" in record["args"] and "--if-exists" in record["args"]  # type: ignore[operator]
     assert record["stdin"] is not None
     assert report.database == settings.db_name
+    # the restore is followed by the tokenizer probe, the post-restore repair seam
+    calls = record["calls"]
+    assert len(calls) == 2 and calls[1][0] == "psql"  # type: ignore[index]
+    assert backup.PROBE_TOKENIZER_SQL in calls[1]  # type: ignore[operator]
+
+
+def test_restore_recreates_the_bm25_tokenizer_when_the_probe_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A restored database without the tokenizer registration gets it recreated, EAFP.
+
+    `pg_dump` does not carry the vchord_bm25 catalog registration, so the probe `tokenize`
+    call fails on a fresh restore and the repair issues `create_tokenizer`; a database whose
+    registration survived probes clean and is never touched.
+    """
+    issued: list[list[str]] = []
+
+    async def fake_tool(args: list[str], **_: object) -> None:
+        issued.append(args)
+        if backup.PROBE_TOKENIZER_SQL in args:
+            raise backup.BackupError("Tokenizer not found: aizk_bm25")
+
+    monkeypatch.setattr(settings, "pg_client_launcher", [])
+    monkeypatch.setattr(backup, "run_pg_tool", fake_tool)
+    asyncio.run(backup.ensure_bm25_tokenizer())
+    assert any(backup.CREATE_TOKENIZER_SQL in call for call in issued)
+
+    issued.clear()
+
+    async def healthy_tool(args: list[str], **_: object) -> None:
+        issued.append(args)
+
+    monkeypatch.setattr(backup, "run_pg_tool", healthy_tool)
+    asyncio.run(backup.ensure_bm25_tokenizer())
+    assert len(issued) == 1 and backup.PROBE_TOKENIZER_SQL in issued[0]
 
 
 def test_restore_into_a_scratch_database_skips_the_clean_flags(

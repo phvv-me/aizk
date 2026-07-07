@@ -111,7 +111,10 @@ async def restore_database(path: str, database: str | None = None) -> RestoreRep
     Passing `database` points the restore at a fresh, empty database instead and drops the clean
     flags, the non-destructive path a recovery drill or a proven-restore test uses. Runs as the
     owner, a superuser, so the archive's `CREATE EXTENSION` lines and app-role grants both apply,
-    and forced row level security comes back exactly as the backup held it.
+    and forced row level security comes back exactly as the backup held it. The BM25 tokenizer
+    registration is re-ensured afterward, since `pg_dump` does not carry the vchord_bm25
+    catalog's registration and every lexical read would otherwise fail with "Tokenizer not
+    found" (the crimson migration hit exactly this).
 
     path: the archive to read.
     database: an alternate, already-created database to restore into, the configured database
@@ -122,7 +125,33 @@ async def restore_database(path: str, database: str | None = None) -> RestoreRep
     await run_pg_tool(
         [*settings.pg_client_launcher, "pg_restore", *clean, "--dbname", conn], stdin_path=path
     )
+    await ensure_bm25_tokenizer(database)
     return RestoreReport(path=path, database=make_url(conn).database or settings.db_name)
+
+
+# the tokenizer name and model mirror migration 0001_init's BM25_TOKENIZER block, the single
+# writer of the registration this probe-and-recreate repairs after a restore
+PROBE_TOKENIZER_SQL = "SELECT tokenizer_catalog.tokenize('probe', 'aizk_bm25')"
+CREATE_TOKENIZER_SQL = (
+    "SELECT tokenizer_catalog.create_tokenizer('aizk_bm25', $$\nmodel = \"llmlingua2\"\n$$)"
+)
+
+
+async def ensure_bm25_tokenizer(database: str | None = None) -> None:
+    """Re-register the BM25 tokenizer when a restore left the database without it.
+
+    The vchord_bm25 tokenizer registration lives in the extension's catalog, which a
+    custom-format `pg_dump` does not carry, so a restored database tokenizes nothing until it is
+    re-registered. EAFP: probe with a real `tokenize` call and only recreate on failure, so a
+    database whose registration survived is never touched and a genuine create failure still
+    surfaces as a `BackupError`.
+    """
+    url = connection_url(database)
+    psql = [*settings.pg_client_launcher, "psql", url, "-v", "ON_ERROR_STOP=1", "-qAt", "-c"]
+    try:
+        await run_pg_tool([*psql, PROBE_TOKENIZER_SQL])
+    except BackupError:
+        await run_pg_tool([*psql, CREATE_TOKENIZER_SQL])
 
 
 def prune_backups(directory: Path, keep_days: int) -> int:
