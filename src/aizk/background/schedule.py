@@ -4,7 +4,7 @@ from pgqueuer.models import Job
 
 from ..config import settings
 from ..extract import ontology
-from ..store import Principal, system_session
+from ..store import User, system_session
 from .payloads import ChunkJob, ProfileJob, TaskJob
 from .queue import (
     EXTRACT_ENTRYPOINT,
@@ -31,7 +31,7 @@ async def fan_out(task: ScheduledTask) -> None:
     task: the scheduled task being fanned out.
     """
     async with system_session() as session:
-        principals = await Principal.list_all(session)
+        principals = await User.list_all(session)
     async with queue_queries() as queries:
         queued = sum(
             [

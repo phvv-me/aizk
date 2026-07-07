@@ -24,7 +24,7 @@ def test_deleting_a_group_demotes_bridge_rows_fully_private() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
         group_a = await dbutil.seed_group(uuid.uuid4())
         group_b = await dbutil.seed_group(uuid.uuid4())
         bridge = await dbutil.seed_document(owner, [group_a, group_b])
@@ -46,7 +46,7 @@ def test_group_deletion_cascades_memberships_and_removes_the_group() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        member = await dbutil.seed_principal(uuid.uuid4())
+        member = await dbutil.seed_user(uuid.uuid4())
         group_id = await dbutil.seed_group(uuid.uuid4())
         await dbutil.seed_membership(member, group_id, "writer")
         async with system_session() as session:
@@ -76,7 +76,7 @@ def test_demotion_dedupes_a_colliding_private_claim() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
         group_id = await dbutil.seed_group(uuid.uuid4())
         content = entity_id("node", "Concept")
         await dbutil.admin_exec(

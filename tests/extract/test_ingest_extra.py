@@ -15,7 +15,7 @@ pytestmark = pytest.mark.usefixtures("migrated_db")
 async def seed_system() -> uuid.UUID:
     """Reset the schema and seed the default system principal these writers own rows under."""
     await dbutil.reset_db()
-    return await dbutil.seed_principal(settings.system_principal_id)
+    return await dbutil.seed_user(settings.system_user_id)
 
 
 async def count(table: str, where: str, params: dict[str, object]) -> int:

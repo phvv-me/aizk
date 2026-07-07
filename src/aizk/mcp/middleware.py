@@ -4,14 +4,14 @@ from fastmcp.server.middleware.rate_limiting import RateLimitError, TokenBucketR
 from fastmcp.tools.tool import ToolResult
 
 from ..config import settings
-from .principal import PRINCIPAL_STATE_KEY, Principal, resolve_principal
+from .principal import USER_STATE_KEY, User, resolve_user
 
 
-class PrincipalMiddleware(Middleware):
+class IdentityMiddleware(Middleware):
     """Resolve the caller once per call, threading it through Context state to every verb.
 
-    `on_call_tool` resolves the `Principal` exactly once and stashes it in the request's Context
-    state, the one slot `current_principal` and every verb body read it back from, so a call pays
+    `on_call_tool` resolves the `User` exactly once and stashes it in the request's Context
+    state, the one slot `current_user` and every verb body read it back from, so a call pays
     a single bearer-token check rather than one per verb. The whole surface is client verbs a
     key-holder is entitled to reach, so there is nothing to hide from a listing, the operational
     tools that once needed hiding having moved off the server to the CLI.
@@ -22,9 +22,9 @@ class PrincipalMiddleware(Middleware):
         context: MiddlewareContext[mt.CallToolRequestParams],
         call_next: CallNext[mt.CallToolRequestParams, ToolResult],
     ) -> ToolResult:
-        principal = await resolve_principal()
+        principal = await resolve_user()
         assert context.fastmcp_context is not None  # every tool call carries a request context
-        context.fastmcp_context.set_state(PRINCIPAL_STATE_KEY, principal)
+        context.fastmcp_context.set_state(USER_STATE_KEY, principal)
         return await call_next(context)
 
 
@@ -32,13 +32,13 @@ class AnonymousRateLimit(Middleware):
     """Token-bucket rate limiting applied only to unauthenticated tool calls.
 
     A public group makes the HTTP server readable by strangers, so anonymous tool calls consume
-    from one shared token bucket while any authenticated principal, keyed or Zitadel resolved,
+    from one shared token bucket while any authenticated principal, keyed or OIDC resolved,
     passes through unthrottled. Composing the bucket rather than subclassing fastmcp's
     RateLimitingMiddleware keeps its inherited on_request hook from also charging every protocol
     handshake and listing, which would drain the bucket before the first tool call arrived. One
     bucket serves all strangers, since an unauthenticated HTTP caller carries no identity to key
-    a fairer split on anyway. Registered after `PrincipalMiddleware`, so its own `on_call_tool`
-    always sees the Principal already resolved into Context state rather than resolving a second
+    a fairer split on anyway. Registered after `IdentityMiddleware`, so its own `on_call_tool`
+    always sees the User already resolved into Context state rather than resolving a second
     one of its own.
     """
 
@@ -56,8 +56,8 @@ class AnonymousRateLimit(Middleware):
         call_next: CallNext[mt.CallToolRequestParams, ToolResult],
     ) -> ToolResult:
         assert context.fastmcp_context is not None  # every tool call carries a request context
-        principal = context.fastmcp_context.get_state(PRINCIPAL_STATE_KEY)
-        if not isinstance(principal, Principal) or principal.id != settings.anonymous_principal_id:
+        principal = context.fastmcp_context.get_state(USER_STATE_KEY)
+        if not isinstance(principal, User) or principal.id != settings.anonymous_user_id:
             return await call_next(context)
         if not await self.limiter.consume():
             raise RateLimitError("anonymous rate limit exceeded, authenticate for more")

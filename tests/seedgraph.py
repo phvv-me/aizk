@@ -24,7 +24,7 @@ async def fresh_owner(is_admin: bool = False) -> uuid.UUID:
     is_admin: whether the seeded principal carries the server-wide admin flag.
     """
     await dbutil.reset_db()
-    return await dbutil.seed_principal(uuid.uuid4(), is_admin=is_admin)
+    return await dbutil.seed_user(uuid.uuid4(), is_admin=is_admin)
 
 
 async def add_entity(

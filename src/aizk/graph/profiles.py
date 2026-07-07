@@ -132,7 +132,7 @@ async def build_profile(
     principal_id: identity that owns the profile and whose visibility scopes the facts read, the
         system principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     builder = ProfileTierBuilder(principal_id, subject_id)
     await builder.build()
     assert builder.profile_id is not None  # gather() raises rather than skipping when invisible
@@ -154,7 +154,7 @@ async def refresh_profiles(
     principal_id: identity that owns the profiles and whose visibility scopes the entities, the
         system principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     async with acting_as(principal_id) as session:
         subject_ids = list(
             await session.scalars(

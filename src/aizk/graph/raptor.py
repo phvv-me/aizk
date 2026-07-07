@@ -480,7 +480,7 @@ async def build_raptor(
 
     principal_id: identity that owns the written tree, the system principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     nodes = await leaf_nodes(principal_id)
     if not nodes:
         return 0

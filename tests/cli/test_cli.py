@@ -218,7 +218,7 @@ def test_worker_enables_spans_only_when_profiling(
             "hello world",
             PRINCIPAL_ID,
         ),
-        (["recall-context"], cli.PROJECT_CONTEXT_QUERY, cli.settings.system_principal_id),
+        (["recall-context"], cli.PROJECT_CONTEXT_QUERY, cli.settings.system_user_id),
     ],
     ids=["explicit", "default"],
 )
@@ -309,7 +309,7 @@ def test_capture_session_ingests_the_transcript_and_enqueues_extraction(
 
     assert seams.ingest.args[0] == "decided to ship the codec"
     assert seams.ingest.kwargs["title"] == "session"
-    assert seams.ingest.kwargs["owner_id"] == cli.settings.system_principal_id
+    assert seams.ingest.kwargs["owner_id"] == cli.settings.system_user_id
     assert seams.enqueue.count == 1
     assert str(DOC_ID) in capsys.readouterr().out
 
@@ -350,7 +350,12 @@ OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
     ),
     (["promote", str(DOC_ID), "team"], "promote", 5, "promoted 5 rows into team"),
     (["ingest", "notes/"], "ingest", 4, "ingested 4 documents"),
-    (["grant-admin", str(USER_ID)], "grant_admin", SimpleNamespace(id=USER_ID), "is now admin"),
+    (
+        ["link-user", "gh|42", "--name", "Al"],
+        "link_user",
+        SimpleNamespace(id=USER_ID),
+        str(USER_ID),
+    ),
     (["create-group", "team"], "create_group", SimpleNamespace(id=DOC_ID), str(DOC_ID)),
     (["add-member", str(USER_ID), "team"], "add_member", None, "joined team"),
     (["publish-group", "team"], "publish_group", None, "public=True"),

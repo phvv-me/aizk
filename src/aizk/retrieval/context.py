@@ -124,6 +124,6 @@ async def assemble_context_pack(
     scopes: group ids narrowing the read to that combination's composed graph, the whole visible
         union when empty.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     result = await recall(query, principal_id=principal_id, k=k, scopes=scopes)
     return pack_context(result, token_budget or settings.context_token_budget)

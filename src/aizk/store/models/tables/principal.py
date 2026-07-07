@@ -18,18 +18,25 @@ if TYPE_CHECKING:
     from .membership import Membership
 
 
-class Principal(Id, Timestamped, TableBase, table=True):
+class User(Id, Timestamped, TableBase, table=True):
     """An actor that can own and read memory, a human or an agent identity.
 
     id: stable identity, generated client-side on insert.
     display_name: human-readable label when one is known.
-    zitadel_sub: unique subject claim from the identity provider, null until linked.
-    is_admin: whether this principal manages the operational surface, false for a regular user.
+    oidc_subject: unique subject claim from the identity provider, null until linked.
+    is_admin: whether this user is the engine admin. It is set only on the seeded system user
+        and never granted to a client, since the operator is the Postgres owner role the CLI acts
+        as, not an app user promoted through a verb. Its one live use is `Group.require_admin`
+        letting that system user clear any group's curation without a membership row.
     created_at: first-seen timestamp.
     """
 
+    # `user` is a reserved SQL word, so the physical table keeps its original name rather than the
+    # class-derived `user` an unquoted CREATE TABLE would choke on
+    __tablename__ = "principal"
+
     display_name: str | None = Field(default=None, sa_type=Text)
-    zitadel_sub: str | None = Field(default=None, unique=True, sa_type=Text)
+    oidc_subject: str | None = Field(default=None, unique=True, sa_type=Text)
     is_admin: bool = Field(default=False, sa_column_kwargs={"server_default": "false"})
 
     # no back_populates: Membership carries no `principal` relationship of its own, every read
@@ -52,58 +59,46 @@ class Principal(Id, Timestamped, TableBase, table=True):
         return principal
 
     @classmethod
-    async def link_admin(cls, session: AsyncSession, zitadel_sub: str, display_name: str) -> Self:
-        """Provision or promote the admin principal a Zitadel subject authenticates as.
+    async def link_oidc(cls, session: AsyncSession, oidc_subject: str, display_name: str) -> Self:
+        """Bind an OIDC subject to a user, minting one on first sight, the row back.
 
-        Binds an external identity provider subject to an admin principal so the machine or human
-        that presents that subject's token administers the engine, minting one stamped with the
-        subject when none carries it yet and promoting the existing one otherwise. Idempotent, a
-        second call over the same subject just re-confirms the flag. Runs under a system session
-        since it is a pre-auth bootstrap that no principal is resolved to administer through yet.
+        Provisions the user the human or machine presenting that subject's token acts as, so a
+        named user exists before its first login rather than waiting to be auto-created. A regular
+        user, never an admin: engine admin standing is the seeded system user alone. Idempotent, a
+        second call over the same subject just returns the existing row. Runs under a system
+        session since it is a pre-auth bootstrap no user is resolved through yet.
 
-        session: open system session the row is minted or promoted through.
-        zitadel_sub: the subject claim the provider mints this identity's tokens against.
-        display_name: human-readable label for a freshly minted principal.
+        session: open system session the row is minted through.
+        oidc_subject: the subject claim the provider mints this identity's tokens against.
+        display_name: human-readable label for a freshly minted user.
         """
-        principal = await session.scalar(select(cls).where(cls.zitadel_sub == zitadel_sub))
-        if principal is None:
-            principal = cls(display_name=display_name, zitadel_sub=zitadel_sub, is_admin=True)
-            session.add(principal)
+        user = await session.scalar(select(cls).where(cls.oidc_subject == oidc_subject))
+        if user is None:
+            user = cls(display_name=display_name, oidc_subject=oidc_subject)
+            session.add(user)
             await session.flush()
-            return principal
-        await principal.grant_admin(session)
-        return principal
+        return user
 
     @classmethod
-    async def administers(cls, session: AsyncSession, principal_id: uuid.UUID) -> bool:
-        """Whether a principal holds server-wide admin standing, the group-curation override.
+    async def administers(cls, session: AsyncSession, user_id: uuid.UUID) -> bool:
+        """Whether a user holds engine admin standing, the group-curation override.
 
-        Read by `Group.require_admin` so an engine admin clears any group's review without a
-        membership row of its own; the operational surface it once gated on the MCP server has
-        moved to the ssh-only CLI, whose operator acts as the already-admin system principal.
-        Reads the is_admin column off the caller's own already-open session, an unknown principal
-        reading as false. The migration seeds the system principal with the flag already set, so a
-        fresh single-user stack self-administers from the first migration. Principal carries no row
-        level security of its own, so any open session reads every row regardless of its own acting
-        principal, and a caller passes in the session it already holds rather than this method
-        nesting a second one inside it.
+        Read by `Group.require_admin` so the engine admin clears any group's review without a
+        membership row of its own. Only the seeded system user carries the flag, since engine
+        admin is the Postgres owner the CLI acts as rather than an app user promoted through a
+        verb, so this reads true for that one identity and false for every other, including an
+        unknown one. Reads the is_admin column off the caller's own already-open session; User
+        carries no row level security of its own, so any open session reads every row regardless
+        of its acting user, and a caller passes in the session it already holds.
 
         session: open session the flag is read through.
-        principal_id: identity whose administrative standing is resolved.
+        user_id: identity whose admin standing is resolved.
         """
-        return bool(await session.scalar(select(cls.is_admin).where(cls.id == principal_id)))
-
-    async def grant_admin(self, session: AsyncSession) -> None:
-        """Mark this principal as an admin so it manages the operational surface.
-
-        session: open session the update is written through.
-        """
-        self.is_admin = True
-        session.add(self)
+        return bool(await session.scalar(select(cls.is_admin).where(cls.id == user_id)))
 
     @classmethod
     async def list_all(cls, session: AsyncSession) -> list[Self]:
-        """List every principal known to the engine in first-seen order, the admin roster.
+        """List every user known to the engine in first-seen order, the roster.
 
         session: open session the roster is read through.
         """
@@ -117,7 +112,7 @@ class Principal(Id, Timestamped, TableBase, table=True):
         first, so an audit reads who wrote what, into which scope, and whether the row was
         promoted from another document, the provenance `promoted_from` link records. The caller
         holds only the id here, resolved from an MCP string argument rather than a loaded
-        `Principal`, so this stays id-keyed and opens its own principal-scoped session.
+        `User`, so this stays id-keyed and opens its own principal-scoped session.
 
         principal_id: identity whose visibility scopes the audit listing.
         limit: maximum number of documents to return.
@@ -131,21 +126,21 @@ class Principal(Id, Timestamped, TableBase, table=True):
 
     @classmethod
     async def for_subject(cls, subject: str) -> uuid.UUID:
-        """Map a Zitadel subject to its aizk principal, provisioning one on first sight.
+        """Map a OIDC subject to its aizk principal, provisioning one on first sight.
 
-        Looks up the principal whose zitadel_sub matches and returns its id, and when none exists
-        yet creates one stamped with the subject so a Zitadel user is provisioned on first
+        Looks up the principal whose oidc_subject matches and returns its id, and when none exists
+        yet creates one stamped with the subject so a OIDC user is provisioned on first
         authenticated call and stays stable across calls after. Runs as the system principal since
         no aizk principal is known until this resolves one, and the token-verification call site
         holds no session of its own to reuse.
 
-        subject: the Zitadel subject claim naming the external user.
+        subject: the OIDC subject claim naming the external user.
         """
         async with system_session() as session:
-            principal_id = await session.scalar(select(cls.id).where(cls.zitadel_sub == subject))
+            principal_id = await session.scalar(select(cls.id).where(cls.oidc_subject == subject))
             if principal_id is not None:
                 return principal_id
-            principal = cls(zitadel_sub=subject)
+            principal = cls(oidc_subject=subject)
             session.add(principal)
             await session.flush()
             return principal.id
@@ -155,18 +150,18 @@ class Principal(Id, Timestamped, TableBase, table=True):
     def cached_verifier(
         cls, issuer: str, jwks_uri: str, introspect_url: str, client_id: str, client_secret: str
     ) -> TokenVerifier | None:
-        """Build the verifier for one set of Zitadel settings, memoized so repeat settings reuse
+        """Build the verifier for one set of OIDC settings, memoized so repeat settings reuse
         it.
 
         Cached on the primitive settings values rather than the unhashable `Settings` object, so a
-        test that monkeypatches the Zitadel fields builds its own verifier without disturbing the
+        test that monkeypatches the OIDC fields builds its own verifier without disturbing the
         one already cached for the process's real configuration. An empty issuer means auth is
         off. An introspection url routes tokens through the live RFC 7662 round-trip, which also
         catches a token revoked before expiry, falling back to the offline JWKS check with no
         per-call network trip when absent. `verifier` is the entrypoint that forwards the live
         settings here. Call that instead unless a test needs to pin a specific settings tuple.
 
-        issuer: base issuer URL whose tokens are accepted, empty to leave the Zitadel path off.
+        issuer: base issuer URL whose tokens are accepted, empty to leave the OIDC path off.
         jwks_uri: JWKS endpoint the offline signature path fetches keys from.
         introspect_url: RFC 7662 introspection endpoint, empty to prefer the offline JWKS path.
         client_id: resource server client id the introspection call authenticates as.
@@ -182,22 +177,22 @@ class Principal(Id, Timestamped, TableBase, table=True):
 
     @classmethod
     def verifier(cls) -> TokenVerifier | None:
-        """Return the process-cached token verifier for the currently configured Zitadel settings.
+        """Return the process-cached token verifier for the currently configured OIDC settings.
 
-        None when `zitadel_issuer` is empty, the auth-off default a personal single-user stack
+        None when `oidc_issuer` is empty, the auth-off default a personal single-user stack
         runs under.
         """
         return cls.cached_verifier(
-            settings.zitadel_issuer,
-            settings.zitadel_jwks_url,
-            settings.zitadel_introspect_url,
-            settings.zitadel_client_id,
-            settings.zitadel_client_secret,
+            settings.oidc_issuer,
+            settings.oidc_jwks_url,
+            settings.oidc_introspect_url,
+            settings.oidc_client_id,
+            settings.oidc_client_secret,
         )
 
     @classmethod
     async def from_token(cls, token: str) -> uuid.UUID | None:
-        """Validate a Zitadel bearer token and resolve it to an aizk principal, null when invalid.
+        """Validate a OIDC bearer token and resolve it to an aizk principal, null when invalid.
 
         Verifies the token through the configured verifier, introspection or the offline JWKS
         check, and on a valid token maps its `sub` claim to a principal, provisioning one on first
@@ -205,7 +200,7 @@ class Principal(Id, Timestamped, TableBase, table=True):
         to null so it authenticates no one and the caller falls through to the next auth source,
         and `is_admin` stays governed by the principal row aizk owns rather than any claim the
         token carries. The token verification runs outside any session, and `for_subject` opens its
-        own only once a claim is actually ready to resolve, so a slow network round trip to Zitadel
+        own only once a claim is actually ready to resolve, so a slow network round trip to OIDC
         never holds one open for nothing.
 
         token: the raw bearer token presented by the caller.

@@ -19,7 +19,7 @@ def owner(migrated_db: None) -> Iterator[uuid.UUID]:
 
     async def setup() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(pid)
+        await dbutil.seed_user(pid)
 
     dbutil.run(setup())
     yield pid

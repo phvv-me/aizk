@@ -172,5 +172,5 @@ async def derive_insights(
     principal_id: identity whose graph is reflected on and that owns the written observations, the
         system principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     return await InsightTierBuilder(principal_id).build()

@@ -13,7 +13,7 @@ import aizk.mcp.server as server_module
 from aizk.config import settings
 from aizk.exceptions import NotGroupAdminError, ScopeNotFoundError
 from aizk.mcp.models import PendingFact, ReviewResult, WriteResult
-from aizk.mcp.principal import Principal
+from aizk.mcp.principal import User
 from aizk.mcp.server import (
     AizkMCP,
     parse_fact_ids,
@@ -59,9 +59,9 @@ def test_init_wires_a_verifier_and_the_rate_limit_on_the_configured_http_transpo
     """
     from aizk.mcp.middleware import AnonymousRateLimit
 
-    monkeypatch.setattr(settings, "zitadel_issuer", "https://issuer.test/aizk")
-    monkeypatch.setattr(settings, "zitadel_jwks_url", "https://issuer.test/jwks")
-    monkeypatch.setattr(settings, "zitadel_introspect_url", "")
+    monkeypatch.setattr(settings, "oidc_issuer", "https://issuer.test/aizk")
+    monkeypatch.setattr(settings, "oidc_jwks_url", "https://issuer.test/jwks")
+    monkeypatch.setattr(settings, "oidc_introspect_url", "")
     monkeypatch.setattr(settings, "mcp_http", True)
 
     probe = AizkMCP("probe")
@@ -117,7 +117,7 @@ def test_resolve_scopes_canonicalizes_names_to_a_sorted_id_tuple_and_fails_on_an
 
     async def probe() -> None:
         await dbutil.reset_db()
-        principal_id = await dbutil.seed_principal(uuid.uuid4())
+        principal_id = await dbutil.seed_user(uuid.uuid4())
         ids = {
             name: await dbutil.seed_group(uuid.uuid4(), name=name)
             for name in ("alpha", "beta", "gamma")
@@ -146,7 +146,7 @@ def test_resolve_group_admin_returns_the_group_or_wraps_a_domain_refusal(
     monkeypatch: pytest.MonkeyPatch, vetted: bool
 ) -> None:
     """A vetted caller gets the group back; a non-admin reads a plain ToolError, not the domain."""
-    monkeypatch.setattr(server_module, "current_principal", lambda: Principal(id=uuid.uuid4()))
+    monkeypatch.setattr(server_module, "current_user", lambda: User(id=uuid.uuid4()))
 
     class FakeGroup:
         async def require_admin(self, session: object, principal_id: uuid.UUID) -> None:
@@ -163,7 +163,7 @@ def test_resolve_group_admin_returns_the_group_or_wraps_a_domain_refusal(
 
 
 def test_recall_forwards_the_query_budget_and_resolved_lens_to_the_context_pack(
-    monkeypatch: pytest.MonkeyPatch, as_caller: Principal, tools: dict[str, FunctionTool]
+    monkeypatch: pytest.MonkeyPatch, as_caller: User, tools: dict[str, FunctionTool]
 ) -> None:
     """recall forwards query, budget, resolved lens, and caller to the pack builder."""
     captured: dict[str, object] = {}
@@ -186,7 +186,7 @@ def test_recall_forwards_the_query_budget_and_resolved_lens_to_the_context_pack(
 
 
 def test_remember_writes_under_the_identified_caller_and_returns_the_id(
-    monkeypatch: pytest.MonkeyPatch, as_caller: Principal, tools: dict[str, FunctionTool]
+    monkeypatch: pytest.MonkeyPatch, as_caller: User, tools: dict[str, FunctionTool]
 ) -> None:
     """The remember verb writes under the identified caller and the resolved lens, id back."""
     item_id = uuid.uuid4()
@@ -277,7 +277,7 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
 )
 def test_bodies_build_their_delegate_call_and_return_the_promised_model(
     monkeypatch: pytest.MonkeyPatch,
-    as_caller: Principal,
+    as_caller: User,
     tools: dict[str, FunctionTool],
     tool_name: str,
     patches: dict[str, object],
@@ -303,8 +303,8 @@ def test_write_verbs_refuse_the_anonymous_caller(
     """A write verb refuses the anonymous read-only principal before it ever touches storage."""
     monkeypatch.setattr(
         server_module,
-        "current_principal",
-        lambda: Principal(id=settings.anonymous_principal_id),
+        "current_user",
+        lambda: User(id=settings.anonymous_user_id),
     )
     with pytest.raises(ToolError, match="anonymous"):
         dbutil.run(tools[tool_name].fn(**kwargs))
@@ -324,7 +324,7 @@ def test_end_to_end_a_non_admin_client_lists_and_calls_the_whole_visible_surface
 
     async def drive() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.principal)
+        await dbutil.seed_user(settings.default_user_id)
         async with Client(server) as client:
             names = {t.name for t in await client.list_tools()}
             assert names == USER_TOOLS

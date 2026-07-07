@@ -15,10 +15,10 @@ from ..extract import ingest as extract_ingest
 from ..retrieval import ContextPack
 from ..scopes import resolve_scopes
 from ..store import Group, system_session
-from ..store import Principal as PrincipalRow
-from .middleware import AnonymousRateLimit, PrincipalMiddleware
+from ..store import User as UserRow
+from .middleware import AnonymousRateLimit, IdentityMiddleware
 from .models import PendingFact, ReviewResult, WriteResult
-from .principal import current_principal, require_identified
+from .principal import current_user, require_identified
 
 
 @asynccontextmanager
@@ -55,12 +55,12 @@ class AizkMCP(FastMCP):
     """
 
     def __init__(self, name: str) -> None:
-        active_verifier = PrincipalRow.verifier()
+        active_verifier = UserRow.verifier()
         if active_verifier:
             super().__init__(name, auth=active_verifier, lifespan=startup_check)
         else:
             super().__init__(name, lifespan=startup_check)
-        self.add_middleware(PrincipalMiddleware())
+        self.add_middleware(IdentityMiddleware())
         if settings.mcp_http:
             # a shared HTTP transport may serve unauthenticated strangers reading public groups,
             # so their tool calls consume from a token bucket while an authenticated caller passes.
@@ -91,7 +91,7 @@ async def recall(query: str, scopes: str | None = None, budget: int | None = Non
         excludes the caller's own private notes, which surface only when scopes is left null.
     budget: token ceiling the pack fits within, the configured default when null.
     """
-    principal = current_principal()
+    principal = current_user()
     lens = await resolve_scopes(scopes, principal.id)
     return await retrieval.assemble_context_pack(
         query, principal_id=principal.id, token_budget=budget, scopes=lens
@@ -113,7 +113,7 @@ async def remember(text: str, scopes: str | None = None, kind: str = "note") -> 
         when null.
     kind: coarse type tag, such as note or code.
     """
-    principal = require_identified(current_principal())
+    principal = require_identified(current_user())
     target = await resolve_scopes(scopes, principal.id)
     item_id = await extract_ingest.remember_session(
         text, kind=kind, owner_id=principal.id, scopes=target
@@ -128,7 +128,7 @@ async def reference(uri: str, scopes: str | None = None) -> WriteResult:
     uri: locator of the paper, url, or file.
     scopes: comma-separated group names to share it with, private to the caller when null.
     """
-    principal = require_identified(current_principal())
+    principal = require_identified(current_user())
     target = await resolve_scopes(scopes, principal.id)
     document_id = await extract_ingest.record_reference(uri, owner_id=principal.id, scopes=target)
     return WriteResult(id=document_id)
@@ -146,7 +146,7 @@ async def resolve_group_admin(session: AsyncSession, group: str) -> Group:
     session: open session, already acting as the system principal.
     group: name of the curated group the call would administer.
     """
-    principal = current_principal()
+    principal = current_user()
     group_row = await Group.named(session, group)
     try:
         await group_row.require_admin(session, principal.id)

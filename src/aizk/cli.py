@@ -17,7 +17,6 @@ from .background.schedule import run_worker
 from .config import settings
 from .extract.ingest import ingest_text
 from .retrieval import assemble_context_pack
-from .store import Principal, system_session
 
 # env var a Stop hook sets to the session transcript path, the same file Claude Code records the
 # turn-by-turn session to, so capture-session can read it without any argument
@@ -175,7 +174,7 @@ async def recall_context(
     principal: identity whose visibility scopes the recall, the system principal when null.
     """
     pack = await assemble_context_pack(
-        query or PROJECT_CONTEXT_QUERY, principal_id=principal or settings.system_principal_id, k=k
+        query or PROJECT_CONTEXT_QUERY, principal_id=principal or settings.system_user_id, k=k
     )
     print(
         "\n".join(f"[{block.lane}] {block.line}" for block in pack.blocks) or "no context recalled"
@@ -200,7 +199,7 @@ async def capture_session(
     if not transcript or not Path(transcript).is_file():
         print("no session transcript to capture")
         return
-    principal_id = principal or settings.system_principal_id
+    principal_id = principal or settings.system_user_id
     text_content = Path(transcript).read_text(encoding="utf-8")
 
     document_id = await ingest_text(
@@ -240,48 +239,35 @@ async def scale(
 
 @app.command
 async def create_user(name: str) -> None:
-    """Create a principal and print its id, the root bootstrap that cannot require auth.
+    """Create a user and print its id, the multi-user onboarding op.
 
     name: human-readable display name for the new actor.
     """
-    principal = await admin.create_user(name)
-    print(principal.id)
+    user = await admin.create_user(name)
+    print(user.id)
 
 
 @app.command
-async def create_admin(zitadel_sub: str, name: str = "admin") -> None:
-    """Bind a Zitadel subject to an admin principal and print its id, the identity bootstrap.
+async def link_user(oidc_subject: str, name: str = "") -> None:
+    """Bind an OIDC subject to a user and print its id, the identity-provider bridge.
 
-    Provisions the principal the machine or human presenting that subject's token administers the
-    engine as, minting an admin one stamped with the subject or promoting the one already carrying
-    it. The one bootstrap that cannot require auth, since it mints the first identity the token
-    verifier resolves an admin to, run once after Zitadel issues the machine account.
+    Provisions the user the human or machine presenting that subject's token acts as, so a named
+    user exists before its first login. A regular user, never an admin, since engine admin is the
+    Postgres owner the CLI runs as, not an app user. Idempotent over the same subject.
 
-    zitadel_sub: the subject claim Zitadel mints this identity's tokens against.
-    name: display name for a freshly minted principal.
+    oidc_subject: the subject claim the provider mints this identity's tokens against.
+    name: display name for a freshly minted user.
     """
-    async with system_session() as session:
-        principal = await Principal.link_admin(session, zitadel_sub, name)
-        principal_id = principal.id
-    print(principal_id)
+    user = await admin.link_user(oidc_subject, name)
+    print(user.id)
 
 
 @app.command
-async def grant_admin(principal: str) -> None:
-    """Promote a principal to server-wide admin so it can curate any group.
-
-    principal: id of the principal to grant administrator standing.
-    """
-    target = await admin.grant_admin(principal)
-    print(f"{target.id} is now admin")
-
-
-@app.command
-async def list_principals() -> None:
-    """List every principal known to the engine, id and display name."""
-    for principal in await admin.list_principals():
-        star = " (admin)" if principal.is_admin else ""
-        print(f"{principal.id}  {principal.display_name or '-'}{star}")
+async def list_users() -> None:
+    """List every user known to the engine, id and display name."""
+    for user in await admin.list_users():
+        star = " (admin)" if user.is_admin else ""
+        print(f"{user.id}  {user.display_name or '-'}{star}")
 
 
 @app.command

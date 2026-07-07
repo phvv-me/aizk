@@ -57,7 +57,7 @@ async def promote_sessions(
     principal_id: identity whose working memory is promoted and that owns the written graph rows,
         the system principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     now = datetime.now(UTC)
     items = await writable_working_items(principal_id)
     due = SessionItem.due_for_promotion(

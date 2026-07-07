@@ -9,8 +9,8 @@ from aizk.store import (
     Document,
     Group,
     Membership,
-    Principal,
     SessionItem,
+    User,
     Watermark,
     acting_as,
     system_session,
@@ -19,23 +19,30 @@ from aizk.store import (
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 
-def test_principal_lifecycle_create_grant_and_list() -> None:
-    """A created principal reads back, `grant_admin` flips `administers`, and listing is by age."""
+def test_user_lifecycle_create_link_and_list() -> None:
+    """A created user reads back, `link_oidc` binds a subject without admin, listing is by age.
+
+    Admin standing is the seeded system user alone now (engine admin = the Postgres owner the CLI
+    runs as), never granted to a created or linked user, so both a fresh `create` and a
+    subject-bound `link_oidc` read `administers` false.
+    """
 
     async def body() -> None:
         await dbutil.reset_db()
         async with system_session() as session:
-            first = await Principal.create(session, "alice")
-            second = await Principal.create(session, "bob")
-            assert not await Principal.administers(session, first.id)
-            await first.grant_admin(session)
+            first = await User.create(session, "alice")
+            second = await User.create(session, "bob")
+            assert not await User.administers(session, first.id)
+            linked = await User.link_oidc(session, "gh|alice", "alice-oidc")
+            assert linked.oidc_subject == "gh|alice"
+            assert not await User.administers(session, linked.id)  # a linked user is not admin
+            again = await User.link_oidc(session, "gh|alice", "ignored")
+            assert again.id == linked.id  # idempotent over the same subject
         async with system_session() as session:
-            assert await Principal.administers(session, first.id)
-            ordered = await Principal.list_all(session)
+            ordered = await User.list_all(session)
             names = [p.display_name for p in ordered]
-            assert names[:2] == ["alice", "bob"] or {"alice", "bob"} <= set(names)
-            assert first.id in {p.id for p in ordered}
-            assert second.id in {p.id for p in ordered}
+            assert {"alice", "bob"} <= set(names)
+            assert {first.id, second.id} <= {p.id for p in ordered}
 
     dbutil.run(body())
 
@@ -46,7 +53,7 @@ def test_unknown_principal_administers_reads_false() -> None:
     async def body() -> None:
         await dbutil.reset_db()
         async with system_session() as session:
-            assert not await Principal.administers(session, uuid.uuid4())
+            assert not await User.administers(session, uuid.uuid4())
 
     dbutil.run(body())
 
@@ -56,7 +63,7 @@ def test_group_creation_enrolls_creator_as_admin() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        creator = await dbutil.seed_principal(uuid.uuid4())
+        creator = await dbutil.seed_user(uuid.uuid4())
         async with system_session() as session:
             group = await Group.create(session, "team", creator=creator)
             assert await group.admin(session, creator)
@@ -85,7 +92,7 @@ def test_membership_add_remove_and_admin_gate() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        member = await dbutil.seed_principal(uuid.uuid4())
+        member = await dbutil.seed_user(uuid.uuid4())
         async with system_session() as session:
             group = await Group.create(session, "g")
             await group.add_member(session, member, role="reader")
@@ -103,7 +110,7 @@ def test_server_admin_passes_group_admin_gate() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        root = await dbutil.seed_principal(uuid.uuid4(), is_admin=True)
+        root = await dbutil.seed_user(uuid.uuid4(), is_admin=True)
         async with system_session() as session:
             group = await Group.create(session, "g")
             await group.require_admin(session, root)
@@ -132,8 +139,8 @@ def test_list_all_counts_members() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        a = await dbutil.seed_principal(uuid.uuid4())
-        b = await dbutil.seed_principal(uuid.uuid4())
+        a = await dbutil.seed_user(uuid.uuid4())
+        b = await dbutil.seed_user(uuid.uuid4())
         async with system_session() as session:
             group = await Group.create(session, "team", public=True, creator=a)
             await group.add_member(session, b, role="writer")
@@ -150,7 +157,7 @@ def test_watermark_bump_read_and_payload_round_trip() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
         async with acting_as(owner) as session:
             assert await Watermark.read(session, owner, Watermark.Kind.fact_count) == 0
             assert await Watermark.bump(session, owner, Watermark.Kind.fact_count, by=3) == 3
@@ -172,8 +179,8 @@ def test_watermark_is_private_to_its_owner() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
-        other = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
+        other = await dbutil.seed_user(uuid.uuid4())
         async with acting_as(owner) as session:
             await Watermark.bump(session, owner, Watermark.Kind.fact_count, by=7)
         async with acting_as(other) as session:
@@ -187,10 +194,10 @@ def test_recent_writes_lists_visible_documents_newest_first() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
         old = await dbutil.seed_document(owner, [])
         new = await dbutil.seed_document(owner, [])
-        docs = await Principal.recent_writes(owner, limit=10)
+        docs = await User.recent_writes(owner, limit=10)
         ids = [doc.id for doc in docs]
         assert set(ids) == {old, new}
         assert all(isinstance(doc, Document) for doc in docs)
@@ -204,7 +211,7 @@ def test_writable_scopes_clause_matches_the_write_lattice() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        principal = await dbutil.seed_principal(uuid.uuid4())
+        principal = await dbutil.seed_user(uuid.uuid4())
         writable = await dbutil.seed_group(uuid.uuid4())
         readonly = await dbutil.seed_group(uuid.uuid4())
         await dbutil.seed_membership(principal, writable, "writer")

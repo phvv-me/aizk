@@ -4,7 +4,7 @@ from fastmcp.tools.tool import FunctionTool
 
 import aizk.mcp.server as server_module
 from aizk.config import settings
-from aizk.mcp.principal import Principal
+from aizk.mcp.principal import User
 from aizk.mcp.server import server
 
 
@@ -15,8 +15,8 @@ def tools() -> dict[str, FunctionTool]:
 
 
 @pytest.fixture
-def as_caller(monkeypatch: pytest.MonkeyPatch) -> Principal:
-    """Resolve every verb body's `current_principal` to a fixed caller, bypassing the auth seam."""
-    caller = Principal(id=settings.principal)
-    monkeypatch.setattr(server_module, "current_principal", lambda: caller)
+def as_caller(monkeypatch: pytest.MonkeyPatch) -> User:
+    """Resolve every verb body's `current_user` to a fixed caller, bypassing the auth seam."""
+    caller = User(id=settings.default_user_id)
+    monkeypatch.setattr(server_module, "current_user", lambda: caller)
     return caller

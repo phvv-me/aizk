@@ -26,9 +26,9 @@ from ..store import (
     FactClaim,
     FactContent,
     LiveFact,
-    Principal,
     Profile,
     TableBase,
+    User,
     Watermark,
     acting_as,
     system_session,
@@ -749,7 +749,7 @@ async def run_scale_benchmark(
     rng = np.random.default_rng(seed)
     [vector] = await Embedder().embed([query], mode="query")
     async with system_session() as session:
-        principal_id = (await Principal.create(session, "scale-benchmark")).id
+        principal_id = (await User.create(session, "scale-benchmark")).id
     generated = Generated()
     points: list[ScalePoint] = []
     try:

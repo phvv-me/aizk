@@ -57,7 +57,7 @@ def test_fan_out_enqueues_one_deduped_job_per_principal(
             return False
 
     monkeypatch.setattr(schedule_mod, "system_session", lambda: FakeSystemSession())
-    monkeypatch.setattr(schedule_mod.Principal, "list_all", fake_list_all)
+    monkeypatch.setattr(schedule_mod.User, "list_all", fake_list_all)
     task = task_cls()
 
     asyncio.run(fan_out(task))

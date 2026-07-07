@@ -125,7 +125,7 @@ async def enqueue_pending(
         system principal when null.
     source: when set, restrict to chunks of documents whose title matches this substring.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     chunks = await pending_chunks(principal_id, limit, source)
     async with queue_queries() as queries:
         queued = sum(

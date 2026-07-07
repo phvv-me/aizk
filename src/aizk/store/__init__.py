@@ -29,10 +29,10 @@ from .models import (
     Group,
     LiveFact,
     Membership,
-    Principal,
     Profile,
     RelationKind,
     SessionItem,
+    User,
     Watermark,
 )
 from .rls import verify_scoped_rls
@@ -50,7 +50,7 @@ __all__ = [
     "LiveFact",
     "Membership",
     "NoTenantContext",
-    "Principal",
+    "User",
     "Profile",
     "RelationKind",
     "SessionItem",

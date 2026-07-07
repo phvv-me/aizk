@@ -138,7 +138,7 @@ class Settings(BaseSettings):
         plain host run never dumps, on in the container which mounts `backup_dir` and enables it.
     backup_keep_days: age past which the scheduled backup prunes an old dump, so the directory
         does not grow without bound.
-    anonymous_principal_id: all-zero identity an unauthenticated caller acts as, reading only
+    anonymous_user_id: all-zero identity an unauthenticated caller acts as, reading only
         public scopes. Fixed, not configurable, since the moat predicate's `::uuid` cast depends
         on every unscoped session binding this exact value.
     app_password: password for the restricted app role `aizk_app`, folded into `database_url`'s
@@ -317,7 +317,8 @@ class Settings(BaseSettings):
     ppr_max_fanout: most neighbors the bounded walk expands per node per hop, capping one hub
         entity from pulling in the whole graph.
     ppr_max_hops: how many hops the bounded local walk follows out from the seeds before stopping.
-    principal: identity the MCP server and hook commands act as until an auth seam resolves one.
+    default_user_id: identity the MCP server and hook commands act as until an auth seam resolves
+        one, the single-user stdio default.
     profiling: whether `mainboard.profiling.span` recording is turned on at startup, off by
         default so an unmeasured deployment pays only the one boolean check each span reads. The
         `serve_mcp` and `worker` entrypoints call `enable_spans()` once when this is set. The
@@ -411,17 +412,17 @@ class Settings(BaseSettings):
         gate, for reads that must see superseded rows (as_of replay, raw counts, promote-copy).
     snippet_chars: characters a hit or fact snippet is truncated to when rendered into a recall
         bundle or a context pack, the display-width budget both renderers share.
-    system_principal_id: identity that owns rows ingested before the visibility lattice, the
+    system_user_id: identity that owns rows ingested before the visibility lattice, the
         owner-and-scope model every row's row level security policy compiles from, existed, and
         that a scheduled background pass acts as when a caller does not name a per-principal one.
-    zitadel_client_id: client id of the aizk resource server registered at the issuer, the
+    oidc_client_id: client id of the aizk resource server registered at the issuer, the
         identity the introspection call authenticates as.
-    zitadel_client_secret: client secret paired with zitadel_client_id for the introspection call,
+    oidc_client_secret: client secret paired with oidc_client_id for the introspection call,
         held by the resource server and never the caller.
-    zitadel_introspect_url: RFC 7662 introspection endpoint. Empty keeps the offline JWKS path,
+    oidc_introspect_url: RFC 7662 introspection endpoint. Empty keeps the offline JWKS path,
         set to validate each token against the issuer instead, catching revocation before expiry.
-    zitadel_issuer: base issuer URL whose JWTs are accepted, empty to leave the Zitadel path off.
-    zitadel_jwks_url: JWKS endpoint the issuer publishes its signing keys at, to verify tokens.
+    oidc_issuer: base issuer URL whose JWTs are accepted, empty to leave the OIDC path off.
+    oidc_jwks_url: JWKS endpoint the issuer publishes its signing keys at, to verify tokens.
     """
 
     # extra="ignore": .env also carries compose-only container knobs (AIZK_EMBED_CHECKPOINT,
@@ -433,7 +434,7 @@ class Settings(BaseSettings):
     admin_database_url: str = ""
     admin_password: str = "aizk"
     anon_rate_per_second: float = 1.0
-    anonymous_principal_id: uuid.UUID = uuid.UUID(int=0)
+    anonymous_user_id: uuid.UUID = uuid.UUID(int=0)
     app_password: str = "aizk_app"
     auto_setup: bool = True
     backup_cron: str = "0 2 * * *"
@@ -536,7 +537,7 @@ class Settings(BaseSettings):
     ppr_margin: float = 0.35
     ppr_max_fanout: int = 50
     ppr_max_hops: int = 3
-    principal: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    default_user_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
     profiling: bool = False
     profile_on_write: bool = True
     profile_refresh_cron: str = "0 5 * * 0"
@@ -582,12 +583,12 @@ class Settings(BaseSettings):
     similar_facts: int = 5
     skip_live_gate: str = "aizk_skip_live_gate"
     snippet_chars: int = 280
-    system_principal_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
-    zitadel_client_id: str = ""
-    zitadel_client_secret: str = ""
-    zitadel_introspect_url: str = ""
-    zitadel_issuer: str = ""
-    zitadel_jwks_url: str = ""
+    system_user_id: uuid.UUID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
+    oidc_introspect_url: str = ""
+    oidc_issuer: str = ""
+    oidc_jwks_url: str = ""
 
     @model_validator(mode="after")
     def default_dsns(self) -> Self:

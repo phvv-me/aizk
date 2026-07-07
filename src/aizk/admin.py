@@ -43,7 +43,7 @@ from .store import (
     acting_as,
     system_session,
 )
-from .store import Principal as PrincipalRow
+from .store import User as UserRow
 
 
 class ForgetResult(FrozenModel):
@@ -79,7 +79,7 @@ class OntologyKindRow(FrozenModel):
 
 def system() -> uuid.UUID:
     """The system principal id, the identity an operator's CLI call acts as by default."""
-    return settings.system_principal_id
+    return settings.system_user_id
 
 
 async def rebuild(
@@ -237,39 +237,35 @@ async def audit(limit: int = 20, principal_id: uuid.UUID | None = None) -> list[
     limit: maximum number of writes to return.
     principal_id: identity whose visible writes are listed, the system principal when null.
     """
-    return await PrincipalRow.recent_writes(principal_id or system(), limit=limit)
+    return await UserRow.recent_writes(principal_id or system(), limit=limit)
 
 
-async def create_user(name: str) -> PrincipalRow:
-    """Create a regular principal, the multi-user onboarding op, and return the row.
+async def create_user(name: str) -> UserRow:
+    """Create a user, the multi-user onboarding op, and return the row.
 
     name: human-readable display name for the new actor.
     """
     async with system_session() as session:
-        return await PrincipalRow.create(session, name)
+        return await UserRow.create(session, name)
 
 
-async def grant_admin(principal: str) -> PrincipalRow:
-    """Promote a principal to server-wide admin so it can curate any group, the row back.
+async def link_user(oidc_subject: str, name: str = "") -> UserRow:
+    """Bind an OIDC subject to a user, minting one on first sight, the row back.
 
-    A server admin clears group-admin review on every group without a membership row, the one
-    standing that overrides group ownership, so it is an operator grant, never a client one.
+    The bridge from an external identity provider (Logto, a customer's IdP) to an aizk user, so a
+    named user exists before its first login. A regular user, never an admin.
 
-    principal: id of the principal to grant administrator standing.
+    oidc_subject: the subject claim the provider mints this identity's tokens against.
+    name: human-readable display name for a freshly minted user.
     """
     async with system_session() as session:
-        target = await session.get(PrincipalRow, uuid.UUID(principal))
-        if target is None:
-            raise ValueError(f"no principal {principal!r}")
-        await target.grant_admin(session)
-        await session.refresh(target)
-        return target
+        return await UserRow.link_oidc(session, oidc_subject, name)
 
 
-async def list_principals() -> list[PrincipalRow]:
-    """Every principal known to the engine, the roster."""
+async def list_users() -> list[UserRow]:
+    """Every user known to the engine, the roster."""
     async with system_session() as session:
-        return await PrincipalRow.list_all(session)
+        return await UserRow.list_all(session)
 
 
 async def create_group(

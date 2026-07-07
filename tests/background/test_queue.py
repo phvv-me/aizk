@@ -83,7 +83,7 @@ def test_enqueue_pending_queues_one_deduped_job_per_chunk_and_counts_them(
 
     queued = asyncio.run(enqueue_pending(limit=limit, principal_id=principal, source=source))
 
-    resolved = principal or settings.system_principal_id
+    resolved = principal or settings.system_user_id
     assert seen_args == [(resolved, limit, source)]
     assert queued == len(chunks)
     assert {call.dedupe_key for call in recorder.enqueues} == {str(chunk) for chunk in chunks}

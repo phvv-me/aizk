@@ -20,7 +20,7 @@ async def admin_session() -> AsyncIterator[AsyncSession]:
     engine = create_async_engine(settings.admin_database_url)
     try:
         sessions = async_sessionmaker(engine, expire_on_commit=False)
-        async with sessions(info={"principal": settings.system_principal_id}) as session:
+        async with sessions(info={"principal": settings.system_user_id}) as session:
             yield session
     finally:
         await engine.dispose()

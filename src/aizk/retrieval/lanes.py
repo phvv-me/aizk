@@ -230,7 +230,7 @@ async def recall(
     scopes: group ids narrowing every lane's read to that combination's composed graph, the whole
         visible union when empty.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     ctx = await build_context(query, k, as_of)
     fused = fuse_lanes(await gather_lanes(principal_id, scopes, ctx))
     logger.info(

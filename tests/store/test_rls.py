@@ -96,8 +96,8 @@ def scenarios(draw: st.DrawFn) -> Scenario:
 async def provision(scenario: Scenario) -> uuid.UUID:
     """Reset the schema and seed the scenario's principals, groups, memberships, and row."""
     await dbutil.reset_db()
-    await dbutil.seed_principal(scenario.probe)
-    await dbutil.seed_principal(scenario.other)
+    await dbutil.seed_user(scenario.probe)
+    await dbutil.seed_user(scenario.other)
     for gid, is_public in scenario.groups.items():
         await dbutil.seed_group(gid, public=is_public)
     for gid, role in scenario.roles.items():
@@ -134,7 +134,7 @@ def test_write_predicate_enforces_lattice(scenario: Scenario) -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(scenario.probe)
+        await dbutil.seed_user(scenario.probe)
         for gid, is_public in scenario.groups.items():
             await dbutil.seed_group(gid, public=is_public)
         for gid, role in scenario.roles.items():
@@ -155,7 +155,7 @@ def test_missing_lens_reaches_full_union_and_lens_narrows() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
         group_a = await dbutil.seed_group(uuid.uuid4())
         group_b = await dbutil.seed_group(uuid.uuid4())
         await dbutil.seed_membership(owner, group_a, "writer")
@@ -176,8 +176,8 @@ def test_public_group_reaches_non_member_only_as_singleton() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
-        stranger = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
+        stranger = await dbutil.seed_user(uuid.uuid4())
         public = await dbutil.seed_group(uuid.uuid4(), public=True)
         private_group = await dbutil.seed_group(uuid.uuid4(), public=False)
         await dbutil.seed_membership(owner, public, "writer")
@@ -204,12 +204,12 @@ def test_scoped_orm_query_without_acting_as_raises() -> None:
 
 def test_non_scoped_query_without_acting_as_is_allowed() -> None:
     """A no-principal session may still read a non-scoped identity table past the tenant guard."""
-    from aizk.store import Principal
+    from aizk.store import User
 
     async def body() -> None:
         async with async_session()() as session, session.begin():
             # principal carries no row level security, so the tenant guard lets this pass
-            await session.execute(select(Principal).limit(1))
+            await session.execute(select(User).limit(1))
 
     dbutil.run(body())
 
@@ -219,10 +219,10 @@ def test_anonymous_session_reads_no_private_row() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
         private = await dbutil.seed_document(owner, [])
-        assert not await dbutil.can_read_document(settings.anonymous_principal_id, private)
-        async with acting_as(settings.anonymous_principal_id) as session:
-            assert session.info["principal"] == settings.anonymous_principal_id
+        assert not await dbutil.can_read_document(settings.anonymous_user_id, private)
+        async with acting_as(settings.anonymous_user_id) as session:
+            assert session.info["principal"] == settings.anonymous_user_id
 
     dbutil.run(body())

@@ -345,7 +345,7 @@ async def run_sweep(
     """
     from ranx import Qrels
 
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     matrix = matrix or SweepMatrix()
     if gold is None:
         items = await build_questions(questions, principal_id)

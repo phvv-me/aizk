@@ -62,7 +62,7 @@ async def reset_db() -> None:
     await admin_exec(f"TRUNCATE {', '.join(APP_TABLES)} RESTART IDENTITY CASCADE")
 
 
-async def seed_principal(principal_id: uuid.UUID, is_admin: bool = False) -> uuid.UUID:
+async def seed_user(principal_id: uuid.UUID, is_admin: bool = False) -> uuid.UUID:
     """Insert one principal, optionally carrying the server-wide admin flag."""
     await admin_exec(
         "INSERT INTO principal (id, is_admin) VALUES (:id, :is_admin)",

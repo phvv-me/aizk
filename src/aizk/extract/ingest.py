@@ -126,7 +126,7 @@ async def ingest_image(
     owner_id: principal that owns the stored rows, the system principal when null.
     scopes: group set the stored rows are shared with, private to the owner when empty.
     """
-    owner_id = owner_id or settings.system_principal_id
+    owner_id = owner_id or settings.system_user_id
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     [embedding] = await Embedder().embed_images([str(path)])
     document = Document(
@@ -222,7 +222,7 @@ async def ingest_path(
     owner_id: principal that owns the stored rows, the system principal when null.
     scopes: group set the stored rows are shared with, private to the owner when empty.
     """
-    owner_id = owner_id or settings.system_principal_id
+    owner_id = owner_id or settings.system_user_id
     logger.info("ingest start path={}", path)
     embedder = Embedder()
     written = [await ingest_file(file, owner_id, scopes, embedder) for file in text_files(path)]
@@ -251,7 +251,7 @@ async def ingest_text(
     owner_id: principal that owns the stored rows, the system principal when null.
     scopes: group set the stored rows are shared with, private to the owner when empty.
     """
-    owner_id = owner_id or settings.system_principal_id
+    owner_id = owner_id or settings.system_user_id
     digest = content_hash(text)
     effective_title = title or " ".join(text.split()[:8])
     spans = ChonkieChunker().chunk(text)
@@ -299,7 +299,7 @@ async def record_reference(
     owner_id: principal that owns the stored row, the system principal when null.
     scopes: group set the row is shared with, private to the owner when empty.
     """
-    owner_id = owner_id or settings.system_principal_id
+    owner_id = owner_id or settings.system_user_id
     document = Document(
         kind="reference",
         title=title or uri,
@@ -332,7 +332,7 @@ async def remember_session(
     owner_id: principal that owns the stored item, the system principal when null.
     scopes: group set the item is shared with, private to the owner when empty.
     """
-    owner_id = owner_id or settings.system_principal_id
+    owner_id = owner_id or settings.system_user_id
     [embedding] = await Embedder().embed([text], mode="document")
     async with acting_as(owner_id) as session:
         item = SessionItem(

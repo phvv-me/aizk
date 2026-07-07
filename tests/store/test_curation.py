@@ -60,7 +60,7 @@ def test_review_stamp_gates_on_curated_admin_standing(
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
         group = await dbutil.seed_group(uuid.uuid4(), curated=curated)
         await dbutil.seed_membership(owner, group, "admin" if owner_is_admin else "writer")
         async with system_session() as session:
@@ -77,7 +77,7 @@ def test_review_stamp_private_write_is_immediate() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_principal(uuid.uuid4())
+        owner = await dbutil.seed_user(uuid.uuid4())
         async with system_session() as session:
             assert await Group.review_stamp(session, (), owner) is not None
 
@@ -89,8 +89,8 @@ def test_pending_facts_lists_only_unreviewed_across_authors() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
-        author = await dbutil.seed_principal(uuid.uuid4())
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        author = await dbutil.seed_user(uuid.uuid4())
         group = await dbutil.seed_group(uuid.uuid4(), curated=True)
         await seed_fact(author, [group], "pending one", reviewed=False)
         await seed_fact(author, [group], "approved already", reviewed=True)
@@ -108,8 +108,8 @@ def test_approve_all_stamps_every_pending_claim() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
-        author = await dbutil.seed_principal(uuid.uuid4())
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        author = await dbutil.seed_user(uuid.uuid4())
         group = await dbutil.seed_group(uuid.uuid4(), curated=True)
         await seed_fact(author, [group], "a", reviewed=False)
         await seed_fact(author, [group], "b", reviewed=False)
@@ -128,8 +128,8 @@ def test_approve_specific_ids_stamps_only_those_claims() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
-        author = await dbutil.seed_principal(uuid.uuid4())
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        author = await dbutil.seed_user(uuid.uuid4())
         group = await dbutil.seed_group(uuid.uuid4(), curated=True)
         chosen = await seed_fact(author, [group], "approve this", reviewed=False)
         await seed_fact(author, [group], "leave this", reviewed=False)
@@ -149,8 +149,8 @@ def test_reject_deletes_named_pending_claims() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
-        author = await dbutil.seed_principal(uuid.uuid4())
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        author = await dbutil.seed_user(uuid.uuid4())
         group = await dbutil.seed_group(uuid.uuid4(), curated=True)
         doomed = await seed_fact(author, [group], "reject me", reviewed=False)
         await seed_fact(author, [group], "keep me", reviewed=False)

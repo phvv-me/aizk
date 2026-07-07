@@ -29,7 +29,7 @@ from aizk.eval import (
 )
 from aizk.eval.scale import CorpusScale, Generated, grow_corpus, purge_principal
 from aizk.retrieval import RecallResult
-from aizk.store import Principal, system_session
+from aizk.store import User, system_session
 
 
 class RanxCase(NamedTuple):
@@ -167,7 +167,7 @@ def test_swept_settings_restores_even_when_the_block_raises() -> None:
 
 def test_build_questions_wraps_caller_questions_as_judge_only_items() -> None:
     """A caller's questions become items with no gold, so the judge alone scores them, no DB."""
-    items = dbutil.run(build_questions(["what holds", "what fell"], settings.system_principal_id))
+    items = dbutil.run(build_questions(["what holds", "what fell"], settings.system_user_id))
 
     assert [item.question for item in items] == ["what holds", "what fell"]
     assert all(item.expected is None for item in items)
@@ -200,7 +200,7 @@ def test_build_questions_synthesizes_gold_from_sampled_facts(
 
     monkeypatch.setattr(harness, "sample_facts", stub_sample_facts)
 
-    items = dbutil.run(build_questions(None, settings.system_principal_id))
+    items = dbutil.run(build_questions(None, settings.system_user_id))
 
     assert len(items) == 1
     assert items[0].expected == SOURCE_FACT
@@ -304,7 +304,7 @@ def test_sample_facts_returns_latest_statements_in_a_stable_id_order(migrated_db
     async def body() -> None:
         await dbutil.reset_db()
         async with system_session() as session:
-            principal_id = (await Principal.create(session, "eval-sample")).id
+            principal_id = (await User.create(session, "eval-sample")).id
         try:
             await grow_corpus(
                 principal_id, Generated(), CorpusScale.for_size(20), np.random.default_rng(0)

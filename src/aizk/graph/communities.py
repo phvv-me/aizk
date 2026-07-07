@@ -119,7 +119,7 @@ async def build_communities(
 
     principal_id: identity that owns the written communities, the system principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     async with acting_as(principal_id) as session:
         entities = {entity.id: entity for entity in await session.scalars(select(EntityContent))}
         # only embedded knowledge facts define the cluster graph, so the structural part_of edges

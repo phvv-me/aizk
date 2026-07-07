@@ -112,8 +112,8 @@ def test_export_dumps_the_acting_slice_with_history_and_no_other_tenant(
 
     async def run() -> tuple[ExportReport, list[dict[str, object]], set[str], set[str]]:
         await dbutil.reset_db()
-        mine = await dbutil.seed_principal(uuid.uuid4())
-        other = await dbutil.seed_principal(uuid.uuid4())
+        mine = await dbutil.seed_user(uuid.uuid4())
+        other = await dbutil.seed_user(uuid.uuid4())
         my_ids = await seed_graph(mine, "mine")
         other_ids = await seed_graph(other, "other")
         report = await export_scope(tmp_path / "dump.jsonl", principal_id=mine)
@@ -156,8 +156,8 @@ def test_export_defaults_the_principal_to_the_system_identity(
 
     async def run() -> tuple[ExportReport, list[dict[str, object]], set[str]]:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id)
-        ids = await seed_graph(settings.system_principal_id, "system")
+        await dbutil.seed_user(settings.system_user_id)
+        ids = await seed_graph(settings.system_user_id, "system")
         report = await export_scope(tmp_path / "system.jsonl")
         records = read_jsonl(tmp_path / "system.jsonl")
         return report, records, {str(value) for value in ids.values()}

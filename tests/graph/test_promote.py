@@ -39,7 +39,7 @@ def grid(migrated_db: None) -> Iterator[Grid]:
     async def setup() -> None:
         await dbutil.reset_db()
         for principal in (lattice.promoter, lattice.member, lattice.outsider):
-            await dbutil.seed_principal(principal)
+            await dbutil.seed_user(principal)
         await dbutil.seed_group(lattice.team, name=lattice.team_name)
 
     dbutil.run(setup())

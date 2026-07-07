@@ -49,11 +49,11 @@ def test_ingest_text_dedupes_on_content_hash(settings: Settings) -> None:
 
     async def body() -> tuple[uuid.UUID, uuid.UUID, int]:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
         note = "a remembered note about the bi-temporal memory spine across time"
         first = await ingest_text(note, title=title)
         second = await ingest_text(note, title=title)
-        async with acting_as(settings.system_principal_id) as session:
+        async with acting_as(settings.system_user_id) as session:
             count = await session.scalar(
                 sql("SELECT count(*) FROM document WHERE title = :t"), {"t": title}
             )
@@ -85,10 +85,10 @@ def test_ingest_path_routes_each_lane_dedupes_and_skips_the_rest(
 
     async def body() -> tuple[int, int, list[str]]:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
         first = await ingest_path(tmp_path)
         again = await ingest_path(tmp_path)
-        async with acting_as(settings.system_principal_id) as session:
+        async with acting_as(settings.system_user_id) as session:
             rows = await session.execute(
                 sql("SELECT kind FROM document WHERE source_uri LIKE :pat ORDER BY kind"),
                 {"pat": f"%{tmp_path.name}%"},
@@ -120,12 +120,12 @@ def test_reingesting_a_changed_file_refreshes_its_standing_document(
 
     async def body() -> tuple[int, int, int, list, list]:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
         first = await ingest_path(tmp_path)
         note.write_text("# note\n\nthe REWRITTEN status line after the edit.\n", encoding="utf-8")
         changed = await ingest_path(tmp_path)
         unchanged = await ingest_path(tmp_path)
-        async with acting_as(settings.system_principal_id) as session:
+        async with acting_as(settings.system_user_id) as session:
             docs = list(
                 (
                     await session.execute(

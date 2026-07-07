@@ -275,7 +275,7 @@ def test_self_improve_stores_the_scorecard_and_flips_only_on_a_significant_win(
     monkeypatch.setattr(settings, "rerank", True)
     monkeypatch.setattr(settings, "ppr", False)
 
-    asyncio.run(SelfImproveTask().run(settings.system_principal_id))
+    asyncio.run(SelfImproveTask().run(settings.system_user_id))
 
     (kind, payload) = writes[0]
     assert [kind for kind, _ in writes] == [Watermark.Kind.scorecard]

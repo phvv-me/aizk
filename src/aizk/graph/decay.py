@@ -22,7 +22,7 @@ async def decay(
         system principal when null.
     half_life_days: age in days at which an unaccessed claim's relevance halves.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     async with acting_as(principal_id) as session:
         archived = await FactClaim.archive_stale(session, half_life_days, settings.decay_floor)
     logger.info(

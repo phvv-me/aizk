@@ -27,7 +27,7 @@ class Recorder:
 
 def test_system_is_the_configured_system_principal() -> None:
     """An operator call acts as the system principal by default, past row level security."""
-    assert admin.system() == settings.system_principal_id
+    assert admin.system() == settings.system_user_id
 
 
 @pytest.mark.parametrize(
@@ -49,7 +49,7 @@ def test_maintenance_op_defaults_to_the_system_principal(
     out = dbutil.run(getattr(admin, fn)())
 
     assert out == expected
-    assert recorder.kwargs["principal_id"] == settings.system_principal_id
+    assert recorder.kwargs["principal_id"] == settings.system_user_id
 
 
 def test_maintenance_op_honors_an_explicit_principal(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -111,21 +111,25 @@ def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
     assert result.documents == ["Note A"]  # the null title dropped, the real one kept
 
 
-def test_grant_admin_refuses_an_unknown_principal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An unresolvable id fails fast rather than silently no-opping."""
+def test_link_user_binds_a_subject_without_granting_admin(migrated_db: None) -> None:
+    """Linking an OIDC subject mints a regular user, never an admin, and is idempotent.
 
-    class FakeSession:
-        async def get(self, model: type, id_: object) -> None:
-            return None
+    Engine admin is the seeded system user alone now, so the identity-provider bridge only ever
+    provisions a plain user; a second link over the same subject returns the same row.
+    """
 
-    @asynccontextmanager
-    async def fake_system_session():
-        yield FakeSession()
+    async def run() -> tuple[uuid.UUID, uuid.UUID, bool]:
+        await dbutil.reset_db()
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        first = await admin.link_user("gh|7", "Ada")
+        again = await admin.link_user("gh|7", "ignored")
+        async with admin.system_session() as session:
+            is_admin = await admin.UserRow.administers(session, first.id)
+        return first.id, again.id, is_admin
 
-    monkeypatch.setattr(admin, "system_session", fake_system_session)
-
-    with pytest.raises(ValueError, match="no principal"):
-        dbutil.run(admin.grant_admin(str(uuid.uuid4())))
+    first_id, again_id, is_admin = dbutil.run(run())
+    assert first_id == again_id  # idempotent over the same subject
+    assert is_admin is False  # a linked user is never granted engine admin
 
 
 def test_benchmark_refuses_when_the_engine_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,8 +155,8 @@ def test_create_group_and_add_member_run_against_the_live_schema(migrated_db: No
 
     async def run() -> list[dict]:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
-        member = await dbutil.seed_principal(uuid.uuid4())
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        member = await dbutil.seed_user(uuid.uuid4())
         await admin.create_group("team", public=True)
         await admin.add_member(str(member), "team", role="writer")
         return await admin.list_groups()

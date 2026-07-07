@@ -289,7 +289,7 @@ async def graph_search(
         principal when null.
     as_of: world-time the facts must be valid at, the live graph when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     [vector] = await Embedder().embed([query], mode="query")
     async with acting_as(principal_id) as session:
         hits = await latest_facts(session, vector, k, as_of)
@@ -336,7 +336,7 @@ async def search(
     principal_id: identity whose row level security visibility scopes the results, the system
         principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     embedder = Embedder()
     [vector] = await embedder.embed([query], mode="query")
     async with acting_as(principal_id) as session:

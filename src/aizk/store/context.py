@@ -33,9 +33,9 @@ async def acting_as(
 
 
 def system_session() -> AbstractAsyncContextManager[AsyncSession]:
-    """Open a session acting as `settings.system_principal_id`, the background-pass shorthand.
+    """Open a session acting as `settings.system_user_id`, the background-pass shorthand.
 
-    Collapses the common `acting_as(settings.system_principal_id)` pairing callers otherwise
+    Collapses the common `acting_as(settings.system_user_id)` pairing callers otherwise
     repeat at every scheduled pass and identity-table write into one call.
     """
-    return acting_as(settings.system_principal_id)
+    return acting_as(settings.system_user_id)

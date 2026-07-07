@@ -6,7 +6,7 @@ from fastmcp.server.auth.providers.introspection import IntrospectionTokenVerifi
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
 from aizk.config import settings
-from aizk.store import Principal
+from aizk.store import User
 
 
 @pytest.mark.parametrize(
@@ -26,7 +26,7 @@ def test_cached_verifier_selects_the_verifier_class_from_the_zitadel_settings(
     The issuer values differ per case so `functools.cache` never returns another case's verifier,
     and no network is touched: the branch is asserted by the verifier class the settings select.
     """
-    verifier = Principal.cached_verifier(
+    verifier = User.cached_verifier(
         issuer=issuer,
         jwks_uri="https://iss/jwks",
         introspect_url=introspect,
@@ -44,13 +44,13 @@ def test_cached_verifier_selects_the_verifier_class_from_the_zitadel_settings(
 def test_verifier_forwards_the_live_settings_to_cached_verifier(
     monkeypatch: pytest.MonkeyPatch, issuer: str, expected: type
 ) -> None:
-    """verifier reads the currently configured Zitadel settings, none when the issuer is empty."""
-    monkeypatch.setattr(settings, "zitadel_issuer", issuer)
-    monkeypatch.setattr(settings, "zitadel_jwks_url", "https://iss/jwks")
-    monkeypatch.setattr(settings, "zitadel_introspect_url", "")
-    monkeypatch.setattr(settings, "zitadel_client_id", "cid")
-    monkeypatch.setattr(settings, "zitadel_client_secret", "secret")
-    assert isinstance(Principal.verifier(), expected)
+    """verifier reads the currently configured OIDC settings, none when the issuer is empty."""
+    monkeypatch.setattr(settings, "oidc_issuer", issuer)
+    monkeypatch.setattr(settings, "oidc_jwks_url", "https://iss/jwks")
+    monkeypatch.setattr(settings, "oidc_introspect_url", "")
+    monkeypatch.setattr(settings, "oidc_client_id", "cid")
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret")
+    assert isinstance(User.verifier(), expected)
 
 
 class FakeVerifier:
@@ -88,11 +88,11 @@ def test_from_token_resolves_no_one_when_the_token_never_yields_a_string_subject
     async def forbidden(subject: str) -> uuid.UUID:
         raise AssertionError("for_subject must not run on a subject-less token")
 
-    monkeypatch.setattr(Principal, "verifier", classmethod(lambda cls: verifier))
+    monkeypatch.setattr(User, "verifier", classmethod(lambda cls: verifier))
     monkeypatch.setattr(
-        Principal, "for_subject", classmethod(lambda cls, subject: forbidden(subject))
+        User, "for_subject", classmethod(lambda cls, subject: forbidden(subject))
     )
-    assert dbutil.run(Principal.from_token("tok")) is None
+    assert dbutil.run(User.from_token("tok")) is None
 
 
 def test_from_token_maps_a_verified_subject_to_its_provisioned_principal(
@@ -107,11 +107,11 @@ def test_from_token_maps_a_verified_subject_to_its_provisioned_principal(
         return resolved
 
     token = type("Tok", (), {"claims": {"sub": "zitadel|42"}})()
-    monkeypatch.setattr(Principal, "verifier", classmethod(lambda cls: FakeVerifier(token)))
+    monkeypatch.setattr(User, "verifier", classmethod(lambda cls: FakeVerifier(token)))
     monkeypatch.setattr(
-        Principal, "for_subject", classmethod(lambda cls, subject: stub_for_subject(subject))
+        User, "for_subject", classmethod(lambda cls, subject: stub_for_subject(subject))
     )
-    assert dbutil.run(Principal.from_token("tok")) == resolved
+    assert dbutil.run(User.from_token("tok")) == resolved
     assert seen == {"subject": "zitadel|42"}
 
 
@@ -122,8 +122,8 @@ def test_for_subject_provisions_on_first_sight_then_reuses_the_same_principal(
 
     async def probe() -> None:
         await dbutil.reset_db()
-        first = await Principal.for_subject("sub-A")
-        assert await Principal.for_subject("sub-A") == first  # stable across calls
-        assert await Principal.for_subject("sub-B") != first  # a new subject, a new principal
+        first = await User.for_subject("sub-A")
+        assert await User.for_subject("sub-A") == first  # stable across calls
+        assert await User.for_subject("sub-B") != first  # a new subject, a new principal
 
     dbutil.run(probe())

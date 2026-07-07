@@ -183,6 +183,6 @@ def test_assemble_context_pack_defaults_principal_and_budget(
     captured: dict[str, object] = {}
     monkeypatch.setattr(context_module, "recall", stub_recall_into(captured))
     pack = asyncio.run(assemble_context_pack("what holds"))
-    assert captured["principal_id"] == settings.system_principal_id
+    assert captured["principal_id"] == settings.system_user_id
     assert pack.budget == settings.context_token_budget
     assert pack.used_tokens <= settings.context_token_budget

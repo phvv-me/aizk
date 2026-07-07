@@ -9,10 +9,10 @@ from .tables import (
     FactContent,
     Group,
     Membership,
-    Principal,
     Profile,
     RelationKind,
     SessionItem,
+    User,
     Watermark,
 )
 from .views import LiveFact
@@ -29,7 +29,7 @@ __all__ = [
     "Group",
     "LiveFact",
     "Membership",
-    "Principal",
+    "User",
     "Profile",
     "RelationKind",
     "SessionItem",

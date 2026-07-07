@@ -168,7 +168,7 @@ async def promote(
     principal_id: the promoter, owner of the new copy and the principal the writes act as, the
         system principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     async with acting_as(principal_id) as session:
         target = await target_groups(session, principal_id, to_scopes)
         source = await source_document(session, document_id)

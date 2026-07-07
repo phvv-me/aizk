@@ -284,7 +284,7 @@ async def run_eval(
     principal_id: identity whose visibility scopes the recall and the sampled facts, the system
         principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     items = await build_questions(questions, principal_id)
     gold = [qa for qa in items if qa.expected is not None]
     metrics = [f"hit_rate@{k}", f"ndcg@{k}", "mrr"]

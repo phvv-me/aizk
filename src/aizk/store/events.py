@@ -31,7 +31,7 @@ def bind_principal(
     transaction: the session transaction that just began, unused beyond the event signature.
     connection: the DBAPI connection the transaction runs on, the GUCs bind to.
     """
-    uid = session.info.get("principal") or settings.anonymous_principal_id
+    uid = session.info.get("principal") or settings.anonymous_user_id
     narrowed = session.info.get("lens") or ()
     lens = "{" + ",".join(str(group_id) for group_id in narrowed) + "}" if narrowed else ""
     connection.execute(

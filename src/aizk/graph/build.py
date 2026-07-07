@@ -735,7 +735,7 @@ async def build_graph(
     source: when set, restrict the build to chunks of documents whose title matches this
         substring, so the graph can be grown one source subset at a time.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     # DEFER GraphRAG and LightRAG community detection and summaries, and RAPTOR recursive summary
     # trees, run as a second pass over the graph this builds to serve global queries.
     chunks = await pending_chunks(principal_id, limit, source)
@@ -955,7 +955,7 @@ async def dedup_entities(principal_id: uuid.UUID | None = None) -> int:
     principal_id: identity whose row level security visibility scopes which content this pass can
         find and merge, the system principal when null.
     """
-    principal_id = principal_id or settings.system_principal_id
+    principal_id = principal_id or settings.system_user_id
     async with acting_as(principal_id) as session:
         redirect = await find_duplicates(session)
         if not redirect:

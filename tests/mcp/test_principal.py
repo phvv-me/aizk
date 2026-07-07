@@ -8,19 +8,19 @@ import aizk.mcp.principal as principal_mod
 from aizk.config import settings
 from aizk.mcp.principal import (
     AUTH_TOKEN_ENV,
-    Principal,
+    User,
     bearer_token,
-    current_principal,
+    current_user,
     require_identified,
-    resolve_principal,
+    resolve_user,
 )
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 
-def a_principal() -> Principal:
+def a_principal() -> User:
     """A resolved caller identity for the pure gate tests."""
-    return Principal(id=uuid.uuid4())
+    return User(id=uuid.uuid4())
 
 
 def test_bearer_token_prefers_the_environment_over_the_header(
@@ -54,11 +54,11 @@ def test_require_identified_refuses_the_anonymous_principal() -> None:
     named = a_principal()
     assert require_identified(named) is named
     with pytest.raises(ToolError, match="anonymous"):
-        require_identified(Principal(id=settings.anonymous_principal_id))
+        require_identified(User(id=settings.anonymous_user_id))
 
 
 def test_current_principal_reads_the_resolved_state(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`current_principal` returns the Principal the middleware stashed, else a loud ToolError."""
+    """`current_user` returns the User the middleware stashed, else a loud ToolError."""
     resolved = a_principal()
 
     class Ctx:
@@ -69,10 +69,10 @@ def test_current_principal_reads_the_resolved_state(monkeypatch: pytest.MonkeyPa
             return self._state
 
     monkeypatch.setattr(principal_mod, "get_context", lambda: Ctx(resolved))
-    assert current_principal() == resolved
+    assert current_user() == resolved
     monkeypatch.setattr(principal_mod, "get_context", lambda: Ctx(None))
     with pytest.raises(ToolError, match="no principal"):
-        current_principal()
+        current_user()
 
 
 @pytest.mark.parametrize("http", [False, True])
@@ -85,9 +85,9 @@ def test_resolve_principal_falls_back_by_transport(
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.principal, is_admin=True)
-        principal = await resolve_principal()
-        expected = settings.anonymous_principal_id if http else settings.principal
+        await dbutil.seed_user(settings.default_user_id, is_admin=True)
+        principal = await resolve_user()
+        expected = settings.anonymous_user_id if http else settings.default_user_id
         assert principal.id == expected
 
     dbutil.run(body())
@@ -102,13 +102,13 @@ def test_resolve_principal_uses_a_verified_token(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(principal_mod, "bearer_token", lambda: "a-token")
     monkeypatch.setattr(
-        principal_mod.PrincipalRow, "from_token", classmethod(lambda cls, token: from_token(token))
+        principal_mod.UserRow, "from_token", classmethod(lambda cls, token: from_token(token))
     )
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(token_principal)
-        principal = await resolve_principal()
+        await dbutil.seed_user(token_principal)
+        principal = await resolve_user()
         assert principal.id == token_principal
 
     dbutil.run(body())

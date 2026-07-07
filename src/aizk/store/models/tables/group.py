@@ -12,7 +12,7 @@ from ...mixins import Id, TableBase
 from ..views.live_fact import LiveFact
 from .fact import FactClaim
 from .membership import Membership
-from .principal import Principal
+from .principal import User
 
 # claim tables whose (content_id, owner_id, scopes) uniqueness can collide once a deleted group's
 # demotion resets every claim containing it to the empty scope set: an owner who already privately
@@ -174,7 +174,7 @@ class Group(Id, TableBase, table=True):
         """Refuse a call unless the principal administers this group or the whole engine.
 
         Standing comes from holding this group's own admin membership role, or from the
-        server-wide `Principal.administers` flag, so a group's own admins and an engine admin can
+        server-wide `User.administers` flag, so a group's own admins and an engine admin can
         both work its curation queue, the gate every curation tool runs its body through before it
         ever reads or writes a fact.
 
@@ -183,7 +183,7 @@ class Group(Id, TableBase, table=True):
             its own.
         principal_id: caller whose standing is checked.
         """
-        if await Principal.administers(session, principal_id) or await self.admin(
+        if await User.administers(session, principal_id) or await self.admin(
             session, principal_id
         ):
             return

@@ -35,9 +35,9 @@ def brain(migrated_db: None) -> Iterator[Brain]:
 
     async def setup() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
-        await dbutil.seed_principal(reviewer)
-        await dbutil.seed_principal(writer)
+        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        await dbutil.seed_user(reviewer)
+        await dbutil.seed_user(writer)
         await dbutil.seed_group(group, name=f"review-{group}", curated=True)
         await dbutil.seed_membership(reviewer, group, "admin")
         await dbutil.seed_membership(writer, group, "writer")
