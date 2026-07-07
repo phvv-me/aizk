@@ -81,7 +81,7 @@ services:
   # tunnel's public-hostname ingress maps the public URL onto http://server:8080 (MCP at /mcp).
   cloudflared:
     image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run --token ${AIZK_TUNNEL_TOKEN:?set AIZK_TUNNEL_TOKEN in the env file}
+    command: tunnel --no-autoupdate run --token ${AIZK_TUNNEL_TOKEN:-}
     profiles: ["public"]  # opt-in: `--profile public` once the tunnel token exists, so a bare bring-up never blocks on it
     depends_on:
       - server
