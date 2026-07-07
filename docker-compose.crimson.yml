@@ -73,3 +73,15 @@ services:
             - driver: nvidia
               device_ids: ["1"]
               capabilities: [gpu]
+
+  # The Cloudflare Tunnel connector, the outbound-only path through the university NAT that
+  # publishes the MCP endpoint without opening a port. It joins the compose network and points
+  # at the server by service name, so nothing extra is published on the host. The token comes
+  # from AIZK_TUNNEL_TOKEN in .env (Zero Trust -> Networks -> Tunnels -> create -> token); the
+  # tunnel's public-hostname ingress maps the public URL onto http://server:8080 (MCP at /mcp).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${AIZK_TUNNEL_TOKEN:?set AIZK_TUNNEL_TOKEN in .env}
+    depends_on:
+      - server
+    restart: unless-stopped
