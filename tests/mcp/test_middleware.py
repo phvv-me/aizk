@@ -9,7 +9,7 @@ from hypothesis import strategies as st
 import aizk.mcp.middleware as middleware_module
 from aizk.config import settings
 from aizk.mcp.middleware import AnonymousRateLimit, PrincipalMiddleware
-from aizk.mcp.principal import ADMIN_TAG, PRINCIPAL_STATE_KEY, Principal
+from aizk.mcp.principal import PRINCIPAL_STATE_KEY, Principal
 
 
 class FakeFastmcpContext:
@@ -35,17 +35,6 @@ class FakeContext:
         self.fastmcp_context = FakeFastmcpContext(state)
 
 
-class FakeTool:
-    """A listed tool stand-in carrying only the tag set `on_list_tools` filters on.
-
-    tags: the tool's tags, `{ADMIN_TAG}` for an operational tool a non-admin listing hides.
-    """
-
-    def __init__(self, name: str, tags: set[str]) -> None:
-        self.name = name
-        self.tags = tags
-
-
 @given(rate=st.floats(min_value=0.01, max_value=1000))
 def test_anonymous_bucket_is_sized_to_a_five_second_burst_never_below_one(rate: float) -> None:
     """The bucket holds a five-second burst of the sustained rate, floored at one token."""
@@ -58,7 +47,7 @@ def test_principal_middleware_resolves_once_and_stashes_it_for_the_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`on_call_tool` resolves the caller once and stashes it in Context state, then delegates."""
-    resolved = Principal(id=uuid.uuid4(), is_admin=True)
+    resolved = Principal(id=uuid.uuid4())
     monkeypatch.setattr(middleware_module, "resolve_principal", lambda: _async_return(resolved))
     context = FakeContext()
     reached: list[object] = []
@@ -73,30 +62,9 @@ def test_principal_middleware_resolves_once_and_stashes_it_for_the_call(
     assert context.fastmcp_context.get_state(PRINCIPAL_STATE_KEY) == resolved
 
 
-@pytest.mark.parametrize("is_admin", [True, False], ids=["admin", "non-admin"])
-def test_list_tools_hides_the_admin_surface_from_a_non_admin(
-    monkeypatch: pytest.MonkeyPatch, is_admin: bool
-) -> None:
-    """An admin listing keeps every tool; a non-admin listing drops exactly the ADMIN_TAG tools."""
-    tools = [FakeTool("recall", set()), FakeTool("setup", {ADMIN_TAG})]
-    monkeypatch.setattr(
-        middleware_module,
-        "resolve_principal",
-        lambda: _async_return(Principal(id=uuid.uuid4(), is_admin=is_admin)),
-    )
-
-    async def call_next(ctx: object) -> list[FakeTool]:
-        return tools
-
-    visible = {
-        t.name for t in dbutil.run(PrincipalMiddleware().on_list_tools(object(), call_next))
-    }
-    assert visible == ({"recall", "setup"} if is_admin else {"recall"})
-
-
 @pytest.mark.parametrize(
     "state",
-    [None, Principal(id=uuid.uuid4(), is_admin=True)],
+    [None, Principal(id=uuid.uuid4())],
     ids=["unresolved", "authenticated"],
 )
 def test_rate_limit_lets_any_non_anonymous_call_pass_uncharged(state: object) -> None:
@@ -115,7 +83,7 @@ def test_rate_limit_lets_any_non_anonymous_call_pass_uncharged(state: object) ->
 def test_rate_limit_drains_one_shared_burst_then_refuses_the_stranger() -> None:
     """The anonymous principal drains the lone burst token, then the next call is refused."""
     limit = AnonymousRateLimit(max_requests_per_second=0.2)  # capacity floors at one token
-    anon = Principal(id=settings.anonymous_principal_id, is_admin=False)
+    anon = Principal(id=settings.anonymous_principal_id)
     context = FakeContext({PRINCIPAL_STATE_KEY: anon})
     served: list[object] = []
 

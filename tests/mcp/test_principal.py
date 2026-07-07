@@ -11,7 +11,6 @@ from aizk.mcp.principal import (
     Principal,
     bearer_token,
     current_principal,
-    require_admin,
     require_identified,
     resolve_principal,
 )
@@ -19,9 +18,9 @@ from aizk.mcp.principal import (
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 
-def a_principal(is_admin: bool = False) -> Principal:
+def a_principal() -> Principal:
     """A resolved caller identity for the pure gate tests."""
-    return Principal(id=uuid.uuid4(), is_admin=is_admin)
+    return Principal(id=uuid.uuid4())
 
 
 def test_bearer_token_prefers_the_environment_over_the_header(
@@ -50,25 +49,17 @@ def test_bearer_token_reads_only_the_bearer_scheme(
     assert bearer_token() == expected
 
 
-def test_require_admin_gates_on_the_admin_flag() -> None:
-    """A non-admin caller is refused; an admin passes through unchanged."""
-    admin = a_principal(is_admin=True)
-    assert require_admin(admin) is admin
-    with pytest.raises(ToolError, match="admin"):
-        require_admin(a_principal(is_admin=False))
-
-
 def test_require_identified_refuses_the_anonymous_principal() -> None:
     """The anonymous id is read-only; any other principal passes the write gate."""
     named = a_principal()
     assert require_identified(named) is named
     with pytest.raises(ToolError, match="anonymous"):
-        require_identified(Principal(id=settings.anonymous_principal_id, is_admin=False))
+        require_identified(Principal(id=settings.anonymous_principal_id))
 
 
 def test_current_principal_reads_the_resolved_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """`current_principal` returns the Principal the middleware stashed, else a loud ToolError."""
-    resolved = a_principal(is_admin=True)
+    resolved = a_principal()
 
     class Ctx:
         def __init__(self, state: object) -> None:
@@ -98,7 +89,6 @@ def test_resolve_principal_falls_back_by_transport(
         principal = await resolve_principal()
         expected = settings.anonymous_principal_id if http else settings.principal
         assert principal.id == expected
-        assert principal.is_admin == (not http)  # only the seeded stdio principal is admin
 
     dbutil.run(body())
 
@@ -117,7 +107,7 @@ def test_resolve_principal_uses_a_verified_token(monkeypatch: pytest.MonkeyPatch
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_principal(token_principal, is_admin=False)
+        await dbutil.seed_principal(token_principal)
         principal = await resolve_principal()
         assert principal.id == token_principal
 

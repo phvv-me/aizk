@@ -7,16 +7,11 @@ from patos import FrozenModel
 
 from ..config import settings
 from ..store import Principal as PrincipalRow
-from ..store import system_session
 
 # environment variable carrying a presented Zitadel bearer token over the stdio transport, where
 # there is no request header to read one from. The http transport reads the Authorization header
 # instead, resolving the same way through PrincipalRow.from_token.
 AUTH_TOKEN_ENV = "AIZK_AUTH_TOKEN"
-
-# tag marking the admin-only operational tools, which PrincipalMiddleware.on_list_tools filters
-# from a non-admin listing so a regular user never sees the operational surface.
-ADMIN_TAG = "admin"
 
 # the fastmcp Context state key PrincipalMiddleware.on_call_tool stashes the resolved Principal
 # under, the one slot every tool reads it back from through `current_principal`.
@@ -26,15 +21,16 @@ PRINCIPAL_STATE_KEY = "principal"
 class Principal(FrozenModel):
     """The caller identity resolved once per call, threaded through Context state to every tool.
 
-    Carries only what a tool ever branches on, an id and an admin flag, deliberately not the
-    `store.Principal` table row itself, so a tool never re-queries the database for either.
+    Carries only the id a verb ever acts under, deliberately not the `store.Principal` table row
+    itself, so a verb never re-queries the database for it. The server-wide admin standing that
+    once gated an operational surface here is gone with that surface, moved to the CLI, and the
+    group-admin standing the curation verbs still check is read from the database inside
+    `Group.require_admin`, not carried on this identity.
 
     id: the aizk principal id the caller acts as.
-    is_admin: whether this principal manages the operational surface.
     """
 
     id: uuid.UUID
-    is_admin: bool
 
 
 def bearer_token() -> str | None:
@@ -65,9 +61,7 @@ async def resolve_principal() -> Principal:
     principal_id = await PrincipalRow.from_token(token) if token else None
     if principal_id is None:
         principal_id = settings.anonymous_principal_id if settings.mcp_http else settings.principal
-    async with system_session() as session:
-        is_admin = await PrincipalRow.administers(session, principal_id)
-    return Principal(id=principal_id, is_admin=is_admin)
+    return Principal(id=principal_id)
 
 
 def current_principal() -> Principal:
@@ -79,16 +73,6 @@ def current_principal() -> Principal:
     principal = get_context().get_state(PRINCIPAL_STATE_KEY)
     if not isinstance(principal, Principal):
         raise ToolError("no principal resolved for this call")
-    return principal
-
-
-def require_admin(principal: Principal) -> Principal:
-    """Refuse a non-admin principal, the gate every admin call runs.
-
-    principal: the caller already resolved for this call.
-    """
-    if not principal.is_admin:
-        raise ToolError("aizk admin tools require an admin principal")
     return principal
 
 

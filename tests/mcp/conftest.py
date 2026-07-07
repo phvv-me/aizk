@@ -15,8 +15,8 @@ def tools() -> dict[str, FunctionTool]:
 
 
 @pytest.fixture
-def as_admin(monkeypatch: pytest.MonkeyPatch) -> Principal:
-    """Resolve every tool body's `current_principal` to a fixed admin, bypassing the auth seam."""
-    caller = Principal(id=settings.principal, is_admin=True)
+def as_caller(monkeypatch: pytest.MonkeyPatch) -> Principal:
+    """Resolve every verb body's `current_principal` to a fixed caller, bypassing the auth seam."""
+    caller = Principal(id=settings.principal)
     monkeypatch.setattr(server_module, "current_principal", lambda: caller)
     return caller

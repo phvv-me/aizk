@@ -1,11 +1,8 @@
 import uuid
 from collections.abc import Awaitable, Callable
 
-from aizk.mcp.server import AizkMCP
-
-# the memory verbs and curation tools every caller reaches, gated in-body rather than hidden from
-# listing, versus the operational surface the admin tag carves apart; the two disjoint partitions
-# the registration contract keeps apart.
+# the client verbs the server registers, the whole surface a key-holder reaches; every operational
+# operation now lives in the CLI rather than as a tagged, listing-hidden tool.
 USER_TOOLS = {
     "recall",
     "remember",
@@ -13,36 +10,6 @@ USER_TOOLS = {
     "pending",
     "approve",
     "reject",
-}
-ADMIN_TOOLS = {
-    "force_rebuild",
-    "forget",
-    "force_decay",
-    "force_reembed",
-    "force_raptor",
-    "bench",
-    "sweep",
-    "benchmark",
-    "scale",
-    "ingest",
-    "ingest_image",
-    "promote",
-    "export_scope",
-    "tasks_status",
-    "create_user",
-    "grant_admin",
-    "define_entity_kind",
-    "define_relation_kind",
-    "list_ontology",
-    "create_group",
-    "add_member",
-    "remove_member",
-    "publish_group",
-    "curate_group",
-    "delete_group",
-    "list_groups",
-    "list_principals",
-    "audit",
 }
 
 
@@ -124,20 +91,5 @@ class FakeSystemSession:
 
 
 def fake_system_session() -> FakeSystemSession:
-    """Zero-arg stand-in for `system_session`, the shape every admin tool body calls it in."""
+    """Zero-arg stand-in for `system_session`, the shape an operator operation calls it in."""
     return FakeSystemSession()
-
-
-def make_probe(probe: AizkMCP, spec: dict[str, bool]) -> None:
-    """Register each `spec` tool on `probe`, admin-gated through `admin_tool` where marked.
-
-    spec: tool name to whether it is admin-gated, the surface `admin_tool` and plain `tool`
-        partition between them.
-    """
-    for name, is_admin_tool in spec.items():
-
-        async def body() -> str:
-            return "ok"
-
-        body.__name__ = name
-        probe.admin_tool(body) if is_admin_tool else probe.tool(body)

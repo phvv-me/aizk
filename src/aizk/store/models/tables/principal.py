@@ -76,16 +76,17 @@ class Principal(Id, Timestamped, TableBase, table=True):
 
     @classmethod
     async def administers(cls, session: AsyncSession, principal_id: uuid.UUID) -> bool:
-        """Whether a principal may manage the operational surface, the one admin gate.
+        """Whether a principal holds server-wide admin standing, the group-curation override.
 
-        Reads the principal's is_admin column off the caller's own already-open session, with an
-        unknown principal reading as false. The migration seeds the system principal with the flag
-        already set, so a fresh single-user stack self-administers from the first migration with no
-        separate root-principal short-circuit. Principal carries no row level security of its own,
-        so any open session reads every row regardless of that session's own acting principal, and
-        a caller with no session of its own yet (the auth middleware, `require_admin`) opens a
-        system_session at its own boundary and passes it in rather than this method opening a
-        second one nested inside whatever the caller already holds.
+        Read by `Group.require_admin` so an engine admin clears any group's review without a
+        membership row of its own; the operational surface it once gated on the MCP server has
+        moved to the ssh-only CLI, whose operator acts as the already-admin system principal.
+        Reads the is_admin column off the caller's own already-open session, an unknown principal
+        reading as false. The migration seeds the system principal with the flag already set, so a
+        fresh single-user stack self-administers from the first migration. Principal carries no row
+        level security of its own, so any open session reads every row regardless of its own acting
+        principal, and a caller passes in the session it already holds rather than this method
+        nesting a second one inside it.
 
         session: open session the flag is read through.
         principal_id: identity whose administrative standing is resolved.

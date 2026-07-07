@@ -1,25 +1,20 @@
-from collections.abc import Sequence
-
 import mcp.types as mt
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.middleware.rate_limiting import RateLimitError, TokenBucketRateLimiter
-from fastmcp.tools.tool import Tool, ToolResult
+from fastmcp.tools.tool import ToolResult
 
 from ..config import settings
-from .principal import ADMIN_TAG, PRINCIPAL_STATE_KEY, Principal, resolve_principal
+from .principal import PRINCIPAL_STATE_KEY, Principal, resolve_principal
 
 
 class PrincipalMiddleware(Middleware):
-    """Resolve the caller once per call, threading it through Context state and hiding admin tools.
+    """Resolve the caller once per call, threading it through Context state to every verb.
 
     `on_call_tool` resolves the `Principal` exactly once and stashes it in the request's Context
-    state, the one slot `current_principal` and every tool body read it back from, so a call no
-    longer pays a bearer-token check and an is_admin query per tool plus another per gate.
-    `on_list_tools` resolves its own copy since a listing carries no tool call of its own to stash
-    onto, then hides the ADMIN_TAG tools from a non-admin listing so a regular user neither sees
-    nor is tempted to call any of them. The admin gate itself lives on each admin tool through
-    `AizkMCP.admin_tool`, not here, a listing hides a tool without enforcing access to it, and a
-    caller could still reach a hidden tool directly through `tool.run()`.
+    state, the one slot `current_principal` and every verb body read it back from, so a call pays
+    a single bearer-token check rather than one per verb. The whole surface is client verbs a
+    key-holder is entitled to reach, so there is nothing to hide from a listing, the operational
+    tools that once needed hiding having moved off the server to the CLI.
     """
 
     async def on_call_tool(
@@ -31,15 +26,6 @@ class PrincipalMiddleware(Middleware):
         assert context.fastmcp_context is not None  # every tool call carries a request context
         context.fastmcp_context.set_state(PRINCIPAL_STATE_KEY, principal)
         return await call_next(context)
-
-    async def on_list_tools(
-        self,
-        context: MiddlewareContext[mt.ListToolsRequest],
-        call_next: CallNext[mt.ListToolsRequest, Sequence[Tool]],
-    ) -> Sequence[Tool]:
-        tools = await call_next(context)
-        principal = await resolve_principal()
-        return tools if principal.is_admin else [t for t in tools if ADMIN_TAG not in t.tags]
 
 
 class AnonymousRateLimit(Middleware):

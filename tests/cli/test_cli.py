@@ -3,14 +3,11 @@ from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
-import dbutil
 import pytest
 
 import aizk.cli as cli
 from aizk.config import Settings
-from aizk.eval import scale as eval_scale
 from aizk.mcp import server as mcp_server
-from aizk.store import Principal, acting_as
 
 DOC_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 USER_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -117,12 +114,12 @@ def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
     monkeypatch.setattr(cli, "assemble_context_pack", seams.recall)
     monkeypatch.setattr(cli, "ingest_text", seams.ingest)
     monkeypatch.setattr(cli, "enqueue_pending", seams.enqueue)
-    monkeypatch.setattr(cli, "create_user_principal", seams.create_principal)
+    monkeypatch.setattr(cli.admin, "create_user", seams.create_principal)
     monkeypatch.setattr(cli.backup_ops, "backup_database", seams.backup)
     monkeypatch.setattr(cli.backup_ops, "restore_database", seams.restore)
     monkeypatch.setattr(mcp_server.server, "run_http_async", seams.serve_http)
     monkeypatch.setattr(mcp_server.server, "run_stdio_async", seams.serve_stdio)
-    monkeypatch.setattr(eval_scale, "run_scale_benchmark", seams.run_scale)
+    monkeypatch.setattr(cli.admin, "scale", seams.run_scale)
     return seams
 
 
@@ -150,8 +147,7 @@ def check_install_queue(seams: Seams, out: str) -> None:
 def check_scale(seams: Seams, out: str) -> None:
     assert seams.run_scale.kwargs["sizes"] == (1, 2)
     assert seams.run_scale.kwargs["k"] == 4
-    budget = seams.run_scale.kwargs["budget"]
-    assert isinstance(budget, eval_scale.Budget) and budget.recall_p95_ms == 50.0
+    assert seams.run_scale.kwargs["recall_p95_ms"] == 50.0
     assert "SCALE-CURVE" in out
 
 
@@ -339,23 +335,80 @@ def test_capture_session_is_a_quiet_noop_without_a_transcript(
     assert "no session transcript" in capsys.readouterr().out
 
 
-def test_create_user_principal_mints_a_row_through_one_system_session(migrated_db: None) -> None:
-    """The CLI's own seam opens a system-acting session and mints a readable principal in it.
+# each operator command routes its argv to the matching `admin.<fn>` and prints a summary. The
+# tuple is (argv, admin function name, its faked return, a substring the command must print).
+OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
+    (["rebuild", "--limit", "5"], "rebuild", (3, 7), "3 entities and 7 facts"),
+    (["decay", "--half-life-days", "30"], "decay", 4, "archived 4"),
+    (["reembed"], "reembed", 9, "re-embedded 9"),
+    (["raptor"], "raptor", 2, "built 2 summaries"),
+    (
+        ["forget", "wrong note"],
+        "forget",
+        SimpleNamespace(claims=6, documents=["A", "B"]),
+        "retracted 6 claims from 2 notes",
+    ),
+    (["promote", str(DOC_ID), "team"], "promote", 5, "promoted 5 rows into team"),
+    (["ingest", "notes/"], "ingest", 4, "ingested 4 documents"),
+    (["grant-admin", str(USER_ID)], "grant_admin", SimpleNamespace(id=USER_ID), "is now admin"),
+    (["create-group", "team"], "create_group", SimpleNamespace(id=DOC_ID), str(DOC_ID)),
+    (["add-member", str(USER_ID), "team"], "add_member", None, "joined team"),
+    (["publish-group", "team"], "publish_group", None, "public=True"),
+    (["delete-group", "team"], "delete_group", None, "team deleted"),
+    (
+        ["define-entity-kind", "Area", "a domain"],
+        "define_entity_kind",
+        None,
+        "entity kind Area defined",
+    ),
+]
 
-    Runs against the live schema so `system_session`, `Principal.create`, and the commit all run
-    for real, then reads the row back to prove it landed with the given display name.
+
+@pytest.mark.parametrize(
+    ("tokens", "fn_name", "ret", "expected"),
+    OPERATOR_COMMANDS,
+    ids=[tokens[0] for tokens, _, _, _ in OPERATOR_COMMANDS],
+)
+def test_operator_command_routes_to_admin_and_prints(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tokens: list[str],
+    fn_name: str,
+    ret: object,
+    expected: str,
+) -> None:
+    """Every operator verb delegates to its `admin` function and renders a readable summary.
+
+    The whole operational surface lives in the CLI now, so this is the operator plane's own wiring
+    contract: the argv reaches the matching `admin.<fn>` and its result prints, no MCP tool
+    involved.
+
+    tokens: the argv the CLI dispatches.
+    fn_name: the `admin` function the command must delegate to.
+    ret: the value the faked admin function resolves to.
+    expected: a substring the command must print from that result.
     """
+    recorder = Recorder(ret=ret, is_async=True)
+    monkeypatch.setattr(cli.admin, fn_name, recorder)
 
-    async def run() -> tuple[Principal, str | None]:
-        await dbutil.reset_db()
-        await dbutil.seed_principal(cli.settings.system_principal_id)
-        created = await cli.create_user_principal("alice")
-        async with acting_as(cli.settings.system_principal_id) as session:
-            reloaded = await session.get(Principal, created.id)
-        assert reloaded is not None
-        return created, reloaded.display_name
+    dispatch(tokens)
 
-    created, display_name = dbutil.run(run())
+    assert recorder.count == 1
+    assert expected in capsys.readouterr().out
 
-    assert display_name == "alice"
-    assert created.display_name == "alice"
+
+def test_list_groups_renders_each_group_row(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The roster command prints one line per group with its visibility and member count."""
+    rows = [
+        {"name": "team", "public": True, "members": 3},
+        {"name": "vault", "public": False, "members": 1},
+    ]
+    monkeypatch.setattr(cli.admin, "list_groups", Recorder(ret=rows, is_async=True))
+
+    dispatch(["list-groups"])
+
+    out = capsys.readouterr().out
+    assert "team  public  3 members" in out
+    assert "vault  members-only  1 members" in out

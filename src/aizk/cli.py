@@ -10,8 +10,8 @@ from mainboard.profiling import enable_spans
 
 from alembic import command
 
+from . import admin, ops
 from . import backup as backup_ops
-from . import ops
 from .background.queue import enqueue_pending, install_queue_schema
 from .background.schedule import run_worker
 from .config import settings
@@ -229,24 +229,13 @@ async def scale(
     repeats: how many recall and per-lane calls each percentile is read over.
     recall_p95_ms: the tail recall budget in milliseconds the recall knee is flagged against.
     """
-    from .eval.scale import Budget, run_scale_benchmark
-
-    report = await run_scale_benchmark(
+    report = await admin.scale(
         sizes=tuple(int(size) for size in sizes.split(",")),
         k=k,
         repeats=repeats,
-        budget=Budget(recall_p95_ms=recall_p95_ms),
+        recall_p95_ms=recall_p95_ms,
     )
     print(report.render())
-
-
-async def create_user_principal(name: str) -> Principal:
-    """Create a principal under one system-acting session, the CLI's own testable seam.
-
-    name: human-readable display name for the new actor.
-    """
-    async with system_session() as session:
-        return await Principal.create(session, name)
 
 
 @app.command
@@ -255,7 +244,7 @@ async def create_user(name: str) -> None:
 
     name: human-readable display name for the new actor.
     """
-    principal = await create_user_principal(name)
+    principal = await admin.create_user(name)
     print(principal.id)
 
 
@@ -275,6 +264,323 @@ async def create_admin(zitadel_sub: str, name: str = "admin") -> None:
         principal = await Principal.link_admin(session, zitadel_sub, name)
         principal_id = principal.id
     print(principal_id)
+
+
+@app.command
+async def grant_admin(principal: str) -> None:
+    """Promote a principal to server-wide admin so it can curate any group.
+
+    principal: id of the principal to grant administrator standing.
+    """
+    target = await admin.grant_admin(principal)
+    print(f"{target.id} is now admin")
+
+
+@app.command
+async def list_principals() -> None:
+    """List every principal known to the engine, id and display name."""
+    for principal in await admin.list_principals():
+        star = " (admin)" if principal.is_admin else ""
+        print(f"{principal.id}  {principal.display_name or '-'}{star}")
+
+
+@app.command
+async def create_group(name: str, public: bool = False, curated: bool = False) -> None:
+    """Create a sharing group and print its id, the scope memberships and promotions target.
+
+    name: unique human-readable label for the group.
+    public: whether the group's rows are readable by anyone from the start, else members-only.
+    curated: whether writes into the group's canon must clear group-admin review before visible.
+    """
+    group = await admin.create_group(name, public=public, curated=curated)
+    print(group.id)
+
+
+@app.command
+async def add_member(principal: str, group: str, role: str = "writer") -> None:
+    """Add a principal to a group so that group's scope becomes visible to it under RLS.
+
+    principal: id of the principal joining the group.
+    group: name of the group the principal joins.
+    role: standing within the group, reader for read-only, writer or admin to also write.
+    """
+    await admin.add_member(principal, group, role=role)
+    print(f"{principal} joined {group} as {role}")
+
+
+@app.command
+async def remove_member(principal: str, group: str) -> None:
+    """Remove a principal from a group, its scope no longer visible to them.
+
+    principal: id of the principal leaving the group.
+    group: name of the group the principal leaves.
+    """
+    await admin.remove_member(principal, group)
+    print(f"{principal} removed from {group}")
+
+
+@app.command
+async def publish_group(group: str, public: bool = True) -> None:
+    """Publish a group so anyone can read its rows, or unpublish it back to members-only.
+
+    group: name of the group to publish or unpublish.
+    public: true to publish, false to make members-only again.
+    """
+    await admin.publish_group(group, public=public)
+    print(f"{group} public={public}")
+
+
+@app.command
+async def curate_group(group: str, curated: bool = True) -> None:
+    """Curate or uncurate a group, flipping whether its writes must clear group-admin review.
+
+    group: name of the group to curate or uncurate.
+    curated: true to require review, false to write straight through.
+    """
+    await admin.curate_group(group, curated=curated)
+    print(f"{group} curated={curated}")
+
+
+@app.command
+async def delete_group(group: str) -> None:
+    """Delete a group, memberships cascading and its rows falling back to their owners.
+
+    group: name of the group to delete.
+    """
+    await admin.delete_group(group)
+    print(f"{group} deleted")
+
+
+@app.command
+async def list_groups() -> None:
+    """List every group with its visibility and member count, the sharing roster."""
+    for row in await admin.list_groups():
+        flags = "public" if row["public"] else "members-only"
+        print(f"{row['name']}  {flags}  {row['members']} members")
+
+
+@app.command
+async def ingest(path: str, scopes: str | None = None, principal: uuid.UUID | None = None) -> None:
+    """Ingest a file or directory of notes and code into memory, the document count back.
+
+    path: file or directory to ingest.
+    scopes: comma-separated group names to share it with, private to the owner when null.
+    principal: identity that owns the stored rows, the system principal when null.
+    """
+    count = await admin.ingest(path, scopes=scopes, principal_id=principal)
+    print(f"ingested {count} documents from {path}")
+
+
+@app.command
+async def ingest_image(
+    path: str,
+    caption: str | None = None,
+    scopes: str | None = None,
+    principal: uuid.UUID | None = None,
+) -> None:
+    """Ingest an image into the shared multimodal space so a text query can recall it.
+
+    path: image file to ingest.
+    caption: text stored on the chunk and shown in recall, the file name when null.
+    scopes: comma-separated group names to share it with, private to the owner when null.
+    principal: identity that owns the stored row, the system principal when null.
+    """
+    document_id = await admin.ingest_image(
+        path, caption=caption, scopes=scopes, principal_id=principal
+    )
+    print(document_id)
+
+
+@app.command
+async def rebuild(
+    limit: int | None = None, source: str | None = None, principal: uuid.UUID | None = None
+) -> None:
+    """Build the graph now over the principal's pending chunks, the on-demand extraction.
+
+    limit: maximum number of chunks to process, all of them when null.
+    source: restrict the build to chunks of documents whose title matches this substring.
+    principal: identity that owns the written claims, the system principal when null.
+    """
+    entities, facts = await admin.rebuild(limit=limit, source=source, principal_id=principal)
+    print(f"built {entities} entities and {facts} facts")
+
+
+@app.command
+async def decay(half_life_days: float = 90.0, principal: uuid.UUID | None = None) -> None:
+    """Run the decay pass now, archiving stale facts that leave recall but stay in history.
+
+    half_life_days: age in days at which an unaccessed fact's relevance halves.
+    principal: identity whose facts are decayed, the system principal when null.
+    """
+    archived = await admin.decay(half_life_days=half_life_days, principal_id=principal)
+    print(f"archived {archived} stale facts")
+
+
+@app.command
+async def reembed(principal: uuid.UUID | None = None) -> None:
+    """Re-embed every visible stored vector with the current embedder, a backend migration.
+
+    principal: identity whose vectors are re-embedded, the system principal when null.
+    """
+    written = await admin.reembed(principal_id=principal)
+    print(f"re-embedded {written} vectors")
+
+
+@app.command
+async def raptor(principal: uuid.UUID | None = None) -> None:
+    """Build the RAPTOR tree now, the recursive summary tiers above the communities.
+
+    principal: identity whose tree is built, the system principal when null.
+    """
+    written = await admin.raptor(principal_id=principal)
+    print(f"built {written} summaries")
+
+
+@app.command
+async def forget(query: str, k: int = 8, principal: uuid.UUID | None = None) -> None:
+    """Retract the claims a query's own source notes contributed, the erasure counterpart to write.
+
+    query: what to forget, described the way you would recall it.
+    k: how many of the most relevant source notes to retract the derived claims of.
+    principal: identity whose notes are searched and retracted, the system principal when null.
+    """
+    result = await admin.forget(query, k=k, principal_id=principal)
+    print(f"retracted {result.claims} claims from {len(result.documents)} notes")
+    for title in result.documents:
+        print(f"  - {title}")
+
+
+@app.command
+async def promote(document: str, to_scopes: str, principal: uuid.UUID | None = None) -> None:
+    """Promote a document and its chunks and facts into a wider scope-set as a new audited copy.
+
+    document: id of the source document to promote.
+    to_scopes: comma-separated names of the target groups the copy is published into.
+    principal: identity the promotion acts under, the system principal when null.
+    """
+    count = await admin.promote(document, to_scopes, principal_id=principal)
+    print(f"promoted {count} rows into {to_scopes}")
+
+
+@app.command
+async def export_scope(path: str, principal: uuid.UUID | None = None) -> None:
+    """Export a principal's visible memory to a JSONL file, the scoped portable dump.
+
+    path: the JSONL file the dump is written to.
+    principal: identity whose visible rows are exported, the system principal when null.
+    """
+    report = await admin.export_scope(path, principal_id=principal)
+    print(report.render() if hasattr(report, "render") else report)
+
+
+@app.command
+async def audit(limit: int = 20, principal: uuid.UUID | None = None) -> None:
+    """List the most recent visible document writes with owner, scope-set, and title.
+
+    limit: maximum number of writes to return.
+    principal: identity whose visible writes are listed, the system principal when null.
+    """
+    for doc in await admin.audit(limit=limit, principal_id=principal):
+        scopes = ",".join(str(s) for s in doc.scopes) or "private"
+        print(f"{doc.id}  {doc.kind}  [{scopes}]  {doc.title or '-'}")
+
+
+@app.command
+async def define_entity_kind(name: str, description: str, domain: str = "general") -> None:
+    """Add or refine an entity type in the live ontology, refreshing the extraction snapshot.
+
+    name: the type a content row stores, a noun in PascalCase such as Area or Milestone.
+    description: one-line gloss the extraction prompt renders and the auto-create fold matches.
+    domain: grouping tag, general by default, or core, coding, research, finance, personal.
+    """
+    await admin.define_entity_kind(name, description, domain)
+    print(f"entity kind {name} defined")
+
+
+@app.command
+async def define_relation_kind(name: str, description: str, domain: str = "general") -> None:
+    """Add or refine a relation predicate in the live ontology, refreshing the extraction snapshot.
+
+    name: the predicate a fact stores, a snake_case verb phrase such as part_of or funds.
+    description: one-line gloss the extraction prompt renders and the auto-create fold matches.
+    domain: grouping tag, general by default, or core, coding, research, finance, personal.
+    """
+    await admin.define_relation_kind(name, description, domain)
+    print(f"relation kind {name} defined")
+
+
+@app.command
+async def list_ontology() -> None:
+    """List every ontology kind with how much of the graph uses it, the catalog review surface."""
+    for row in await admin.list_ontology():
+        mark = "*" if row.structural else " "
+        print(f"{mark} {row.kind:8} {row.name:24} {row.domain:9} uses={row.uses}")
+
+
+@app.command
+async def tasks_status() -> None:
+    """Report the autonomous engine's pending, running, failed, last-run, and lag counts."""
+    status = await admin.tasks_status()
+    print(status.model_dump_json(indent=2) if hasattr(status, "model_dump_json") else status)
+
+
+@app.command
+def profile_report() -> None:
+    """Report the process-wide span timing stats mainboard.profiling collected, slowest first."""
+    stats = admin.profile_report()
+    for stat in stats:
+        print(stat)
+    if not stats:
+        print("no spans recorded (set AIZK_PROFILING=1)")
+
+
+@app.command
+async def bench(questions_file: str | None = None, k: int = 8) -> None:
+    """Run the eval harness over visible memory and report hit-at-k with a per-config split.
+
+    questions_file: a file of one question per line, or null to synthesize them from facts.
+    k: how many hits and seed facts each recall surfaces.
+    """
+    report = await admin.bench(questions_file=questions_file, k=k)
+    print(report.render() if hasattr(report, "render") else report)
+
+
+@app.command
+async def sweep(questions_file: str | None = None, k: int = 8, dims: str | None = None) -> None:
+    """Sweep the config grid and report quality, latency, and memory for each config.
+
+    questions_file: a file of one question per line, or null to synthesize them from facts.
+    k: how many hits and seed facts each recall surfaces.
+    dims: comma-separated Matryoshka widths to sweep, the live width when null.
+    """
+    report = await admin.sweep(questions_file=questions_file, k=k, dims=dims)
+    print(report.render() if hasattr(report, "render") else report)
+
+
+@app.command
+async def benchmark(name: str, dataset_path: str, k: int = 8) -> None:
+    """Sweep the config grid over one external 2026 benchmark loaded from its dataset file.
+
+    name: which benchmark to load, `evermembench` or `tempo`.
+    dataset_path: path to the benchmark's JSONL file.
+    k: how many hits and seed facts each recall surfaces.
+    """
+    report = await admin.benchmark(name, dataset_path, k=k)
+    print(report.render() if hasattr(report, "render") else report)
+
+
+@app.command
+async def setup() -> None:
+    """Bring the database to a ready state, migrating to head and installing the queue schema."""
+    report = await admin.setup()
+    print(f"migrated {report.migrated_from} -> {report.migrated_to}")
+
+
+@app.command
+async def health() -> None:
+    """Report the engine's schema, row security, row-count, queue, and serving-endpoint state."""
+    report = await admin.health()
+    print(report.model_dump_json(indent=2) if hasattr(report, "model_dump_json") else report)
 
 
 if __name__ == "__main__":
