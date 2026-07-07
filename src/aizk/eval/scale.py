@@ -12,7 +12,7 @@ from sqlalchemy import delete, func, insert, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..extract.ontology import EntityType, RelationType
+from ..extract import ontology
 from ..graph.algos import ppr_expand
 from ..graph.communities import detect
 from ..retrieval import Recall, recall
@@ -47,11 +47,11 @@ CHUNKS_PER_ENTITY = 4
 
 # the closed predicate vocabulary the synthetic facts cycle through.
 PREDICATES = (
-    RelationType.RELATED_TO,
-    RelationType.DEPENDS_ON,
-    RelationType.PART_OF,
-    RelationType.CITES,
-    RelationType.SUPERSEDES,
+    ontology.RELATED_TO,
+    ontology.DEPENDS_ON,
+    ontology.PART_OF,
+    ontology.CITES,
+    ontology.SUPERSEDES,
 )
 
 # recall and per-lane calls timed per size, wide enough that a p99 is not a single sample.
@@ -389,7 +389,7 @@ def corpus_rows(
         {
             "id": index_id(principal_id, "entity", i),
             "name": f"entity {i}",
-            "type": EntityType.CONCEPT,
+            "type": ontology.CONCEPT,
             "embedding": unit_vector(rng, dim),
         }
         for i in range(generated.entities, target.entities)

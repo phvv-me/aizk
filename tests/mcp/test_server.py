@@ -62,16 +62,14 @@ def apply_patches(monkeypatch: pytest.MonkeyPatch, patches: dict[str, object]) -
 USER_TOOLS = {
     "recall",
     "remember",
-    "get_context",
     "reference",
-    "timeline",
-    "projects",
     "pending",
     "approve",
     "reject",
 }
 ADMIN_TOOLS = {
     "force_rebuild",
+    "forget",
     "force_decay",
     "force_reembed",
     "force_raptor",
@@ -89,6 +87,9 @@ ADMIN_TOOLS = {
     "health",
     "create_user",
     "grant_admin",
+    "define_entity_kind",
+    "define_relation_kind",
+    "list_ontology",
     "create_group",
     "add_member",
     "remove_member",
@@ -227,24 +228,28 @@ def test_resolve_group_admin_returns_the_group_or_wraps_a_domain_refusal(
             dbutil.run(resolve_group_admin(object(), "team"))
 
 
-def test_recall_forwards_the_query_k_and_resolved_lens_to_retrieval(
+def test_recall_forwards_the_query_budget_and_resolved_lens_to_the_context_pack(
     monkeypatch: pytest.MonkeyPatch, as_admin: Principal, tools: dict[str, FunctionTool]
 ) -> None:
-    """The recall verb forwards the query, k, resolved lens, and caller, and returns the result."""
+    """The one recall verb forwards query, budget, resolved lens, and caller to the pack builder.
+
+    Recall is now the single retrieval verb and returns the assembled context pack rather than a
+    raw result, so it delegates to `assemble_context_pack`, not the lower-level `recall` lane.
+    """
     captured: dict[str, object] = {}
     sentinel = object()
 
     async def stub(query: str, **kwargs: object) -> object:
-        captured.update(query=query, k=kwargs["k"], scopes=kwargs["scopes"])
+        captured.update(query=query, token_budget=kwargs["token_budget"], scopes=kwargs["scopes"])
         captured["principal_id"] = kwargs["principal_id"]
         return sentinel
 
-    monkeypatch.setattr(server_module.retrieval, "recall", stub)
-    out = dbutil.run(tools["recall"].fn(query="what holds", scopes=None, k=5))
+    monkeypatch.setattr(server_module.retrieval, "assemble_context_pack", stub)
+    out = dbutil.run(tools["recall"].fn(query="what holds", scopes=None, budget=2000))
     assert out is sentinel
     assert captured == {
         "query": "what holds",
-        "k": 5,
+        "token_budget": 2000,
         "scopes": (),  # a null scope string resolves to the empty private lens
         "principal_id": as_admin.id,
     }
@@ -283,7 +288,6 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
     the delegate or `Group`/`Principal` classmethod under a faked `system_session` is the seam.
     """
     pid, did, new_id = str(uuid.uuid4()), str(uuid.uuid4()), uuid.uuid4()
-    ctx, tl, projs = object(), object(), object()
     scaler, expr = object(), object()
     tasks, setupr, healthr = object(), object(), object()
     fact = SimpleNamespace(
@@ -294,9 +298,6 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
     )
     created = SimpleNamespace(id=new_id, display_name="bob")
     return [
-        ("get_context", {"retrieval.assemble_context_pack": const(ctx)}, {"query": "q"}, ctx),
-        ("timeline", {"graph.timeline": const(tl)}, {}, tl),
-        ("projects", {"graph.projects": const(projs)}, {}, projs),
         (
             "reference",
             {"extract_ingest.record_reference": const(new_id)},

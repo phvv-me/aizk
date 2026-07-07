@@ -1,0 +1,20 @@
+# only pyproject, README, and src are needed to build the image; keep the context small and the
+# layer cache stable by excluding everything the build never reads.
+.git
+.github
+.venv
+.chefe
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.pyrefly
+tests
+docs
+site
+backups
+*.dump
+.env
+.mcp.json
+htmlcov
+.coverage

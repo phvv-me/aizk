@@ -37,6 +37,9 @@ dependencies = [
   "loguru>=0.7.3,<0.8",
   "fastmcp>=2.11,<3",
   "networkx>=3.4,<4",
+  # backs networkx's pagerank, the sparse-matrix solver `nx.pagerank` calls by default, so the
+  # recall PPR lane raises ModuleNotFoundError the moment a principal has a non-empty graph without it
+  "scipy>=1.14,<2",
   # the sweep and scale eval harnesses' numeric work, present transitively through pgvector too
   "numpy>=2,<3",
   # the api embed and rerank backends' shared HTTP client, and the native pydantic structured

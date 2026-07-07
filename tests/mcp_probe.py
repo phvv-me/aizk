@@ -9,16 +9,14 @@ from aizk.mcp.server import AizkMCP
 USER_TOOLS = {
     "recall",
     "remember",
-    "get_context",
     "reference",
-    "timeline",
-    "projects",
     "pending",
     "approve",
     "reject",
 }
 ADMIN_TOOLS = {
     "force_rebuild",
+    "forget",
     "force_decay",
     "force_reembed",
     "force_raptor",
@@ -33,6 +31,9 @@ ADMIN_TOOLS = {
     "tasks_status",
     "create_user",
     "grant_admin",
+    "define_entity_kind",
+    "define_relation_kind",
+    "list_ontology",
     "create_group",
     "add_member",
     "remove_member",

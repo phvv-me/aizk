@@ -4,7 +4,6 @@ import pytest
 
 from aizk.extract.dating import parse_date, resolve_valid_from, with_document_fallback
 from aizk.extract.models import TimedFact
-from aizk.extract.ontology import RelationType
 
 
 def test_empty_text_parses_to_none() -> None:
@@ -63,8 +62,8 @@ def test_document_fallback_fills_only_undated_facts() -> None:
     doc_time = datetime(2020, 6, 1, tzinfo=UTC)
     kept = datetime(2015, 1, 1, tzinfo=UTC)
     facts = [
-        TimedFact(subject="a", predicate=RelationType.USES, statement="x", valid_from=kept),
-        TimedFact(subject="b", predicate=RelationType.USES, statement="y", valid_from=None),
+        TimedFact(subject="a", predicate="uses", statement="x", valid_from=kept),
+        TimedFact(subject="b", predicate="uses", statement="y", valid_from=None),
     ]
     filled = with_document_fallback(facts, doc_time)
     assert filled[0].valid_from == kept

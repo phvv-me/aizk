@@ -100,3 +100,58 @@ def test_ingest_path_routes_each_lane_dedupes_and_skips_the_rest(
     assert first == 2
     assert again == 0
     assert kinds == ["code", "note"]
+
+
+@pytest.mark.usefixtures("migrated_db", "fake_embedder")
+def test_reingesting_a_changed_file_refreshes_its_standing_document(
+    settings: Settings, tmp_path: Path
+) -> None:
+    """An edited file keeps its document row and swaps the content under it, never a crash.
+
+    ``source_uri`` is the document's stable identity, so the changed content must land as an
+    in-place refresh: same document id, the new content hash and title-stable row, the old
+    chunks replaced by the fresh spans with ``processed_at`` null so the graph re-extracts,
+    and the write counted. A second ingest of the unchanged edit then dedupes to nothing.
+    The pre-fix behavior raised ``UniqueViolationError`` on ``document_source_uri_key``, which
+    is exactly the edited-Zettel re-ingest case the vault migration hit.
+    """
+    note = tmp_path / "note.md"
+    note.write_text("# note\n\nthe original status line before the edit.\n", encoding="utf-8")
+
+    async def body() -> tuple[int, int, int, list, list]:
+        await dbutil.reset_db()
+        await dbutil.seed_principal(settings.system_principal_id, is_admin=True)
+        first = await ingest_path(tmp_path)
+        note.write_text("# note\n\nthe REWRITTEN status line after the edit.\n", encoding="utf-8")
+        changed = await ingest_path(tmp_path)
+        unchanged = await ingest_path(tmp_path)
+        async with acting_as(settings.system_principal_id) as session:
+            docs = list(
+                (
+                    await session.execute(
+                        sql("SELECT id, content_hash FROM document WHERE source_uri LIKE :pat"),
+                        {"pat": f"%{tmp_path.name}%"},
+                    )
+                ).all()
+            )
+            chunks = list(
+                (
+                    await session.execute(
+                        sql(
+                            "SELECT text, processed_at FROM chunk WHERE document_id = :d "
+                            "ORDER BY ord"
+                        ),
+                        {"d": docs[0][0]},
+                    )
+                ).all()
+            )
+        return first, changed, unchanged, docs, chunks
+
+    first, changed, unchanged, docs, chunks = dbutil.run(body())
+    assert first == 1
+    assert changed == 1  # the refresh counts as written
+    assert unchanged == 0  # and the refreshed content then dedupes
+    assert len(docs) == 1  # one standing document, never a duplicate row
+    assert docs[0][1] == content_hash(note.read_text(encoding="utf-8"))
+    assert all("REWRITTEN" in text for text, _ in chunks)  # old spans fully replaced
+    assert all(processed_at is None for _, processed_at in chunks)  # re-extraction pending

@@ -2,14 +2,12 @@ import uuid
 
 import rls
 import sqlalchemy as sa
-from sqlalchemy import CheckConstraint, Index, Text, UniqueConstraint
+from sqlalchemy import Index, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import declared_attr, validates
+from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Field
 
-from ....exceptions import OntologyError
-from ....extract.ontology import EntityType, check_in_sql
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
 from ...mixins.scoped import ScopeLattice
 
@@ -130,41 +128,16 @@ class EntityContent(Id, Embedded, TableBase, table=True):
 
     id: content-addressed identity from uuid5 over normalized name and type.
     name: canonical surface form of the entity.
-    type: ontology entity type drawn from the closed vocabulary.
+    type: entity type, foreign-keyed against the live `entity_kind` catalog, the wall that keeps
+        a stray or off-vocabulary type from ever reaching a row regardless of what path wrote it.
     embedding: halfvec dense vector of the name, null until embedded, stored once regardless of how
         many containers hold a claim on this content.
     """
 
     name: str = Field(sa_type=Text)
-    type: str = Field(sa_type=Text)
+    type: str = Field(sa_type=Text, foreign_key="entity_kind.name")
 
     @classmethod
     def __rls_policies__(cls) -> list[rls.Policy]:
         """Visible through an `entity_claim`, freely mintable, immutable, admin-only to delete."""
         return content_policies(EntityClaim)
-
-    @declared_attr.directive
-    def __table_args__(cls) -> tuple[Index | CheckConstraint, ...]:
-        # a database-level third wall mirroring `validate_type`, the same `EntityType` membership
-        # the 0001 migration's `ck_entity_content_type` constraint checks, built from the same
-        # `check_in_sql` call so autogenerate never sees the two sides drift.
-        return (
-            *super().__table_args__,
-            CheckConstraint(check_in_sql("type", EntityType), name="ck_entity_content_type"),
-        )
-
-    @validates("type")
-    def validate_type(self, key: str, value: str) -> str:
-        """Reject an entity type outside the closed ontology so the ORM boundary fails off-vocab.
-
-        The extractor already renders the ontology as enums, and this is the second wall, so a type
-        reaching the row by any path other than extraction, a hand-built row or a future caller, is
-        held to the same closed vocabulary, `EntityType`'s structural members (the RAPTOR summary
-        and insight observation types the system writes itself) included.
-
-        key: the attribute being set, always `type`.
-        value: the candidate entity type to admit or reject.
-        """
-        if value not in set(EntityType):
-            raise OntologyError(f"entity type {value!r} is not in the ontology")
-        return value

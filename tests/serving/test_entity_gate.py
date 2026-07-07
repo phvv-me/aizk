@@ -4,7 +4,7 @@ from types import ModuleType
 import pytest
 
 from aizk.config import settings
-from aizk.extract.ontology import EntityType
+from aizk.extract import ontology
 from aizk.serving.gate.entity_gate import EntityGate
 
 
@@ -56,8 +56,8 @@ def test_gate_construction_drops_concept_from_the_label_schema(
 ) -> None:
     """The gate scores against the extractable entity types minus the Concept catch-all."""
     gate = build_gate({"entities": {}}, monkeypatch)
-    assert EntityType.CONCEPT.value not in gate.labels
-    assert EntityType.TOOL.value in gate.labels
+    assert ontology.CONCEPT not in gate.labels
+    assert "Tool" in gate.labels
     assert gate.threshold == settings.gliner_gate_threshold
 
 

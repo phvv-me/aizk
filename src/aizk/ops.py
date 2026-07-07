@@ -18,7 +18,8 @@ from alembic.script import ScriptDirectory
 from .background.queue import install_queue_schema
 from .background.status import TasksStatus, tasks_overview
 from .config import settings
-from .store import TableBase, verify_scoped_rls
+from .extract import ontology
+from .store import TableBase, system_session, verify_scoped_rls
 
 # the tables a health read counts, the main entities of the store rather than every join and
 # mixin table, read through the owner's superuser connection so the count is the true total
@@ -281,7 +282,9 @@ async def setup() -> SetupReport:
     `grant_app_role_privileges` is a plain idempotent GRANT set, and `enable_query_stats`
     tolerates a not-yet-restarted Postgres, so this is the one bootstrap call the MCP `setup`
     tool, the startup auto-setup, and the CLI's `migrate` and `install-queue` commands all run,
-    and the only call any database on the instance needs to become ready.
+    and the only call any database on the instance needs to become ready. Refreshing the ontology
+    cache is the final step, since every gate check and extraction call downstream of a fresh
+    migration reads the live catalog through it, never a class body fixed at import time.
     """
     before = await alembic_current()
     already_queued = await queue_schema_present()
@@ -291,6 +294,8 @@ async def setup() -> SetupReport:
         await install_queue_schema()
     await grant_app_role_privileges()
     await enable_query_stats()
+    async with system_session() as session:
+        await ontology.refresh(session)
     return SetupReport(
         migrated_from=before, migrated_to=alembic_head(config), queue_installed=not already_queued
     )

@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..extract.ontology import EntityType, RelationType
+from ..extract import ontology
 from ..store import EntityContent, FactClaim, FactContent, LiveFact, acting_as
 from .dedupe import claim_entity, claim_fact, mint_content
 from .ids import entity_id, fact_id
@@ -70,7 +70,7 @@ async def write_observation(
     obs: the gated observation to write.
     vector: the observation's own statement, already embedded.
     """
-    identity = fact_id(OBSERVATION_NODE, RelationType.OBSERVES, "", obs.statement)
+    identity = fact_id(OBSERVATION_NODE, ontology.OBSERVES, "", obs.statement)
     if await observation_already_claimed(session, principal_id, identity):
         return False
     await mint_content(
@@ -79,7 +79,7 @@ async def write_observation(
             id=identity,
             subject_id=node_id,
             object_id=None,
-            predicate=RelationType.OBSERVES,
+            predicate=ontology.OBSERVES,
             statement=obs.statement,
             embedding=vector,
         ),
@@ -116,7 +116,7 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
             statements = list(
                 await session.scalars(
                     select(LiveFact.statement)
-                    .where(LiveFact.predicate != RelationType.OBSERVES)
+                    .where(LiveFact.predicate != ontology.OBSERVES)
                     .order_by(func.lower(LiveFact.recorded).desc())
                     .limit(settings.insight_facts_k)
                 )
@@ -147,11 +147,11 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
     ) -> int:
         """Write each gated observation as its own content-addressed, idempotent observes claim."""
         kept = kept_observations(report)
-        node_id = entity_id(OBSERVATION_NODE, EntityType.OBSERVATION)
+        node_id = entity_id(OBSERVATION_NODE, ontology.OBSERVATION)
         async with acting_as(self.principal_id) as session:
             await mint_content(
                 session,
-                EntityContent(id=node_id, name=OBSERVATION_NODE, type=EntityType.OBSERVATION),
+                EntityContent(id=node_id, name=OBSERVATION_NODE, type=ontology.OBSERVATION),
             )
             await claim_entity(session, node_id, self.principal_id, [])
             written = sum(

@@ -5,6 +5,7 @@ from .entity import EntityClaim, EntityContent
 from .fact import FactClaim, FactContent
 from .group import Group
 from .membership import Membership
+from .ontology import EntityKind, RelationKind
 from .principal import Principal
 from .profile import Profile
 from .session_item import SessionItem
@@ -16,12 +17,14 @@ __all__ = [
     "Document",
     "EntityClaim",
     "EntityContent",
+    "EntityKind",
     "FactClaim",
     "FactContent",
     "Group",
     "Membership",
     "Principal",
     "Profile",
+    "RelationKind",
     "SessionItem",
     "Watermark",
 ]

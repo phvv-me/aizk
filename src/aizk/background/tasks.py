@@ -10,6 +10,7 @@ from pgqueuer.models import Job, Schedule
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..backup import scheduled_backup
 from ..config import settings
 from ..eval import EvalReport, run_eval
 from ..graph.build import dedup_entities
@@ -324,3 +325,38 @@ class CurationReviewTask(ScheduledTask):
 
     async def run(self, principal_id: uuid.UUID) -> None:
         await review_curated_groups(principal_id=principal_id)
+
+
+class BackupTask(ScheduledTask):
+    """Dump the whole database on a cron, the integrated auto-backup pass the worker runs.
+
+    The one pass that fires once globally rather than fanned out per principal, since a backup is
+    a single owner-level `pg_dump` capturing every tenant's rows at once, not a per-principal
+    graph operation. So it overrides the fan-out cron to run the dump directly and registers only
+    that cron, never the per-principal queue entrypoint every maintenance pass otherwise carries.
+    Off unless `backup_enabled` is set, so a plain host run never dumps while the container turns
+    it on and mounts `backup_dir`.
+    """
+
+    name = "backup"
+
+    async def run(self, principal_id: uuid.UUID) -> None:
+        raise NotImplementedError("backup is a system pass, never fanned out per principal")
+
+    async def fire_cron(self, fan_out: FanOut, schedule: Schedule) -> None:
+        """Dump and prune directly on the cron tick, no per-principal fan-out.
+
+        fan_out: unused, a backup reads no principal roster.
+        schedule: the cron schedule this run fired from, unused past selecting this task.
+        """
+        report = await scheduled_backup()
+        logger.info("scheduled backup wrote {} bytes to {}", report.bytes, report.path)
+
+    def register(self, pg: PgQueuer, fan_out: FanOut) -> None:
+        """Register only the backup cron, and only when enabled, no per-principal entrypoint.
+
+        pg: the PgQueuer application the cron attaches to.
+        fan_out: unused, a backup never fans out.
+        """
+        if self.enabled:
+            pg.schedule(self.cron_entrypoint, self.expression)(partial(self.fire_cron, fan_out))

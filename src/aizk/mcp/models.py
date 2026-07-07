@@ -45,6 +45,18 @@ class DecayResult(FrozenModel):
     archived: int
 
 
+class ForgetResult(FrozenModel):
+    """What one forget retracted, the erasure counterpart to a write's `WriteResult`.
+
+    documents: titles of the source notes whose derived claims were retracted, so the caller sees
+        exactly what was forgotten before it commits to the reversible retraction.
+    claims: how many live claims left the live graph, closed in `recorded` but kept in history.
+    """
+
+    documents: list[str]
+    claims: int
+
+
 class ReembedResult(FrozenModel):
     """How many stored vectors one re-embed pass wrote.
 
@@ -168,6 +180,36 @@ class GroupDeleted(FrozenModel):
     """
 
     group: str
+
+
+class KindDefined(FrozenModel):
+    """A newly added or refined ontology kind, the catalog write's own return.
+
+    name: the vocabulary member the catalog now carries.
+    kind: whether it is an entity type or a relation predicate.
+    """
+
+    name: str
+    kind: str
+
+
+class OntologyKindSummary(FrozenModel):
+    """One ontology kind with how much of the graph uses it, the curation review row shape.
+
+    name: the vocabulary member itself, the type or predicate a content row stores.
+    kind: entity for an entity type, relation for a fact predicate.
+    description: the one-line gloss the extraction prompt renders.
+    domain: the grouping tag, core, general, coding, research, finance, personal, or auto.
+    structural: whether the system writes this one and the extractor never emits it.
+    uses: how many live content rows currently carry this type or predicate.
+    """
+
+    name: str
+    kind: str
+    description: str
+    domain: str
+    structural: bool
+    uses: int
 
 
 class ProfileReport(FrozenModel):

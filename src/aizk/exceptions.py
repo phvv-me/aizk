@@ -16,7 +16,16 @@ class NotVisibleError(ValueError):
 
 
 class OntologyError(ValueError):
-    """A predicate or entity type outside the closed extraction ontology."""
+    """An ontology operation that violates a structural invariant, such as deactivating a
+    system-written entity type or relation."""
+
+
+class OntologyNotReadyError(RuntimeError):
+    """The ontology cache was read before `ops.setup()` ever refreshed it.
+
+    `setup` runs at server start, worker start, and test bootstrap alike, so reaching this
+    genuinely means a missed bootstrap, not a race worth papering over with a lazy default.
+    """
 
 
 class NotGroupAdminError(PermissionError):

@@ -84,6 +84,26 @@ Open items carried over from the earlier gap analysis, still unbuilt or partial.
   its chunks, and the claims derived from them, sweeping derived claims through `source_chunk_id`
   before that `SET NULL` foreign key erases the trail. A background GC pass then collects content
   rows left with zero claims, the same pass the known claim-less-orphan gap already needs.
+- [ ] **Compound-engineering borrows.** Every's compound-engineering plugin
+  (https://every.to/guides/compound-engineering, https://github.com/everyinc/compound-engineering-plugin)
+  is, mechanically, a weaker file-based cousin of aizk's capture→facts→recall loop: it writes typed
+  "Learnings" to `docs/solutions/` markdown, consolidates them with a hand-rolled ADD/UPDATE/NOOP,
+  refreshes stale ones, and grounds each plan against them. aizk's Stop-hook capture already is an
+  automatic `/ce-compound`, its SessionStart recall the grounding return arrow, its insight pass
+  the "Pattern generalized from several Learnings", and bi-temporal supersession subsumes their
+  whole `ce-compound-refresh`. Four ideas map cleanly onto existing machinery and are worth
+  borrowing: a first-class **DeadEnd/NegativeResult** entity (or a `rejected_because` relation) so
+  recall can warn "you tried X, it failed because Y", the most expensive and first-to-vanish
+  knowledge their bug track centers; a task-scoped **`ground(task)`** MCP tool that returns exactly
+  the Decisions/Patterns/Gotchas relevant to a described piece of work rather than the generic
+  recent-items recall; an **incident-versus-standing altitude** on facts, the mechanism for the
+  "learns standing preferences" goal where a durable preference is promoted from repeated
+  incident-level observations by a recurrence trigger on the insight pass; and **confidence
+  anchors** on the insight pass so an observation corroborated by N independent facts earns higher
+  confidence while a single-source one stays advisory and decays, the guardrail against the
+  reflective pass writing overconfident junk. Their execution harness (worktrees, PR automation,
+  CI repair) stays out of scope, aizk is the memory substrate such a harness stores into, not a
+  workflow orchestrator.
 
 ## v1.0.0
 

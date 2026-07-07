@@ -3,6 +3,7 @@ from pgqueuer import PgQueuer
 from pgqueuer.models import Job
 
 from ..config import settings
+from ..extract import ontology
 from ..store import Principal, system_session
 from .payloads import ChunkJob, ProfileJob, TaskJob
 from .queue import (
@@ -86,8 +87,15 @@ async def run_worker(batch_size: int = 10) -> None:
     has no reason to cap it any tighter, each entrypoint's own concurrency_limit already the real
     throttle.
 
+    The ontology cache refreshes here before the first job is dequeued, since the extraction
+    gate reads it and a worker is not guaranteed to run in a process that already bootstrapped
+    (the standalone `aizk worker` CLI, or a server started with `auto_setup` off, both crashed
+    every chunk job with `OntologyNotReadyError` otherwise).
+
     batch_size: maximum number of jobs the manager dequeues per round.
     """
+    async with system_session() as session:
+        await ontology.refresh(session)
     async with queue_connection() as connection:
         pg = PgQueuer.from_asyncpg_connection(connection)
         pg.entrypoint(EXTRACT_ENTRYPOINT, concurrency_limit=settings.graph_build_concurrency)(

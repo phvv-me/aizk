@@ -17,11 +17,10 @@ from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait
 
 from ..config import settings
 from ..exceptions import ExtractionUnreachableError
-from ..extract import journal
+from ..extract import journal, ontology
 from ..extract.dating import with_document_fallback
 from ..extract.llm import combined_extract, decide_consolidations_batch
 from ..extract.models import ConsolidationVerdict, ExtractedEntity, TimedFact
-from ..extract.ontology import EntityType
 from ..serving import Embedder, EntityGate
 from ..store import (
     Chunk,
@@ -40,6 +39,7 @@ from .consolidation import decide_by_rule, rank_pool
 from .dedupe import claim_entity, claim_fact, mint_content
 from .ids import entity_id, fact_id
 from .naming import normalize_name
+from .ontology_growth import resolve_suggested_type
 
 
 def is_transient_db_error(error: BaseException) -> bool:
@@ -486,41 +486,54 @@ async def graph_counts(principal_id: uuid.UUID) -> tuple[int, int]:
     return entities, facts
 
 
-async def document_tagged_project(session: AsyncSession, document_id: uuid.UUID) -> bool:
-    """Whether any sibling chunk of a document carries the #project tag.
+async def document_declared_type(session: AsyncSession, document_id: uuid.UUID) -> str | None:
+    """The structural type any sibling chunk of a document declares, Area or Project, else None.
 
-    Read only when a chunk's own text already matched journal.JOURNAL_LINE, never on the common
-    prose-only path. The tag can live in a different chunk than the one carrying the dated line
-    (often the front matter), so every sibling's text is scanned rather than only this chunk's own.
+    Read only for a journal-line chunk that does not itself carry the declaring tag, since the tag
+    usually lives in the front-matter chunk rather than the one carrying the dated line. Every
+    sibling's text is scanned rather than only this chunk's own.
 
     session: open, principal-scoped session.
     document_id: the chunk's parent document.
     """
     siblings = await session.scalars(select(Chunk.text).where(Chunk.document_id == document_id))
-    return any(journal.is_tagged_project(text) for text in siblings)
+    for text in siblings:
+        declared = journal.declared_type(text)
+        if declared is not None:
+            return declared
+    return None
 
 
 async def journal_extraction(
     principal_id: uuid.UUID, chunk: Chunk, document: Document | None
 ) -> tuple[list[ExtractedEntity], list[TimedFact]]:
-    """The chunk's dated journal-line title entity and facts, empty when it carries no such line.
+    """The note's declared title entity and any dated journal facts, empty when neither applies.
 
-    extract.journal's `- YYYY-MM-DD: text` convention is parsed deterministically here, with no
-    LLM call, into facts logged against the note's own title entity. A chunk that carries one of
-    these is never skipped by extract_min_chars purely for being short, since the line itself is
-    already the whole fact.
+    Two deterministic, no-LLM signals combine here, the trust-declared-structure path. A note that
+    declares its own kind through a #project or #area tag contributes its title as that typed
+    entity, so the projects and areas rosters are exactly the notes that named themselves rather
+    than whatever the extractor over-tagged. And extract.journal's `- YYYY-MM-DD: text` lines
+    contribute dated facts logged against that title. A chunk declaring nothing and carrying no
+    dated line returns empty, left to the LLM to characterize, and one carrying either is never
+    skipped by extract_min_chars for being short since the signal is already the whole fact.
 
-    principal_id: identity that will own the written claims, whose visibility scopes the
-        #project-tag sibling read.
-    chunk: the chunk whose text is scanned for a dated journal line.
+    principal_id: identity that will own the written claims, whose visibility scopes the sibling
+        tag read.
+    chunk: the chunk whose text is scanned for the declaring tag and the dated line.
     document: the chunk's parent document, null when it no longer exists.
     """
-    if not (journal.JOURNAL_LINE.search(chunk.text) and document is not None and document.title):
+    if document is None or not document.title:
         return [], []
-    async with acting_as(principal_id) as session:
-        tagged_project = await document_tagged_project(session, chunk.document_id)
-    entity = journal.title_entity(document.title, tagged_project)
-    return [entity], journal.journal_facts(chunk.text, document.title)
+    declared = journal.declared_type(chunk.text)
+    has_journal = bool(journal.JOURNAL_LINE.search(chunk.text))
+    if declared is None and not has_journal:
+        return [], []
+    if declared is None:
+        async with acting_as(principal_id) as session:
+            declared = await document_declared_type(session, chunk.document_id)
+    entity = journal.title_entity(document.title, declared)
+    facts = journal.journal_facts(chunk.text, document.title) if has_journal else []
+    return [entity], facts
 
 
 async def llm_extraction(
@@ -581,6 +594,23 @@ async def llm_extraction(
     return extraction.entities, with_document_fallback(extraction.facts, fallback)
 
 
+async def resolve_entity_type(writer: GraphWriter, entity: ExtractedEntity) -> str:
+    """The entity kind this entity should actually resolve against, growing the catalog when the
+    extractor named `Concept` but offered a more specific guess.
+
+    The wire schema's own grammar constrains `type` to the live catalog, so a genuinely new kind
+    can only ever arrive through `suggested_type`, never through `type` itself, `graph.
+    ontology_growth.resolve_suggested_type` is where that free-text guess becomes a real,
+    reusable kind rather than an ignored hint.
+
+    writer: this chunk's own GraphWriter, its session the auto-create cascade writes through.
+    entity: the extracted entity whose type may still be growing the ontology.
+    """
+    if entity.type != ontology.CONCEPT or entity.suggested_type is None:
+        return entity.type
+    return await resolve_suggested_type(writer.session, entity.suggested_type)
+
+
 async def resolve_entities(
     writer: GraphWriter, entities: list[ExtractedEntity]
 ) -> dict[str, uuid.UUID]:
@@ -591,7 +621,8 @@ async def resolve_entities(
     """
     resolved: dict[str, uuid.UUID] = {}
     for entity in entities:
-        content_id = await writer.resolve(entity.name, entity.type)
+        entity_type = await resolve_entity_type(writer, entity)
+        content_id = await writer.resolve(entity.name, entity_type)
         if content_id is not None:
             resolved[entity.name] = content_id
     return resolved
@@ -851,7 +882,7 @@ async def find_duplicates(session: AsyncSession) -> dict[uuid.UUID, uuid.UUID | 
     """
     entities = sorted(
         await session.scalars(
-            select(EntityContent).where(EntityContent.type != EntityType.RAPTOR_SUMMARY)
+            select(EntityContent).where(EntityContent.type != ontology.RAPTOR_SUMMARY)
         ),
         key=lambda entity: entity.id.bytes,
     )

@@ -17,27 +17,26 @@ from sqlalchemy.exc import DBAPIError
 
 from aizk.config import settings
 from aizk.exceptions import ExtractionUnreachableError
+from aizk.extract import ontology
 from aizk.extract.llm import client as llm_client
 from aizk.extract.models import (
     BatchConsolidationVerdict,
     ConsolidationVerdict,
-    LLMEntity,
-    LLMExtraction,
-    LLMFact,
+    ExtractedEntity,
     TimedFact,
 )
-from aizk.extract.ontology import EntityType, RelationType
 from aizk.graph.build import (
     GraphWriter,
     build_graph,
     dedup_entities,
     is_transient_db_error,
     redirect_entity,
+    resolve_entity_type,
 )
 from aizk.graph.ids import entity_id
 from aizk.serving import EntityGate
 from aizk.serving.embed import EmbedMode
-from aizk.store import EntityContent, FactClaim, FactContent, LiveFact, acting_as
+from aizk.store import EntityContent, EntityKind, FactClaim, FactContent, LiveFact, acting_as
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -321,7 +320,7 @@ def test_consolidate_applies_verdict(scenario: str, fixed_embedder: FixedEmbedde
                 resolved["Obj Two"] = await seedgraph.add_entity(session, owner, "Obj Two")
         fact = TimedFact(
             subject="Subject",
-            predicate=RelationType.RELATED_TO,
+            predicate="related_to",
             object="Obj Two" if scenario == "update" else "",
             statement="candidate fact",
             valid_from=now - timedelta(days=10) if scenario == "update" else None,
@@ -353,7 +352,7 @@ def test_consolidate_is_idempotent_and_reads_an_empty_pool(fixed_embedder: Fixed
         chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
         async with acting_as(owner) as session:
             subject = await seedgraph.add_entity(session, owner, "Subject")
-        fact = TimedFact(subject="Subject", predicate=RelationType.RELATED_TO, statement="only")
+        fact = TimedFact(subject="Subject", predicate="related_to", statement="only")
         async with acting_as(owner) as session:
             writer = GraphWriter(session, owner, ())
             empty = await writer.live_facts_by_subject(set())
@@ -401,7 +400,7 @@ def test_consolidate_defers_borderline_facts_to_the_batch(
             ),
         )
         facts = [
-            TimedFact(subject="Subject", predicate=RelationType.RELATED_TO, statement=text)
+            TimedFact(subject="Subject", predicate="related_to", statement=text)
             for text in ("first candidate", "second candidate")
         ]
         async with acting_as(owner) as session:
@@ -472,6 +471,51 @@ def test_close_superseded_claim_clamps_and_tolerates_a_vanished_target(scenario:
         assert lower is None and upper is not None  # undated retired claim, open lower bound
 
 
+def test_resolve_entity_type_passes_through_a_confident_type_unchanged(
+    fake_embedder: RecordingEmbedder,
+) -> None:
+    """An entity the extractor typed confidently never touches the auto-create cascade at all."""
+    entity = ExtractedEntity(name="Ada", type="Author")
+
+    async def body() -> str:
+        async with acting_as(await seedgraph.fresh_owner()) as session:
+            return await resolve_entity_type(GraphWriter(session, uuid.uuid4(), ()), entity)
+
+    assert dbutil.run(body()) == "Author"
+
+
+def test_resolve_entity_type_grows_the_catalog_for_a_concept_fallback_with_a_suggestion(
+    fake_embedder: RecordingEmbedder,
+) -> None:
+    """A Concept fallback carrying a suggestion resolves through the auto-create cascade, folding
+    into the identical description it names rather than staying Concept."""
+
+    async def body() -> tuple[str, str]:
+        owner = await seedgraph.fresh_owner()
+        async with acting_as(owner) as session:
+            await ontology.refresh(session)
+            name, description = (
+                await session.execute(select(EntityKind.name, EntityKind.description).limit(1))
+            ).one()
+            entity = ExtractedEntity(
+                name="Something", type=ontology.CONCEPT, suggested_type=description
+            )
+            resolved = await resolve_entity_type(GraphWriter(session, owner, ()), entity)
+        return resolved, name
+
+    try:
+        resolved_type, existing_name = dbutil.run(body())
+        assert resolved_type == existing_name
+    finally:
+        dbutil.run(dbutil.admin_exec("DELETE FROM entity_kind WHERE domain = 'auto'"))
+
+        async def restore() -> None:
+            async with acting_as(await seedgraph.fresh_owner()) as session:
+                await ontology.refresh(session)
+
+        dbutil.run(restore())
+
+
 def test_build_graph_writes_a_slice_then_resumes(
     fake_llm: FakeLLM, fake_embedder: RecordingEmbedder, fake_gate: FakeGate
 ) -> None:
@@ -480,16 +524,15 @@ def test_build_graph_writes_a_slice_then_resumes(
     A chunk stays pending until its `processed_at` is stamped, so a build resumed after the slice
     landed reprocesses nothing and reports a zero delta the second time.
     """
+    snapshot = ontology.current()
     fake_llm.register(
-        LLMExtraction,
-        LLMExtraction(
+        snapshot.llm_extraction,
+        snapshot.llm_extraction(
             e=[
-                LLMEntity(n="Ada", t=EntityType.AUTHOR),
-                LLMEntity(n="Notes", t=EntityType.CONCEPT),
+                snapshot.llm_entity(n="Ada", t="Author"),
+                snapshot.llm_entity(n="Notes", t="Concept"),
             ],
-            f=[
-                LLMFact(s="Ada", p=RelationType.RELATED_TO, o="Notes", statement="Ada keeps notes")
-            ],
+            f=[snapshot.llm_fact(s="Ada", p="related_to", o="Notes", statement="Ada keeps notes")],
         ),
     )
 
@@ -511,17 +554,18 @@ def test_build_graph_source_filter_drops_a_path_and_skips_a_ghost_subject(
     """The source title selects one chunk, a repeated name reuses its node, a path drops, a ghost
     subject's fact is skipped, leaving one entity and one fact, with the gate disabled."""
     monkeypatch.setattr(settings, "gliner_gate_enabled", False)
+    snapshot = ontology.current()
     fake_llm.register(
-        LLMExtraction,
-        LLMExtraction(
+        snapshot.llm_extraction,
+        snapshot.llm_extraction(
             e=[
-                LLMEntity(n="Ada", t=EntityType.AUTHOR),
-                LLMEntity(n="Ada", t=EntityType.AUTHOR),
-                LLMEntity(n="notes/graph_rag.md", t=EntityType.CONCEPT),
+                snapshot.llm_entity(n="Ada", t="Author"),
+                snapshot.llm_entity(n="Ada", t="Author"),
+                snapshot.llm_entity(n="notes/graph_rag.md", t="Concept"),
             ],
             f=[
-                LLMFact(s="Ada", p=RelationType.RELATED_TO, statement="Ada keeps notes"),
-                LLMFact(s="ghost", p=RelationType.RELATED_TO, statement="ghost drifts"),
+                snapshot.llm_fact(s="Ada", p="related_to", statement="Ada keeps notes"),
+                snapshot.llm_fact(s="ghost", p="related_to", statement="ghost drifts"),
             ],
         ),
     )
@@ -596,7 +640,7 @@ def test_journal_line_logs_a_dated_project_fact(fake_embedder: RecordingEmbedder
             projects = await session.scalar(
                 select(func.count())
                 .select_from(EntityContent)
-                .where(EntityContent.type == EntityType.PROJECT)
+                .where(EntityContent.type == ontology.PROJECT)
             )
         return entities, facts, projects or 0
 
@@ -657,7 +701,7 @@ def test_build_graph_marks_processed_on_an_unfinishable_extraction(
         error: BaseException = LengthFinishReasonError.__new__(LengthFinishReasonError)
     else:
         try:
-            LLMExtraction(e="truncated", f=[])
+            ontology.current().llm_extraction(e="truncated", f=[])
             raise AssertionError("expected a ValidationError")
         except ValidationError as caught:
             error = caught

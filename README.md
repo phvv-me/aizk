@@ -15,51 +15,54 @@
 
 A self-hosted multi-tenant memory engine that turns a Zettelkasten into scoped agent-queryable memory over MCP
 
-An AI assistant forgets everything between sessions, and sharing one assistant across a team or
-household needs private, project, and overlapping-group knowledge to stay properly separated.
-aizk is a single self-hosted Postgres database that gives an assistant real memory over MCP,
-with the visibility rules enforced by the database itself. See
-[phvv.me/aizk](https://phvv.me/aizk) for what this means in plain language and how it works.
+## What this is
 
-## Install
+aizk is a memory an AI assistant can actually keep. Text goes in, an entity and fact knowledge
+graph comes out, addressed by meaning so the same knowledge extracted twice never duplicates.
+Everything lives in one self-hosted Postgres, and row level security enforces who can see what
+at the database layer, private notes, shared projects, and overlapping groups never cross. It
+speaks MCP, so Claude or any other MCP-capable assistant calls it directly. Full explanation at
+[phvv.me/aizk](https://phvv.me/aizk).
+
+## Quickstart
+
+One command brings up the whole engine, Postgres, the embed, rerank, and extraction containers,
+and one aizk container that is the MCP server, the background worker, and the scheduled auto-backup
+at once. It migrates and comes up ready over HTTP with nothing else to run.
 
 ```sh
-pip install aizk
+docker compose up -d
 ```
 
-## Use
-
-Bring up Postgres and the model containers with `docker compose up`, start the server with
-`aizk serve-mcp`, then call its tools from any MCP client.
+Then call its tools from any MCP client.
 
 ```python
 from fastmcp import Client
 
-async with Client("http://localhost:8000/mcp") as client:
+async with Client("http://localhost:8080/mcp") as client:
     await client.call_tool("remember", {"text": "aizk runs entirely on local hardware."})
     result = await client.call_tool("recall", {"query": "where does aizk run?"})
     print(result.data)
 ```
 
-## Configuration
+Every docker-compose knob and every `Settings` default live in one file, `.env.example`, copy
+it to `.env` and edit, both compose and the app read the same `AIZK_`-prefixed variables. Running
+the server, worker, or backup outside the container is a plain `pip install aizk` and the matching
+`aizk` command. See [Operations](https://phvv.me/aizk/operations/) for deployment and backups.
 
-Every docker-compose knob, the `initdb/roles.sh` role password, and every `Settings` default live
-in one file, `.env.example`. Copy it to `.env` and edit; docker compose and the app both read the
-same `AIZK_`-prefixed variables, so one edit moves both.
+## The flows
 
-## Documentation
+```mermaid
+flowchart LR
+    A[agent] -->|remember, ingest| W[write path<br/>chunk, extract, consolidate]
+    A -->|recall, get_context| Re[read path<br/>fused retrieval]
+    W --> P[(Postgres<br/>knowledge graph + row level security)]
+    Re --> P
+    P --> Re --> A
+```
 
-Full documentation lives at [https://phvv.me/aizk](https://phvv.me/aizk).
-
-For LLM-assisted use, start with [`llms.txt`](https://phvv.me/aizk/llms.txt).
-
-## Development
-
-The dev environment is managed by [uv](https://docs.astral.sh/uv/).
-
-- Install: `uv sync --extra dev`
-- Lint: `uv run ruff check . && uv run ruff format --check .`
-- Typecheck: `uv run mypy src && uv run pyrefly check`
-- Test: `uv run pytest -q`
-- Docs: `uv run --extra docs mkdocs build -d site`
-- Build: `uv build`
+Writing turns text into a typed entity and fact graph, one content row shared by meaning plus
+one scoped, bi-temporal claim per owner. Reading fuses five retrieval lanes behind one Postgres
+round trip, filtered to exactly what the caller's own scopes make visible before a row is ever
+considered. The full breakdown of both, with a diagram for each stage, lives in
+[Engine](https://phvv.me/aizk/engine/).

@@ -9,6 +9,7 @@ from fastmcp.exceptions import ToolError
 from fastmcp.tools.tool import FunctionTool
 from loguru import logger
 from mainboard.profiling import default_collector, enable_spans
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import export, graph, ops, retrieval
@@ -27,21 +28,36 @@ from ..eval.scale import ScaleReport
 from ..eval.sweep import SweepReport
 from ..exceptions import NotGroupAdminError
 from ..extract import ingest as extract_ingest
-from ..graph.timeline import ProjectSummary, TimelineEntry
+from ..extract import ontology
 from ..ops import HealthReport, SetupReport
-from ..retrieval import ContextPack, RecallResult
-from ..store import Group, acting_as, system_session
+from ..retrieval import ContextPack
+from ..serving import Embedder
+from ..store import (
+    Chunk,
+    Document,
+    EntityContent,
+    EntityKind,
+    FactClaim,
+    FactContent,
+    Group,
+    RelationKind,
+    acting_as,
+    system_session,
+)
 from ..store import Principal as PrincipalRow
 from .middleware import AnonymousRateLimit, PrincipalMiddleware
 from .models import (
     DecayResult,
+    ForgetResult,
     GraphBuildResult,
     GroupCreated,
     GroupDeleted,
     GroupFlag,
     GroupSummary,
     IngestResult,
+    KindDefined,
     MembershipChange,
+    OntologyKindSummary,
     PendingFact,
     PrincipalSummary,
     ProfileReport,
@@ -144,19 +160,29 @@ async def resolve_scopes(scopes: str | None, principal_id: uuid.UUID) -> tuple[u
 
 
 @server.tool
-async def recall(query: str, scopes: str | None = None, k: int = 8) -> RecallResult:
-    """Recall the most relevant memory for a query as compact facts and source snippets.
+async def recall(query: str, scopes: str | None = None, budget: int | None = None) -> ContextPack:
+    """Recall everything the memory holds on a question as one ready, ranked context pack.
 
-    query: what to recall context about.
+    The single retrieval verb. Ask a specific natural-language question, such as "what are the
+    ongoing projects", "what is the SPReAD project about", or "what changed in finances lately",
+    and the server does the whole retrieval itself. It fuses reranked source passages, the matching
+    latest facts and their graph neighbors, the personalized-pagerank reach, the community and
+    RAPTOR summaries, and any still-working session items into token-budgeted blocks, the broad
+    view first and the raw sources last. One call returns a pack ready to reason over, with no lane
+    to choose and no follow-up read. Ask a sharper question rather than a second call.
+
+    query: the question to pull context for, natural language, as specific as you can make it.
     scopes: comma-separated group names narrowing the read to that combination's composed graph
         (`"finance,business"` reads only what is scoped to exactly that pair together), the whole
         visible union of private and every member and public scope otherwise. Naming any scopes
         excludes the caller's own private notes, which surface only when scopes is left null.
-    k: how many hits and seed facts to surface.
+    budget: token ceiling the pack fits within, the configured default when null.
     """
     principal = current_principal()
     lens = await resolve_scopes(scopes, principal.id)
-    return await retrieval.recall(query, principal_id=principal.id, k=k, scopes=lens)
+    return await retrieval.assemble_context_pack(
+        query, principal_id=principal.id, token_budget=budget, scopes=lens
+    )
 
 
 @server.tool
@@ -183,29 +209,6 @@ async def remember(text: str, scopes: str | None = None, kind: str = "note") -> 
 
 
 @server.tool
-async def get_context(
-    query: str, scopes: str | None = None, token_budget: int | None = None
-) -> ContextPack:
-    """Assemble a token-budgeted, prompt-ready context pack for a query, mixing every source.
-
-    Recalls for the query and packs the fused profiles, community and RAPTOR summaries, facts,
-    and still-working session items into blocks that fit the token budget, the broad view first
-    and the raw sources last, so an agent reads one ready pack without choosing the mix. The pack
-    reuses recall under the caller's own visibility.
-
-    query: what to assemble context about.
-    scopes: comma-separated group names narrowing the read to that combination's composed graph,
-        the whole visible union otherwise.
-    token_budget: token ceiling the pack fits within, the configured default when null.
-    """
-    principal = current_principal()
-    lens = await resolve_scopes(scopes, principal.id)
-    return await retrieval.assemble_context_pack(
-        query, principal_id=principal.id, token_budget=token_budget, scopes=lens
-    )
-
-
-@server.tool
 async def reference(uri: str, scopes: str | None = None) -> WriteResult:
     """Record a reference to a paper, url, or file so it is recallable later.
 
@@ -216,37 +219,6 @@ async def reference(uri: str, scopes: str | None = None) -> WriteResult:
     target = await resolve_scopes(scopes, principal.id)
     document_id = await extract_ingest.record_reference(uri, owner_id=principal.id, scopes=target)
     return WriteResult(id=document_id)
-
-
-@server.tool
-async def timeline(
-    since_days: float = 7.0, entity: str | None = None, scopes: str | None = None
-) -> list[TimelineEntry]:
-    """Read the weekly-review timeline, the claims recorded in the trailing window, newest first.
-
-    Facts work like an events table, so every claim recorded in the window surfaces regardless of
-    its own valid-time, a note's dated journal lines and any other recently learned fact alike.
-
-    since_days: how many trailing days to read, a week by default.
-    entity: when set, only facts whose subject or object name matches this substring.
-    scopes: comma-separated group names narrowing the read to that combination's composed graph,
-        the whole visible union otherwise.
-    """
-    principal = current_principal()
-    lens = await resolve_scopes(scopes, principal.id)
-    return await graph.timeline(principal.id, since_days=since_days, entity=entity, scopes=lens)
-
-
-@server.tool
-async def projects(scopes: str | None = None) -> list[ProjectSummary]:
-    """List every visible Project entity with its profile and its 3 most recent timeline facts.
-
-    scopes: comma-separated group names narrowing the read to that combination's composed graph,
-        the whole visible union otherwise.
-    """
-    principal = current_principal()
-    lens = await resolve_scopes(scopes, principal.id)
-    return await graph.projects(principal.id, scopes=lens)
 
 
 async def resolve_group_admin(session: AsyncSession, group: str) -> Group:
@@ -352,6 +324,39 @@ async def force_decay(half_life_days: float = 90.0) -> DecayResult:
     principal = current_principal()
     archived = await graph.decay(principal_id=principal.id, half_life_days=half_life_days)
     return DecayResult(archived=archived)
+
+
+@server.admin_tool
+async def forget(query: str, k: int = 8) -> ForgetResult:
+    """Retract the claims a query's own source notes contributed, remember's erasure counterpart.
+
+    Where decay forgets by age, this forgets by provenance. It finds the notes most relevant to
+    the query and closes the recorded range on every live claim derived from them, so knowledge
+    that should never have been mined leaves live recall while the notes themselves stay indexable.
+    Reversible and admin-grade, nothing is deleted, the claims keep their history and an as-of read
+    still sees them, so describe what to forget the way you would recall it and start narrow.
+
+    query: what to forget, described the way you would recall it.
+    k: how many of the most relevant source notes to retract the derived claims of.
+    """
+    principal = current_principal()
+    [vector] = await Embedder().embed([query], mode="query")
+    async with acting_as(principal.id) as session:
+        ranked = (
+            await session.execute(
+                select(Chunk.document_id)
+                .order_by(Chunk.embedding.cosine_distance(vector))
+                .limit(k * 4)
+            )
+        ).scalars()
+        doc_ids = list(dict.fromkeys(ranked))[:k]
+        titles = list(
+            (
+                await session.execute(select(Document.title).where(Document.id.in_(doc_ids)))
+            ).scalars()
+        )
+        retracted = await FactClaim.forget_from_documents(session, doc_ids)
+    return ForgetResult(documents=[t for t in titles if t], claims=len(retracted))
 
 
 @server.admin_tool
@@ -603,6 +608,90 @@ async def grant_admin(principal: str) -> PrincipalSummary:
             raise ToolError(f"no principal {principal!r}")
         await target.grant_admin(session)
     return PrincipalSummary(id=target.id, display_name=target.display_name, is_admin=True)
+
+
+@server.admin_tool
+async def define_entity_kind(name: str, description: str, domain: str = "general") -> KindDefined:
+    """Add or refine an entity type in the live ontology, the agent's own vocabulary bookkeeping.
+
+    Writes the type into the catalog and refreshes the extraction snapshot, so the very next
+    extraction may emit it, and the same call over a name already present just sharpens its gloss.
+    This is how the harness agent keeps the vocabulary clear, adding Area beside Project or
+    splitting an over-broad type, with no code change and no migration. The catalog only grows,
+    there is no delete, so curation here is always add or refine.
+
+    name: the type a content row stores, a noun in PascalCase such as Area or Milestone.
+    description: one-line gloss the extraction prompt renders and the auto-create fold matches.
+    domain: grouping tag, general by default, or core, coding, research, finance, personal.
+    """
+    async with system_session() as session:
+        await EntityKind.define(session, name, description, domain)
+        await ontology.refresh(session)
+    return KindDefined(name=name, kind="entity")
+
+
+@server.admin_tool
+async def define_relation_kind(
+    name: str, description: str, domain: str = "general"
+) -> KindDefined:
+    """Add or refine a relation predicate in the live ontology, the agent's vocabulary bookkeeping.
+
+    Writes the predicate into the catalog and refreshes the extraction snapshot, so the very next
+    extraction may emit it, and a repeat call over a name already present just sharpens its gloss.
+    Grow-only like its entity twin, so curation is always add or refine, never delete.
+
+    name: the predicate a fact stores, a snake_case verb phrase such as part_of or funds.
+    description: one-line gloss the extraction prompt renders and the auto-create fold matches.
+    domain: grouping tag, general by default, or core, coding, research, finance, personal.
+    """
+    async with system_session() as session:
+        await RelationKind.define(session, name, description, domain)
+        await ontology.refresh(session)
+    return KindDefined(name=name, kind="relation")
+
+
+@server.admin_tool
+async def list_ontology() -> list[OntologyKindSummary]:
+    """List every ontology kind with how much of the graph uses it, the curation review surface.
+
+    Entity types first, then relation predicates, each with the count of live content rows that
+    carry it, so the agent sees the whole vocabulary at once and can tell a load-bearing type from
+    dead weight worth folding into another, the read half of managing the ontology.
+    """
+    async with system_session() as session:
+        entity_uses = dict(
+            (
+                await session.execute(
+                    select(EntityContent.type, func.count()).group_by(EntityContent.type)
+                )
+            ).all()
+        )
+        relation_uses = dict(
+            (
+                await session.execute(
+                    select(FactContent.predicate, func.count()).group_by(FactContent.predicate)
+                )
+            ).all()
+        )
+        entity_kinds = list(await session.scalars(select(EntityKind).order_by(EntityKind.name)))
+        relation_kinds = list(
+            await session.scalars(select(RelationKind).order_by(RelationKind.name))
+        )
+    return [
+        OntologyKindSummary(
+            name=kind.name,
+            kind=label,
+            description=kind.description,
+            domain=kind.domain,
+            structural=kind.structural,
+            uses=uses.get(kind.name, 0),
+        )
+        for label, kinds, uses in (
+            ("entity", entity_kinds, entity_uses),
+            ("relation", relation_kinds, relation_uses),
+        )
+        for kind in kinds
+    ]
 
 
 @server.admin_tool

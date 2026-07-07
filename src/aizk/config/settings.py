@@ -126,6 +126,18 @@ class Settings(BaseSettings):
         names both DSNs connect as, so only the password varies deployment to deployment.
     anon_rate_per_second: token-bucket rate anonymous HTTP callers may call tools at. Authenticated
         principals pass unthrottled.
+    backup_cron: crontab the scheduled `BackupTask` dumps the whole database on, daily before dawn
+        by default, only fired when `backup_enabled` is set.
+    backup_database_url: libpq URL the `backup`/`restore` tools connect with, empty to use
+        `admin_asyncpg_dsn` (the host-mapped owner DSN). Set to the container-internal owner URL
+        (Postgres on its own `5432`, not the host-mapped port) when `pg_client_launcher` runs the
+        tools inside the database container.
+    backup_dir: directory the scheduled `BackupTask` writes its timestamped dumps to, a mounted
+        volume in the container so backups outlive it. Required when `backup_enabled` is set.
+    backup_enabled: whether the worker registers the `BackupTask` cron at all, off by default so a
+        plain host run never dumps, on in the container which mounts `backup_dir` and enables it.
+    backup_keep_days: age past which the scheduled backup prunes an old dump, so the directory
+        does not grow without bound.
     anonymous_principal_id: all-zero identity an unauthenticated caller acts as, reading only
         public scopes. Fixed, not configurable, since the moat predicate's `::uuid` cast depends
         on every unscoped session binding this exact value.
@@ -289,9 +301,15 @@ class Settings(BaseSettings):
     mcp_host: interface the HTTP MCP server binds when mcp_http is set.
     mcp_http: serve the MCP server over streamable HTTP instead of stdio.
     mcp_port: port the HTTP MCP server listens on when mcp_http is set.
+    ontology_growth_threshold: cosine similarity at or above which the auto-create cascade folds
+        an extractor's suggested type into an existing entity kind rather than minting a new one.
     ontology_prompt_template: ontology guidance every extraction strategy layers on, a
         `str.format` template with entity_count/entity_types/relation_count/relation_types
-        placeholders `extract.ontology.ONTOLOGY_PROMPT` fills at import time.
+        placeholders `extract.ontology.cache.build_snapshot` fills from the live catalog.
+    pg_client_launcher: command prefix the `backup`/`restore` tools run `pg_dump`/`pg_restore`
+        through, empty to run the host's own binaries. The client must be at least the server's
+        version, so a compose deployment sets this to run the tools inside the database container
+        whose binaries match by construction, e.g. `["docker", "exec", "-i", "aizk-db-1"]`.
     ppr: whether recall expands the seed facts through personalized pagerank for multi-hop reach.
     ppr_alpha: damping for personalized pagerank, the chance of following an edge over teleport.
     ppr_margin: cosine-similarity floor a multi-hop pagerank fact must clear before recall folds
@@ -369,6 +387,11 @@ class Settings(BaseSettings):
         fusions.
     self_improve_cron: crontab the self-improve fan-out fires on, weekly by default.
     self_improve_enabled: whether the scheduler fans the weekly self-evaluation across principals.
+    serve_with_worker: whether `serve-mcp` also runs the background worker in its own process,
+        gathered on the one event loop, so a single container is server, worker, and scheduled
+        backup at once. On by default for that single-box case, set off to run the server alone
+        beside a separate `aizk worker`, the split a horizontally scaled deployment wants so its
+        extra server replicas never each fire the crons.
     self_improve_max_p: largest ranx significance p-value the weekly pass accepts before flipping
         a config axis, low by default so a noisy delta never flips it.
     session_promote_age_minutes: age in minutes after which an unpromoted session item is fed into
@@ -413,6 +436,11 @@ class Settings(BaseSettings):
     anonymous_principal_id: uuid.UUID = uuid.UUID(int=0)
     app_password: str = "aizk_app"
     auto_setup: bool = True
+    backup_cron: str = "0 2 * * *"
+    backup_database_url: str = ""
+    backup_dir: str = ""
+    backup_enabled: bool = False
+    backup_keep_days: int = 14
     benchmarks_enabled: bool = False
     bm25_backend: str = "vchord_bm25"
     chunk_denylist: str = (
@@ -500,7 +528,9 @@ class Settings(BaseSettings):
     mcp_host: str = "127.0.0.1"
     mcp_http: bool = False
     mcp_port: int = 8000
+    ontology_growth_threshold: float = 0.85
     ontology_prompt_template: str = ONTOLOGY_PROMPT_TEMPLATE
+    pg_client_launcher: list[str] = []
     ppr: bool = True
     ppr_alpha: float = 0.5
     ppr_margin: float = 0.35
@@ -548,6 +578,7 @@ class Settings(BaseSettings):
     session_promote_enabled: bool = True
     session_promote_threshold: int = 20
     session_recall_k: int = 5
+    serve_with_worker: bool = True
     similar_facts: int = 5
     skip_live_gate: str = "aizk_skip_live_gate"
     snippet_chars: int = 280

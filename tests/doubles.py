@@ -6,11 +6,8 @@ from patos import SingletonMeta
 from pydantic import BaseModel
 
 from aizk.config import settings
-from aizk.extract.models import (
-    BatchConsolidationVerdict,
-    ConsolidationVerdict,
-    LLMExtraction,
-)
+from aizk.extract import ontology
+from aizk.extract.models import BatchConsolidationVerdict, ConsolidationVerdict
 from aizk.graph.models import (
     CommunitySummary,
     CurationReview,
@@ -136,19 +133,27 @@ def install_fake_reranker(reranker: RecordingReranker | None) -> RecordingRerank
 def default_response(schema: type[BaseModel]) -> BaseModel:
     """A minimal valid instance of one extractor or summarizer schema, the fake LLM's fallback.
 
+    Keyed by `schema.__name__` rather than the class object itself, since the combined
+    extraction call's wire schema (`ontology.current().llm_extraction`) is rebuilt fresh from
+    the live catalog on every `ontology.refresh`, a different class object each time under the
+    same name, so identity is not a stable key across a test's lifetime the way it is for every
+    other, statically defined schema here.
+
     schema: the response model the seam asked the LLM for.
     """
-    defaults: dict[type[BaseModel], BaseModel] = {
-        LLMExtraction: LLMExtraction(e=[], f=[]),
-        BatchConsolidationVerdict: BatchConsolidationVerdict(verdicts=[]),
-        ConsolidationVerdict: ConsolidationVerdict(action="ADD"),
-        CommunitySummary: CommunitySummary(label="cluster theme", summary="a grounded paragraph"),
-        ProfileReport: ProfileReport(summary="a static and dynamic paragraph"),
-        RaptorReport: RaptorReport(label="broad theme", summary="a rolled-up paragraph"),
-        InsightReport: InsightReport(observations=[]),
-        CurationReview: CurationReview(verdicts=[]),
+    defaults: dict[str, BaseModel] = {
+        "LLMExtraction": ontology.current().llm_extraction(e=[], f=[]),
+        BatchConsolidationVerdict.__name__: BatchConsolidationVerdict(verdicts=[]),
+        ConsolidationVerdict.__name__: ConsolidationVerdict(action="ADD"),
+        CommunitySummary.__name__: CommunitySummary(
+            label="cluster theme", summary="a grounded paragraph"
+        ),
+        ProfileReport.__name__: ProfileReport(summary="a static and dynamic paragraph"),
+        RaptorReport.__name__: RaptorReport(label="broad theme", summary="a rolled-up paragraph"),
+        InsightReport.__name__: InsightReport(observations=[]),
+        CurationReview.__name__: CurationReview(verdicts=[]),
     }
-    return defaults[schema]
+    return defaults[schema.__name__]
 
 
 @dataclass
@@ -179,12 +184,13 @@ class FakeCompletions:
     summarizer and extractor that flows through `structured` runs without the local model. This
     replaces the one external LLM process at its seam, never any of our own classes.
 
-    responses: per-schema overrides the test installs, falling back to a minimal valid default.
+    responses: per-schema-name overrides the test installs, falling back to a minimal valid
+        default. Keyed by name rather than the class object, see `default_response`.
     calls: every turn's kwargs, normalized to `response_model`/`messages` keys.
     """
 
     def __init__(self) -> None:
-        self.responses: dict[type[BaseModel], BaseModel] = {}
+        self.responses: dict[str, BaseModel] = {}
         self.calls: list[dict[str, object]] = []
 
     async def parse(
@@ -219,7 +225,7 @@ class FakeCompletions:
                 "extra_body": extra_body,
             }
         )
-        parsed = self.responses.get(response_format) or default_response(response_format)
+        parsed = self.responses.get(response_format.__name__) or default_response(response_format)
         return FakeParsedCompletion(choices=[FakeChoice(FakeMessage(parsed))])
 
 
@@ -243,10 +249,11 @@ class FakeLLM:
     def register(self, schema: type[BaseModel], response: BaseModel) -> None:
         """Pin the parsed instance the fake returns for one response schema.
 
-        schema: the response_format a `structured` call will ask for.
+        schema: the response_format a `structured` call will ask for, matched by name, see
+            `default_response`.
         response: the instance to hand back for that schema.
         """
-        self.completions.responses[schema] = response
+        self.completions.responses[schema.__name__] = response
 
 
 @dataclass

@@ -8,7 +8,6 @@ from hypothesis import strategies as st
 
 from aizk.config import settings
 from aizk.extract.models import ConsolidationVerdict
-from aizk.extract.ontology import RelationType
 from aizk.graph.consolidation import cosine_similarity, decide_by_rule, rank_pool
 
 
@@ -79,7 +78,7 @@ def test_rank_pool_sorts_desc_skips_unembedded_and_caps() -> None:
 
 def test_decide_by_rule_add_when_no_similar_claims() -> None:
     """A subject with no existing claim is a trivial ADD, no LLM deferral."""
-    assert decide_by_rule(RelationType.USES, None, []) == ConsolidationVerdict(action="ADD")
+    assert decide_by_rule("uses", None, []) == ConsolidationVerdict(action="ADD")
 
 
 def test_decide_by_rule_similarity_bands() -> None:
@@ -89,10 +88,8 @@ def test_decide_by_rule_similarity_bands() -> None:
     below = floor - 0.05
     band = (floor + auto) / 2
     best = build_live_fact(predicate="uses", object_id=None)
-    assert decide_by_rule(RelationType.USES, None, [(best, below)]) == (
-        ConsolidationVerdict(action="ADD")
-    )
-    assert decide_by_rule(RelationType.USES, None, [(best, band)]) is None
+    assert decide_by_rule("uses", None, [(best, below)]) == (ConsolidationVerdict(action="ADD"))
+    assert decide_by_rule("uses", None, [(best, band)]) is None
 
 
 def test_decide_by_rule_auto_merge_noop_update_and_add() -> None:
@@ -101,14 +98,12 @@ def test_decide_by_rule_auto_merge_noop_update_and_add() -> None:
     obj = uuid.uuid4()
     best = build_live_fact(predicate="uses", object_id=obj)
     # same predicate and object: a near-duplicate, NOOP
-    assert decide_by_rule(RelationType.USES, obj, [(best, auto)]) == (
-        ConsolidationVerdict(action="NOOP")
-    )
+    assert decide_by_rule("uses", obj, [(best, auto)]) == (ConsolidationVerdict(action="NOOP"))
     # same predicate, different object: the value changed, UPDATE superseding the old claim
     other = uuid.uuid4()
-    verdict = decide_by_rule(RelationType.USES, other, [(best, auto)])
+    verdict = decide_by_rule("uses", other, [(best, auto)])
     assert verdict == ConsolidationVerdict(action="UPDATE", supersedes=best.id)
     # different predicate: a genuinely different assertion, ADD
-    assert decide_by_rule(RelationType.DEPENDS_ON, obj, [(best, auto)]) == (
+    assert decide_by_rule("depends_on", obj, [(best, auto)]) == (
         ConsolidationVerdict(action="ADD")
     )

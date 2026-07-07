@@ -85,12 +85,17 @@ class Seams:
         self.enable_spans = Recorder()
         self.worker = Recorder(is_async=True)
         self.install_queue = Recorder(is_async=True)
-        self.serve = Recorder()
+        self.serve_http = Recorder(is_async=True)
+        self.serve_stdio = Recorder(is_async=True)
         self.recall = Recorder(ret=Pack([Block("fact", "codec shipped")]), is_async=True)
         self.ingest = Recorder(ret=DOC_ID, is_async=True)
         self.enqueue = Recorder(is_async=True)
         self.run_scale = Recorder(ret=Rendered("SCALE-CURVE"), is_async=True)
         self.create_principal = Recorder(ret=SimpleNamespace(id=USER_ID), is_async=True)
+        self.backup = Recorder(ret=SimpleNamespace(bytes=7, path="/tmp/x.dump"), is_async=True)
+        self.restore = Recorder(
+            ret=SimpleNamespace(path="/tmp/x.dump", database="aizk"), is_async=True
+        )
 
 
 @pytest.fixture
@@ -113,7 +118,10 @@ def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
     monkeypatch.setattr(cli, "ingest_text", seams.ingest)
     monkeypatch.setattr(cli, "enqueue_pending", seams.enqueue)
     monkeypatch.setattr(cli, "create_user_principal", seams.create_principal)
-    monkeypatch.setattr(mcp_server.server, "run", seams.serve)
+    monkeypatch.setattr(cli.backup_ops, "backup_database", seams.backup)
+    monkeypatch.setattr(cli.backup_ops, "restore_database", seams.restore)
+    monkeypatch.setattr(mcp_server.server, "run_http_async", seams.serve_http)
+    monkeypatch.setattr(mcp_server.server, "run_stdio_async", seams.serve_stdio)
     monkeypatch.setattr(eval_scale, "run_scale_benchmark", seams.run_scale)
     return seams
 
@@ -152,12 +160,24 @@ def check_create_user(seams: Seams, out: str) -> None:
     assert str(USER_ID) in out
 
 
+def check_backup(seams: Seams, out: str) -> None:
+    assert seams.backup.args == ("/tmp/x.dump",)
+    assert "backed up 7 bytes to /tmp/x.dump" in out
+
+
+def check_restore(seams: Seams, out: str) -> None:
+    assert seams.restore.args == ("/tmp/x.dump",)
+    assert "restored /tmp/x.dump into aizk" in out
+
+
 COMMANDS: list[tuple[str, list[str], Callable[[Seams, str], None]]] = [
     ("migrate", ["migrate"], check_migrate),
     ("makemigrations", ["makemigrations", "add col"], check_makemigrations),
     ("install-queue", ["install-queue"], check_install_queue),
     ("scale", ["scale", "--sizes", "1,2", "--k", "4", "--recall-p95-ms", "50"], check_scale),
     ("create-user", ["create-user", "alice"], check_create_user),
+    ("backup", ["backup", "/tmp/x.dump"], check_backup),
+    ("restore", ["restore", "/tmp/x.dump"], check_restore),
 ]
 
 
@@ -255,20 +275,27 @@ def test_check_rls_gates_on_violations(
 
 
 @pytest.mark.parametrize("over_http", [True, False])
-def test_serve_mcp_selects_the_transport_on_the_http_flag(
-    seams: Seams, settings: Settings, monkeypatch: pytest.MonkeyPatch, over_http: bool
+@pytest.mark.parametrize("with_worker", [True, False])
+def test_serve_mcp_gathers_the_transport_and_optionally_the_worker(
+    seams: Seams,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    over_http: bool,
+    with_worker: bool,
 ) -> None:
-    """serve-mcp runs the module server over http when mcp_http is set, plain stdio otherwise."""
+    """serve-mcp runs http or stdio, gathering the worker on one loop when serve_with_worker."""
     monkeypatch.setattr(settings, "mcp_http", over_http)
     monkeypatch.setattr(settings, "mcp_port", 9999)
+    monkeypatch.setattr(settings, "serve_with_worker", with_worker)
 
     dispatch(["serve-mcp"])
 
-    assert seams.serve.count == 1
-    assert bool(seams.serve.kwargs) == over_http  # http carries transport kwargs, stdio runs bare
     if over_http:
-        assert seams.serve.kwargs["transport"] == "http"
-        assert seams.serve.kwargs["port"] == 9999
+        assert seams.serve_http.count == 1 and seams.serve_stdio.count == 0
+        assert seams.serve_http.kwargs["port"] == 9999
+    else:
+        assert seams.serve_stdio.count == 1 and seams.serve_http.count == 0
+    assert seams.worker.count == (1 if with_worker else 0)
 
 
 def test_capture_session_ingests_the_transcript_and_enqueues_extraction(

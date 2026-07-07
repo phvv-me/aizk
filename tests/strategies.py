@@ -1,19 +1,12 @@
 from datetime import UTC, datetime, timedelta
+from typing import Protocol, cast
 
 from hypothesis import strategies as st
 from sqlalchemy.dialects.postgresql import Range
 
 from aizk.config import Settings
-from aizk.extract.models import (
-    ConsolidationVerdict,
-    ExtractedEntity,
-    Extraction,
-    LLMEntity,
-    LLMExtraction,
-    LLMFact,
-    TimedFact,
-)
-from aizk.extract.ontology import EntityType, RelationType
+from aizk.extract import ontology
+from aizk.extract.models import ConsolidationVerdict, ExtractedEntity, Extraction, TimedFact
 from aizk.retrieval import (
     CommunityNote,
     FactHit,
@@ -25,10 +18,39 @@ from aizk.retrieval import (
     SessionNote,
 )
 
-# the extractable ontology vocabularies, already sorted for a byte-stable draw, the same members
-# the extraction prompt and the pydantic fields share.
-ENTITY_TYPE_LIST: list[EntityType] = EntityType.extractable()
-PREDICATE_LIST: list[RelationType] = RelationType.extractable()
+
+class WireEntity(Protocol):
+    """The shape of one entity in the live, dynamically-built combined extraction wire schema,
+    `ontology.current().llm_entity` structurally, since the real class is rebuilt fresh on every
+    `ontology.refresh` and so cannot be named directly in a type annotation."""
+
+    n: str
+    t: str
+
+
+class WireFact(Protocol):
+    """The shape of one fact in the live wire schema, `ontology.current().llm_fact`
+    structurally."""
+
+    s: str
+    p: str
+    o: str
+
+
+class WireExtraction(Protocol):
+    """The shape of the combined extraction call's wire schema, `ontology.current().
+    llm_extraction` structurally."""
+
+    e: list[WireEntity]
+    f: list[WireFact]
+
+
+# a small, fixed pool of real seeded catalog names, deliberately not read from `ontology.
+# current()`, these strategies are drawn at collection time by test modules that never touch the
+# database, so they cannot depend on `ops.setup()` having run. `ExtractedEntity.type`/`TimedFact.
+# predicate` are plain `str` fields, any value works, this pool only keeps examples readable.
+ENTITY_TYPE_LIST = ("Concept", "Decision", "Pattern", "Project", "Paper", "Tool")
+PREDICATE_LIST = ("related_to", "because", "depends_on", "cites", "uses")
 
 entity_types = st.sampled_from(ENTITY_TYPE_LIST)
 predicates = st.sampled_from(PREDICATE_LIST)
@@ -137,30 +159,44 @@ def extracted_entities() -> st.SearchStrategy[ExtractedEntity]:
     return st.builds(ExtractedEntity, name=short_text, type=entity_types, attributes=st.just({}))
 
 
-def llm_entities() -> st.SearchStrategy[LLMEntity]:
-    """One entity in the combined extraction call's compact wire schema (short keys n/t)."""
-    return st.builds(LLMEntity, n=short_text, t=entity_types)
+def llm_entities() -> st.SearchStrategy[WireEntity]:
+    """One entity in the combined extraction call's compact wire schema (short keys n/t).
+
+    Built against `ontology.current().llm_entity`, the live catalog's own dynamic class, so `t`
+    only ever draws a name the current snapshot actually allows, requires `ops.setup()` to have
+    already refreshed the cache, the same requirement `structured` itself has. `st.builds` only
+    ever knows this as a plain `BaseModel`, its real shape is the live catalog's dynamic class,
+    so the return is cast to the `WireEntity` protocol every caller actually reads.
+    """
+    snapshot = ontology.current()
+    strategy = st.builds(
+        snapshot.llm_entity, n=short_text, t=st.sampled_from(snapshot.entity_names)
+    )
+    return cast("st.SearchStrategy[WireEntity]", strategy)
 
 
-def llm_facts() -> st.SearchStrategy[LLMFact]:
+def llm_facts() -> st.SearchStrategy[WireFact]:
     """One fact in the combined extraction wire schema (s/p/o + statement + optional date)."""
-    return st.builds(
-        LLMFact,
+    snapshot = ontology.current()
+    strategy = st.builds(
+        snapshot.llm_fact,
         s=short_text,
-        p=predicates,
+        p=st.sampled_from(snapshot.relation_names),
         o=st.just("") | short_text,
         statement=short_text,
         date=st.none() | short_text,
     )
+    return cast("st.SearchStrategy[WireFact]", strategy)
 
 
-def llm_extractions() -> st.SearchStrategy[LLMExtraction]:
+def llm_extractions() -> st.SearchStrategy[WireExtraction]:
     """One combined wire-schema extraction, entities and dated facts in one shot."""
-    return st.builds(
-        LLMExtraction,
+    strategy = st.builds(
+        ontology.current().llm_extraction,
         e=st.lists(llm_entities(), max_size=4),
         f=st.lists(llm_facts(), max_size=4),
     )
+    return cast("st.SearchStrategy[WireExtraction]", strategy)
 
 
 def extractions() -> st.SearchStrategy[Extraction]:

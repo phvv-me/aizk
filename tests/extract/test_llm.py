@@ -1,28 +1,25 @@
 import asyncio
+from typing import cast
 from unittest.mock import patch
 
 import pytest
 from doubles import FakeLLM
 from factories import build_live_fact
 from hypothesis import given
-from strategies import llm_extractions, predicates
+from pydantic import BaseModel
+from strategies import WireExtraction, llm_extractions, predicates
 
 from aizk.config import Settings
+from aizk.extract import ontology
 from aizk.extract.llm.client import LLMClientPool
 from aizk.extract.llm.triples import (
-    EXTRACTION_SYSTEM,
     combined_extract,
     decide_consolidations_batch,
     extract_with_system,
+    extraction_system,
     structured,
 )
-from aizk.extract.models import (
-    BatchConsolidationVerdict,
-    ConsolidationVerdict,
-    LLMExtraction,
-    TimedFact,
-)
-from aizk.extract.ontology import RelationType
+from aizk.extract.models import BatchConsolidationVerdict, ConsolidationVerdict, TimedFact
 
 
 # the LLM seam is `LLMClientPool.client_for`; a @given property body cannot request the
@@ -34,15 +31,16 @@ def route_pool_at(fake: FakeLLM) -> object:
 
 def test_structured_forwards_prompt_pair_and_sampling(fake_llm: FakeLLM) -> None:
     """One structured turn sends the system-then-user pair and forwards explicit sampling knobs."""
+    llm_extraction = ontology.current().llm_extraction
     asyncio.run(
-        structured("SYS", "USER", LLMExtraction, temperature=0.3, timeout=5.0, max_tokens=99)
+        structured("SYS", "USER", llm_extraction, temperature=0.3, timeout=5.0, max_tokens=99)
     )
     call = fake_llm.completions.calls[-1]
     assert call["messages"] == [
         {"role": "system", "content": "SYS"},
         {"role": "user", "content": "USER"},
     ]
-    assert call["response_model"] is LLMExtraction
+    assert call["response_model"] is llm_extraction
     assert (call["temperature"], call["timeout"], call["max_tokens"]) == (0.3, 5.0, 99)
 
 
@@ -56,14 +54,14 @@ def test_structured_raises_when_the_model_parses_nothing(fake_llm: FakeLLM) -> N
 
     fake_llm.chat.completions = NullParse()
     with pytest.raises(ValueError, match="no parsed"):
-        asyncio.run(structured("s", "u", LLMExtraction))
+        asyncio.run(structured("s", "u", ontology.current().llm_extraction))
 
 
 @given(wire=llm_extractions())
-def test_extract_with_system_converts_wire_to_domain(wire: LLMExtraction) -> None:
+def test_extract_with_system_converts_wire_to_domain(wire: WireExtraction) -> None:
     """The compact wire schema converts to readable domain shapes, one fact and entity per row."""
     fake = FakeLLM()
-    fake.register(LLMExtraction, wire)
+    fake.register(ontology.current().llm_extraction, cast("BaseModel", wire))
     with route_pool_at(fake):
         extraction = asyncio.run(extract_with_system("SYS", "text"))
     assert [e.name for e in extraction.entities] == [e.n for e in wire.e]
@@ -75,9 +73,11 @@ def test_extract_with_system_converts_wire_to_domain(wire: LLMExtraction) -> Non
 
 def test_combined_extract_uses_the_ontology_system_prompt(fake_llm: FakeLLM) -> None:
     """`combined_extract` is `extract_with_system` under the shared ontology extraction prompt."""
-    fake_llm.register(LLMExtraction, LLMExtraction(e=[], f=[]))
+    fake_llm.register(
+        ontology.current().llm_extraction, ontology.current().llm_extraction(e=[], f=[])
+    )
     asyncio.run(combined_extract("some text"))
-    assert fake_llm.completions.calls[-1]["messages"][0]["content"] == EXTRACTION_SYSTEM
+    assert fake_llm.completions.calls[-1]["messages"][0]["content"] == extraction_system()
 
 
 def test_decide_consolidations_batch_short_circuits_when_empty(fake_llm: FakeLLM) -> None:
@@ -87,9 +87,7 @@ def test_decide_consolidations_batch_short_circuits_when_empty(fake_llm: FakeLLM
 
 
 @given(predicate=predicates)
-def test_decide_consolidations_batch_drops_hallucinated_supersedes(
-    predicate: RelationType,
-) -> None:
+def test_decide_consolidations_batch_drops_hallucinated_supersedes(predicate: str) -> None:
     """An UPDATE naming a supersedes id outside the candidate's own claim set is neutralized."""
     import uuid
 
@@ -111,7 +109,7 @@ def test_decide_consolidations_batch_drops_hallucinated_supersedes(
 def test_decide_consolidations_batch_keeps_valid_supersedes(fake_llm: FakeLLM) -> None:
     """An UPDATE naming a real claim id in the candidate's set keeps that supersession."""
     existing = build_live_fact(statement="old")
-    candidate = TimedFact(subject="s", predicate=RelationType.USES, statement="new")
+    candidate = TimedFact(subject="s", predicate="uses", statement="new")
     fake_llm.register(
         BatchConsolidationVerdict,
         BatchConsolidationVerdict(
@@ -124,7 +122,7 @@ def test_decide_consolidations_batch_keeps_valid_supersedes(fake_llm: FakeLLM) -
 
 def test_decide_consolidations_batch_defaults_missing_verdict_to_add(fake_llm: FakeLLM) -> None:
     """A candidate the model omitted a verdict for defaults to a safe ADD, aligned by position."""
-    candidate = TimedFact(subject="s", predicate=RelationType.USES, statement="new")
+    candidate = TimedFact(subject="s", predicate="uses", statement="new")
     fake_llm.register(BatchConsolidationVerdict, BatchConsolidationVerdict(verdicts=[]))
     verdicts = asyncio.run(decide_consolidations_batch([(candidate, [])]))
     assert verdicts == [ConsolidationVerdict(action="ADD")]

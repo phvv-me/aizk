@@ -19,7 +19,7 @@ from mkdocs.config.defaults import MkDocsConfig
 
 SECTIONS: dict[str, list[str]] = {
     "Usage": ["index.md", "concepts.md"],
-    "Reference": ["api.md", "release.md"],
+    "Reference": ["api.md", "operations.md", "release.md"],
 }
 
 LOCALE_SUFFIXES = (".pt-BR", ".es", ".ja", ".zh")

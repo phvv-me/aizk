@@ -8,7 +8,7 @@ from hypothesis import strategies as st
 from pgvector.utils import HalfVector
 from sqlalchemy import text
 
-from aizk.extract.ontology import EntityType
+from aizk.extract import ontology
 from aizk.graph.raptor import (
     Node,
     build_raptor,
@@ -213,7 +213,7 @@ async def seed_two_levels(owner: uuid.UUID) -> None:
     """Plant one summary entity at level 1 and one at level 2, a fixed tree the read retrieves."""
     async with acting_as(owner) as session:
         for level, label in ((1, "leaf summary"), (2, "root summary")):
-            content = EntityContent(name=label, type=EntityType.RAPTOR_SUMMARY, embedding=basis(0))
+            content = EntityContent(name=label, type=ontology.RAPTOR_SUMMARY, embedding=basis(0))
             session.add(content)
             await session.flush()
             session.add(

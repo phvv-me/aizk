@@ -4,6 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import ColumnElement, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..serving.chunk import ChonkieChunker, CodeChunker, is_code, is_text
@@ -43,25 +44,67 @@ def contextual_lexical(title: str, text: str) -> str | None:
 async def store_document(
     owner_id: uuid.UUID, dedupe: ColumnElement[bool], document: Document
 ) -> tuple[uuid.UUID, bool]:
-    """Dedupe-check then store a document under one owner-scoped transaction.
+    """Dedupe-check then store or refresh a document under one owner-scoped transaction.
 
     The one seam every ingest path shares: look up an existing row by its own dedupe column, and
-    only insert the freshly assembled document when nothing already matches, so a re-ingest of
-    identical content is idempotent no matter which caller built the row.
+    only write when something changed, so a re-ingest of identical content is idempotent no
+    matter which caller built the row. A source whose content CHANGED (same ``source_uri``,
+    different hash, the edited note case) keeps its standing document row and swaps the content
+    under it through :func:`refresh_document`, since ``source_uri`` is the document's stable
+    identity and a second insert would violate its unique constraint.
 
     owner_id: principal the transaction acts as.
     dedupe: the `Document` column-equality clause idempotency is checked against before insert.
     document: the fully assembled row to store when nothing already matches.
 
-    Returns the row's id and whether it was newly inserted, the latter False when dedupe matched.
+    Returns the row's id and whether it was written, the latter False only when dedupe matched.
     """
     async with acting_as(owner_id) as session:
         existing = await session.scalar(select(Document.id).where(dedupe))
         if existing is not None:
             return existing, False
+        if document.source_uri is not None:
+            stale = await session.scalar(
+                select(Document).where(Document.source_uri == document.source_uri)
+            )
+            if stale is not None:
+                return await refresh_document(session, stale, document), True
         session.add(document)
         await session.flush()
         return document.id, True
+
+
+async def refresh_document(
+    session: AsyncSession, stale: Document, document: Document
+) -> uuid.UUID:
+    """Swap a changed source's content under its standing document row, replacing every chunk.
+
+    The row is the source's stable identity (``source_uri`` is unique), so an edited file
+    updates it in place: title, kind and content hash move to the fresh values, the old chunks
+    are deleted and the fresh spans inserted with ``processed_at`` null so the next graph build
+    re-extracts them. Claims minted from the old spans stay live with their provenance nulled
+    (``source_chunk_id`` is SET NULL on chunk delete), and the re-extraction's consolidation
+    supersedes whatever the new content contradicts, the bi-temporal record intact. Ownership
+    and scopes stay the standing row's, a refresh changes content, never sharing.
+
+    session: the open owner-scoped session the caller's transaction runs in.
+    stale: the standing document row whose content changed.
+    document: the freshly assembled row carrying the new content and chunks.
+    """
+    replacements = list(document.chunks)
+    document.chunks = []
+    stale.title = document.title
+    stale.kind = document.kind
+    stale.content_hash = document.content_hash
+    for old in await session.scalars(select(Chunk).where(Chunk.document_id == stale.id)):
+        await session.delete(old)
+    for chunk in replacements:
+        chunk.document_id = stale.id
+        chunk.owner_id = stale.owner_id
+        chunk.scopes = list(stale.scopes)
+        session.add(chunk)
+    await session.flush()
+    return stale.id
 
 
 async def ingest_image(
@@ -123,10 +166,11 @@ def text_files(path: Path) -> list[Path]:
 async def ingest_file(
     file: Path, owner_id: uuid.UUID, scopes: tuple[uuid.UUID, ...], embedder: Embedder
 ) -> bool:
-    """Chunk, embed, and store one file as a document, returning whether it was newly written.
+    """Chunk, embed, and store one file as a document, returning whether it was written.
 
     Skips a file whose content already matches a stored document, or one whose chunker returns no
-    spans at all, such as an empty file.
+    spans at all, such as an empty file. A file stored before under the same ``source_uri`` whose
+    content CHANGED refreshes its standing document in place, counting as written.
 
     file: source file to ingest.
     owner_id: principal that owns the stored rows.

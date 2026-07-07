@@ -3,26 +3,14 @@ import uuid
 import pytest
 
 from aizk.config import settings
-from aizk.exceptions import OntologyError
 from aizk.store import Document, LiveFact
 from aizk.store.engine import build_engine
 from aizk.store.mixins.view import ViewBase, create_view_ddl, drop_view_ddl
-from aizk.store.models.tables.entity import EntityContent
 from aizk.store.models.tables.membership import Membership
 
-
-def test_entity_type_validator_rejects_off_ontology_values() -> None:
-    """The ORM boundary refuses an entity type outside the closed vocabulary."""
-    with pytest.raises(OntologyError):
-        EntityContent(name="x", type="NotARealType")
-
-
-def test_fact_predicate_validator_rejects_off_ontology_values() -> None:
-    """The ORM boundary refuses a predicate outside the closed relation vocabulary."""
-    from aizk.store import FactContent
-
-    with pytest.raises(OntologyError):
-        FactContent(subject_id=uuid.uuid4(), predicate="not_a_relation", statement="s")
+# entity_content.type/fact_content.predicate no longer validate off-ontology values in memory,
+# that wall moved to a real foreign key against the live entity_kind/relation_kind catalog, see
+# tests/extract/test_ontology.py's DB-backed rejection tests instead.
 
 
 def test_created_at_expression_compiles_to_lower_recorded() -> None:

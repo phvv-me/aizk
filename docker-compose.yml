@@ -69,6 +69,75 @@ services:
       timeout: 5s
       retries: 10
 
+  # Zitadel, the self-hosted identity provider aizk rents rather than managing users itself. It
+  # shares the one Postgres in the db container, creating its own `zitadel` database and role on
+  # first init through the aizk superuser admin connection, so the whole stack still runs one
+  # database server. TLS is off and the external scheme is plain http because a reverse proxy or
+  # tunnel terminates TLS in front of the stack, the same seam the aizk server sits behind.
+  # start-from-init runs the one-time setup, the schema, the first instance, and the bootstrap
+  # machine service account whose long-lived PAT is written to the mounted file below, then starts
+  # serving in one go and is idempotent on every later boot. That machine user carries the
+  # IAM_OWNER role, so its PAT both authenticates this machine to aizk and lets the one-time
+  # bootstrap create the introspection app aizk validates tokens through. Reached at
+  # http://zitadel:8080 inside the compose network and published on the host port for the console.
+  # a one-shot that makes the machinekey volume writable by Zitadel's own uid 1000 before it
+  # starts. A fresh named volume is root-owned, and Zitadel runs non-root, so without this the
+  # setup step that writes the bootstrap PAT fails with a permission error, which aborts the whole
+  # first-instance migration after it has already claimed the instance domain, and every restart
+  # then dies on that half-written leftover. Chowning the volume up front keeps Zitadel non-root
+  # and lets the PAT land on the very first init.
+  zitadel-init:
+    image: alpine:3
+    command: ["sh", "-c", "chown -R 1000:1000 /machinekey && chmod 700 /machinekey"]
+    volumes:
+      - zitadel-machinekey:/machinekey
+    restart: "no"
+
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v4.15.3
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      zitadel-init:
+        condition: service_completed_successfully
+    command: start-from-init --masterkeyFromEnv --tlsMode disabled
+    environment:
+      ZITADEL_MASTERKEY: ${AIZK_ZITADEL_MASTERKEY}
+      ZITADEL_DATABASE_POSTGRES_HOST: db
+      ZITADEL_DATABASE_POSTGRES_PORT: "5432"
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${AIZK_ZITADEL_DB_PASSWORD}
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      # the aizk superuser is Zitadel's admin connection, the one that creates the zitadel db and role
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: aizk
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${AIZK_ADMIN_PASSWORD:-aizk}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      ZITADEL_EXTERNALSECURE: "false"
+      # the external domain is the compose service name, not localhost, because the caller that
+      # matters is the aizk server reaching this over the compose network at http://zitadel:8080,
+      # and Zitadel resolves the instance by the request origin, which must match ExternalDomain and
+      # ExternalPort exactly. Matching the internal address is what lets the server introspect a
+      # token with no host-header trickery. The port is Zitadel's own internal 8080, still published
+      # on the host for the console, which a host browser reaches by mapping this name to 127.0.0.1.
+      ZITADEL_EXTERNALDOMAIN: zitadel
+      ZITADEL_EXTERNALPORT: "8080"
+      ZITADEL_TLS_ENABLED: "false"
+      # the first instance's human admin for the console, and the bootstrap machine service account
+      # whose PAT lands in the mounted file the one-time bootstrap reads
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${AIZK_ZITADEL_ADMIN_PASSWORD}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: aizk-admin
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: aizk-admin
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2099-12-31T23:59:59Z"
+      ZITADEL_FIRSTINSTANCE_PATPATH: /machinekey/pat.txt
+    ports:
+      - "${AIZK_ZITADEL_PUBLISH_PORT:-8091}:8080"
+    volumes:
+      - zitadel-machinekey:/machinekey
+
   # vLLM serves Qwen3-VL-Embedding-2B over an OpenAI-compatible /v1/embeddings, so the model loads
   # in this container, never inside aizk. --runner pooling is the current flag (--task embed was
   # removed), is_matryoshka lets a request set dimensions=1024 to truncate the native 2048-d output.
@@ -101,6 +170,20 @@ services:
       - '{"is_matryoshka": true}'
     ports:
       - "127.0.0.1:${AIZK_EMBED_PORT:-8000}:8000"
+    # the three models share one 24 GB card, and vLLM sizes each one's KV cache against the memory
+    # free at profiling time. Started all at once they profile concurrently, each reads the whole
+    # card as free, and the sum over-commits it so one dies with "No available memory for the cache
+    # blocks". The healthcheck plus the depends_on chain below serialize startup instead: the
+    # embedder comes up first, the reranker waits for it, the extractor waits for the reranker, so
+    # each profiles against the memory the earlier ones already hold. start_period covers the
+    # minute-plus of weight loading before /health answers, during which a failing probe is not
+    # counted against retries.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
     ipc: host
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
@@ -147,6 +230,16 @@ services:
       - "examples/pooling/score/template/qwen3_reranker.jinja"
     ports:
       - "127.0.0.1:${AIZK_RERANK_PORT:-8001}:8000"
+    # second onto the shared card, only once the embedder is serving, see vllm-emb's note
+    depends_on:
+      vllm-emb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
     ipc: host
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
@@ -219,6 +312,16 @@ services:
       - "--trust-remote-code"
     ports:
       - "127.0.0.1:${AIZK_LLM_PORT:-8002}:8000"
+    # last onto the shared card, only once the reranker is serving, see vllm-emb's note
+    depends_on:
+      vllm-rerank:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
     ipc: host
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
@@ -230,5 +333,48 @@ services:
               count: 1
               capabilities: ["gpu"]
 
+  # the whole engine in one container: `serve-mcp` gathers the pgqueuer worker on its own event
+  # loop (serve_with_worker defaults on), so this single service is the MCP server, the background
+  # maintenance passes, and the scheduled auto-backup at once. Reaches the db and the model
+  # containers by their compose service names, so the localhost defaults that serve host-run dev
+  # are overridden here to the container-internal addresses, never edited in code.
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # reach Postgres by service name on its own internal 5432, not the host-mapped 5433. The db
+      # host and port are all that changes, admin_asyncpg_dsn (and so the backup connection) and
+      # the app DSN both rebuild from them, so pg_client_launcher stays empty and pg_dump runs
+      # right here against db:5432 with the image's own version-matched client.
+      AIZK_DB_HOST: db
+      AIZK_DB_PORT: "5432"
+      # the three model containers, each listening on its own internal 8000
+      AIZK_EMBED_URL: http://vllm-emb:8000/v1
+      AIZK_RERANK_URL: http://vllm-rerank:8000/v1
+      AIZK_LLM_URL: http://vllm-llm:8000/v1
+      # serve streamable HTTP on all interfaces inside the container, published below; a reverse
+      # proxy or tunnel terminates TLS in front of it, see docs/operations.md
+      AIZK_MCP_HTTP: "1"
+      AIZK_MCP_HOST: 0.0.0.0
+      AIZK_MCP_PORT: "8080"
+      # the integrated auto-backup, the scheduled BackupTask dumping to the mounted volume nightly
+      AIZK_BACKUP_ENABLED: "1"
+      AIZK_BACKUP_DIR: /backups
+    ports:
+      - "${AIZK_MCP_PUBLISH_PORT:-8080}:8080"
+    volumes:
+      - backups:/backups
+    restart: unless-stopped
+
 volumes:
   db-data:
+  backups:
+  # holds the bootstrap machine account's PAT that Zitadel writes on first init
+  zitadel-machinekey:

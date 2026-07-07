@@ -9,7 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..extract.ontology import EntityType
+from ..extract import ontology
 from ..store import (
     Community,
     EntityClaim,
@@ -22,11 +22,11 @@ from .admin import admin_session
 from .models import Node, RaptorReport
 from .tier_builder import TierBuilder
 
-# EntityType.RAPTOR_SUMMARY is the entity type every tree node carries, so the recursive
+# ontology.RAPTOR_SUMMARY is the entity type every tree node carries, so the recursive
 # summaries live in the entity content table beside the knowledge nodes yet never mix with them.
-# It is one of EntityType's structural members, so the extractor's closed vocab never emits it,
-# GraphWriter.resolve and the graph build never touch a summary node, and the whole tree is found
-# and rebuilt by filtering entity content on this one tag.
+# It is a structural catalog member, so the extractor's closed vocab never emits it, GraphWriter.
+# resolve and the graph build never touch a summary node, and the whole tree is found and rebuilt
+# by filtering entity content on this one tag.
 
 # the predicate every parent-to-child tree edge carries. A part_of fact links a child summary to
 # the summary one level above it, and it carries no embedding so it stays out of the knowledge-fact
@@ -209,7 +209,7 @@ class RaptorTierBuilder(TierBuilder[list[Node], RaptorReport]):
             self.content = EntityContent(
                 id=parent.entity_id,
                 name=report.label,
-                type=EntityType.RAPTOR_SUMMARY,
+                type=ontology.RAPTOR_SUMMARY,
                 embedding=vector,
             )
             self.new_parents.append((parent, list(vector)))
@@ -379,7 +379,7 @@ async def stale_tree_content(principal_id: uuid.UUID) -> list[uuid.UUID]:
                 .join(EntityContent, EntityContent.id == EntityClaim.content_id)
                 .where(
                     EntityClaim.owner_id == principal_id,
-                    EntityContent.type == EntityType.RAPTOR_SUMMARY,
+                    EntityContent.type == ontology.RAPTOR_SUMMARY,
                 )
             )
         )
@@ -410,7 +410,7 @@ def leaf_content(community: Community) -> EntityContent:
     return EntityContent(
         id=uuid.uuid4(),
         name=community.label,
-        type=EntityType.RAPTOR_SUMMARY,
+        type=ontology.RAPTOR_SUMMARY,
         embedding=community.embedding,
     )
 
@@ -510,7 +510,7 @@ async def raptor_levels(session: AsyncSession) -> list[int]:
     rows = await session.scalars(
         select(depth)
         .join(EntityContent, EntityContent.id == EntityClaim.content_id)
-        .where(EntityContent.type == EntityType.RAPTOR_SUMMARY, depth >= 1)
+        .where(EntityContent.type == ontology.RAPTOR_SUMMARY, depth >= 1)
         .distinct()
     )
     return sorted(rows)
@@ -551,7 +551,7 @@ async def raptor_search(
         select(EntityContent.name, summary, distance.label("distance"))
         .join(EntityClaim, EntityClaim.content_id == EntityContent.id)
         .where(
-            EntityContent.type == EntityType.RAPTOR_SUMMARY,
+            EntityContent.type == ontology.RAPTOR_SUMMARY,
             depth == level,
             EntityContent.embedding.is_not(None),
         )

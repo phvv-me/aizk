@@ -3,26 +3,32 @@ from pydantic import BaseModel
 
 from ...config import settings
 from ...store import LiveFact
+from .. import ontology
 from ..dating import resolve_valid_from
 from ..models import (
     BatchConsolidationVerdict,
     ConsolidationVerdict,
     ExtractedEntity,
     Extraction,
-    LLMExtraction,
     TimedFact,
 )
-from ..ontology import ONTOLOGY_PROMPT
 from .client import LLMClientPool
 from .providers import provider_settings
 
-# the ontology default strategy's system turn, layered on the ontology rules, the few-shot
-# guidance from settings.extract_system_prompt that keeps entity names and facts well formed.
-EXTRACTION_SYSTEM = f"{ONTOLOGY_PROMPT}\n{settings.extract_system_prompt}"
-
-# the batched borderline-consolidation pass's system turn, mirroring EXTRACTION_SYSTEM's role,
-# sourced from settings.consolidation_prompt.
+# the batched borderline-consolidation pass's system turn, mirroring the ontology default
+# strategy's own system turn, sourced from settings.consolidation_prompt.
 CONSOLIDATION_PROMPT = settings.consolidation_prompt
+
+
+def extraction_system() -> str:
+    """The ontology default strategy's system turn, the live ontology rules layered on the
+    few-shot guidance from `settings.extract_system_prompt` that keeps entity names and facts
+    well formed.
+
+    Read fresh from `ontology.current()` on every call rather than cached as a module constant,
+    since the live catalog can grow between calls, an auto-created type or an admin's own edit.
+    """
+    return f"{ontology.current().prompt}\n{settings.extract_system_prompt}"
 
 
 async def structured[T: BaseModel](
@@ -84,18 +90,24 @@ async def extract_with_system(system: str, text: str) -> Extraction:
 
     Every extraction strategy (`extract.strategies.extract_graph`'s ontology default, summary,
     preferences, and custom) shares this one call shape, only the system prompt's own focus
-    differs. The compact wire schema (`LLMExtraction`) already carries an optional per-fact date
-    alongside its entities and facts, so `extract.dating.resolve_valid_from` only ever needs the
-    model's own field and the fact's own statement text, no second round trip. The wire shapes
-    (`LLMEntity`/`LLMFact`, short keys to hold the call near the ~250-token budget) convert to the
-    readable domain shapes (`ExtractedEntity`/`TimedFact`) immediately after parsing, so nothing
-    downstream of this function ever reads the compact keys.
+    differs. The wire schema, built fresh from `ontology.current().llm_extraction` so its `t`/`p`
+    fields track whatever the live catalog currently allows, already carries an optional per-fact
+    date alongside its entities and facts, so `extract.dating.resolve_valid_from` only ever needs
+    the model's own field and the fact's own statement text, no second round trip. The wire
+    shapes (short keys to hold the call near the ~250-token budget) convert to the readable domain
+    shapes (`ExtractedEntity`/`TimedFact`) immediately after parsing, so nothing downstream of
+    this function ever reads the compact keys.
 
     system: system prompt fixing the strategy's own focus, layered on the shared ontology rules.
     text: the source span to extract from.
     """
-    wire = await structured(system, text, LLMExtraction)
-    entities = [ExtractedEntity(name=entity.n, type=entity.t) for entity in wire.e]
+    # wire's real shape is the live catalog's own dynamic class, structurally carrying e/f, never
+    # expressible as a static type narrower than the BaseModel structured itself is generic over.
+    wire = await structured(system, text, ontology.current().llm_extraction)
+    entities = [
+        ExtractedEntity(name=entity.n, type=entity.t, suggested_type=entity.suggested_type)
+        for entity in wire.e  # pyrefly: ignore
+    ]
     facts = [
         TimedFact(
             subject=fact.s,
@@ -104,7 +116,7 @@ async def extract_with_system(system: str, text: str) -> Extraction:
             statement=fact.statement,
             valid_from=resolve_valid_from(fact.date, fact.statement),
         )
-        for fact in wire.f
+        for fact in wire.f  # pyrefly: ignore
     ]
     logger.info(
         "extracted {} entities and {} facts from {} chars", len(entities), len(facts), len(text)
@@ -117,7 +129,7 @@ async def combined_extract(text: str) -> Extraction:
 
     text: the source span to extract from.
     """
-    return await extract_with_system(EXTRACTION_SYSTEM, text)
+    return await extract_with_system(extraction_system(), text)
 
 
 def consolidation_block(index: int, fact: TimedFact, existing: list[LiveFact]) -> str:

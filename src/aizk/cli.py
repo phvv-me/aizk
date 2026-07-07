@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 import uuid
@@ -9,6 +10,7 @@ from mainboard.profiling import enable_spans
 
 from alembic import command
 
+from . import backup as backup_ops
 from . import ops
 from .background.queue import enqueue_pending, install_queue_schema
 from .background.schedule import run_worker
@@ -101,19 +103,58 @@ async def install_queue() -> None:
 
 
 @app.command
-def serve_mcp() -> None:
-    """Run the aizk MCP server, the one interface through which every memory verb is reached.
+async def backup(path: str) -> None:
+    """Dump the whole database to a portable archive at `path`, the durable snapshot of memory.
 
-    Serves stdio by default and streamable HTTP when AIZK_MCP_HTTP is set. fastmcp is imported
-    lazily here so the rest of the CLI stays usable without it installed.
+    Runs `pg_dump` through `settings.pg_client_launcher` so a compose deployment captures the
+    database with the container's own version-matched binaries. Schedule it from cron for the
+    automated half of the backup story, `restore` reads the archive back.
+
+    path: the host file the archive is written to.
+    """
+    report = await backup_ops.backup_database(path)
+    print(f"backed up {report.bytes} bytes to {report.path}")
+
+
+@app.command
+async def restore(path: str) -> None:
+    """Load a backup archive back into the configured database, overwriting its current contents.
+
+    Destructive, `pg_restore --clean` drops each object the archive recreates, so the database
+    ends holding exactly the backup. For a non-destructive recovery drill, restore into a fresh
+    scratch database instead through `backup.restore_database(path, database=...)`.
+
+    path: the archive `backup` wrote.
+    """
+    report = await backup_ops.restore_database(path)
+    print(f"restored {report.path} into {report.database}")
+
+
+@app.command
+async def serve_mcp() -> None:
+    """Run the aizk MCP server, and the background worker beside it, one process, one event loop.
+
+    The one interface through which every memory verb is reached, streamable HTTP when
+    AIZK_MCP_HTTP is set and stdio otherwise. When `serve_with_worker` is on (the default), the
+    pgqueuer worker that drains the queue and fires every scheduled pass, the auto-backup among
+    them, runs gathered on the same loop, so a single container is the whole engine. Set it off to
+    run the server alone beside a separate `aizk worker`. fastmcp is imported lazily here so the
+    rest of the CLI stays usable without it installed.
     """
     from .mcp.server import server
 
-    logger.info("serving aizk mcp, http={}", settings.mcp_http)
-    if settings.mcp_http:
-        server.run(transport="http", host=settings.mcp_host, port=settings.mcp_port)
+    logger.info(
+        "serving aizk mcp, http={}, worker={}", settings.mcp_http, settings.serve_with_worker
+    )
+    serving = (
+        server.run_http_async(host=settings.mcp_host, port=settings.mcp_port)
+        if settings.mcp_http
+        else server.run_stdio_async()
+    )
+    if settings.serve_with_worker:
+        await asyncio.gather(serving, run_worker())
     else:
-        server.run()
+        await serving
 
 
 @app.command
@@ -216,6 +257,24 @@ async def create_user(name: str) -> None:
     """
     principal = await create_user_principal(name)
     print(principal.id)
+
+
+@app.command
+async def create_admin(zitadel_sub: str, name: str = "admin") -> None:
+    """Bind a Zitadel subject to an admin principal and print its id, the identity bootstrap.
+
+    Provisions the principal the machine or human presenting that subject's token administers the
+    engine as, minting an admin one stamped with the subject or promoting the one already carrying
+    it. The one bootstrap that cannot require auth, since it mints the first identity the token
+    verifier resolves an admin to, run once after Zitadel issues the machine account.
+
+    zitadel_sub: the subject claim Zitadel mints this identity's tokens against.
+    name: display name for a freshly minted principal.
+    """
+    async with system_session() as session:
+        principal = await Principal.link_admin(session, zitadel_sub, name)
+        principal_id = principal.id
+    print(principal_id)
 
 
 if __name__ == "__main__":

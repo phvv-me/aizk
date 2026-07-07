@@ -15,10 +15,164 @@ from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSTZRANGE, TSVECTOR
 
 from aizk.config import settings
-from aizk.extract.ontology import EntityType, RelationType, check_in_sql
 from aizk.store.mixins.view import create_view_ddl, drop_view_ddl
 from aizk.store.models.views.live_fact import LiveFact
 from alembic import op
+
+# ENTITY_KINDS/RELATION_KINDS seed the live ontology catalog entity_content.type/fact_content.
+# predicate foreign-key against, (name, description, domain, structural). Frozen here rather
+# than read from aizk.extract.ontology (which no longer even defines a fixed vocabulary), a
+# migration is a historical record of what a fresh database looked like at this revision, never a
+# view onto code that keeps evolving out from under it.
+ENTITY_KINDS: tuple[tuple[str, str, str, bool], ...] = (
+    # core, structural, system-written, never extractor-emitted or deactivatable
+    ("RaptorSummary", "A recursive summary tree node built above entity clusters.", "core", True),
+    ("Observation", "A reflective insight the system derives from existing facts.", "core", True),
+    # general, cross-cutting vocabulary no single domain owns
+    (
+        "Concept",
+        "A catch-all for an idea or topic that fits no more specific type.",
+        "general",
+        False,
+    ),
+    # Project and Area are structural, declared-only types the extractor never emits, so a note is
+    # a project or an area purely because its own #project or #area tag says so, and a roster of
+    # either is exactly the notes that declared themselves rather than whatever a small model
+    # over-tagged. The trust-declared-structure path in extract.journal writes them.
+    (
+        "Project",
+        "A concrete effort with a start and an end that produces a result, the unit a projects "
+        "rollup treats as a node and its member notes as parts.",
+        "general",
+        True,
+    ),
+    (
+        "Area",
+        "An ongoing domain of responsibility or identity with no end date, the container that "
+        "holds projects and the notes that outlive any one of them.",
+        "general",
+        True,
+    ),
+    ("Tool", "A named library, framework, or piece of software.", "general", False),
+    ("Person", "A specific individual.", "general", False),
+    ("Decision", "A choice made and the reasoning behind it.", "general", False),
+    ("Pattern", "A reusable approach or standing preference.", "general", False),
+    ("Gotcha", "A trap or surprising behavior worth remembering.", "general", False),
+    ("Goal", "An aim being worked toward.", "general", False),
+    # coding
+    ("Module", "A source code module or file.", "coding", False),
+    ("Function", "A named function or method.", "coding", False),
+    # research
+    ("Paper", "A published or preprint research paper.", "research", False),
+    ("Author", "A paper's author.", "research", False),
+    ("Theorem", "A proven mathematical statement.", "research", False),
+    (
+        "Lemma",
+        "A supporting mathematical statement proved on the way to a theorem.",
+        "research",
+        False,
+    ),
+    ("Definition", "A precise statement fixing what a term means.", "research", False),
+    ("Proof", "The argument establishing a theorem or lemma.", "research", False),
+    ("Claim", "An assertion put forward as true, not yet proven.", "research", False),
+    ("Hypothesis", "A proposed explanation offered for testing.", "research", False),
+    ("Method", "A named technique or algorithm.", "research", False),
+    ("Model", "A trained or specified model.", "research", False),
+    (
+        "Dataset",
+        "A named collection of data used for training or evaluation.",
+        "research",
+        False,
+    ),
+    ("Benchmark", "A named evaluation suite or task.", "research", False),
+    ("Metric", "A named measure a result is scored by.", "research", False),
+    ("Result", "A reported outcome or measurement.", "research", False),
+    ("Hyperparameter", "A configuration value set before training.", "research", False),
+    ("Experiment", "A specific run or trial.", "research", False),
+    ("Equation", "A named or numbered mathematical equation.", "research", False),
+    ("CodeArtifact", "Code produced by or for a paper or method.", "research", False),
+    ("Conjecture", "An unproven mathematical statement believed likely true.", "research", False),
+    (
+        "Corollary",
+        "A statement following directly from a theorem already proven.",
+        "research",
+        False,
+    ),
+    # finance
+    (
+        "Instrument",
+        "A tradable financial asset such as a stock, bond, or fund.",
+        "finance",
+        False,
+    ),
+    ("Account", "A named financial account holding positions or cash.", "finance", False),
+    ("Position", "A held quantity of one instrument in an account.", "finance", False),
+    ("Strategy", "A named approach to allocating or trading.", "finance", False),
+    ("Expense", "A recorded outflow of money.", "finance", False),
+    ("Income", "A recorded inflow of money.", "finance", False),
+    ("Budget", "A planned allocation of money over a period.", "finance", False),
+    # personal
+    ("Habit", "A recurring behavior being tracked or built.", "personal", False),
+    ("Milestone", "A significant dated achievement or event.", "personal", False),
+    (
+        "Possession",
+        "A durable physical asset, such as a house, car, or belonging.",
+        "personal",
+        False,
+    ),
+)
+
+RELATION_KINDS: tuple[tuple[str, str, str, bool], ...] = (
+    ("observes", "The predicate every system-derived observation carries.", "core", True),
+    ("because", "Connects a decision or pattern to its reason.", "general", False),
+    (
+        "avoids",
+        "Connects a pattern or decision to something it steers clear of.",
+        "general",
+        False,
+    ),
+    (
+        "related_to",
+        "A generic, otherwise-unclassified connection between two things.",
+        "general",
+        False,
+    ),
+    ("depends_on", "One thing requires another to exist or function.", "general", False),
+    ("part_of", "One thing is a component of another.", "general", False),
+    ("contradicts", "One statement conflicts with another.", "general", False),
+    ("supersedes", "One statement replaces an earlier one.", "general", False),
+    ("implements", "A piece of code realizes a pattern, method, or decision.", "coding", False),
+    ("fixes", "A piece of code resolves a gotcha or bug.", "coding", False),
+    ("proves", "A proof or paper establishes a theorem or lemma.", "research", False),
+    ("refutes", "A result or paper disproves a claim or hypothesis.", "research", False),
+    ("cites", "A paper references another paper.", "research", False),
+    ("extends", "One piece of work builds on another.", "research", False),
+    ("uses", "A method or experiment employs a tool, dataset, or model.", "research", False),
+    (
+        "evaluates_on",
+        "A method or model is evaluated against a benchmark or dataset.",
+        "research",
+        False,
+    ),
+    ("improves_over", "A result outperforms an earlier one.", "research", False),
+    (
+        "derived_from",
+        "One thing is mathematically or empirically derived from another.",
+        "research",
+        False,
+    ),
+    ("authored_by", "A paper's author relation.", "research", False),
+    ("reproduces", "A result independently confirms an earlier one.", "research", False),
+    (
+        "allocates_to",
+        "An account or strategy assigns money to an instrument or position.",
+        "finance",
+        False,
+    ),
+    ("tracks", "A budget monitors an expense or income category.", "finance", False),
+    ("owns", "A person holds a possession or account.", "personal", False),
+    ("motivated_by", "A goal or habit is driven by a reason.", "personal", False),
+)
 
 # the big, backend-branching or fully static DDL this migration executes lives as .sql/.sql.j2
 # files shipped inside the package (the migrations dir already ships in the wheel) rather than
@@ -294,6 +448,68 @@ def upgrade() -> None:
     op.create_index("ix_chunk_scopes", "chunk", ["scopes"], postgresql_using="gin")
     op.create_index("ix_chunk_tsv", "chunk", ["tsv"], postgresql_using="gin")
 
+    # the live ontology catalog entity_content.type/fact_content.predicate foreign-key against,
+    # ENTITY_KINDS/RELATION_KINDS above seeding every kind this revision ships with. Growing the
+    # vocabulary from here on is an ordinary row insert, never a schema migration, the extraction
+    # pipeline's auto-create cascade minting a fresh row. The catalog only grows, never deletes,
+    # so it carries no active or origin state, an auto-created row is simply tagged domain="auto".
+    op.create_table(
+        "entity_kind",
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("domain", sa.Text(), nullable=False),
+        sa.Column("structural", sa.Boolean(), server_default=sa.false(), nullable=False),
+        sa.PrimaryKeyConstraint("name"),
+    )
+    op.create_table(
+        "relation_kind",
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("domain", sa.Text(), nullable=False),
+        sa.Column("structural", sa.Boolean(), server_default=sa.false(), nullable=False),
+        sa.PrimaryKeyConstraint("name"),
+    )
+    entity_kind_table = sa.table(
+        "entity_kind",
+        sa.column("name", sa.Text()),
+        sa.column("description", sa.Text()),
+        sa.column("domain", sa.Text()),
+        sa.column("structural", sa.Boolean()),
+    )
+    op.bulk_insert(
+        entity_kind_table,
+        [
+            {"name": name, "description": description, "domain": domain, "structural": structural}
+            for name, description, domain, structural in ENTITY_KINDS
+        ],
+    )
+    relation_kind_table = sa.table(
+        "relation_kind",
+        sa.column("name", sa.Text()),
+        sa.column("description", sa.Text()),
+        sa.column("domain", sa.Text()),
+        sa.column("structural", sa.Boolean()),
+    )
+    op.bulk_insert(
+        relation_kind_table,
+        [
+            {"name": name, "description": description, "domain": domain, "structural": structural}
+            for name, description, domain, structural in RELATION_KINDS
+        ],
+    )
+
     # the bi-temporal knowledge graph, content-addressed content deduplicated across every tenant
     # plus each container's own per-tenant claim on it: entity_content is the immutable node
     # identity (name, type, embedding) two owners extracting the same thing land on together, and
@@ -305,7 +521,7 @@ def upgrade() -> None:
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("type", sa.Text(), nullable=False),
         sa.Column("embedding", HALFVEC(EMBED_DIM), nullable=True),
-        sa.CheckConstraint(check_in_sql("type", EntityType), name="ck_entity_content_type"),
+        sa.ForeignKeyConstraint(["type"], ["entity_kind.name"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.execute(vector_index_ddl("ix_entity_content_embedding", "entity_content", INDEX_BACKEND))
@@ -347,9 +563,7 @@ def upgrade() -> None:
         sa.Column("predicate", sa.Text(), nullable=False),
         sa.Column("statement", sa.Text(), nullable=False),
         sa.Column("embedding", HALFVEC(EMBED_DIM), nullable=True),
-        sa.CheckConstraint(
-            check_in_sql("predicate", RelationType), name="ck_fact_content_predicate"
-        ),
+        sa.ForeignKeyConstraint(["predicate"], ["relation_kind.name"]),
         sa.ForeignKeyConstraint(["object_id"], ["entity_content.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["subject_id"], ["entity_content.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -609,6 +823,10 @@ def downgrade() -> None:
     op.drop_table("fact_content")
     op.drop_table("entity_claim")
     op.drop_table("entity_content")
+    # the live ontology catalog, droppable only once fact_content/entity_content, its own
+    # foreign-key referrers, are already gone
+    op.drop_table("relation_kind")
+    op.drop_table("entity_kind")
     op.drop_table("chunk")
     op.drop_table("document")
     op.drop_table("membership")

@@ -2,13 +2,17 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pgqueuer.models import Schedule
 
 import aizk.background.tasks as tasks_mod
 from aizk.background.tasks import (
+    BackupTask,
     CommunitiesTask,
     CurationReviewTask,
     DecayTask,
@@ -49,6 +53,7 @@ def test_the_roster_carries_every_maintenance_pass() -> None:
         "session_promote",
         "insight",
         "curation_review",
+        "backup",
     }
 
 
@@ -64,7 +69,7 @@ def test_entrypoint_names_are_prefixed_and_injective() -> None:
 
 
 @given(
-    flags=st.lists(st.booleans(), min_size=9, max_size=9),
+    flags=st.lists(st.booleans(), min_size=10, max_size=10),
     cron=st.sampled_from(["0 3 * * *", "30 4 * * 0"]),
 )
 def test_each_task_reads_its_own_cadence_and_flag_off_settings(
@@ -281,3 +286,44 @@ def test_self_improve_stores_the_scorecard_and_flips_only_on_a_significant_win(
         assert settings.rerank is False and settings.ppr is True
     else:
         assert settings.rerank is True and settings.ppr is False
+
+
+def test_backup_task_fire_cron_runs_the_scheduled_backup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The backup cron runs the dump directly, no per-principal fan-out unlike every other pass."""
+    ran = []
+
+    async def fake_scheduled_backup() -> object:
+        ran.append(True)
+        return SimpleNamespace(bytes=7, path="/backups/x.dump")
+
+    async def fail_fan_out(task: ScheduledTask) -> None:
+        raise AssertionError("a backup must never fan out across principals")
+
+    monkeypatch.setattr(tasks_mod, "scheduled_backup", fake_scheduled_backup)
+    asyncio.run(BackupTask().fire_cron(fail_fan_out, schedule=cast("Schedule", None)))
+    assert ran == [True]
+
+
+def test_backup_task_run_is_never_fanned_out_per_principal() -> None:
+    """A backup carries no per-principal body, so `run` refuses rather than being reachable."""
+    with pytest.raises(NotImplementedError, match="system pass"):
+        asyncio.run(BackupTask().run(uuid.uuid4()))
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_backup_task_registers_only_the_cron_and_only_when_enabled(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    """The backup registers its cron only when enabled, and never a per-principal entrypoint."""
+    from bg_doubles import RecordingPg
+
+    monkeypatch.setattr(settings, "backup_enabled", enabled)
+    monkeypatch.setattr(settings, "backup_cron", "0 2 * * *")
+    pg = RecordingPg()
+
+    BackupTask().register(pg, fan_out=lambda task: None)  # type: ignore[arg-type,return-value]
+
+    assert pg.entrypoints == {}  # never a per-principal entrypoint, whatever the flag
+    assert len(pg.schedules) == (1 if enabled else 0)
+    if enabled:
+        assert pg.schedules[0][:2] == ("aizk_cron_backup", "0 2 * * *")

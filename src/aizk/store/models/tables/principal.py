@@ -52,6 +52,29 @@ class Principal(Id, Timestamped, TableBase, table=True):
         return principal
 
     @classmethod
+    async def link_admin(cls, session: AsyncSession, zitadel_sub: str, display_name: str) -> Self:
+        """Provision or promote the admin principal a Zitadel subject authenticates as.
+
+        Binds an external identity provider subject to an admin principal so the machine or human
+        that presents that subject's token administers the engine, minting one stamped with the
+        subject when none carries it yet and promoting the existing one otherwise. Idempotent, a
+        second call over the same subject just re-confirms the flag. Runs under a system session
+        since it is a pre-auth bootstrap that no principal is resolved to administer through yet.
+
+        session: open system session the row is minted or promoted through.
+        zitadel_sub: the subject claim the provider mints this identity's tokens against.
+        display_name: human-readable label for a freshly minted principal.
+        """
+        principal = await session.scalar(select(cls).where(cls.zitadel_sub == zitadel_sub))
+        if principal is None:
+            principal = cls(display_name=display_name, zitadel_sub=zitadel_sub, is_admin=True)
+            session.add(principal)
+            await session.flush()
+            return principal
+        await principal.grant_admin(session)
+        return principal
+
+    @classmethod
     async def administers(cls, session: AsyncSession, principal_id: uuid.UUID) -> bool:
         """Whether a principal may manage the operational surface, the one admin gate.
 

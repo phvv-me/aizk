@@ -3,13 +3,13 @@ from datetime import UTC, datetime
 from hypothesis import given
 from hypothesis import strategies as st
 
+from aizk.extract import ontology
 from aizk.extract.journal import (
     JOURNAL_LINE,
-    is_tagged_project,
+    declared_type,
     journal_facts,
     title_entity,
 )
-from aizk.extract.ontology import EntityType, RelationType
 
 dates = st.dates(min_value=datetime(2000, 1, 1).date(), max_value=datetime(2099, 12, 31).date())
 line_text = st.text(alphabet=st.characters(blacklist_characters="\n"), min_size=1, max_size=40)
@@ -22,7 +22,7 @@ def test_dated_line_parses_to_one_observed_fact(day: str, body: str) -> None:
     assert len(facts) == 1
     fact = facts[0]
     assert fact.subject == "My Note"
-    assert fact.predicate == RelationType.OBSERVES
+    assert fact.predicate == ontology.OBSERVES
     assert fact.statement == body.strip()
     assert fact.valid_from == datetime(day.year, day.month, day.day, tzinfo=UTC)
     assert fact.valid_to is None
@@ -54,21 +54,33 @@ def test_malformed_dates_and_prose_never_match() -> None:
 
 
 @given(
-    text=st.text(max_size=40),
+    text=st.text(alphabet=st.characters(blacklist_characters="#"), max_size=40),
     tagged=st.booleans(),
 )
 def test_project_tag_flips_the_title_entity_type(text: str, tagged: bool) -> None:
-    """`#project` as a whole word makes the title a Project entity, otherwise a Concept."""
+    """`#project` as a whole word declares a Project entity, otherwise the default Concept."""
     body = f"{text} #project" if tagged else text
-    assert is_tagged_project(body) is tagged
-    entity = title_entity("Title", is_tagged_project(body))
-    assert entity.type == (EntityType.PROJECT if tagged else EntityType.CONCEPT)
+    assert declared_type(body) == (ontology.PROJECT if tagged else None)
+    entity = title_entity("Title", declared_type(body))
+    assert entity.type == (ontology.PROJECT if tagged else ontology.CONCEPT)
 
 
-def test_project_word_in_prose_does_not_flip() -> None:
-    """A bare `project` or `#projection` never trips the whole-word `#project` tag."""
-    assert not is_tagged_project("this project is great")
-    assert not is_tagged_project("see #projections for detail")
+def test_area_tag_declares_area_and_wins_over_project() -> None:
+    """`#area` declares an Area, and a note carrying both tags stays the Area container.
+
+    An area note lists its projects and so may mention both tags; area is tested first by
+    design, the container is believed over the member roster it happens to name.
+    """
+    assert declared_type("the research hub #area") == ontology.AREA
+    assert declared_type("#area with #project members listed") == ontology.AREA
+    assert title_entity("Research", declared_type("x #area")).type == ontology.AREA
+
+
+def test_structural_words_in_prose_never_flip() -> None:
+    """A bare `project`/`area` or `#projection` never trips the whole-word structural tags."""
+    assert declared_type("this project is great") is None
+    assert declared_type("see #projections for detail") is None
+    assert declared_type("the bay area is sunny") is None
 
 
 def test_journal_line_regex_is_anchored_per_line() -> None:

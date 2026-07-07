@@ -1,12 +1,11 @@
 import uuid
 from datetime import UTC, datetime
 
-from polyfactory import Use
 from polyfactory.factories.pydantic_factory import ModelFactory
 from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import Range
 
-from aizk.extract.ontology import EntityType
+from aizk.extract import ontology
 from aizk.retrieval import FactHit, Hit, RecallResult
 from aizk.store import (
     Community,
@@ -19,8 +18,6 @@ from aizk.store import (
     TableBase,
     Watermark,
 )
-
-ENTITY_TYPE_LIST = EntityType.extractable()
 
 
 class AizkModelFactory[T: BaseModel](ModelFactory[T]):
@@ -46,9 +43,9 @@ class AizkTableFactory[T: TableBase](ModelFactory[T]):
 
 
 class EntityContentFactory(AizkTableFactory[EntityContent]):
-    """Builds a transient `EntityContent`, its type pinned to a sampled ontology type."""
+    """Builds a transient `EntityContent`, its type pinned to a seeded ontology entity kind."""
 
-    type = Use(ENTITY_TYPE_LIST.__getitem__, 0)
+    type = ontology.CONCEPT
 
 
 class EntityClaimFactory(AizkTableFactory[EntityClaim]):

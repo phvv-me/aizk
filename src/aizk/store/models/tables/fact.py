@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 import rls
 from sqlalchemy import (
     Boolean,
-    CheckConstraint,
     Column,
     ColumnElement,
     DateTime,
@@ -19,12 +18,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TSTZRANGE, Range
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import declared_attr, validates
+from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.functions import GenericFunction
 from sqlmodel import Field
 
-from ....exceptions import OntologyError
-from ....extract.ontology import RelationType, check_in_sql
 from ...mixins import Embedded, Id, Scoped, TableBase
 from ...mixins.scoped import ScopeLattice
 from .entity import content_policies
@@ -94,6 +91,22 @@ WHERE upper_inf(recorded)
         (CAST(:now AS timestamptz) - coalesce(last_accessed, lower(recorded))))
         / 86400.0 / :half_life_days
      ) * (1 + access_count) < :floor
+RETURNING id
+""")
+
+
+# retracts every live claim derived from a given set of documents, closing `recorded`'s upper
+# bound exactly as DECAY_SQL does, so a forgotten claim reads like a superseded one in history and
+# an as-of query still sees it. Marks the row forgotten rather than decayed. This is the provenance
+# sweep the roadmap's `forget` describes, source_chunk_id back to the documents whose facts should
+# never have been mined, run without deleting anything so an over-eager forget is undoable and the
+# documents themselves stay indexable for retrieval.
+FORGET_SQL = text("""
+UPDATE fact_claim
+SET recorded = tstzrange(lower(recorded), CAST(:now AS timestamptz)),
+    attributes = attributes || jsonb_build_object('forgotten', CAST(:now_iso AS text))
+WHERE upper_inf(recorded)
+  AND source_chunk_id IN (SELECT id FROM chunk WHERE document_id = ANY(:document_ids))
 RETURNING id
 """)
 
@@ -370,6 +383,27 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         )
         return list(result.scalars().all())
 
+    @classmethod
+    async def forget_from_documents(
+        cls, session: AsyncSession, document_ids: list[uuid.UUID]
+    ) -> list[uuid.UUID]:
+        """Retract every live claim derived from the given documents, return the retracted ids.
+
+        Closes `recorded` on each live claim whose source chunk belongs to one of the documents,
+        the provenance sweep `forget` runs when a source should never have been mined for facts.
+        The documents stay stored and indexable for retrieval, only their derived claims leave the
+        live graph, and nothing is deleted so the claims keep their history and an over-eager
+        forget is undoable through an as-of read.
+
+        session: open, principal-scoped session the retraction runs under.
+        document_ids: the source documents whose derived claims are retracted.
+        """
+        now = datetime.now(UTC)
+        result = await session.execute(
+            FORGET_SQL, {"now": now, "now_iso": now.isoformat(), "document_ids": document_ids}
+        )
+        return list(result.scalars().all())
+
 
 class FactContent(Id, Embedded, TableBase, table=True):
     """The immutable, deduplicated structure of a graph edge, content-addressed and tenant-free.
@@ -383,7 +417,9 @@ class FactContent(Id, Embedded, TableBase, table=True):
     id: content-addressed identity from uuid5 over the normalized triple and statement.
     subject_id: entity content the fact is about, cascading on delete.
     object_id: entity content the fact points to, null for unary facts, cascading on delete.
-    predicate: ontology relation type drawn from the closed vocabulary.
+    predicate: relation type, foreign-keyed against the live `relation_kind` catalog, the wall
+        that keeps a stray or off-vocabulary predicate from ever reaching a row regardless of
+        what path wrote it.
     statement: self-contained natural-language rendering of the fact.
     embedding: halfvec dense vector of the statement, null until embedded, stored once regardless
         of how many containers claim this content.
@@ -395,37 +431,10 @@ class FactContent(Id, Embedded, TableBase, table=True):
     object_id: uuid.UUID | None = Field(
         default=None, foreign_key="entity_content.id", ondelete="CASCADE", index=True
     )
-    predicate: str = Field(sa_type=Text)
+    predicate: str = Field(sa_type=Text, foreign_key="relation_kind.name")
     statement: str = Field(sa_type=Text)
 
     @classmethod
     def __rls_policies__(cls) -> list[rls.Policy]:
         """Visible through a `fact_claim`, freely mintable, immutable, admin-only to delete."""
         return content_policies(FactClaim)
-
-    @declared_attr.directive
-    def __table_args__(cls) -> tuple[Index | CheckConstraint, ...]:
-        # a database-level third wall mirroring `validate_predicate`, the same `RelationType`
-        # membership the 0001 migration's constraint checks, built from the same `check_in_sql`
-        # call so autogenerate never sees the two sides drift.
-        return (
-            *super().__table_args__,
-            CheckConstraint(
-                check_in_sql("predicate", RelationType), name="ck_fact_content_predicate"
-            ),
-        )
-
-    @validates("predicate")
-    def validate_predicate(self, key: str, value: str) -> str:
-        """Reject a predicate outside the closed ontology so the ORM boundary fails off-vocabulary.
-
-        The same second wall the entity type validator raises, holding any predicate that reaches a
-        fact by a path other than the enum-constrained extractor to the closed relation vocabulary,
-        `RelationType`'s structural `observes` member (the insight pass's own predicate) included.
-
-        key: the attribute being set, always `predicate`.
-        value: the candidate relation type to admit or reject.
-        """
-        if value not in set(RelationType):
-            raise OntologyError(f"predicate {value!r} is not in the ontology")
-        return value

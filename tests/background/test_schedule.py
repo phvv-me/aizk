@@ -13,11 +13,17 @@ import aizk.background.schedule as schedule_mod
 from aizk.background.payloads import ChunkJob, ProfileJob, TaskJob
 from aizk.background.queue import EXTRACT_ENTRYPOINT, PROFILE_ENTRYPOINT
 from aizk.background.schedule import fan_out, run_worker
-from aizk.background.tasks import ScheduledTask
+from aizk.background.tasks import BackupTask, ScheduledTask
 from aizk.config import settings
 
 InstallSeam = Callable[[object], RecordingQueue]
-task_classes = st.sampled_from(sorted(ScheduledTask.implementations(), key=lambda cls: cls.name))
+# the per-principal, fanned-out passes, excluding BackupTask, whose system-level cron-only shape
+# (no per-principal queue entrypoint, never fanned) is covered on its own in test_tasks.py.
+fanned_task_classes = sorted(
+    (cls for cls in ScheduledTask.implementations() if cls is not BackupTask),
+    key=lambda cls: cls.name,
+)
+task_classes = st.sampled_from(fanned_task_classes)
 crons = st.sampled_from(["0 3 * * *", "30 4 * * 0", "*/15 * * * *"])
 
 
@@ -167,7 +173,9 @@ def test_run_worker_registers_every_entrypoint_and_chains_profiles_only_when_on(
     assert {EXTRACT_ENTRYPOINT, PROFILE_ENTRYPOINT} <= set(pg.entrypoints)
     for task_cls in ScheduledTask.implementations():
         task = task_cls()
-        assert task.queue_entrypoint in pg.entrypoints
+        # the fanned passes register a per-principal queue entrypoint always; BackupTask, the one
+        # system-level pass, registers only its cron, never a per-principal entrypoint.
+        assert (task.queue_entrypoint in pg.entrypoints) is (task_cls is not BackupTask)
         registered = any(entry[0] == task.cron_entrypoint for entry in pg.schedules)
         assert registered is task.enabled
     assert pg.runs == [7]

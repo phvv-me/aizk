@@ -3,7 +3,6 @@ import uuid
 
 from ..config import settings
 from ..extract.models import ConsolidationVerdict
-from ..extract.ontology import RelationType
 from ..store import LiveFact
 
 
@@ -41,7 +40,7 @@ def rank_pool(vector: list[float], pool: list[LiveFact]) -> list[tuple[LiveFact,
 
 
 def decide_by_rule(
-    predicate: RelationType, object_id: uuid.UUID | None, scored: list[tuple[LiveFact, float]]
+    predicate: str, object_id: uuid.UUID | None, scored: list[tuple[LiveFact, float]]
 ) -> ConsolidationVerdict | None:
     """Decide a candidate fact's ADD/UPDATE/NOOP verdict from cosine similarity alone, when
     possible.

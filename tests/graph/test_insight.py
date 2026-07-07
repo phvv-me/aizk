@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from aizk.config import settings
-from aizk.extract.ontology import RelationType
+from aizk.extract import ontology
 from aizk.graph.insight import derive_insights, kept_observations
 from aizk.graph.models import InsightReport, Observation
 from aizk.store import EntityClaim, EntityContent, FactClaim, FactContent, LiveFact, acting_as
@@ -65,7 +65,7 @@ async def observed(principal: uuid.UUID) -> list[str]:
     async with acting_as(principal) as session:
         return list(
             await session.scalars(
-                select(LiveFact.statement).where(LiveFact.predicate == RelationType.OBSERVES)
+                select(LiveFact.statement).where(LiveFact.predicate == ontology.OBSERVES)
             )
         )
 

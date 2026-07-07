@@ -1,18 +1,19 @@
 import asyncio
+from collections.abc import Callable
 from typing import cast
 
 import pytest
 from doubles import FakeLLM
 
 from aizk.config import Settings
-from aizk.extract.llm.triples import EXTRACTION_SYSTEM
+from aizk.extract import ontology
+from aizk.extract.llm.triples import extraction_system
 from aizk.extract.models import Extraction
-from aizk.extract.ontology import ONTOLOGY_PROMPT
 from aizk.extract.strategies import (
-    PREFERENCES_SYSTEM,
-    SUMMARY_SYSTEM,
     custom_system,
     extract_graph,
+    preferences_system,
+    summary_system,
 )
 
 
@@ -25,12 +26,15 @@ def last_system(fake_llm: FakeLLM) -> str:
     return messages[0]["content"]
 
 
+# each strategy's own prompt depends on the live ontology catalog, so the parametrize table
+# carries the builder function itself, called inside the test body once the suite's bootstrap
+# has already refreshed the cache, never the resolved string at collection time.
 @pytest.mark.parametrize(
-    ("strategy", "system"),
+    ("strategy", "build_system"),
     [
-        ("ontology", EXTRACTION_SYSTEM),
-        ("summary", SUMMARY_SYSTEM),
-        ("preferences", PREFERENCES_SYSTEM),
+        ("ontology", extraction_system),
+        ("summary", summary_system),
+        ("preferences", preferences_system),
     ],
     ids=["ontology", "summary", "preferences"],
 )
@@ -39,7 +43,7 @@ def test_extract_graph_dispatches_the_selected_strategy_system(
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
     strategy: str,
-    system: str,
+    build_system: Callable[[], str],
 ) -> None:
     """The build path runs the strategy the config names, each carrying its own system prompt.
 
@@ -51,7 +55,7 @@ def test_extract_graph_dispatches_the_selected_strategy_system(
     assert isinstance(result, Extraction)
     call = fake_llm.completions.calls[-1]
     assert call["messages"] == [
-        {"role": "system", "content": system},
+        {"role": "system", "content": build_system()},
         {"role": "user", "content": "a span of text"},
     ]
 
@@ -64,7 +68,7 @@ def test_custom_strategy_layers_its_prompt_on_the_ontology(
     monkeypatch.setattr(settings, "extract_custom_prompt", "prefer terse claims")
     asyncio.run(extract_graph("a span of text"))
     system = last_system(fake_llm)
-    assert system.startswith(ONTOLOGY_PROMPT)
+    assert system.startswith(ontology.current().prompt)
     assert "prefer terse claims" in system
 
 
@@ -75,7 +79,7 @@ def test_custom_without_a_prompt_falls_back_to_the_ontology_default(
     monkeypatch.setattr(settings, "extract_strategy", "custom")
     monkeypatch.setattr(settings, "extract_custom_prompt", "")
     asyncio.run(extract_graph("a span of text"))
-    assert last_system(fake_llm) == EXTRACTION_SYSTEM
+    assert last_system(fake_llm) == extraction_system()
 
 
 @pytest.mark.parametrize(
@@ -89,5 +93,6 @@ def test_custom_system_layers_a_prompt_only_when_one_is_configured(
     """An empty custom prompt is the bare ontology, a filled one layers onto the ontology."""
     monkeypatch.setattr(settings, "extract_custom_prompt", prompt)
     system = custom_system()
-    assert system.startswith(ONTOLOGY_PROMPT)
-    assert (prompt in system and system != ONTOLOGY_PROMPT) is layered
+    ontology_prompt = ontology.current().prompt
+    assert system.startswith(ontology_prompt)
+    assert (prompt in system and system != ontology_prompt) is layered
