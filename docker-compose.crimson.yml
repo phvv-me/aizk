@@ -86,3 +86,16 @@ services:
     depends_on:
       - server
     restart: unless-stopped
+
+  # Both env_file consumers read the crimson-canonical env outside the synced tree, so a lote
+  # re-sync of the repo can never clobber host-local values (GPU splits, model swaps, the tunnel
+  # token). The compose interpolation side is the same file via --env-file on the command line.
+  db:
+    env_file: !override
+      - path: /home/crimson/aizk-deploy/.env
+        required: true
+
+  server:
+    env_file: !override
+      - path: /home/crimson/aizk-deploy/.env
+        required: true
