@@ -31,8 +31,22 @@ app = App(
     help="Process and bootstrap entrypoint for the aizk memory engine, whose verbs are MCP tools.",
 )
 
+# operator commands are grouped by noun into sub-apps, so `aizk <noun> <verb>` reads as the shape
+# it is: `aizk user create`, `aizk group add-member`, `aizk graph rebuild`. The hook and serve
+# entrypoints (worker, serve-mcp, recall-context, capture-session, profile-report) stay top-level.
+user = App(name="user", help="Users: the actors, human or agent, that own and read memory.")
+group = App(name="group", help="Groups: the sharing scopes memberships and promotions target.")
+graph = App(name="graph", help="Graph maintenance: rebuild, decay, reembed, raptor, forget.")
+ontology = App(name="ontology", help="Ontology: the entity types and relation predicates.")
+data = App(name="data", help="Data: ingest, export, audit, and promote documents.")
+db = App(name="db", help="Database and engine ops: setup, health, migrations, backup, restore.")
+eval = App(name="eval", help="Evaluation: bench, sweep, benchmark, and scale the retrieval.")
+for _sub in (user, group, graph, ontology, data, db, eval):
+    app.command(_sub)
 
-@app.command
+
+
+@db.command(name="migrate")
 def migrate() -> None:
     """Apply database migrations up to head, the pre-auth bootstrap step `ops.setup` also runs.
 
@@ -43,7 +57,7 @@ def migrate() -> None:
     print("done")
 
 
-@app.command
+@db.command(name="makemigrations")
 def makemigrations(message: str) -> None:
     """Autogenerate a new database migration from the current model metadata.
 
@@ -56,7 +70,7 @@ def makemigrations(message: str) -> None:
     print("done")
 
 
-@app.command
+@db.command(name="check-rls")
 async def check_rls() -> None:
     """Verify every scoped table forces row level security with the canonical scope policies.
 
@@ -90,7 +104,7 @@ async def worker(batch_size: int = settings.queue_batch_size) -> None:
     await run_worker(batch_size=batch_size)
 
 
-@app.command
+@db.command(name="install-queue")
 async def install_queue() -> None:
     """Install the pgqueuer schema as the owner and grant the app role access.
 
@@ -101,7 +115,7 @@ async def install_queue() -> None:
     print("done")
 
 
-@app.command
+@db.command(name="backup")
 async def backup(path: str) -> None:
     """Dump the whole database to a portable archive at `path`, the durable snapshot of memory.
 
@@ -115,7 +129,7 @@ async def backup(path: str) -> None:
     print(f"backed up {report.bytes} bytes to {report.path}")
 
 
-@app.command
+@db.command(name="restore")
 async def restore(path: str) -> None:
     """Load a backup archive back into the configured database, overwriting its current contents.
 
@@ -209,7 +223,7 @@ async def capture_session(
     print(f"captured session into document {document_id}")
 
 
-@app.command
+@eval.command(name="scale")
 async def scale(
     sizes: str = "1000,10000",
     k: int = 8,
@@ -237,7 +251,7 @@ async def scale(
     print(report.render())
 
 
-@app.command
+@user.command(name="create")
 async def create_user(name: str) -> None:
     """Create a user and print its id, the multi-user onboarding op.
 
@@ -247,7 +261,7 @@ async def create_user(name: str) -> None:
     print(user.id)
 
 
-@app.command
+@user.command(name="link")
 async def link_user(oidc_subject: str, name: str = "") -> None:
     """Bind an OIDC subject to a user and print its id, the identity-provider bridge.
 
@@ -262,7 +276,7 @@ async def link_user(oidc_subject: str, name: str = "") -> None:
     print(user.id)
 
 
-@app.command
+@user.command(name="list")
 async def list_users() -> None:
     """List every user known to the engine, id and display name."""
     for user in await admin.list_users():
@@ -270,7 +284,7 @@ async def list_users() -> None:
         print(f"{user.id}  {user.display_name or '-'}{star}")
 
 
-@app.command
+@group.command(name="create")
 async def create_group(name: str, public: bool = False, curated: bool = False) -> None:
     """Create a sharing group and print its id, the scope memberships and promotions target.
 
@@ -282,7 +296,7 @@ async def create_group(name: str, public: bool = False, curated: bool = False) -
     print(group.id)
 
 
-@app.command
+@group.command(name="add-member")
 async def add_member(principal: str, group: str, role: str = "writer") -> None:
     """Add a principal to a group so that group's scope becomes visible to it under RLS.
 
@@ -294,7 +308,7 @@ async def add_member(principal: str, group: str, role: str = "writer") -> None:
     print(f"{principal} joined {group} as {role}")
 
 
-@app.command
+@group.command(name="remove-member")
 async def remove_member(principal: str, group: str) -> None:
     """Remove a principal from a group, its scope no longer visible to them.
 
@@ -305,7 +319,7 @@ async def remove_member(principal: str, group: str) -> None:
     print(f"{principal} removed from {group}")
 
 
-@app.command
+@group.command(name="publish")
 async def publish_group(group: str, public: bool = True) -> None:
     """Publish a group so anyone can read its rows, or unpublish it back to members-only.
 
@@ -316,7 +330,7 @@ async def publish_group(group: str, public: bool = True) -> None:
     print(f"{group} public={public}")
 
 
-@app.command
+@group.command(name="curate")
 async def curate_group(group: str, curated: bool = True) -> None:
     """Curate or uncurate a group, flipping whether its writes must clear group-admin review.
 
@@ -327,7 +341,7 @@ async def curate_group(group: str, curated: bool = True) -> None:
     print(f"{group} curated={curated}")
 
 
-@app.command
+@group.command(name="delete")
 async def delete_group(group: str) -> None:
     """Delete a group, memberships cascading and its rows falling back to their owners.
 
@@ -337,7 +351,7 @@ async def delete_group(group: str) -> None:
     print(f"{group} deleted")
 
 
-@app.command
+@group.command(name="list")
 async def list_groups() -> None:
     """List every group with its visibility and member count, the sharing roster."""
     for row in await admin.list_groups():
@@ -345,7 +359,7 @@ async def list_groups() -> None:
         print(f"{row['name']}  {flags}  {row['members']} members")
 
 
-@app.command
+@data.command(name="ingest")
 async def ingest(path: str, scopes: str | None = None, principal: uuid.UUID | None = None) -> None:
     """Ingest a file or directory of notes and code into memory, the document count back.
 
@@ -357,7 +371,7 @@ async def ingest(path: str, scopes: str | None = None, principal: uuid.UUID | No
     print(f"ingested {count} documents from {path}")
 
 
-@app.command
+@data.command(name="ingest-image")
 async def ingest_image(
     path: str,
     caption: str | None = None,
@@ -377,7 +391,7 @@ async def ingest_image(
     print(document_id)
 
 
-@app.command
+@graph.command(name="rebuild")
 async def rebuild(
     limit: int | None = None, source: str | None = None, principal: uuid.UUID | None = None
 ) -> None:
@@ -391,7 +405,7 @@ async def rebuild(
     print(f"built {entities} entities and {facts} facts")
 
 
-@app.command
+@graph.command(name="decay")
 async def decay(half_life_days: float = 90.0, principal: uuid.UUID | None = None) -> None:
     """Run the decay pass now, archiving stale facts that leave recall but stay in history.
 
@@ -402,7 +416,7 @@ async def decay(half_life_days: float = 90.0, principal: uuid.UUID | None = None
     print(f"archived {archived} stale facts")
 
 
-@app.command
+@graph.command(name="reembed")
 async def reembed(principal: uuid.UUID | None = None) -> None:
     """Re-embed every visible stored vector with the current embedder, a backend migration.
 
@@ -412,7 +426,7 @@ async def reembed(principal: uuid.UUID | None = None) -> None:
     print(f"re-embedded {written} vectors")
 
 
-@app.command
+@graph.command(name="raptor")
 async def raptor(principal: uuid.UUID | None = None) -> None:
     """Build the RAPTOR tree now, the recursive summary tiers above the communities.
 
@@ -422,7 +436,7 @@ async def raptor(principal: uuid.UUID | None = None) -> None:
     print(f"built {written} summaries")
 
 
-@app.command
+@graph.command(name="forget")
 async def forget(query: str, k: int = 8, principal: uuid.UUID | None = None) -> None:
     """Retract the claims a query's own source notes contributed, the erasure counterpart to write.
 
@@ -436,7 +450,7 @@ async def forget(query: str, k: int = 8, principal: uuid.UUID | None = None) -> 
         print(f"  - {title}")
 
 
-@app.command
+@data.command(name="promote")
 async def promote(document: str, to_scopes: str, principal: uuid.UUID | None = None) -> None:
     """Promote a document and its chunks and facts into a wider scope-set as a new audited copy.
 
@@ -448,7 +462,7 @@ async def promote(document: str, to_scopes: str, principal: uuid.UUID | None = N
     print(f"promoted {count} rows into {to_scopes}")
 
 
-@app.command
+@data.command(name="export")
 async def export_scope(path: str, principal: uuid.UUID | None = None) -> None:
     """Export a principal's visible memory to a JSONL file, the scoped portable dump.
 
@@ -459,7 +473,7 @@ async def export_scope(path: str, principal: uuid.UUID | None = None) -> None:
     print(report.render() if hasattr(report, "render") else report)
 
 
-@app.command
+@data.command(name="audit")
 async def audit(limit: int = 20, principal: uuid.UUID | None = None) -> None:
     """List the most recent visible document writes with owner, scope-set, and title.
 
@@ -471,7 +485,7 @@ async def audit(limit: int = 20, principal: uuid.UUID | None = None) -> None:
         print(f"{doc.id}  {doc.kind}  [{scopes}]  {doc.title or '-'}")
 
 
-@app.command
+@ontology.command(name="define-entity")
 async def define_entity_kind(name: str, description: str, domain: str = "general") -> None:
     """Add or refine an entity type in the live ontology, refreshing the extraction snapshot.
 
@@ -483,7 +497,7 @@ async def define_entity_kind(name: str, description: str, domain: str = "general
     print(f"entity kind {name} defined")
 
 
-@app.command
+@ontology.command(name="define-relation")
 async def define_relation_kind(name: str, description: str, domain: str = "general") -> None:
     """Add or refine a relation predicate in the live ontology, refreshing the extraction snapshot.
 
@@ -495,7 +509,7 @@ async def define_relation_kind(name: str, description: str, domain: str = "gener
     print(f"relation kind {name} defined")
 
 
-@app.command
+@ontology.command(name="list")
 async def list_ontology() -> None:
     """List every ontology kind with how much of the graph uses it, the catalog review surface."""
     for row in await admin.list_ontology():
@@ -503,7 +517,7 @@ async def list_ontology() -> None:
         print(f"{mark} {row.kind:8} {row.name:24} {row.domain:9} uses={row.uses}")
 
 
-@app.command
+@db.command(name="tasks-status")
 async def tasks_status() -> None:
     """Report the autonomous engine's pending, running, failed, last-run, and lag counts."""
     status = await admin.tasks_status()
@@ -520,7 +534,7 @@ def profile_report() -> None:
         print("no spans recorded (set AIZK_PROFILING=1)")
 
 
-@app.command
+@eval.command(name="bench")
 async def bench(questions_file: str | None = None, k: int = 8) -> None:
     """Run the eval harness over visible memory and report hit-at-k with a per-config split.
 
@@ -531,7 +545,7 @@ async def bench(questions_file: str | None = None, k: int = 8) -> None:
     print(report.render() if hasattr(report, "render") else report)
 
 
-@app.command
+@eval.command(name="sweep")
 async def sweep(questions_file: str | None = None, k: int = 8, dims: str | None = None) -> None:
     """Sweep the config grid and report quality, latency, and memory for each config.
 
@@ -543,7 +557,7 @@ async def sweep(questions_file: str | None = None, k: int = 8, dims: str | None 
     print(report.render() if hasattr(report, "render") else report)
 
 
-@app.command
+@eval.command(name="benchmark")
 async def benchmark(name: str, dataset_path: str, k: int = 8) -> None:
     """Sweep the config grid over one external 2026 benchmark loaded from its dataset file.
 
@@ -555,14 +569,14 @@ async def benchmark(name: str, dataset_path: str, k: int = 8) -> None:
     print(report.render() if hasattr(report, "render") else report)
 
 
-@app.command
+@db.command(name="setup")
 async def setup() -> None:
     """Bring the database to a ready state, migrating to head and installing the queue schema."""
     report = await admin.setup()
     print(f"migrated {report.migrated_from} -> {report.migrated_to}")
 
 
-@app.command
+@db.command(name="health")
 async def health() -> None:
     """Report the engine's schema, row security, row-count, queue, and serving-endpoint state."""
     report = await admin.health()

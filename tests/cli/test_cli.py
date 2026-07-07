@@ -167,13 +167,17 @@ def check_restore(seams: Seams, out: str) -> None:
 
 
 COMMANDS: list[tuple[str, list[str], Callable[[Seams, str], None]]] = [
-    ("migrate", ["migrate"], check_migrate),
-    ("makemigrations", ["makemigrations", "add col"], check_makemigrations),
-    ("install-queue", ["install-queue"], check_install_queue),
-    ("scale", ["scale", "--sizes", "1,2", "--k", "4", "--recall-p95-ms", "50"], check_scale),
-    ("create-user", ["create-user", "alice"], check_create_user),
-    ("backup", ["backup", "/tmp/x.dump"], check_backup),
-    ("restore", ["restore", "/tmp/x.dump"], check_restore),
+    ("db migrate", ["db", "migrate"], check_migrate),
+    ("db makemigrations", ["db", "makemigrations", "add col"], check_makemigrations),
+    ("db install-queue", ["db", "install-queue"], check_install_queue),
+    (
+        "eval scale",
+        ["eval", "scale", "--sizes", "1,2", "--k", "4", "--recall-p95-ms", "50"],
+        check_scale,
+    ),
+    ("user create", ["user", "create", "alice"], check_create_user),
+    ("db backup", ["db", "backup", "/tmp/x.dump"], check_backup),
+    ("db restore", ["db", "restore", "/tmp/x.dump"], check_restore),
 ]
 
 
@@ -262,11 +266,11 @@ def test_check_rls_gates_on_violations(
 
     if violations:
         with pytest.raises(SystemExit) as exit_info:
-            dispatch(["check-rls"])
+            dispatch(["db", "check-rls"])
         assert exit_info.value.code == 1
         assert violations[0] in capsys.readouterr().out
     else:
-        dispatch(["check-rls"])
+        dispatch(["db", "check-rls"])
         assert "ok" in capsys.readouterr().out
 
 
@@ -338,30 +342,30 @@ def test_capture_session_is_a_quiet_noop_without_a_transcript(
 # each operator command routes its argv to the matching `admin.<fn>` and prints a summary. The
 # tuple is (argv, admin function name, its faked return, a substring the command must print).
 OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
-    (["rebuild", "--limit", "5"], "rebuild", (3, 7), "3 entities and 7 facts"),
-    (["decay", "--half-life-days", "30"], "decay", 4, "archived 4"),
-    (["reembed"], "reembed", 9, "re-embedded 9"),
-    (["raptor"], "raptor", 2, "built 2 summaries"),
+    (["graph", "rebuild", "--limit", "5"], "rebuild", (3, 7), "3 entities and 7 facts"),
+    (["graph", "decay", "--half-life-days", "30"], "decay", 4, "archived 4"),
+    (["graph", "reembed"], "reembed", 9, "re-embedded 9"),
+    (["graph", "raptor"], "raptor", 2, "built 2 summaries"),
     (
-        ["forget", "wrong note"],
+        ["graph", "forget", "wrong note"],
         "forget",
         SimpleNamespace(claims=6, documents=["A", "B"]),
         "retracted 6 claims from 2 notes",
     ),
-    (["promote", str(DOC_ID), "team"], "promote", 5, "promoted 5 rows into team"),
-    (["ingest", "notes/"], "ingest", 4, "ingested 4 documents"),
+    (["data", "promote", str(DOC_ID), "team"], "promote", 5, "promoted 5 rows into team"),
+    (["data", "ingest", "notes/"], "ingest", 4, "ingested 4 documents"),
     (
-        ["link-user", "gh|42", "--name", "Al"],
+        ["user", "link", "gh|42", "--name", "Al"],
         "link_user",
         SimpleNamespace(id=USER_ID),
         str(USER_ID),
     ),
-    (["create-group", "team"], "create_group", SimpleNamespace(id=DOC_ID), str(DOC_ID)),
-    (["add-member", str(USER_ID), "team"], "add_member", None, "joined team"),
-    (["publish-group", "team"], "publish_group", None, "public=True"),
-    (["delete-group", "team"], "delete_group", None, "team deleted"),
+    (["group", "create", "team"], "create_group", SimpleNamespace(id=DOC_ID), str(DOC_ID)),
+    (["group", "add-member", str(USER_ID), "team"], "add_member", None, "joined team"),
+    (["group", "publish", "team"], "publish_group", None, "public=True"),
+    (["group", "delete", "team"], "delete_group", None, "team deleted"),
     (
-        ["define-entity-kind", "Area", "a domain"],
+        ["ontology", "define-entity", "Area", "a domain"],
         "define_entity_kind",
         None,
         "entity kind Area defined",
@@ -372,7 +376,7 @@ OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
 @pytest.mark.parametrize(
     ("tokens", "fn_name", "ret", "expected"),
     OPERATOR_COMMANDS,
-    ids=[tokens[0] for tokens, _, _, _ in OPERATOR_COMMANDS],
+    ids=[" ".join(tokens[:2]) for tokens, _, _, _ in OPERATOR_COMMANDS],
 )
 def test_operator_command_routes_to_admin_and_prints(
     monkeypatch: pytest.MonkeyPatch,
@@ -412,7 +416,7 @@ def test_list_groups_renders_each_group_row(
     ]
     monkeypatch.setattr(cli.admin, "list_groups", Recorder(ret=rows, is_async=True))
 
-    dispatch(["list-groups"])
+    dispatch(["group", "list"])
 
     out = capsys.readouterr().out
     assert "team  public  3 members" in out

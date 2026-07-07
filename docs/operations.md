@@ -54,8 +54,8 @@ keep window, so the disk never grows without bound.
 The same engine is two commands for a manual snapshot or a recovery.
 
 ```sh
-aizk backup /backups/aizk-$(date +%F).dump
-aizk restore /backups/aizk-2026-07-05.dump   # into the live database, destructive, --clean
+aizk db backup /backups/aizk-$(date +%F).dump
+aizk db restore /backups/aizk-2026-07-05.dump   # into the live database, destructive, --clean
 ```
 
 Restoring into the live database drops each object the archive recreates so the database ends
@@ -84,7 +84,7 @@ scratch database and checking parity, which never touches your live data.
 ```sh
 # create an empty scratch database, then restore into it
 docker exec aizk-db-1 psql -U aizk -c "CREATE DATABASE aizk_restore_drill"
-aizk restore /backups/aizk-2026-07-05.dump  # after pointing AIZK_DB_NAME at aizk_restore_drill
+aizk db restore /backups/aizk-2026-07-05.dump  # after pointing AIZK_DB_NAME at aizk_restore_drill
 ```
 
 The restore recreates the extensions and the app-role grants, and forced row level security comes
