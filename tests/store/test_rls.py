@@ -19,11 +19,11 @@ WRITER_ROLES = frozenset({"writer", "admin"})
 
 @dataclass
 class Scenario:
-    """One RLS probe: a principal, a set of groups it may belong to, a scoped row, and a lens.
+    """One RLS probe: a user, a set of groups it may belong to, a scoped row, and a lens.
 
     groups: each group's id and its public flag.
-    roles: the probe principal's membership role per group, absent when not a member.
-    owner_is_probe: whether the row's owner is the probe principal or an unrelated third party.
+    roles: the probe user's membership role per group, absent when not a member.
+    owner_is_probe: whether the row's owner is the probe user or an unrelated third party.
     scopes: the group ids the row is shared with, empty for a private row.
     lens: the reading lens group ids, None for no lens at all.
     """
@@ -75,7 +75,7 @@ class Scenario:
 
 @st.composite
 def scenarios(draw: st.DrawFn) -> Scenario:
-    """A random principal/membership/scope-set/lens probe over one to three groups."""
+    """A random user/membership/scope-set/lens probe over one to three groups."""
     group_ids = draw(st.lists(st.uuids(version=4), min_size=1, max_size=3, unique=True))
     groups = {gid: draw(st.booleans()) for gid in group_ids}
     roles = {gid: draw(st.sampled_from(ROLES)) for gid in group_ids if draw(st.booleans())}
@@ -94,7 +94,7 @@ def scenarios(draw: st.DrawFn) -> Scenario:
 
 
 async def provision(scenario: Scenario) -> uuid.UUID:
-    """Reset the schema and seed the scenario's principals, groups, memberships, and row."""
+    """Reset the schema and seed the scenario's users, groups, memberships, and row."""
     await dbutil.reset_db()
     await dbutil.seed_user(scenario.probe)
     await dbutil.seed_user(scenario.other)
@@ -203,19 +203,19 @@ def test_scoped_orm_query_without_acting_as_raises() -> None:
 
 
 def test_non_scoped_query_without_acting_as_is_allowed() -> None:
-    """A no-principal session may still read a non-scoped identity table past the tenant guard."""
+    """A no-user session may still read a non-scoped identity table past the tenant guard."""
     from aizk.store import User
 
     async def body() -> None:
         async with async_session()() as session, session.begin():
-            # principal carries no row level security, so the tenant guard lets this pass
+            # user carries no row level security, so the tenant guard lets this pass
             await session.execute(select(User).limit(1))
 
     dbutil.run(body())
 
 
 def test_anonymous_session_reads_no_private_row() -> None:
-    """A session bound to the anonymous principal sees no private or member-only row."""
+    """A session bound to the anonymous user sees no private or member-only row."""
 
     async def body() -> None:
         await dbutil.reset_db()
@@ -223,6 +223,6 @@ def test_anonymous_session_reads_no_private_row() -> None:
         private = await dbutil.seed_document(owner, [])
         assert not await dbutil.can_read_document(settings.anonymous_user_id, private)
         async with acting_as(settings.anonymous_user_id) as session:
-            assert session.info["principal"] == settings.anonymous_user_id
+            assert session.info["user"] == settings.anonymous_user_id
 
     dbutil.run(body())

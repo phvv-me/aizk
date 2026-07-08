@@ -16,13 +16,13 @@ class TierBuilder[GroundingT, ReportT: FrozenModel](ABC):
     material a caller already fetched under row level security on this instance's behalf, the way a
     per-cluster or per-level pass shares one read across many builder instances.
 
-    principal_id: identity that owns the written rows and whose visibility scopes the grounding.
+    user_id: identity that owns the written rows and whose visibility scopes the grounding.
     """
 
     def __init__(
-        self, principal_id: uuid.UUID, system_prompt: str, report_type: type[ReportT]
+        self, user_id: uuid.UUID, system_prompt: str, report_type: type[ReportT]
     ) -> None:
-        self.principal_id = principal_id
+        self.user_id = user_id
         self.system_prompt = system_prompt
         self.report_type = report_type
         self.embedder = Embedder()

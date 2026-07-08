@@ -332,18 +332,18 @@ def unit_vector(rng: np.random.Generator, dim: int) -> list[float]:
     return vector.tolist()
 
 
-def index_id(principal_id: uuid.UUID, kind: str, index: int) -> uuid.UUID:
+def index_id(user_id: uuid.UUID, kind: str, index: int) -> uuid.UUID:
     """Map a row's kind and index to a stable id, so additive growth never collides on a key.
 
-    principal_id: the throwaway principal namespacing the corpus.
+    user_id: the throwaway user namespacing the corpus.
     kind: the row family, such as document, chunk, entity, or fact.
     index: the row's position within its family.
     """
-    return uuid.uuid5(principal_id, f"{kind}-{index}")
+    return uuid.uuid5(user_id, f"{kind}-{index}")
 
 
 def corpus_rows(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     generated: Generated,
     target: CorpusScale,
     rng: np.random.Generator,
@@ -351,30 +351,30 @@ def corpus_rows(
 ) -> dict[type[TableBase], list[Row]]:
     """Build the additive delta rows per table, documents through facts, so every key resolves.
 
-    Ids derive from the principal and the row index, so growth never collides and each principal
+    Ids derive from the user and the row index, so growth never collides and each user
     namespaces its own corpus.
 
-    principal_id: the owner every row is scoped to under row level security.
+    user_id: the owner every row is scoped to under row level security.
     generated: the running tally of rows already inserted, the indexes the delta starts at.
     target: the corpus shape to grow to.
     rng: the seeded generator the embeddings are drawn from.
     dim: the embedding width.
     """
-    owned: Row = {"owner_id": principal_id, "scopes": []}
+    owned: Row = {"owner_id": user_id, "scopes": []}
     documents: list[Row] = [
         {
-            "id": index_id(principal_id, "document", i),
+            "id": index_id(user_id, "document", i),
             "kind": "note",
             "title": f"scale document {i}",
-            "content_hash": uuid.uuid5(principal_id, f"content-{i}").hex,
+            "content_hash": uuid.uuid5(user_id, f"content-{i}").hex,
             **owned,
         }
         for i in range(generated.documents, target.documents)
     ]
     chunks: list[Row] = [
         {
-            "id": index_id(principal_id, "chunk", i),
-            "document_id": index_id(principal_id, "document", i // CHUNKS_PER_DOC),
+            "id": index_id(user_id, "chunk", i),
+            "document_id": index_id(user_id, "document", i // CHUNKS_PER_DOC),
             "ord": i % CHUNKS_PER_DOC,
             "text": f"scale chunk {i} about entity {i % CHUNKS_PER_ENTITY} and topic {i % 32}",
             "embedding": unit_vector(rng, dim),
@@ -383,11 +383,11 @@ def corpus_rows(
         for i in range(generated.chunks, target.chunks)
     ]
     # entity and fact content carry no owner or scope of their own, minted once per namespaced
-    # index id; the matching claim in this principal's own private container is what makes each
+    # index id; the matching claim in this user's own private container is what makes each
     # one visible and writable to it, the two-row shape every real content/claim write also takes.
     entity_content: list[Row] = [
         {
-            "id": index_id(principal_id, "entity", i),
+            "id": index_id(user_id, "entity", i),
             "name": f"entity {i}",
             "type": ontology.CONCEPT,
             "embedding": unit_vector(rng, dim),
@@ -396,8 +396,8 @@ def corpus_rows(
     ]
     entity_claims: list[Row] = [
         {
-            "id": index_id(principal_id, "entity_claim", i),
-            "content_id": index_id(principal_id, "entity", i),
+            "id": index_id(user_id, "entity_claim", i),
+            "content_id": index_id(user_id, "entity", i),
             "attributes": {},
             **owned,
         }
@@ -405,11 +405,11 @@ def corpus_rows(
     ]
     fact_content: list[Row] = [
         {
-            "id": index_id(principal_id, "fact", i),
-            "subject_id": index_id(principal_id, "entity", i % target.entities),
+            "id": index_id(user_id, "fact", i),
+            "subject_id": index_id(user_id, "entity", i % target.entities),
             "object_id": None
             if i % 5 == 0
-            else index_id(principal_id, "entity", (i * 7 + 1) % target.entities),
+            else index_id(user_id, "entity", (i * 7 + 1) % target.entities),
             "predicate": PREDICATES[i % len(PREDICATES)],
             "statement": (
                 f"entity {i % target.entities} {PREDICATES[i % len(PREDICATES)]}"
@@ -421,8 +421,8 @@ def corpus_rows(
     ]
     fact_claims: list[Row] = [
         {
-            "id": index_id(principal_id, "fact_claim", i),
-            "content_id": index_id(principal_id, "fact", i),
+            "id": index_id(user_id, "fact_claim", i),
+            "content_id": index_id(user_id, "fact", i),
             "attributes": {},
             **owned,
         }
@@ -441,7 +441,7 @@ def corpus_rows(
 async def insert_rows(session: AsyncSession, rows: dict[type[TableBase], list[Row]]) -> None:
     """Insert every table's rows in bounded executemany batches, so a large delta streams in.
 
-    session: open, principal-scoped session the inserts write under.
+    session: open, user-scoped session the inserts write under.
     rows: the per-table delta rows to insert, corpus_rows' own output.
     """
     for table, table_rows in rows.items():
@@ -461,7 +461,7 @@ def advance_generated(generated: Generated, target: CorpusScale) -> None:
 
 
 async def grow_corpus(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     generated: Generated,
     target: CorpusScale,
     rng: np.random.Generator,
@@ -469,18 +469,18 @@ async def grow_corpus(
     """Grow the throwaway corpus to a target size and return the ingestion throughput in chunks/s.
 
     Inserts only the delta past what was generated, documents then chunks then entities then
-    facts so every foreign key resolves, in bounded executemany batches under one principal-scoped
+    facts so every foreign key resolves, in bounded executemany batches under one user-scoped
     transaction, then advances the running tally. The wall time covers only the new rows so the
     throughput is the marginal ingest rate at this size, not the cumulative one.
 
-    principal_id: the throwaway principal that owns the corpus.
+    user_id: the throwaway user that owns the corpus.
     generated: the running tally of rows already inserted, advanced in place.
     target: the corpus shape to grow to.
     rng: the seeded generator the embeddings are drawn from.
     """
-    rows = corpus_rows(principal_id, generated, target, rng, settings.embed_dim)
+    rows = corpus_rows(user_id, generated, target, rng, settings.embed_dim)
     start = time.perf_counter()
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         await insert_rows(session, rows)
     elapsed = time.perf_counter() - start
     advance_generated(generated, target)
@@ -508,7 +508,7 @@ async def measure_lanes(
     row-level-security predicate, so the curve shows which lane bends first as the corpus grows
     rather than only the end-to-end number.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     query: the lexical and embedding query text.
     vector: the query embedding.
     k: how many results each lane surfaces.
@@ -543,7 +543,7 @@ async def measure_graph_ops(
     the whole loaded graph, the batch op the weekly pass runs. Both are the networkx CPU walks the
     curve locates the breaking point of, against the Postgres-CTE and cuGraph alternatives.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     vector: the query embedding the seeds are ranked by.
     repeats: how many pagerank queries to time before the median.
     """
@@ -568,7 +568,7 @@ async def measure_graph_ops(
 
 
 async def measure_point(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     query: str,
     vector: list[float],
     scale: CorpusScale,
@@ -580,10 +580,10 @@ async def measure_point(
 
     Times end-to-end recall, then on one shared session breaks it into per-lane latencies and the
     two graph ops, all inside a mainboard meter so the memory peak rides alongside. The storage
-    footprint spans every principal's rows since a table size is global, so the curve reads the
+    footprint spans every user's rows since a table size is global, so the curve reads the
     growth across sizes rather than an absolute attributable to this corpus alone.
 
-    principal_id: the throwaway principal whose visibility scopes every read.
+    user_id: the throwaway user whose visibility scopes every read.
     query: the recall and lexical query text.
     vector: the precomputed query embedding the lanes and graph ops are ranked by.
     scale: the corpus shape measured, read for the entity and fact counts.
@@ -593,10 +593,10 @@ async def measure_point(
     """
     with open_meter() as meter:
         recalled = await LaneLatency.timed(
-            "recall", partial(recall, query, principal_id, k), repeats
+            "recall", partial(recall, query, user_id, k), repeats
         )
         meter.sample()
-        async with acting_as(principal_id) as session:
+        async with acting_as(user_id) as session:
             lanes = await measure_lanes(session, query, vector, k, repeats)
             ppr_ms, detect_ms = await measure_graph_ops(session, vector, repeats)
             footprint = (
@@ -655,42 +655,42 @@ def find_knees(points: list[ScalePoint], budget: Budget) -> list[Knee]:
     ]
 
 
-async def purge_principal(principal_id: uuid.UUID) -> None:
-    """Delete the throwaway principal and every row it owns, so a scale run leaves no residue.
+async def purge_user(user_id: uuid.UUID) -> None:
+    """Delete the throwaway user and every row it owns, so a scale run leaves no residue.
 
-    Empties the scoped claim tables under the principal's own visibility first, then deletes the
-    entity and fact content those claims staked as the system principal, the one identity the
-    content tables' admin-only DELETE policy admits, before dropping the principal itself. Every id
-    here is namespaced by `uuid.uuid5(principal_id, ...)` (`index_id`), so this cleanup can never
+    Empties the scoped claim tables under the user's own visibility first, then deletes the
+    entity and fact content those claims staked as the system user, the one identity the
+    content tables' admin-only DELETE policy admits, before dropping the user itself. Every id
+    here is namespaced by `uuid.uuid5(user_id, ...)` (`index_id`), so this cleanup can never
     touch a row this throwaway corpus did not itself mint.
 
-    principal_id: the throwaway principal to remove.
+    user_id: the throwaway user to remove.
     """
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         entity_content_ids = list(
             await session.scalars(
-                select(EntityClaim.content_id).where(EntityClaim.owner_id == principal_id)
+                select(EntityClaim.content_id).where(EntityClaim.owner_id == user_id)
             )
         )
         fact_content_ids = list(
             await session.scalars(
                 select(FactClaim.content_id)
-                .where(FactClaim.owner_id == principal_id)
+                .where(FactClaim.owner_id == user_id)
                 .execution_options(**{settings.skip_live_gate: True})
             )
         )
         for table in (FactClaim, Community, Profile, EntityClaim, Chunk, Document, Watermark):
-            await session.execute(delete(table).where(table.owner_id == principal_id))
+            await session.execute(delete(table).where(table.owner_id == user_id))
     async with system_session() as session:
         await session.execute(delete(FactContent).where(FactContent.id.in_(fact_content_ids)))
         await session.execute(
             delete(EntityContent).where(EntityContent.id.in_(entity_content_ids))
         )
-        await session.execute(text("DELETE FROM principal WHERE id = :id"), {"id": principal_id})
+        await session.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
 
 
 async def measure_size(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     query: str,
     vector: list[float],
     size: int,
@@ -701,7 +701,7 @@ async def measure_size(
 ) -> ScalePoint:
     """Grow the corpus to one size and measure it, logging the curve row for this size.
 
-    principal_id: the throwaway principal whose corpus is grown and measured.
+    user_id: the throwaway user whose corpus is grown and measured.
     query: the recall and lexical query text.
     vector: the precomputed query embedding.
     size: the target chunk count for this row of the curve.
@@ -711,8 +711,8 @@ async def measure_size(
     repeats: how many recall and per-lane calls each percentile is read over.
     """
     scale = CorpusScale.for_size(size)
-    ingest_rate = await grow_corpus(principal_id, generated, scale, rng)
-    point = await measure_point(principal_id, query, vector, scale, ingest_rate, k, repeats)
+    ingest_rate = await grow_corpus(user_id, generated, scale, rng)
+    point = await measure_point(user_id, query, vector, scale, ingest_rate, k, repeats)
     logger.info(
         "scale size={size} recall_p95={p95:.1f}ms ppr={ppr:.1f}ms detect={det:.1f}ms",
         size=size,
@@ -734,7 +734,7 @@ async def run_scale_benchmark(
 ) -> ScaleReport:
     """Grow a throwaway corpus through the sizes and measure the scaling curve, flagging each knee.
 
-    The throwaway principal and its rows are purged at the end unless kept, so a run on the live
+    The throwaway user and its rows are purged at the end unless kept, so a run on the live
     database leaves no residue.
 
     sizes: the ascending corpus sizes to measure, the million left opt-in.
@@ -743,23 +743,23 @@ async def run_scale_benchmark(
     query: the probe query every size is recalled with.
     budget: the per-component ceilings the knees are read against, the defaults when null.
     seed: the generator seed, for a reproducible corpus and curve.
-    keep: leave the throwaway principal and its corpus in place rather than purging them.
+    keep: leave the throwaway user and its corpus in place rather than purging them.
     """
     budget = budget or Budget()
     rng = np.random.default_rng(seed)
     [vector] = await Embedder().embed([query], mode="query")
     async with system_session() as session:
-        principal_id = (await User.create(session, "scale-benchmark")).id
+        user_id = (await User.create(session, "scale-benchmark")).id
     generated = Generated()
     points: list[ScalePoint] = []
     try:
         for size in sorted(sizes):
             points.append(
-                await measure_size(principal_id, query, vector, size, generated, rng, k, repeats)
+                await measure_size(user_id, query, vector, size, generated, rng, k, repeats)
             )
     finally:
         if not keep:
-            await purge_principal(principal_id)
+            await purge_user(user_id)
     return ScaleReport(
         sizes=sorted(sizes), points=points, budget=budget, knees=find_knees(points, budget)
     )

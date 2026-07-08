@@ -91,7 +91,7 @@ async def hybrid_recall_rows(
     is baked into the function body instead, since a SQL-language function takes no config of its
     own.
 
-    session: open, principal-scoped session the call runs under, row level security and all.
+    session: open, user-scoped session the call runs under, row level security and all.
     vector: dense query embedding.
     query: natural-language search string, the lexical lane's match text.
     k: fused chunk hits and seed facts the function returns per kind.
@@ -125,7 +125,7 @@ async def latest_facts(
     statement, predicate, and embedding live on the deduplicated content while `valid` is the
     claim's own per-container bi-temporal state.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     vector: dense query embedding.
     k: number of facts to return.
     as_of: world-time the facts must be valid at, the live graph when null.
@@ -157,7 +157,7 @@ async def seed_entities(
     both start from this same closest-facts read before diverging into a one-hop join or a
     pagerank expansion.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     vector: dense query embedding.
     as_of: world-time the seed facts must be valid at, the live graph when null.
     """
@@ -193,7 +193,7 @@ async def facts_near(
     expanded entity set is ready, differing only in which entities they pass and whether they
     exclude the seed facts themselves or apply a relevance margin.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     entity_ids: entities a fact must touch as subject or object to match.
     vector: dense query embedding.
     as_of: world-time the facts must be valid at, the live graph when null.
@@ -236,9 +236,9 @@ async def session_hits(
     Reads only the unpromoted items, the ones whose knowledge has not yet reached the graph, so a
     recall never doubly surfaces an item both here and as a promoted fact, and ranks them by the
     same pgvector cosine operator every other lane uses. The session must already be scoped to a
-    principal so row level security restricts the rows.
+    user so row level security restricts the rows.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     vector: dense query embedding.
     k: number of working items to return.
     """
@@ -259,7 +259,7 @@ async def top_profile(session: AsyncSession, vector: list[float]) -> str | None:
     match's rolled-up summary, so a recall about a known subject opens with its portrait rather
     than reassembling identity from individual facts. Null when nothing visible is profiled.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     vector: dense query embedding.
     """
     return await session.scalar(
@@ -274,7 +274,7 @@ async def top_profile(session: AsyncSession, vector: list[float]) -> str | None:
 async def graph_search(
     query: str,
     k: int = 20,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     as_of: datetime | None = None,
 ) -> list[FactHit]:
     """Search the knowledge graph and return the top latest facts by embedding.
@@ -285,13 +285,13 @@ async def graph_search(
 
     query: natural-language search string.
     k: number of facts to return.
-    principal_id: identity whose row level security visibility scopes the results, the system
-        principal when null.
+    user_id: identity whose row level security visibility scopes the results, the system
+        user when null.
     as_of: world-time the facts must be valid at, the live graph when null.
     """
-    principal_id = principal_id or settings.system_user_id
+    user_id = user_id or settings.system_user_id
     [vector] = await Embedder().embed([query], mode="query")
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         hits = await latest_facts(session, vector, k, as_of)
     logger.info("graph search for {query!r} returned {count} facts", query=query, count=len(hits))
     return hits
@@ -323,23 +323,23 @@ async def rerank_hits(query: str, pool: list[Hit], k: int) -> list[Hit]:
 async def search(
     query: str,
     k: int = 8,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> list[Hit]:
     """Run hybrid dense and lexical search over the live graph and return the top k hits.
 
     Embeds the query once and reads the fused, promoted-bonused chunk hits through the
-    hybrid_recall SQL function on a principal-scoped session, reranking with the cross-encoder
+    hybrid_recall SQL function on a user-scoped session, reranking with the cross-encoder
     before truncating when enabled.
 
     query: natural-language search string.
     k: number of results to return.
-    principal_id: identity whose row level security visibility scopes the results, the system
-        principal when null.
+    user_id: identity whose row level security visibility scopes the results, the system
+        user when null.
     """
-    principal_id = principal_id or settings.system_user_id
+    user_id = user_id or settings.system_user_id
     embedder = Embedder()
     [vector] = await embedder.embed([query], mode="query")
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         round_ = Recall(session, embedder, query, vector, k, None, ppr=False)
         hits, _, _ = await round_.hybrid_recall()
     return await rerank_hits(query, hits, k) if settings.rerank else hits
@@ -440,7 +440,7 @@ class Recall:
     Binds the shared (session, vector, k, as_of) tuple once so each method reads it off `self`
     instead of re-threading it through every call.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     embedder: the embedder an evidence-gap round re-embeds its expanded query with.
     query: natural-language search string, also the lexical and rerank text.
     vector: dense query embedding.

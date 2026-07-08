@@ -87,15 +87,46 @@ services:
       - server
     restart: unless-stopped
 
-  # Both env_file consumers read the crimson-canonical env outside the synced tree, so a lote
-  # re-sync of the repo can never clobber host-local values (GPU splits, model swaps, the tunnel
-  # token). The compose interpolation side is the same file via --env-file on the command line.
+  # Logto, the self-hosted OIDC provider we are moving to as aizk's identity plane, replacing
+  # Zitadel. Shares the one Postgres in the db container through its own `logto` database (created
+  # host-side by a one-off `CREATE DATABASE logto`, then seeded by Logto on first boot). It runs
+  # alongside Zitadel for now; the cutover just rewires the aizk server's `AIZK_OIDC_*` settings to
+  # point here. The admin console (ADMIN_ENDPOINT, published on 3002) is where you create the first
+  # admin user and add the GitHub social connector; the auth endpoint (ENDPOINT, published on 3001)
+  # is what browsers and the aizk server hit. Both default to localhost so an SSH tunnel reaches
+  # them; set AIZK_LOGTO_ENDPOINT / AIZK_LOGTO_ADMIN_ENDPOINT to public URLs once a Cloudflare
+  # hostname is wired. The entrypoint seeds on first run and no-ops the seed on later restarts.
+  logto:
+    image: svhd/logto:latest
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "npm run cli db seed -- --swe || true; exec npm start"]
+    environment:
+      - TRUST_PROXY_HEADER=1
+      - DB_URL=postgres://aizk:${AIZK_ADMIN_PASSWORD:-aizk}@db:5432/logto
+      - ENDPOINT=${AIZK_LOGTO_ENDPOINT:-http://localhost:3001}
+      - ADMIN_ENDPOINT=${AIZK_LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
+    ports:
+      - "${AIZK_LOGTO_PORT:-3001}:3001"
+      - "${AIZK_LOGTO_ADMIN_PORT:-3002}:3002"
+    restart: unless-stopped
+
+  # Both env_file consumers read the crimson-canonical env under ~/.aizk, outside the synced tree,
+  # so a lote re-sync of the repo can never clobber host-local values (GPU splits, model swaps, the
+  # tunnel token). The compose interpolation side is the same file via `--env-file` on the command
+  # line. `~/.aizk` is the single home for this deployment's config, backups, and logs.
   db:
     env_file: !override
-      - path: /home/crimson/aizk-deploy/.env
+      - path: /home/crimson/.aizk/.env
         required: true
 
   server:
     env_file: !override
-      - path: /home/crimson/aizk-deploy/.env
+      - path: /home/crimson/.aizk/.env
         required: true
+    # backups land on the host under ~/.aizk/backups (the nightly BackupTask writes /backups),
+    # replacing the anonymous `backups` named volume so every dump lives beside the rest of the
+    # deployment state and the off-box mirror in `scripts/pull-aizk-backup.sh` reads it unchanged.
+    volumes: !override
+      - /home/crimson/.aizk/backups:/backups

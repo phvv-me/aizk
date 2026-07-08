@@ -16,7 +16,7 @@ class Profile(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
     row is scoped and row-level-security-forced exactly like the entities and facts it builds from.
 
     id: stable identity, generated client-side on insert.
-    owner_id: principal that owns the row, enforced by row level security.
+    owner_id: user that owns the row, enforced by row level security.
     scopes: group set the row is shared with, empty when private to the owner.
     subject_id: entity content the profile portrays, cascading on delete.
     summary: short static-plus-dynamic paragraph rolled up from the entity's latest facts.

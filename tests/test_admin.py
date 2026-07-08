@@ -25,8 +25,8 @@ class Recorder:
         return self.ret
 
 
-def test_system_is_the_configured_system_principal() -> None:
-    """An operator call acts as the system principal by default, past row level security."""
+def test_system_is_the_configured_system_user() -> None:
+    """An operator call acts as the system user by default, past row level security."""
     assert admin.system() == settings.system_user_id
 
 
@@ -39,28 +39,28 @@ def test_system_is_the_configured_system_principal() -> None:
         ("raptor", "build_raptor", 4, 4),
     ],
 )
-def test_maintenance_op_defaults_to_the_system_principal(
+def test_maintenance_op_defaults_to_the_system_user(
     monkeypatch: pytest.MonkeyPatch, fn: str, delegate: str, ret: object, expected: object
 ) -> None:
-    """A maintenance op with no explicit principal drives its graph delegate as the system one."""
+    """A maintenance op with no explicit user drives its graph delegate as the system one."""
     recorder = Recorder(ret=ret)
     monkeypatch.setattr(admin.graph, delegate, recorder)
 
     out = dbutil.run(getattr(admin, fn)())
 
     assert out == expected
-    assert recorder.kwargs["principal_id"] == settings.system_user_id
+    assert recorder.kwargs["user_id"] == settings.system_user_id
 
 
-def test_maintenance_op_honors_an_explicit_principal(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A named principal overrides the system default, the scoped-view seam for a tenant op."""
+def test_maintenance_op_honors_an_explicit_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A named user overrides the system default, the scoped-view seam for a tenant op."""
     recorder = Recorder(ret=0)
     monkeypatch.setattr(admin.graph, "decay", recorder)
     who = uuid.uuid4()
 
-    dbutil.run(admin.decay(half_life_days=30.0, principal_id=who))
+    dbutil.run(admin.decay(half_life_days=30.0, user_id=who))
 
-    assert recorder.kwargs["principal_id"] == who
+    assert recorder.kwargs["user_id"] == who
     assert recorder.kwargs["half_life_days"] == 30.0
 
 
@@ -70,7 +70,7 @@ def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
     """Forget embeds the query, ranks the nearest notes, and retracts their derived claims.
 
     The provenance chain the operator's erasure runs: one embed, a nearest-document rank under the
-    principal's own RLS, and a `forget_from_documents` over exactly those ids, the titles reported
+    user's own RLS, and a `forget_from_documents` over exactly those ids, the titles reported
     back so the operator sees what left before committing.
     """
 
@@ -95,7 +95,7 @@ def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
             return Result([DOC_A, DOC_B]) if self.calls == 1 else Result(["Note A", None])
 
     @asynccontextmanager
-    async def fake_acting_as(principal_id: uuid.UUID):
+    async def fake_acting_as(user_id: uuid.UUID):
         yield FakeSession()
 
     async def fake_forget(session: object, doc_ids: list[uuid.UUID]) -> list[uuid.UUID]:

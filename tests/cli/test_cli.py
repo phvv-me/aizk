@@ -11,7 +11,7 @@ from aizk.mcp import server as mcp_server
 
 DOC_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 USER_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
-PRINCIPAL_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
+OTHER_USER_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
 
 
 class Recorder:
@@ -88,7 +88,7 @@ class Seams:
         self.ingest = Recorder(ret=DOC_ID, is_async=True)
         self.enqueue = Recorder(is_async=True)
         self.run_scale = Recorder(ret=Rendered("SCALE-CURVE"), is_async=True)
-        self.create_principal = Recorder(ret=SimpleNamespace(id=USER_ID), is_async=True)
+        self.create_user = Recorder(ret=SimpleNamespace(id=USER_ID), is_async=True)
         self.backup = Recorder(ret=SimpleNamespace(bytes=7, path="/tmp/x.dump"), is_async=True)
         self.restore = Recorder(
             ret=SimpleNamespace(path="/tmp/x.dump", database="aizk"), is_async=True
@@ -114,7 +114,7 @@ def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
     monkeypatch.setattr(cli, "assemble_context_pack", seams.recall)
     monkeypatch.setattr(cli, "ingest_text", seams.ingest)
     monkeypatch.setattr(cli, "enqueue_pending", seams.enqueue)
-    monkeypatch.setattr(cli.admin, "create_user", seams.create_principal)
+    monkeypatch.setattr(cli.admin, "create_user", seams.create_user)
     monkeypatch.setattr(cli.backup_ops, "backup_database", seams.backup)
     monkeypatch.setattr(cli.backup_ops, "restore_database", seams.restore)
     monkeypatch.setattr(mcp_server.server, "run_http_async", seams.serve_http)
@@ -152,7 +152,7 @@ def check_scale(seams: Seams, out: str) -> None:
 
 
 def check_create_user(seams: Seams, out: str) -> None:
-    assert seams.create_principal.args[0] == "alice"
+    assert seams.create_user.args[0] == "alice"
     assert str(USER_ID) in out
 
 
@@ -215,34 +215,34 @@ def test_worker_enables_spans_only_when_profiling(
 
 
 @pytest.mark.parametrize(
-    ("tokens", "expected_query", "expected_principal"),
+    ("tokens", "expected_query", "expected_user"),
     [
         (
-            ["recall-context", "hello world", "--k", "3", "--principal", str(PRINCIPAL_ID)],
+            ["recall-context", "hello world", "--k", "3", "--user", str(OTHER_USER_ID)],
             "hello world",
-            PRINCIPAL_ID,
+            OTHER_USER_ID,
         ),
         (["recall-context"], cli.PROJECT_CONTEXT_QUERY, cli.settings.system_user_id),
     ],
     ids=["explicit", "default"],
 )
-def test_recall_context_resolves_query_and_principal(
+def test_recall_context_resolves_query_and_user(
     seams: Seams,
     capsys: pytest.CaptureFixture[str],
     tokens: list[str],
     expected_query: str,
-    expected_principal: uuid.UUID,
+    expected_user: uuid.UUID,
 ) -> None:
-    """An explicit query and principal pass through, a bare call falls back to the defaults.
+    """An explicit query and user pass through, a bare call falls back to the defaults.
 
     tokens: the argv the recall command dispatches.
     expected_query: the recall query the fallback resolves to.
-    expected_principal: the principal id the fallback resolves to.
+    expected_user: the user id the fallback resolves to.
     """
     dispatch(tokens)
 
     assert seams.recall.args[0] == expected_query
-    assert seams.recall.kwargs["principal_id"] == expected_principal
+    assert seams.recall.kwargs["user_id"] == expected_user
     assert "[fact] codec shipped" in capsys.readouterr().out
 
 

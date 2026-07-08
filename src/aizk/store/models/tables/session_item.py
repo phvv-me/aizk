@@ -8,7 +8,7 @@ from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
 
 
 class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
-    """One fast working-memory item a principal remembered, before it reaches the long-term graph.
+    """One fast working-memory item a user remembered, before it reaches the long-term graph.
 
     The session tier is the cheap front of memory. A remember writes a single embedded row here
     rather than paying the chunk, embed, and extract pipeline up front, so a capture is immediate.
@@ -18,7 +18,7 @@ class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
     row is scoped and row-level-security forced exactly like the memory it becomes.
 
     id: stable identity, generated client-side on insert.
-    owner_id: principal that owns the row, enforced by row level security.
+    owner_id: user that owns the row, enforced by row level security.
     scopes: group set the row is shared with, empty when private to the owner.
     kind: coarse type tag carried through to the promoted document, such as note or code.
     text: the remembered content, ranked by its embedding and fed whole to promotion.

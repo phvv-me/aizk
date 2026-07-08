@@ -15,17 +15,17 @@ GLOBAL = "global"
 
 
 class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
-    """A tiny per-principal counter the autonomous engine debounces and gates its passes against.
+    """A tiny per-user counter the autonomous engine debounces and gates its passes against.
 
     Where the other scoped tables hold memory, this one holds bookkeeping. The on-write path bumps
     an `entity_dirty` row per touched entity so a debounced profile rebuild knows the portrait went
     stale, the community pass reads a `fact_count` row to skip a graph that has not grown past the
     threshold since its last summary, and the self-improve pass stores its latest `scorecard` here
     as a payload. One row per owner, kind, and ref, scoped and row-level-security forced exactly
-    like the memory it tracks so a counter never leaks across principals.
+    like the memory it tracks so a counter never leaks across users.
 
     id: stable identity, generated client-side on insert.
-    owner_id: principal that owns the row, enforced by row level security.
+    owner_id: user that owns the row, enforced by row level security.
     scopes: group set the row is shared with, always empty since a watermark is private
         bookkeeping.
     kind: discriminator naming what the row tracks, such as entity_dirty, fact_count, or scorecard.
@@ -72,7 +72,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         from `by`.
 
         session: open session already acting as owner_id under row level security.
-        owner_id: principal that owns the counter.
+        owner_id: user that owns the counter.
         kind: discriminator naming what the counter tracks.
         ref: subject the counter is keyed to, the entity id for a dirty count, global otherwise.
         by: amount to add to the counter.
@@ -95,7 +95,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         """Read one watermark counter, zero when the row does not exist yet.
 
         session: open session already acting as owner_id under row level security.
-        owner_id: principal that owns the counter.
+        owner_id: user that owns the counter.
         kind: discriminator naming what the counter tracks.
         ref: subject the counter is keyed to.
         """
@@ -117,7 +117,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         self-improve pass flipped and a caller can recover any structured detail a kind stored.
 
         session: open session already acting as owner_id under row level security.
-        owner_id: principal that owns the counter.
+        owner_id: user that owns the counter.
         kind: discriminator naming what the row tracks.
         ref: subject the counter is keyed to.
         """
@@ -146,7 +146,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         payload.
 
         session: open session already acting as owner_id under row level security.
-        owner_id: principal that owns the counter.
+        owner_id: user that owns the counter.
         kind: discriminator naming what the counter tracks.
         counter: the absolute value to store.
         payload: the structured detail to store, an empty object when null.

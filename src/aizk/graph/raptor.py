@@ -167,12 +167,12 @@ class RaptorTierBuilder(TierBuilder[list[Node], RaptorReport]):
 
     def __init__(
         self,
-        principal_id: uuid.UUID,
+        user_id: uuid.UUID,
         members: list[Node],
         level: int,
         new_parents: list[tuple[Node, list[float]]],
     ) -> None:
-        super().__init__(principal_id, settings.raptor_rollup_system, RaptorReport)
+        super().__init__(user_id, settings.raptor_rollup_system, RaptorReport)
         self.members = members
         self.level = level
         self.new_parents = new_parents
@@ -234,31 +234,31 @@ def part_of_content(child_id: uuid.UUID, parent: Node) -> FactContent:
     )
 
 
-def part_of_claim(principal_id: uuid.UUID, content_id: uuid.UUID) -> FactClaim:
-    """Build one part_of tree edge's claim, owned by the principal that built the tree.
+def part_of_claim(user_id: uuid.UUID, content_id: uuid.UUID) -> FactClaim:
+    """Build one part_of tree edge's claim, owned by the user that built the tree.
 
     The default open `recorded` keeps it inside the same bi-temporal shape every claim has, so the
     read-path validity gate treats it like any current edge while it lives, and a rebuild clears
     the whole tree before writing a new one. The tree carries no scope of its own, always private
-    to the principal that built it, so it stamps reviewed immediately the same as any other private
+    to the user that built it, so it stamps reviewed immediately the same as any other private
     write, never a curated group's pending queue.
 
-    principal_id: identity that owns the edge.
+    user_id: identity that owns the edge.
     content_id: the part_of fact content this claim stakes.
     """
     return FactClaim(
         content_id=content_id,
-        owner_id=principal_id,
+        owner_id=user_id,
         reviewed_at=datetime.now(UTC),
     )
 
 
 def summary_claim(
-    principal_id: uuid.UUID, content: EntityContent, level: int, summary: str
+    user_id: uuid.UUID, content: EntityContent, level: int, summary: str
 ) -> EntityClaim:
     """One freshly minted RAPTOR summary's claim, stamped with its tree level and own text.
 
-    principal_id: identity that owns the tree.
+    user_id: identity that owns the tree.
     content: the summary's own freshly minted entity content.
     level: the level number this summary was rolled up to.
     summary: the summary's own paragraph, duplicated onto the claim so recall reads it with no
@@ -266,13 +266,13 @@ def summary_claim(
     """
     return EntityClaim(
         content_id=content.id,
-        owner_id=principal_id,
+        owner_id=user_id,
         attributes={"level": level, "summary": summary},
     )
 
 
 async def rolled_up_parent(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     members: list[Node],
     level: int,
     new_parents: list[tuple[Node, list[float]]],
@@ -280,19 +280,19 @@ async def rolled_up_parent(
     """A non-singleton cluster's parent node, and its freshly minted content when this cluster
     itself wrote one rather than reusing a redundant parent an earlier cluster this level minted.
 
-    principal_id: identity that owns the written summary content and claim.
+    user_id: identity that owns the written summary content and claim.
     members: this cluster's level-below members, at least two.
     level: the level number a newly minted summary is stamped with.
     new_parents: the parents already minted this level, shared across every cluster's builder.
     """
-    builder = RaptorTierBuilder(principal_id, members, level, new_parents)
+    builder = RaptorTierBuilder(user_id, members, level, new_parents)
     await builder.build()
     assert builder.result is not None  # a non-singleton cluster always rolls up to a parent
     return builder.result, builder.content
 
 
 async def write_level(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     contents: list[EntityContent],
     claims: list[EntityClaim],
     edges: list[tuple[uuid.UUID, Node]],
@@ -306,25 +306,25 @@ async def write_level(
     to auto-order the insert on, only a bare FK column, so a claim added in the same batch as its
     content can flush ahead of it and violate the FK.
 
-    principal_id: identity that owns every row written.
+    user_id: identity that owns every row written.
     contents: this level's freshly minted summary content, empty when every cluster reused a
         redundant parent or was a singleton.
     claims: this level's freshly minted summary claims, one per entry in contents.
     edges: every member-to-parent part_of edge this level's clusters resolved, new or reused alike.
     """
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         edge_contents = [part_of_content(child_id, parent) for child_id, parent in edges]
         session.add_all(contents)
         session.add_all(edge_contents)
         await session.flush()
         session.add_all(claims)
         session.add_all(
-            part_of_claim(principal_id, edge_content.id) for edge_content in edge_contents
+            part_of_claim(user_id, edge_content.id) for edge_content in edge_contents
         )
 
 
 async def build_level(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     nodes: list[Node],
     clusters: list[list[int]],
     level: int,
@@ -334,12 +334,12 @@ async def build_level(
     A singleton cluster is carried up unchanged, the prune that keeps RAPTOR from minting a summary
     node that just restates one child. A multi-member cluster's parent comes from rolled_up_parent,
     which rolls it up, embeds it outside any transaction, and either reuses a redundant parent
-    already minted this level or stages a fresh summary entity content plus this principal's own
+    already minted this level or stages a fresh summary entity content plus this user's own
     claim on it. Every member of a built cluster then gets a part_of edge to its parent regardless
     of whether the parent was freshly minted or reused. write_level then writes everything staged
     in one owner-scoped transaction, so a slow rollup never holds a write lock.
 
-    principal_id: identity that owns the written summary content, claims, and part_of edges.
+    user_id: identity that owns the written summary content, claims, and part_of edges.
     nodes: the level-below nodes the clusters index into.
     clusters: the grouping of the level-below nodes into this level's parents.
     level: the level number stamped on every summary claim this call writes.
@@ -354,47 +354,47 @@ async def build_level(
         if len(members) == 1:
             next_nodes.append(members[0])
             continue
-        parent, content = await rolled_up_parent(principal_id, members, level, new_parents)
+        parent, content = await rolled_up_parent(user_id, members, level, new_parents)
         if content is not None:
             contents.append(content)
-            claims.append(summary_claim(principal_id, content, level, parent.summary))
+            claims.append(summary_claim(user_id, content, level, parent.summary))
             next_nodes.append(parent)
         edges.extend((member.entity_id, parent) for member in members)
-    await write_level(principal_id, contents, claims, edges)
+    await write_level(user_id, contents, claims, edges)
     logger.info(
         "raptor level {} built {} summaries over {} nodes", level, len(contents), len(nodes)
     )
     return next_nodes, len(contents)
 
 
-async def stale_tree_content(principal_id: uuid.UUID) -> list[uuid.UUID]:
-    """This principal's own prior RAPTOR tree content ids, read ahead of a rebuild.
+async def stale_tree_content(user_id: uuid.UUID) -> list[uuid.UUID]:
+    """This user's own prior RAPTOR tree content ids, read ahead of a rebuild.
 
-    principal_id: identity whose prior tree, if any, is found.
+    user_id: identity whose prior tree, if any, is found.
     """
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         return list(
             await session.scalars(
                 select(EntityClaim.content_id)
                 .join(EntityContent, EntityContent.id == EntityClaim.content_id)
                 .where(
-                    EntityClaim.owner_id == principal_id,
+                    EntityClaim.owner_id == user_id,
                     EntityContent.type == ontology.RAPTOR_SUMMARY,
                 )
             )
         )
 
 
-async def clear_stale_tree(principal_id: uuid.UUID) -> None:
-    """Delete a principal's prior RAPTOR tree content wholesale, so a rebuild is idempotent.
+async def clear_stale_tree(user_id: uuid.UUID) -> None:
+    """Delete a user's prior RAPTOR tree content wholesale, so a rebuild is idempotent.
 
     Content carries no owner of its own and no ordinary DELETE policy at all, so this runs on the
     owner-role admin connection, bypassing row level security entirely. The delete cascades its
     claims and part_of edges away through their foreign keys.
 
-    principal_id: identity whose prior tree, if any, is cleared.
+    user_id: identity whose prior tree, if any, is cleared.
     """
-    stale = await stale_tree_content(principal_id)
+    stale = await stale_tree_content(user_id)
     if not stale:
         return
     async with admin_session() as session:
@@ -415,31 +415,31 @@ def leaf_content(community: Community) -> EntityContent:
     )
 
 
-def leaf_claim(principal_id: uuid.UUID, leaf: EntityContent, community: Community) -> EntityClaim:
+def leaf_claim(user_id: uuid.UUID, leaf: EntityContent, community: Community) -> EntityClaim:
     """One level-0 leaf's claim, its attributes carrying a backreference to its own community.
 
-    principal_id: identity that owns the tree.
+    user_id: identity that owns the tree.
     leaf: the leaf's own freshly minted entity content.
     community: the community this leaf summarizes.
     """
     return EntityClaim(
         content_id=leaf.id,
-        owner_id=principal_id,
+        owner_id=user_id,
         attributes={"level": 0, "summary": community.summary, "community": str(community.id)},
     )
 
 
-async def leaf_nodes(principal_id: uuid.UUID) -> list[Node]:
+async def leaf_nodes(user_id: uuid.UUID) -> list[Node]:
     """Clear any prior tree and mint the level-0 leaves, one summary entity per community.
 
     Plain RAPTOR builds its tree over text chunks, but here the leaves are the single-level
     communities the global lane already detected, so the recursive summaries climb above them.
     Returns the leaves, empty when fewer than two communities exist to cluster.
 
-    principal_id: identity that owns the tree and whose visibility scopes the communities read.
+    user_id: identity that owns the tree and whose visibility scopes the communities read.
     """
-    await clear_stale_tree(principal_id)
-    async with acting_as(principal_id) as session:
+    await clear_stale_tree(user_id)
+    async with acting_as(user_id) as session:
         communities = list(
             await session.scalars(select(Community).where(Community.embedding.is_not(None)))
         )
@@ -452,7 +452,7 @@ async def leaf_nodes(principal_id: uuid.UUID) -> list[Node]:
         # `write_level` observes, or a claim can insert ahead of the content row it stakes.
         await session.flush()
         session.add_all(
-            leaf_claim(principal_id, leaf, community)
+            leaf_claim(user_id, leaf, community)
             for leaf, community in zip(leaves, communities, strict=True)
         )
     return [
@@ -467,7 +467,7 @@ async def leaf_nodes(principal_id: uuid.UUID) -> list[Node]:
 
 
 async def build_raptor(
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> int:
     """Build the recursive summary tree above the communities, return how many summaries it wrote.
 
@@ -478,10 +478,10 @@ async def build_raptor(
     raptor_max_levels is reached, so the climb always terminates at a small root set. Returns the
     count of summary entities written across the levels above the leaves.
 
-    principal_id: identity that owns the written tree, the system principal when null.
+    user_id: identity that owns the written tree, the system user when null.
     """
-    principal_id = principal_id or settings.system_user_id
-    nodes = await leaf_nodes(principal_id)
+    user_id = user_id or settings.system_user_id
+    nodes = await leaf_nodes(user_id)
     if not nodes:
         return 0
     written = 0
@@ -490,10 +490,10 @@ async def build_raptor(
         clusters = cluster([node.embedding for node in nodes], settings.raptor_sim_threshold)
         if len(clusters) >= len(nodes):
             break
-        nodes, count = await build_level(principal_id, nodes, clusters, level)
+        nodes, count = await build_level(user_id, nodes, clusters, level)
         written += count
         level += 1
-    logger.info("raptor tree wrote {} summaries under principal {}", written, principal_id)
+    logger.info("raptor tree wrote {} summaries under user {}", written, user_id)
     return written
 
 
@@ -504,7 +504,7 @@ async def raptor_levels(session: AsyncSession) -> list[int]:
     leaves, so recall knows which level answers a broad query and which a pointed one. Empty until
     a tree has been built.
 
-    session: open, principal- and scope-scoped session the caller already holds.
+    session: open, user- and scope-scoped session the caller already holds.
     """
     depth = EntityClaim.attributes["level"].as_integer()
     rows = await session.scalars(
@@ -534,7 +534,7 @@ async def raptor_search(
     recall's one round already holds both and a second session here would open a second connection
     nested inside the first for no reason.
 
-    session: open, principal- and scope-scoped session the caller already holds.
+    session: open, user- and scope-scoped session the caller already holds.
     query: natural-language query, read only for its specificity when the round is not thematic.
     vector: dense query embedding.
     thematic: whether the query is broad, reading the root level rather than the leaf summaries.

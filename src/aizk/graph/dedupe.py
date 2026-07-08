@@ -41,7 +41,7 @@ async def mint_content(session: AsyncSession, content: TableBase) -> None:
     savepoint, so the surrounding write proceeds identically whether this exact content already
     existed or not, with no crash and no observable difference between the two cases either way.
 
-    session: open, principal-scoped session the insert runs on.
+    session: open, user-scoped session the insert runs on.
     content: the transient content row to insert, its primary key already content-addressed.
     """
     try:
@@ -57,9 +57,9 @@ async def claim_entity(
 ) -> None:
     """Idempotently insert one entity claim, a no-op when (content, owner, scopes) already exists.
 
-    session: open, principal-scoped session the insert runs on.
+    session: open, user-scoped session the insert runs on.
     content_id: entity content this claim stakes.
-    owner_id: principal the new claim is staked under.
+    owner_id: user the new claim is staked under.
     scopes: group set the new claim is shared with, private when empty.
     """
     await session.execute(
@@ -78,9 +78,9 @@ async def claim_fact(
 ) -> None:
     """Idempotently insert one fact claim, a no-op against an identical already-live claim.
 
-    session: open, principal-scoped session the insert runs on.
+    session: open, user-scoped session the insert runs on.
     content_id: fact content this claim stakes.
-    owner_id: principal the new claim is staked under.
+    owner_id: user the new claim is staked under.
     scopes: group set the new claim is shared with, private when empty.
     claim_fields: further `FactClaim` columns the caller already resolved (`valid`,
         `source_chunk_id`, `reviewed_at`, `attributes`, `promoted_from`, ...).

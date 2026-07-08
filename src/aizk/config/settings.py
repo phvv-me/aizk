@@ -125,7 +125,7 @@ class Settings(BaseSettings):
         `APP_ROLE` constants in `store/rls/ops.py` and the initial migration hardcode the role
         names both DSNs connect as, so only the password varies deployment to deployment.
     anon_rate_per_second: token-bucket rate anonymous HTTP callers may call tools at. Authenticated
-        principals pass unthrottled.
+        users pass unthrottled.
     backup_cron: crontab the scheduled `BackupTask` dumps the whole database on, daily before dawn
         by default, only fired when `backup_enabled` is set.
     backup_database_url: libpq URL the `backup`/`restore` tools connect with, empty to use
@@ -154,10 +154,10 @@ class Settings(BaseSettings):
         `chunk_denylist_languages`. A denylist not an allowlist, so a new language routes to the
         code lane with no edit here.
     chunk_size: target characters per chunk, honored by both the prose and code chunkers.
-    communities_cron: crontab the community fan-out fires on, gated per principal by
+    communities_cron: crontab the community fan-out fires on, gated per user by
         communities_every_n_facts so a quiet graph is not re-summarized.
-    communities_enabled: whether the scheduler fans community detection out across principals.
-    communities_every_n_facts: facts a principal's graph must gain since the last community build
+    communities_enabled: whether the scheduler fans community detection out across users.
+    communities_every_n_facts: facts a user's graph must gain since the last community build
         before a rebuild.
     community_backend: networkx graph backend Louvain detection runs on. A registered accelerator
         like cugraph can swap in at no code change.
@@ -181,7 +181,7 @@ class Settings(BaseSettings):
         pass's judgment of its pending queue, the only material the judge may reason over.
     curation_review_cron: crontab the curation-review fan-out fires on, weekly after insight.
     curation_review_enabled: whether the scheduler fans the curation-review pass out across
-        principals.
+        users.
     curation_review_system: system prompt the curation-review pass uses to approve or reject each
         pending claim against a curated group's visible canon.
     database_url: async DSN for the restricted app role row level security is enforced under.
@@ -199,14 +199,14 @@ class Settings(BaseSettings):
         fresh `NullPool` connection paid per call.
     db_port: port of the Postgres server both DSN templates default against.
     decay_cron: crontab the decay fan-out fires on, daily before dawn by default.
-    decay_enabled: whether the scheduler fans the daily decay pass out across principals.
+    decay_enabled: whether the scheduler fans the daily decay pass out across users.
     decay_floor: relevance floor a latest fact must clear to stay in the live graph. An untouched
         fact holds 0.5 relevance at one half-life and 0.25 at two, so this floor forgets facts
         unreached for roughly two half-lives. A single access lifts a fact back above it.
     decay_half_life_days: age in days at which an unaccessed fact's relevance halves, the decay
         pass's forgetting rate.
     dedup_cron: crontab the dedup fan-out fires on, nightly by default.
-    dedup_enabled: whether the scheduler fans the nightly entity-dedup pass out across principals.
+    dedup_enabled: whether the scheduler fans the nightly entity-dedup pass out across users.
     embed_api_key: bearer token for the embeddings endpoint, empty for a local server that ignores
         it.
     embed_batch_size: how many texts one /v1/embeddings request carries.
@@ -268,7 +268,7 @@ class Settings(BaseSettings):
         `hnsw` (portable fallback). Both share the cosine op. Drives both the migration DDL and
         the Embedded mixin's `embedding_index`, so they must agree.
     insight_cron: crontab the insight fan-out fires on, weekly after self-improve.
-    insight_enabled: whether the scheduler fans the reflective insight pass out across principals,
+    insight_enabled: whether the scheduler fans the reflective insight pass out across users,
         deriving and writing back higher-level observations.
     insight_facts_k: latest facts the insight pass grounds its observations in, the only material
         it may reason over.
@@ -342,8 +342,8 @@ class Settings(BaseSettings):
     raptor: whether recall folds in RAPTOR summaries, root level for a broad query and leaf level
         for a pointed one.
     raptor_cron: crontab the RAPTOR fan-out fires on, weekly after communities.
-    raptor_enabled: whether the scheduler fans the weekly RAPTOR tree build out across principals.
-    raptor_every_n_facts: latest facts a principal's graph must gain since the last RAPTOR build
+    raptor_enabled: whether the scheduler fans the weekly RAPTOR tree build out across users.
+    raptor_every_n_facts: latest facts a user's graph must gain since the last RAPTOR build
         before a rebuild.
     raptor_k: how many RAPTOR summaries recall folds into a query's context.
     raptor_max_levels: hard ceiling on levels the RAPTOR climb adds above the leaves, a second
@@ -387,7 +387,7 @@ class Settings(BaseSettings):
     rrf_k: reciprocal-rank-fusion smoothing constant shared by the chunk-lane and chunk-fact
         fusions.
     self_improve_cron: crontab the self-improve fan-out fires on, weekly by default.
-    self_improve_enabled: whether the scheduler fans the weekly self-evaluation across principals.
+    self_improve_enabled: whether the scheduler fans the weekly self-evaluation across users.
     serve_with_worker: whether `serve-mcp` also runs the background worker in its own process,
         gathered on the one event loop, so a single container is server, worker, and scheduled
         backup at once. On by default for that single-box case, set off to run the server alone
@@ -400,8 +400,8 @@ class Settings(BaseSettings):
     session_promote_cron: crontab the session-promotion fan-out fires on, every quarter hour by
         default so working memory drains into the graph promptly.
     session_promote_enabled: whether the scheduler fans the session-promotion pass out across
-        principals, moving aged or overflow working items into the long-term graph.
-    session_promote_threshold: most unpromoted items a principal's working memory holds before the
+        users, moving aged or overflow working items into the long-term graph.
+    session_promote_threshold: most unpromoted items a user's working memory holds before the
         oldest beyond the cap are promoted regardless of age, the overflow half of the trigger.
     session_recall_k: how many still-working session items a recall folds in beside the graph,
         zero to leave the session tier out of recall entirely.
@@ -414,7 +414,7 @@ class Settings(BaseSettings):
         bundle or a context pack, the display-width budget both renderers share.
     system_user_id: identity that owns rows ingested before the visibility lattice, the
         owner-and-scope model every row's row level security policy compiles from, existed, and
-        that a scheduled background pass acts as when a caller does not name a per-principal one.
+        that a scheduled background pass acts as when a caller does not name a per-user one.
     oidc_client_id: client id of the aizk resource server registered at the issuer, the
         identity the introspection call authenticates as.
     oidc_client_secret: client secret paired with oidc_client_id for the introspection call,
@@ -423,6 +423,22 @@ class Settings(BaseSettings):
         set to validate each token against the issuer instead, catching revocation before expiry.
     oidc_issuer: base issuer URL whose JWTs are accepted, empty to leave the OIDC path off.
     oidc_jwks_url: JWKS endpoint the issuer publishes its signing keys at, to verify tokens.
+    oidc_algorithm: JWS signing algorithm the offline JWKS path verifies against, `RS256` for
+        most providers, `ES384` for Logto. A mismatch fails every signature with no error.
+    oidc_groups_claim: access-token claim carrying the user's identity-provider organization
+        memberships and roles, which `Group.sync_user_groups` reconciles the membership table to on
+        each authenticated request. Empty leaves membership hand-managed, the default until the
+        provider is configured to emit the claim.
+    mcp_resource_url: this server's own public base URL, advertised in the RFC 9728 protected
+        resource metadata so a client discovers the OIDC issuer and logs in through it, getting
+        and refreshing its own tokens. Empty serves the bare token verifier with no advertising,
+        the single-user default where the caller already holds a token.
+    oidc_required_scopes: comma-separated access-token scopes the resource both requires and
+        advertises as `scopes_supported`, so a client requests exactly them and the provider mints
+        a resource-audience token carrying them. A resource-indicator login grants only scopes the
+        client asks for, so an empty value leaves the provider nothing to grant and it denies the
+        authorization. `control` for the standard aizk resource whose one permission gates every
+        client verb.
     """
 
     # extra="ignore": .env also carries compose-only container knobs (AIZK_EMBED_CHECKPOINT,
@@ -589,6 +605,10 @@ class Settings(BaseSettings):
     oidc_introspect_url: str = ""
     oidc_issuer: str = ""
     oidc_jwks_url: str = ""
+    oidc_algorithm: str = "RS256"
+    oidc_groups_claim: str = ""
+    mcp_resource_url: str = ""
+    oidc_required_scopes: str = ""
 
     @model_validator(mode="after")
     def default_dsns(self) -> Self:

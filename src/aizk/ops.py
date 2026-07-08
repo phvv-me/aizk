@@ -23,7 +23,7 @@ from .store import TableBase, system_session, verify_scoped_rls
 
 # the tables a health read counts, the main entities of the store rather than every join and
 # mixin table, read through the owner's superuser connection so the count is the true total
-# rather than one principal's own row-level-security-narrowed slice.
+# rather than one user's own row-level-security-narrowed slice.
 MAIN_TABLES = (
     "document",
     "chunk",
@@ -34,7 +34,7 @@ MAIN_TABLES = (
     "community",
     "profile",
     "session_item",
-    "principal",
+    "users",
     "group_",
 )
 
@@ -188,7 +188,7 @@ async def row_counts() -> dict[str, int]:
 
     The owner role is the actual Postgres superuser this stack provisions (`initdb/roles.sh`), so
     it bypasses row level security entirely and this count is the true total rather than one
-    principal's own narrowed slice.
+    user's own narrowed slice.
     """
     admin = create_async_engine(settings.admin_database_url)
     try:
@@ -226,7 +226,7 @@ async def grant_app_role_privileges() -> None:
     test, say) never receives its schema USAGE, per-table CRUD, or default-privilege grants. A
     fresh database migrated to head still has every Scoped table's own `apply_scoped_rls` grant
     (0001_init's per-table belt), but an unscoped table such as `group_`, `membership`, or
-    `principal` carries none. This closes that gap so `setup` alone, with no manual psql grant,
+    `user` carries none. This closes that gap so `setup` alone, with no manual psql grant,
     makes any database ready. Every statement is a plain idempotent GRANT, safe to rerun.
     """
     role = settings.app_role

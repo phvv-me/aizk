@@ -80,7 +80,7 @@ class EntityClaim(Id, Scoped, Timestamped, TableBase, table=True):
     id: uuid7 claim identity.
     content_id: the entity content this claim stakes, cascading on delete so the last claim's
         removal is what makes a content row eligible for the system merge's own cleanup.
-    owner_id: principal that holds this claim, enforced by row level security.
+    owner_id: user that holds this claim, enforced by row level security.
     scopes: group set this claim is shared with, an implicit intersection when it names more than
         one, empty when private to the owner.
     attributes: free-form structured detail extracted alongside this container's claim.

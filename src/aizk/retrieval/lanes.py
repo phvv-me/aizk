@@ -103,11 +103,11 @@ LANES: tuple[Lane, ...] = (CoreLane(), SessionLane(), CommunityLane(), RaptorLan
 
 
 async def run_lane[T](
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     scopes: tuple[uuid.UUID, ...],
     body: Callable[[AsyncSession], Awaitable[T]],
 ) -> T:
-    """Run one recall lane body on its own pooled session acting as principal_id, scoped to scopes.
+    """Run one recall lane body on its own pooled session acting as user_id, scoped to scopes.
 
     A single `AsyncSession` cannot run two statements at once, so recall's independent lanes each
     check out their own connection from the pool and run concurrently under `asyncio.gather`
@@ -115,41 +115,41 @@ async def run_lane[T](
     pools real connections. A fresh `NullPool` connection per lane would have traded one latency
     tax for five.
 
-    principal_id: identity whose row level security visibility the lane's session acts under.
+    user_id: identity whose row level security visibility the lane's session acts under.
     scopes: group ids narrowing the lane's session to that combination's composed graph, the whole
         visible union when empty.
     body: the lane's own work, given the freshly opened session.
     """
-    async with acting_as(principal_id, scopes) as session:
+    async with acting_as(user_id, scopes) as session:
         return await body(session)
 
 
 async def timed_lane(
-    lane: Lane, principal_id: uuid.UUID, scopes: tuple[uuid.UUID, ...], ctx: RecallContext
+    lane: Lane, user_id: uuid.UUID, scopes: tuple[uuid.UUID, ...], ctx: RecallContext
 ) -> LaneResult:
     """Run one lane inside a span named for its own class, `gather_lanes`' per-lane timing seam.
 
     lane: the lane to run and time.
-    principal_id: identity whose row level security visibility the lane's session acts under.
+    user_id: identity whose row level security visibility the lane's session acts under.
     scopes: group ids narrowing the lane's read to that combination's composed graph.
     ctx: the shared per-call inputs the lane reads its own slice off.
     """
     with span(type(lane).__name__):
-        return await run_lane(principal_id, scopes, partial(lane.run, ctx=ctx))
+        return await run_lane(user_id, scopes, partial(lane.run, ctx=ctx))
 
 
 async def gather_lanes(
-    principal_id: uuid.UUID, scopes: tuple[uuid.UUID, ...], ctx: RecallContext
+    user_id: uuid.UUID, scopes: tuple[uuid.UUID, ...], ctx: RecallContext
 ) -> list[LaneResult]:
     """Run every lane in `LANES` concurrently, each on its own session, and return their slices.
 
-    principal_id: identity whose row level security visibility every lane's session acts under.
+    user_id: identity whose row level security visibility every lane's session acts under.
     scopes: group ids narrowing every lane's read to that combination's composed graph.
     ctx: the shared per-call inputs every lane reads its own slice off.
     """
     async with stage("recall_lanes"):
         return await asyncio.gather(
-            *(timed_lane(lane, principal_id, scopes, ctx) for lane in LANES)
+            *(timed_lane(lane, user_id, scopes, ctx) for lane in LANES)
         )
 
 
@@ -211,7 +211,7 @@ async def build_context(query: str, k: int, as_of: datetime | None) -> RecallCon
 
 async def recall(
     query: str,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     k: int = 8,
     as_of: datetime | None = None,
     scopes: tuple[uuid.UUID, ...] = (),
@@ -223,16 +223,16 @@ async def recall(
     fusing them is the whole algorithm, read straight off this method.
 
     query: natural-language query to recall context for.
-    principal_id: identity whose row level security visibility scopes the recall, the system
-        principal when null.
+    user_id: identity whose row level security visibility scopes the recall, the system
+        user when null.
     k: number of fused hits and of seed facts to surface.
     as_of: world-time the graph facts must be valid at, the live graph when null.
     scopes: group ids narrowing every lane's read to that combination's composed graph, the whole
         visible union when empty.
     """
-    principal_id = principal_id or settings.system_user_id
+    user_id = user_id or settings.system_user_id
     ctx = await build_context(query, k, as_of)
-    fused = fuse_lanes(await gather_lanes(principal_id, scopes, ctx))
+    fused = fuse_lanes(await gather_lanes(user_id, scopes, ctx))
     logger.info(
         "recall {query!r} bundled {hits} hits, {facts} facts, {comms} comms, {raptor} raptor",
         query=query,

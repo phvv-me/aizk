@@ -34,7 +34,7 @@ def _curation_admin_policies(table: Table) -> list[rls.Policy]:
     Postgres combines multiple PERMISSIVE policies for one command with OR, so these ride alongside
     `Scoped`'s ordinary scope policies as an additive escape rather than replacing them. A curated
     group's own admin member keeps reaching its rows through the ordinary scope policies, and a
-    server admin, or a principal separately administering every group a row's set names, reaches it
+    server admin, or a user separately administering every group a row's set names, reaches it
     through these instead. A curated group's canon is centrally governed, so a server admin may
     read and review its rows even without a membership row anywhere in the set, the standing
     `auth.groups.require_group_admin` already vouches for at the application layer before any of
@@ -141,7 +141,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 
     id: uuid7 claim identity.
     content_id: the fact content this claim stakes, cascading on delete.
-    owner_id: principal that holds this claim, enforced by row level security.
+    owner_id: user that holds this claim, enforced by row level security.
     scopes: group set this claim is shared with, an implicit intersection when it names more than
         one, empty when private to the owner.
     valid: world-time range when the statement holds, null when undated. An open upper bound means
@@ -344,10 +344,10 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 
         Sets last_accessed to now and increments access_count for every latest claim whose fact
         content statement is in the surfaced set, so the decay pass can tell a claim memory keeps
-        reaching for from one it has not touched in months. Runs on the same principal-scoped
+        reaching for from one it has not touched in months. Runs on the same user-scoped
         session recall already holds open.
 
-        session: open, principal-scoped session.
+        session: open, user-scoped session.
         statements: the fact statements recall returned in this call.
         """
         if not statements:
@@ -367,7 +367,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         history and an as-of query still sees it, it only leaves the live graph default recall
         reads.
 
-        session: open, principal-scoped session the archival runs under.
+        session: open, user-scoped session the archival runs under.
         half_life_days: age in days at which an unaccessed claim's relevance halves.
         floor: relevance floor a claim must clear to stay in the live graph.
         """
@@ -395,7 +395,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         live graph, and nothing is deleted so the claims keep their history and an over-eager
         forget is undoable through an as-of read.
 
-        session: open, principal-scoped session the retraction runs under.
+        session: open, user-scoped session the retraction runs under.
         document_ids: the source documents whose derived claims are retracted.
         """
         now = datetime.now(UTC)

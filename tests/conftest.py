@@ -177,6 +177,6 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - double type laz
 
 
 @pytest.fixture
-def principal_id() -> uuid.UUID:
-    """A random principal id, seeded on demand by the DB helpers rather than here."""
+def user_id() -> uuid.UUID:
+    """A random user id, seeded on demand by the DB helpers rather than here."""
     return uuid.uuid4()

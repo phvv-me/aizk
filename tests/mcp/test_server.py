@@ -13,7 +13,7 @@ import aizk.mcp.server as server_module
 from aizk.config import settings
 from aizk.exceptions import NotGroupAdminError, ScopeNotFoundError
 from aizk.mcp.models import PendingFact, ReviewResult, WriteResult
-from aizk.mcp.principal import User
+from aizk.mcp.user import User
 from aizk.mcp.server import (
     AizkMCP,
     parse_fact_ids,
@@ -117,16 +117,16 @@ def test_resolve_scopes_canonicalizes_names_to_a_sorted_id_tuple_and_fails_on_an
 
     async def probe() -> None:
         await dbutil.reset_db()
-        principal_id = await dbutil.seed_user(uuid.uuid4())
+        user_id = await dbutil.seed_user(uuid.uuid4())
         ids = {
             name: await dbutil.seed_group(uuid.uuid4(), name=name)
             for name in ("alpha", "beta", "gamma")
         }
         canonical = tuple(sorted(ids.values()))
-        assert await resolve_scopes("beta,alpha,gamma", principal_id) == canonical
-        assert await resolve_scopes("gamma, beta ,alpha", principal_id) == canonical
+        assert await resolve_scopes("beta,alpha,gamma", user_id) == canonical
+        assert await resolve_scopes("gamma, beta ,alpha", user_id) == canonical
         with pytest.raises(ScopeNotFoundError, match="no scope"):
-            await resolve_scopes("ghost", principal_id)
+            await resolve_scopes("ghost", user_id)
 
     dbutil.run(probe())
 
@@ -149,7 +149,7 @@ def test_resolve_group_admin_returns_the_group_or_wraps_a_domain_refusal(
     monkeypatch.setattr(server_module, "current_user", lambda: User(id=uuid.uuid4()))
 
     class FakeGroup:
-        async def require_admin(self, session: object, principal_id: uuid.UUID) -> None:
+        async def require_admin(self, session: object, user_id: uuid.UUID) -> None:
             if not vetted:
                 raise NotGroupAdminError("not your group")
 
@@ -171,7 +171,7 @@ def test_recall_forwards_the_query_budget_and_resolved_lens_to_the_context_pack(
 
     async def stub(query: str, **kwargs: object) -> object:
         captured.update(query=query, token_budget=kwargs["token_budget"], scopes=kwargs["scopes"])
-        captured["principal_id"] = kwargs["principal_id"]
+        captured["user_id"] = kwargs["user_id"]
         return sentinel
 
     monkeypatch.setattr(server_module.retrieval, "assemble_context_pack", stub)
@@ -181,7 +181,7 @@ def test_recall_forwards_the_query_budget_and_resolved_lens_to_the_context_pack(
         "query": "what holds",
         "token_budget": 2000,
         "scopes": (),  # a null scope string resolves to the empty private lens
-        "principal_id": as_caller.id,
+        "user_id": as_caller.id,
     }
 
 
@@ -300,7 +300,7 @@ def test_write_verbs_refuse_the_anonymous_caller(
     tool_name: str,
     kwargs: dict[str, object],
 ) -> None:
-    """A write verb refuses the anonymous read-only principal before it ever touches storage."""
+    """A write verb refuses the anonymous read-only user before it ever touches storage."""
     monkeypatch.setattr(
         server_module,
         "current_user",
@@ -349,7 +349,7 @@ def test_no_operational_tool_leaks_onto_the_server(tools: dict[str, FunctionTool
         "audit",
         "create_user",
         "grant_admin",
-        "list_principals",
+        "list_users",
         "create_group",
         "add_member",
         "remove_member",

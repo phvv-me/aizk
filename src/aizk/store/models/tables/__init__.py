@@ -6,9 +6,9 @@ from .fact import FactClaim, FactContent
 from .group import Group
 from .membership import Membership
 from .ontology import EntityKind, RelationKind
-from .principal import User
 from .profile import Profile
 from .session_item import SessionItem
+from .user import User
 from .watermark import Watermark
 
 __all__ = [

@@ -32,22 +32,22 @@ class ScopeLattice:
     scopes: the table's own scope-set column, read from `table.c` at construction.
     """
 
-    # the acting principal and the optional scope-set reading lens, GUCs
-    # `store.events.bind_principal` binds per transaction; read once per lattice class rather than
+    # the acting user and the optional scope-set reading lens, GUCs
+    # `store.events.bind_user` binds per transaction; read once per lattice class rather than
     # per predicate call.
     _uid = rls.current_setting("uid", sa.Uuid(), prefix="app")
     _lens = rls.current_setting("scopes", ARRAY(sa.Uuid()), prefix="app")
 
     # Core table stand-ins for the visibility lattice, columns named but untyped, so a predicate
-    # can join against membership, groups, and principal without importing their mapped ORM
+    # can join against membership, groups, and user without importing their mapped ORM
     # classes: a mixin's predicates are built before its own concrete subclasses exist, and
     # importing the model modules here would cycle back through `mixins`, which every model itself
     # imports.
     _membership = sa.table(
-        "membership", sa.column("principal_id"), sa.column("group_id"), sa.column("role")
+        "membership", sa.column("user_id"), sa.column("group_id"), sa.column("role")
     )
     _groups = sa.table("group_", sa.column("id"), sa.column("public"), sa.column("curated"))
-    _principal = sa.table("principal", sa.column("id"), sa.column("is_admin"))
+    _users = sa.table("users", sa.column("id"), sa.column("is_admin"))
 
     def __init__(self, table: Table) -> None:
         self.owner_id = table.c.owner_id
@@ -65,10 +65,10 @@ class ScopeLattice:
 
     @classmethod
     def is_admin(cls) -> ColumnElement[bool]:
-        """Whether the acting principal carries the server-wide admin flag."""
+        """Whether the acting user carries the server-wide admin flag."""
         return sa.exists(
             sa.select(sa.literal(1)).where(
-                cls._principal.c.id == cls._uid, cls._principal.c.is_admin
+                cls._users.c.id == cls._uid, cls._users.c.is_admin
             )
         )
 
@@ -76,7 +76,7 @@ class ScopeLattice:
     def _group_array(
         cls, condition: ColumnElement[bool], role_filter: ColumnElement[bool] | None = None
     ) -> ColumnElement:
-        """A `coalesce(array_agg(group_id), '{}')` scalar subquery of the acting principal's own
+        """A `coalesce(array_agg(group_id), '{}')` scalar subquery of the acting user's own
         groups.
 
         Every containment check below (`scopes <@ ...`) needs an array on both sides, but
@@ -85,7 +85,7 @@ class ScopeLattice:
         into the empty array, never a SQL `NULL` a `<@` comparison would otherwise silently fail
         against.
 
-        condition: the membership predicate selecting this principal's own rows, `principal_id =
+        condition: the membership predicate selecting this user's own rows, `user_id =
             uid` further narrowed by the caller (e.g. only admin-role rows).
         role_filter: an additional predicate on `role`, folded into `condition` when given.
         """
@@ -114,9 +114,9 @@ class ScopeLattice:
 
     @classmethod
     def admin_group_ids(cls) -> ColumnElement:
-        """Coalesced array of group ids the acting principal holds the admin membership role in."""
+        """Coalesced array of group ids the acting user holds the admin membership role in."""
         return cls._group_array(
-            cls._membership.c.principal_id == cls._uid, cls._membership.c.role == "admin"
+            cls._membership.c.user_id == cls._uid, cls._membership.c.role == "admin"
         )
 
     def read(self) -> ColumnElement[bool]:
@@ -134,7 +134,7 @@ class ScopeLattice:
         singleton (the narrower, single-group shape a public share is kept to, never an implicit
         multi-group intersection).
         """
-        member_groups = self._group_array(self._membership.c.principal_id == self._uid)
+        member_groups = self._group_array(self._membership.c.user_id == self._uid)
         public_groups = sa.select(self._groups.c.id).where(self._groups.c.public)
         return sa.and_(
             sa.or_(
@@ -164,7 +164,7 @@ class ScopeLattice:
         them.
         """
         writer_groups = self._group_array(
-            self._membership.c.principal_id == self._uid,
+            self._membership.c.user_id == self._uid,
             self._membership.c.role.in_(("writer", "admin")),
         )
         return sa.or_(
@@ -201,7 +201,7 @@ class Scoped:
     `__rls_policies__` to extend this default set (`*super().__rls_policies__()`) rather than
     editing it here.
 
-    owner_id: principal that owns the row, enforced by row level security.
+    owner_id: user that owns the row, enforced by row level security.
     scopes: the groups this row is shared with, an implicit intersection container rather than one
         administered group. Empty is private to the owner, a singleton is the familiar one-group
         share, and a larger set is the composed graph of every group named, visible only to a
@@ -211,7 +211,7 @@ class Scoped:
         cascade.
     """
 
-    owner_id: uuid.UUID = Field(foreign_key="principal.id", nullable=False, index=True)
+    owner_id: uuid.UUID = Field(foreign_key="users.id", nullable=False, index=True)
     # `sa_type=`/`sa_column_kwargs=` rather than a literal `sa_column=Column(...)`: a mixin's own
     # class body runs once, so a fully constructed `Column` object assigned there would be the
     # exact same instance every subclass inherits, and SQLAlchemy refuses to attach one physical

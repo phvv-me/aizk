@@ -16,7 +16,7 @@ UNIT_VECTOR = [1.0] + [0.0] * 1023
 
 @pytest.fixture
 def owner(migrated_db: None) -> Iterator[uuid.UUID]:
-    """A freshly reset schema seeding one principal, the owner every DB body acts as."""
+    """A freshly reset schema seeding one user, the owner every DB body acts as."""
     pid = uuid.uuid4()
 
     async def setup() -> None:
@@ -120,7 +120,7 @@ def test_build_then_search_lands_a_searchable_community(
             session.add_all(
                 FactClaim(content_id=content.id, owner_id=owner) for content in contents
             )
-        written = await build_communities(principal_id=owner)
+        written = await build_communities(user_id=owner)
         async with acting_as(owner) as session:
             found = await community_search(session, UNIT_VECTOR, k=3)
         return written, found

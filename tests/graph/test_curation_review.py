@@ -30,7 +30,7 @@ class Brain(NamedTuple):
 
 @pytest.fixture
 def brain(migrated_db: None) -> Iterator[Brain]:
-    """A reset schema seeding the system principal, a curated group, its admin, and one writer."""
+    """A reset schema seeding the system user, a curated group, its admin, and one writer."""
     reviewer, writer, group = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
 
     async def setup() -> None:
@@ -104,7 +104,7 @@ def test_render_review_prompt_lists_canon_then_pending_by_id(
 
 
 def test_curated_groups_administered_filters_to_admin_and_curated(brain: Brain) -> None:
-    """Only a curated group the principal admins is returned, a reader or writer role excluded.
+    """Only a curated group the user admins is returned, a reader or writer role excluded.
 
     An admin role in an uncurated group and a reader role in another curated group both stay off
     the roster, and the writer never administers anything, so the pass reviews only what it can.

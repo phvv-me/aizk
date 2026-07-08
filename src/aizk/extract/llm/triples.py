@@ -44,7 +44,7 @@ async def structured[T: BaseModel](
 
     The single seam every extractor, judge, and summarizer flows through. Grammar-constrained
     decoding on the OpenAI-compatible endpoint means the returned message already validates
-    against `schema` with no retry-until-valid layer on top. Takes no session or principal, so it
+    against `schema` with no retry-until-valid layer on top. Takes no session or user, so it
     is safe to call inside or outside a transaction.
 
     system: system prompt fixing the task and the response contract.

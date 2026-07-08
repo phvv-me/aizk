@@ -7,7 +7,7 @@ from ..store import FactClaim, acting_as
 
 
 async def decay(
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     half_life_days: float = 90.0,
 ) -> int:
     """Archive the stale, rarely accessed latest claims so default recall drops them, return count.
@@ -18,12 +18,12 @@ async def decay(
     attributes. Nothing is deleted, so an archived claim stays in history and an as-of query still
     sees it, it only leaves the live graph default recall reads. Returns the number archived.
 
-    principal_id: identity whose row level security visibility scopes and owns the archival, the
-        system principal when null.
+    user_id: identity whose row level security visibility scopes and owns the archival, the
+        system user when null.
     half_life_days: age in days at which an unaccessed claim's relevance halves.
     """
-    principal_id = principal_id or settings.system_user_id
-    async with acting_as(principal_id) as session:
+    user_id = user_id or settings.system_user_id
+    async with acting_as(user_id) as session:
         archived = await FactClaim.archive_stale(session, half_life_days, settings.decay_floor)
     logger.info(
         "decay archived {count} stale claims below relevance {floor}",

@@ -17,7 +17,7 @@ class Community(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
     Rows are scoped and row-level-security forced exactly like entities and facts.
 
     id: stable identity, generated client-side on insert.
-    owner_id: principal that owns the row, enforced by row level security.
+    owner_id: user that owns the row, enforced by row level security.
     scopes: group set the row is shared with, empty when private to the owner.
     label: short human-readable name for the cluster.
     summary: paragraph describing what the cluster's entities and facts are about.

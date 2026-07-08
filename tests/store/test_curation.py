@@ -16,7 +16,7 @@ async def seed_fact(
 ) -> uuid.UUID:
     """Seed one entity/content/claim triple and return the live claim id, superuser-inserted.
 
-    owner: principal holding the claim.
+    owner: user holding the claim.
     scopes: the claim's group set, empty for private.
     statement: the fact's self-contained text, also its content address.
     reviewed: whether the claim is stamped reviewed or left pending (reviewed_at null).

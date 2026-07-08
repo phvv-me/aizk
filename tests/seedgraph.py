@@ -19,9 +19,9 @@ from aizk.store import (
 
 
 async def fresh_owner(is_admin: bool = False) -> uuid.UUID:
-    """Wipe every app table and seed one principal, the isolated start of a graph DB test.
+    """Wipe every app table and seed one user, the isolated start of a graph DB test.
 
-    is_admin: whether the seeded principal carries the server-wide admin flag.
+    is_admin: whether the seeded user carries the server-wide admin flag.
     """
     await dbutil.reset_db()
     return await dbutil.seed_user(uuid.uuid4(), is_admin=is_admin)
@@ -38,7 +38,7 @@ async def add_entity(
     """Insert one entity content plus this owner's private claim on it, return the content id.
 
     session: open session already acting as owner.
-    owner: principal that stakes the claim.
+    owner: user that stakes the claim.
     name: entity surface form.
     type: ontology entity type.
     embedding: optional dense vector, null for an unembedded node.
@@ -67,7 +67,7 @@ async def add_fact(
     """Insert one fact content plus this owner's claim on it, return its (content id, claim id).
 
     session: open session already acting as owner.
-    owner: principal that stakes the claim.
+    owner: user that stakes the claim.
     subject_id: entity content the fact is about.
     statement: self-contained fact text, the record_access key.
     predicate: closed-vocabulary relation type.
@@ -102,7 +102,7 @@ async def seed_chunk(
 ) -> uuid.UUID:
     """Plant a document and one pending chunk the build extracts a graph slice from, return its id.
 
-    owner: principal that owns the document and chunk.
+    owner: user that owns the document and chunk.
     text: the span text the chunk carries.
     title: optional document title the source filter matches on.
     scopes: group set the document and chunk are shared with.
@@ -134,7 +134,7 @@ async def seed_chunk(
 async def seed_scoped_row(owner: uuid.UUID, kind: str) -> None:
     """Plant one unembedded scoped row of a chosen table under the owner, for the reembed walk.
 
-    owner: principal that owns the row.
+    owner: user that owns the row.
     kind: which table to seed, one of `chunk`, `community`, or `profile`.
     """
     async with acting_as(owner) as session:

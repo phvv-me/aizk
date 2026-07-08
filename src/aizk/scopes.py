@@ -3,7 +3,7 @@ import uuid
 from .store import Group, acting_as
 
 
-async def resolve_scopes(scopes: str | None, principal_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
+async def resolve_scopes(scopes: str | None, user_id: uuid.UUID) -> tuple[uuid.UUID, ...]:
     """Resolve a comma-separated group-name list to the sorted scope-set rows are shared with.
 
     The one scope-name bridge both the MCP write verbs and the operator CLI read through, so a
@@ -15,11 +15,11 @@ async def resolve_scopes(scopes: str | None, principal_id: uuid.UUID) -> tuple[u
     check depends on.
 
     scopes: comma-separated human-readable group names, null or blank for private.
-    principal_id: identity whose visibility scopes the group lookups.
+    user_id: identity whose visibility scopes the group lookups.
     """
     names = [name.strip() for name in (scopes or "").split(",") if name.strip()]
     if not names:
         return ()
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         ids = [(await Group.named(session, name)).id for name in names]
     return tuple(sorted(ids))

@@ -539,8 +539,8 @@ def test_build_graph_writes_a_slice_then_resumes(
     async def body() -> tuple[tuple[int, int], tuple[int, int]]:
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, LONG_PROSE)
-        first = await build_graph(principal_id=owner)
-        second = await build_graph(principal_id=owner)
+        first = await build_graph(user_id=owner)
+        second = await build_graph(user_id=owner)
         return first, second
 
     first, second = dbutil.run(body())
@@ -574,7 +574,7 @@ def test_build_graph_source_filter_drops_a_path_and_skips_a_ghost_subject(
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, LONG_PROSE, title="alpha source")
         await seedgraph.seed_chunk(owner, LONG_PROSE, title="beta other")
-        return await build_graph(principal_id=owner, source="alpha")
+        return await build_graph(user_id=owner, source="alpha")
 
     assert dbutil.run(body()) == (1, 1)  # Ada minted once, path dropped, ghost fact skipped
 
@@ -586,7 +586,7 @@ def test_build_graph_skips_a_gated_out_chunk(fake_gate: FakeGate) -> None:
     async def body() -> tuple[tuple[int, int], bool]:
         owner = await seedgraph.fresh_owner()
         chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
-        result = await build_graph(principal_id=owner)
+        result = await build_graph(user_id=owner)
         async with acting_as(owner) as session:
             done = await session.get(seedgraph.Chunk, chunk)
         return result, done is not None and done.processed_at is not None
@@ -614,7 +614,7 @@ def test_build_graph_marks_short_and_untitled_chunks_done(
     async def body() -> tuple[tuple[int, int], bool]:
         owner = await seedgraph.fresh_owner()
         chunk = await seedgraph.seed_chunk(owner, text, title=title)
-        result = await build_graph(principal_id=owner)
+        result = await build_graph(user_id=owner)
         async with acting_as(owner) as session:
             done = await session.get(seedgraph.Chunk, chunk)
         return result, done is not None and done.processed_at is not None
@@ -635,7 +635,7 @@ def test_journal_line_logs_a_dated_project_fact(fake_embedder: RecordingEmbedder
     async def body() -> tuple[int, int, int]:
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, journal_text, title="My Project")
-        entities, facts = await build_graph(principal_id=owner)
+        entities, facts = await build_graph(user_id=owner)
         async with acting_as(owner) as session:
             projects = await session.scalar(
                 select(func.count())
@@ -660,7 +660,7 @@ def test_build_graph_leaves_a_chunk_pending_on_a_timeout(
     async def body() -> tuple[tuple[int, int], bool]:
         owner = await seedgraph.fresh_owner()
         chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
-        result = await build_graph(principal_id=owner)
+        result = await build_graph(user_id=owner)
         async with acting_as(owner) as session:
             done = await session.get(seedgraph.Chunk, chunk)
         return result, done is not None and done.processed_at is not None
@@ -681,7 +681,7 @@ def test_build_graph_raises_when_the_endpoint_is_unreachable(
     async def body() -> None:
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, LONG_PROSE)
-        await build_graph(principal_id=owner)
+        await build_graph(user_id=owner)
 
     with pytest.raises(ExtractionUnreachableError):
         dbutil.run(body())
@@ -710,7 +710,7 @@ def test_build_graph_marks_processed_on_an_unfinishable_extraction(
     async def body() -> tuple[tuple[int, int], bool]:
         owner = await seedgraph.fresh_owner()
         chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
-        result = await build_graph(principal_id=owner)
+        result = await build_graph(user_id=owner)
         async with acting_as(owner) as session:
             done = await session.get(seedgraph.Chunk, chunk)
         return result, done is not None and done.processed_at is not None
@@ -733,15 +733,15 @@ def test_build_graph_logs_and_skips_an_unexpected_chunk_error(
     async def body() -> tuple[int, int]:
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, LONG_PROSE)
-        return await build_graph(principal_id=owner)
+        return await build_graph(user_id=owner)
 
     assert dbutil.run(body()) == (0, 0)
 
 
-def test_build_graph_and_dedup_default_to_the_system_principal_on_an_empty_graph() -> None:
-    """With no principal both passes act as the system principal and no-op on an empty graph.
+def test_build_graph_and_dedup_default_to_the_system_user_on_an_empty_graph() -> None:
+    """With no user both passes act as the system user and no-op on an empty graph.
 
-    Covers the `principal_id or system` default shared by `build_graph` and `dedup_entities`
+    Covers the `user_id or system` default shared by `build_graph` and `dedup_entities`
     without seeding a chunk, so the gather and the merge each run over nothing and report zero.
     """
 
@@ -774,8 +774,8 @@ def test_dedup_merges_a_slug_twin_and_converges(fake_embedder: RecordingEmbedder
             fact, _ = await seedgraph.add_fact(
                 session, owner, duplicate_id, statement="the duplicate carries a fact"
             )
-        first = await dedup_entities(principal_id=owner)
-        second = await dedup_entities(principal_id=owner)
+        first = await dedup_entities(user_id=owner)
+        second = await dedup_entities(user_id=owner)
         async with acting_as(owner) as session:
             survivors = list(await session.scalars(select(EntityContent.id)))
             subject = await session.scalar(
@@ -813,7 +813,7 @@ def test_dedup_drops_a_path_like_entity_and_its_dangling_facts(
             await seedgraph.add_fact(
                 session, owner, path_like, statement="a dangling fact", object_id=object_id
             )
-        await dedup_entities(principal_id=owner)
+        await dedup_entities(user_id=owner)
         async with acting_as(owner) as session:
             facts = await session.scalar(select(func.count()).select_from(FactContent))
             entities = await session.scalar(select(func.count()).select_from(EntityContent))

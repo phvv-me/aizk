@@ -14,7 +14,7 @@ from aizk.store import EntityClaim, EntityContent, FactClaim, FactContent, LiveF
 
 @pytest.fixture
 def owner(migrated_db: None) -> Iterator[uuid.UUID]:
-    """A freshly reset schema seeding one principal, the graph the reflective pass reads."""
+    """A freshly reset schema seeding one user, the graph the reflective pass reads."""
     pid = uuid.uuid4()
 
     async def setup() -> None:
@@ -60,9 +60,9 @@ async def seed_two_facts(owner: uuid.UUID) -> None:
             session.add(FactClaim(content_id=content.id, owner_id=owner))
 
 
-async def observed(principal: uuid.UUID) -> list[str]:
-    """The observes-fact statements one principal reads in its own graph."""
-    async with acting_as(principal) as session:
+async def observed(user: uuid.UUID) -> list[str]:
+    """The observes-fact statements one user reads in its own graph."""
+    async with acting_as(user) as session:
         return list(
             await session.scalars(
                 select(LiveFact.statement).where(LiveFact.predicate == ontology.OBSERVES)
@@ -92,8 +92,8 @@ def test_insight_writes_only_the_gated_observation_and_is_idempotent(
 
     async def probe() -> tuple[int, int, list[str]]:
         await seed_two_facts(owner)
-        written = await derive_insights(principal_id=owner)
-        again = await derive_insights(principal_id=owner)
+        written = await derive_insights(user_id=owner)
+        again = await derive_insights(user_id=owner)
         return written, again, await observed(owner)
 
     written, again, mine = dbutil.run(probe())
@@ -105,7 +105,7 @@ def test_insight_writes_only_the_gated_observation_and_is_idempotent(
 @pytest.mark.usefixtures("fake_embedder")
 def test_insight_skips_a_graph_with_too_few_facts(owner: uuid.UUID, fake_llm: object) -> None:
     """A graph without at least two facts is left untouched, so the pass never reasons blind."""
-    assert dbutil.run(derive_insights(principal_id=owner)) == 0
+    assert dbutil.run(derive_insights(user_id=owner)) == 0
 
 
 @pytest.mark.usefixtures("fake_embedder")
@@ -122,6 +122,6 @@ def test_insight_writes_nothing_when_no_observation_clears_the_gate(
 
     async def probe() -> int:
         await seed_two_facts(owner)
-        return await derive_insights(principal_id=owner)
+        return await derive_insights(user_id=owner)
 
     assert dbutil.run(probe()) == 0

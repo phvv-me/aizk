@@ -27,7 +27,7 @@ from aizk.eval import (
     sample_facts,
     significant_winner,
 )
-from aizk.eval.scale import CorpusScale, Generated, grow_corpus, purge_principal
+from aizk.eval.scale import CorpusScale, Generated, grow_corpus, purge_user
 from aizk.retrieval import RecallResult
 from aizk.store import User, system_session
 
@@ -195,7 +195,7 @@ def test_build_questions_synthesizes_gold_from_sampled_facts(
     """A null question set samples facts and paraphrases each into gold through QUESTION_SYSTEM."""
     fake_llm.register(GeneratedQuestion, GeneratedQuestion(question=PARAPHRASE))
 
-    async def stub_sample_facts(principal_id: uuid.UUID, n: int) -> list[str]:
+    async def stub_sample_facts(user_id: uuid.UUID, n: int) -> list[str]:
         return [SOURCE_FACT]
 
     monkeypatch.setattr(harness, "sample_facts", stub_sample_facts)
@@ -233,7 +233,7 @@ def test_run_eval_scores_a_half_hitting_gold_sweep_and_ab(monkeypatch: pytest.Mo
     ]
 
     async def stub_build_questions(
-        questions: list[str] | None, principal_id: uuid.UUID
+        questions: list[str] | None, user_id: uuid.UUID
     ) -> list[QA]:
         return gold
 
@@ -281,7 +281,7 @@ def test_run_eval_judge_and_no_gold_paths(
     if gold is not None:
 
         async def stub_build_questions(
-            questions: list[str] | None, principal_id: uuid.UUID
+            questions: list[str] | None, user_id: uuid.UUID
         ) -> list[QA]:
             return gold
 
@@ -304,18 +304,18 @@ def test_sample_facts_returns_latest_statements_in_a_stable_id_order(migrated_db
     async def body() -> None:
         await dbutil.reset_db()
         async with system_session() as session:
-            principal_id = (await User.create(session, "eval-sample")).id
+            user_id = (await User.create(session, "eval-sample")).id
         try:
             await grow_corpus(
-                principal_id, Generated(), CorpusScale.for_size(20), np.random.default_rng(0)
+                user_id, Generated(), CorpusScale.for_size(20), np.random.default_rng(0)
             )
-            sampled = await sample_facts(principal_id, 5)
-            again = await sample_facts(principal_id, 5)
+            sampled = await sample_facts(user_id, 5)
+            again = await sample_facts(user_id, 5)
 
             assert len(sampled) == 5
             assert all(isinstance(statement, str) for statement in sampled)
             assert sampled == again  # ordered by LiveFact.id, so the prefix is stable run to run
         finally:
-            await purge_principal(principal_id)
+            await purge_user(user_id)
 
     dbutil.run(body())

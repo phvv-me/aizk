@@ -57,12 +57,12 @@ class CommunityTierBuilder(TierBuilder[Grounding, CommunitySummary]):
 
     def __init__(
         self,
-        principal_id: uuid.UUID,
+        user_id: uuid.UUID,
         cluster: set[uuid.UUID],
         entities: dict[uuid.UUID, EntityContent],
         facts: list[LiveFact],
     ) -> None:
-        super().__init__(principal_id, settings.community_summary_system, CommunitySummary)
+        super().__init__(user_id, settings.community_summary_system, CommunitySummary)
         self.cluster = cluster
         self.entities = entities
         self.facts = facts
@@ -92,10 +92,10 @@ class CommunityTierBuilder(TierBuilder[Grounding, CommunitySummary]):
         self, grounding: Grounding, report: CommunitySummary, vectors: list[list[float]]
     ) -> int:
         """Store the cluster's summary as a new, scoped community row."""
-        async with acting_as(self.principal_id) as session:
+        async with acting_as(self.user_id) as session:
             session.add(
                 Community(
-                    owner_id=self.principal_id,
+                    owner_id=self.user_id,
                     label=report.label,
                     summary=report.summary,
                     embedding=vectors[0],
@@ -107,7 +107,7 @@ class CommunityTierBuilder(TierBuilder[Grounding, CommunitySummary]):
 
 
 async def build_communities(
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> int:
     """Detect communities over the entity graph, summarize each, store the rows, return the count.
 
@@ -117,10 +117,10 @@ async def build_communities(
     summary, and storing its own scoped community row. Committing one community at a time mirrors
     build_graph so a slow summarization never holds a write lock and the build is resumable.
 
-    principal_id: identity that owns the written communities, the system principal when null.
+    user_id: identity that owns the written communities, the system user when null.
     """
-    principal_id = principal_id or settings.system_user_id
-    async with acting_as(principal_id) as session:
+    user_id = user_id or settings.system_user_id
+    async with acting_as(user_id) as session:
         entities = {entity.id: entity for entity in await session.scalars(select(EntityContent))}
         # only embedded knowledge facts define the cluster graph, so the structural part_of edges
         # of the RAPTOR tree, which carry no embedding, never form their own summary communities.
@@ -131,7 +131,7 @@ async def build_communities(
     clusters = detect(facts, settings.community_min_size, settings.community_backend)
     written = 0
     for cluster in clusters:
-        written += await CommunityTierBuilder(principal_id, cluster, entities, facts).build()
+        written += await CommunityTierBuilder(user_id, cluster, entities, facts).build()
     return written
 
 
@@ -145,11 +145,11 @@ async def community_search(
     Ranks the row-level-security-visible communities by cosine distance to their summary
     embedding and returns the top k as label, summary, and a similarity score. This is the global
     lane recall folds in when a query reads thematic rather than pointed. Takes the caller's own
-    open, already principal- and scope-scoped session and an already-embedded query vector rather
+    open, already user- and scope-scoped session and an already-embedded query vector rather
     than opening a session or embedding of its own, since recall's one round already holds both and
     a second session here would open a second connection nested inside the first for no reason.
 
-    session: open, principal- and scope-scoped session the caller already holds.
+    session: open, user- and scope-scoped session the caller already holds.
     vector: dense query embedding.
     k: number of community summaries to return.
     """

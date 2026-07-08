@@ -33,22 +33,22 @@ class ExportReport(FrozenModel):
 
 async def export_scope(
     path: Path,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> ExportReport:
-    """Dump the principal-visible documents, chunks, entity/fact content, and claims to a JSONL.
+    """Dump the user-visible documents, chunks, entity/fact content, and claims to a JSONL.
 
     Runs entirely under `acting_as` so row level security decides exactly which rows leave, the
-    principal's own and its group-shared scopes and no other tenant's. Content's read-through-a-
-    claim policy means only content this principal's claims actually reach ever leaves too. The
+    user's own and its group-shared scopes and no other tenant's. Content's read-through-a-
+    claim policy means only content this user's claims actually reach ever leaves too. The
     claim reads opt out of the live gate so superseded history and both temporal windows are
     dumped, not only the currently-valid edges. Emits only, no import path back in.
 
     path: the JSONL file the dump is written to.
-    principal_id: identity whose row level security visibility scopes exactly what is exported,
-        the system principal when null.
+    user_id: identity whose row level security visibility scopes exactly what is exported,
+        the system user when null.
     """
-    principal_id = principal_id or settings.system_user_id
-    async with acting_as(principal_id) as session:
+    user_id = user_id or settings.system_user_id
+    async with acting_as(user_id) as session:
         documents = list(await session.scalars(select(Document).order_by(Document.id)))
         chunks = list(await session.scalars(select(Chunk).order_by(Chunk.id)))
         entity_content = list(
@@ -83,7 +83,7 @@ async def export_scope(
     )
     logger.info(
         "exported {} documents, {} chunks, {} entity content, {} entity claims, "
-        "{} fact content, {} fact claims to {} for principal {}",
+        "{} fact content, {} fact claims to {} for user {}",
         len(documents),
         len(chunks),
         len(entity_content),
@@ -91,7 +91,7 @@ async def export_scope(
         len(fact_content),
         len(fact_claims),
         path,
-        principal_id,
+        user_id,
     )
     return ExportReport(
         documents=len(documents),

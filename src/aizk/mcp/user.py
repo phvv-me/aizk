@@ -15,7 +15,7 @@ AUTH_TOKEN_ENV = "AIZK_AUTH_TOKEN"
 
 # the fastmcp Context state key IdentityMiddleware.on_call_tool stashes the resolved User
 # under, the one slot every tool reads it back from through `current_user`.
-USER_STATE_KEY = "principal"
+USER_STATE_KEY = "user"
 
 
 class User(FrozenModel):
@@ -27,7 +27,7 @@ class User(FrozenModel):
     group-admin standing the curation verbs still check is read from the database inside
     `Group.require_admin`, not carried on this identity.
 
-    id: the aizk principal id the caller acts as.
+    id: the aizk user id the caller acts as.
     """
 
     id: uuid.UUID
@@ -52,7 +52,7 @@ async def resolve_user() -> User:
 
     Tries a OIDC bearer token first so the multi-user identity provider is the primary path. An
     unresolved caller falls back to settings.default_user_id on the local stdio transport, the
-    single-identity default a personal stack runs under, and to the anonymous principal on the
+    single-identity default a personal stack runs under, and to the anonymous user on the
     shared HTTP transport, where an unauthenticated stranger reads exactly the public scopes and
     writes nothing. `IdentityMiddleware.on_call_tool` calls this once per call and every tool
     reads the result back through `current_user` rather than resolving it again.
@@ -70,21 +70,21 @@ def current_user() -> User:
     Every tool calls this instead of resolving its own caller, so the one bearer-token check and
     the one is_admin read `IdentityMiddleware.on_call_tool` already ran cover the whole call.
     """
-    principal = get_context().get_state(USER_STATE_KEY)
-    if not isinstance(principal, User):
-        raise ToolError("no principal resolved for this call")
-    return principal
+    user = get_context().get_state(USER_STATE_KEY)
+    if not isinstance(user, User):
+        raise ToolError("no user resolved for this call")
+    return user
 
 
-def require_identified(principal: User) -> User:
-    """Refuse the anonymous principal, the gate on every write verb.
+def require_identified(user: User) -> User:
+    """Refuse the anonymous user, the gate on every write verb.
 
-    An unauthenticated HTTP stranger reads the public scopes but owns no principal row, so letting
+    An unauthenticated HTTP stranger reads the public scopes but owns no user row, so letting
     a write through would only die later on a foreign key. Refusing here turns that into a clear
     read-only message instead.
 
-    principal: the caller already resolved for this call.
+    user: the caller already resolved for this call.
     """
-    if principal.id == settings.anonymous_user_id:
+    if user.id == settings.anonymous_user_id:
         raise ToolError("anonymous callers are read-only, authenticate to write")
-    return principal
+    return user

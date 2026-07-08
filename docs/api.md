@@ -34,7 +34,7 @@ See [Lattice](engine/lattice.md) for why membership, not a standalone group, dec
 
 ## Maintenance and admin
 
-Registered only for the resolved root principal.
+Registered only for the resolved root user.
 
 | tool | does |
 |---|---|
@@ -45,7 +45,7 @@ Registered only for the resolved root principal.
 | `bench` / `sweep` / `benchmark` / `scale` | the eval harness, gated by `AIZK_BENCHMARKS_ENABLED` where noted |
 | `export_scope(path)` | dump one scope's claims and history to a file |
 | `profile_report()` | span-profiler timing stats, when `AIZK_PROFILING=1` |
-| `create_user` / `grant_admin` / `list_groups` / `list_principals` | identity and group bootstrap |
+| `create_user` / `grant_admin` / `list_groups` / `list_users` | identity and group bootstrap |
 
 `scopes` parameters take a comma-separated list of group names. `scopes="finance,business"`
 writes or reads the intersection only members of both groups can see.
@@ -62,6 +62,6 @@ calls always go through the MCP tools above.
 | `aizk migrate` / `aizk makemigrations` | apply or author a schema migration |
 | `aizk check-rls` | diff compiled row level security policies against the live catalog |
 | `aizk install-queue` | install the pgqueuer schema once |
-| `aizk create-user <name>` | bootstrap the first principal before any auth exists |
+| `aizk create-user <name>` | bootstrap the first user before any auth exists |
 | `aizk scale` | run the scale eval harness |
 | `aizk recall-context` / `aizk capture-session` | the Claude Code session hook bridges |

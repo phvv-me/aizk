@@ -13,7 +13,7 @@ pytestmark = pytest.mark.usefixtures("migrated_db", "fake_embedder")
 async def seed_one_of_each(owner: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
     """Plant one unembedded row in every embedded table, return the entity and fact content ids.
 
-    owner: principal that owns every seeded row.
+    owner: user that owns every seeded row.
     """
     await seedgraph.seed_scoped_row(owner, "chunk")
     await seedgraph.seed_scoped_row(owner, "community")

@@ -59,7 +59,7 @@ def install_constant_recall(
 
     async def stub_recall(
         query: str,
-        principal_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
         k: int = 8,
         as_of: datetime | None = None,
     ) -> RecallResult:

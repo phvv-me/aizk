@@ -313,19 +313,19 @@ APP_ROLE = "aizk_app"
 
 # the well-known identity that owns any pre-lattice row and always administers the engine, so a
 # fresh single-user stack self-administers from the first migration
-SYSTEM_PRINCIPAL_ID = "00000000-0000-0000-0000-000000000001"
+SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def upgrade() -> None:
     for extension in required_extensions(INDEX_BACKEND, BM25_BACKEND):
         op.execute(f"CREATE EXTENSION IF NOT EXISTS {extension}")
 
-    # the visibility lattice the scope policies read: principals own rows, group_ gathers them, and
-    # memberships bridge a principal into a group's shared scope. group_ carries the trailing
+    # the visibility lattice the scope policies read: users own rows, group_ gathers them, and
+    # memberships bridge a user into a group's shared scope. group_ carries the trailing
     # underscore `TableBase.__tablename__` appends on any reserved-word collision, since GROUP is a
     # reserved SQL keyword.
     op.create_table(
-        "principal",
+        "users",
         sa.Column(
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
@@ -334,10 +334,10 @@ def upgrade() -> None:
         ),
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("display_name", sa.Text(), nullable=True),
-        sa.Column("zitadel_sub", sa.Text(), nullable=True),
+        sa.Column("oidc_subject", sa.Text(), nullable=True),
         sa.Column("is_admin", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("zitadel_sub"),
+        sa.UniqueConstraint("oidc_subject"),
     )
     op.create_table(
         "group_",
@@ -350,29 +350,29 @@ def upgrade() -> None:
     )
     op.create_table(
         "membership",
-        sa.Column("principal_id", sa.Uuid(), nullable=False),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("group_id", sa.Uuid(), nullable=False),
         sa.Column(
             "role", sa.Enum("reader", "writer", "admin", name="membership_role"), nullable=False
         ),
         sa.ForeignKeyConstraint(["group_id"], ["group_.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["principal_id"], ["principal.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("principal_id", "group_id"),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("user_id", "group_id"),
     )
 
-    # the system principal owns any row ingested before a caller is known and is an admin from the
+    # the system user owns any row ingested before a caller is known and is an admin from the
     # start, so the auth layer and the pre-lattice backfill both have an identity to point at.
     # bulk_insert over a literal INSERT so the seeded value is parameter-bound rather than
     # string-formatted into the statement text.
-    principal_table = sa.table(
-        "principal",
+    user_table = sa.table(
+        "users",
         sa.column("id", sa.Uuid()),
         sa.column("display_name", sa.Text()),
         sa.column("is_admin", sa.Boolean()),
     )
     op.bulk_insert(
-        principal_table,
-        [{"id": SYSTEM_PRINCIPAL_ID, "display_name": "system", "is_admin": True}],
+        user_table,
+        [{"id": SYSTEM_USER_ID, "display_name": "system", "is_admin": True}],
     )
 
     # documents and their chunks, each scoped by owner_id and a shared group scope-set; chunk text
@@ -393,7 +393,7 @@ def upgrade() -> None:
         sa.Column("source_uri", sa.String(), nullable=True),
         sa.Column("content_hash", sa.String(), nullable=False),
         sa.Column("promoted_from", sa.Uuid(), nullable=True),
-        sa.ForeignKeyConstraint(["owner_id"], ["principal.id"]),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["promoted_from"], ["document.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("source_uri"),
@@ -428,7 +428,7 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.ForeignKeyConstraint(["document_id"], ["document.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["owner_id"], ["principal.id"]),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     # indexed: promote's document-ordered rebuild and build_graph's source-title filter both
@@ -540,7 +540,7 @@ def upgrade() -> None:
         sa.Column("content_id", sa.Uuid(), nullable=False),
         sa.Column("attributes", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
         sa.ForeignKeyConstraint(["content_id"], ["entity_content.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["owner_id"], ["principal.id"]),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "content_id", "owner_id", "scopes", name="uq_entity_claim_content_owner_scope"
@@ -592,7 +592,7 @@ def upgrade() -> None:
         sa.Column("source_chunk_id", sa.Uuid(), nullable=True),
         sa.Column("promoted_from", sa.Uuid(), nullable=True),
         sa.ForeignKeyConstraint(["content_id"], ["fact_content.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["owner_id"], ["principal.id"]),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["promoted_from"], ["fact_claim.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["source_chunk_id"], ["chunk.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
@@ -649,7 +649,7 @@ def upgrade() -> None:
         sa.Column(
             "member_ids", ARRAY(sa.Uuid()), server_default=sa.text("'{}'::uuid[]"), nullable=False
         ),
-        sa.ForeignKeyConstraint(["owner_id"], ["principal.id"]),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.execute(vector_index_ddl("ix_community_embedding", "community", INDEX_BACKEND))
@@ -670,7 +670,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("subject_id", sa.Uuid(), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
-        sa.ForeignKeyConstraint(["owner_id"], ["principal.id"]),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["subject_id"], ["entity_content.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("owner_id", "subject_id", name="uq_profile_owner_subject"),
@@ -697,7 +697,7 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(), nullable=False),
         sa.Column("text", sa.Text(), nullable=False),
         sa.Column("promoted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["owner_id"], ["principal.id"]),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.execute(vector_index_ddl("ix_session_item_embedding", "session_item", INDEX_BACKEND))
@@ -705,7 +705,7 @@ def upgrade() -> None:
     op.create_index("ix_session_item_promoted_at", "session_item", ["promoted_at"])
 
     # one tiny counter row per owner, kind, and ref the autonomous engine debounces its passes on,
-    # scoped and forced exactly like the memory it tracks so a count never leaks across principals
+    # scoped and forced exactly like the memory it tracks so a count never leaks across users
     op.create_table(
         "watermark",
         sa.Column(
@@ -733,7 +733,7 @@ def upgrade() -> None:
         sa.Column("ref", sa.Text(), server_default="global", nullable=False),
         sa.Column("counter", sa.BigInteger(), server_default="0", nullable=False),
         sa.Column("payload", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
-        sa.ForeignKeyConstraint(["owner_id"], ["principal.id"]),
+        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("owner_id", "kind", "ref", name="uq_watermark_owner_kind_ref"),
     )
@@ -777,7 +777,7 @@ def upgrade() -> None:
     )
 
     # force every declared policy on each tenant-scoped table, so even the table owner is subject
-    # to them and no row leaks across principals; `fact_claim`'s own curation-admin escape rides
+    # to them and no row leaks across users; `fact_claim`'s own curation-admin escape rides
     # along automatically here, declared on the model itself rather than applied as a separate
     # step. The content tables carry no owner_id/scope of their own, so `apply_scoped_rls` never
     # runs against them; their custom visible-through-a-claim policy set is applied the identical
@@ -831,7 +831,7 @@ def downgrade() -> None:
     op.drop_table("document")
     op.drop_table("membership")
     op.drop_table("group_")
-    op.drop_table("principal")
+    op.drop_table("users")
 
     # native enum types outlive the table whose column referenced them, so each is dropped
     # explicitly once the last column using it is gone

@@ -51,7 +51,7 @@ for.
 ## Verification posture
 
 - 577 tests across 57 files, all green, property-based first with Hypothesis. The RLS lattice
-  is proven against an independent Python specification over the full principal, role,
+  is proven against an independent Python specification over the full user, role,
   scope-set, and lens cross-product.
 - 100.00% consolidated line and branch coverage, 3,877 statements and 454 branches with zero
   missed.

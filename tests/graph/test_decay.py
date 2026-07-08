@@ -75,7 +75,7 @@ def test_relevance_brackets_the_decay_floor() -> None:
 async def claim_state(owner: uuid.UUID, claim: uuid.UUID) -> tuple[bool, bool]:
     """The (still-live, decay-marked) state of one claim after a pass, read back as its owner.
 
-    owner: principal whose visibility scopes the read.
+    owner: user whose visibility scopes the read.
     claim: the claim to inspect.
     """
     async with acting_as(owner) as session:
@@ -100,7 +100,7 @@ async def plant_aged(
 ) -> uuid.UUID:
     """Plant one latest claim with a chosen age and access history, return its claim id.
 
-    owner: principal that owns the claim.
+    owner: user that owns the claim.
     subject: entity content the fact hangs from.
     statement: self-contained text.
     age_days: days in the past the claim entered memory.
@@ -142,7 +142,7 @@ def test_decay_archives_the_stale_claim_and_keeps_the_fresh_one() -> None:
             subject = await seedgraph.add_entity(session, owner, "Subject")
         stale = await plant_aged(owner, subject, "stale", 3650.0, 0, accessed=False)
         fresh = await plant_aged(owner, subject, "fresh", 0.0, 50, accessed=True)
-        count = await decay(principal_id=owner, half_life_days=90.0)
+        count = await decay(user_id=owner, half_life_days=90.0)
         return count, await claim_state(owner, stale), await claim_state(owner, fresh)
 
     count, (stale_live, stale_marked), (fresh_live, _) = dbutil.run(body())
@@ -151,10 +151,10 @@ def test_decay_archives_the_stale_claim_and_keeps_the_fresh_one() -> None:
     assert fresh_live is True
 
 
-def test_decay_defaults_to_the_system_principal_and_archives_nothing_on_empty() -> None:
-    """With no principal given the pass acts as the system principal and archives an empty graph.
+def test_decay_defaults_to_the_system_user_and_archives_nothing_on_empty() -> None:
+    """With no user given the pass acts as the system user and archives an empty graph.
 
-    Covers the `principal_id or system` default branch without seeding a claim, so the archival
+    Covers the `user_id or system` default branch without seeding a claim, so the archival
     runs over nothing and reports zero.
     """
 

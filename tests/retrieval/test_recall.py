@@ -115,7 +115,7 @@ async def seed_entity(
 ) -> uuid.UUID:
     """Seed one deduplicated entity content row, optionally embedded and claimed, return its id.
 
-    owner: when given, also stake an entity claim so the content is visible under that principal's
+    owner: when given, also stake an entity claim so the content is visible under that user's
         row level security; entity content carries no owner of its own and is read only through a
         claim, so the portrait and raptor lanes that join it see nothing without one.
     """
@@ -251,12 +251,12 @@ async def seed_session(
 
 
 async def in_session[T](
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     body: Callable[[AsyncSession], Awaitable[T]],
     scopes: tuple[uuid.UUID, ...] = (),
 ) -> T:
-    """Run one body on a principal-scoped session, the shape the Recall unit tests share."""
-    async with acting_as(principal_id, scopes) as session:
+    """Run one body on a user-scoped session, the shape the Recall unit tests share."""
+    async with acting_as(user_id, scopes) as session:
         return await body(session)
 
 
@@ -360,7 +360,7 @@ def test_hybrid_recall_recalls_the_matching_chunk_and_caps_at_k(
 def test_hybrid_recall_hides_another_owners_private_chunk(
     migrated_db: None, fake_embedder: RecordingEmbedder
 ) -> None:
-    """A private chunk owned by a stranger never enters a principal's fused pool."""
+    """A private chunk owned by a stranger never enters a user's fused pool."""
     query = "shared topic"
 
     async def flow() -> list[Row]:
@@ -511,7 +511,7 @@ def test_graph_search_embeds_the_query_and_ranks_facts(
         await dbutil.seed_user(owner)
         subject = await seed_entity("Node")
         await seed_fact(owner, "the ranked fact", qvec(query), subject)
-        return await graph_search(query, k=5, principal_id=owner)
+        return await graph_search(query, k=5, user_id=owner)
 
     facts = dbutil.run(flow())
     assert [fact.statement for fact in facts] == ["the ranked fact"]
@@ -536,7 +536,7 @@ def test_search_returns_hits_reranked_only_when_enabled(
         await dbutil.seed_user(owner)
         doc = await seed_doc(owner, title="src")
         await seed_chunk(doc, owner, f"the passage for {query}", qvec(query))
-        return await search(query, k=4, principal_id=owner)
+        return await search(query, k=4, user_id=owner)
 
     hits_out = dbutil.run(flow())
     assert any("the passage" in hit.text for hit in hits_out)
@@ -572,7 +572,7 @@ def test_recall_bundles_every_lane_over_the_seeded_graph(
         await seed_profile(owner, subject, "a rolled-up portrait")
         await seed_community(owner, "packings", "a cluster paragraph", qvec(query))
         await seed_session(owner, "a working note", qvec(query))
-        result = await recall(query, principal_id=owner, k=4)
+        result = await recall(query, user_id=owner, k=4)
         return result, await access_count(fact)
 
     result, count = dbutil.run(flow())
@@ -603,7 +603,7 @@ def test_recall_replays_the_graph_at_a_past_world_time(
             owner, "alice knew bob", qvec(query), alice, object_id=bob, recorded_from=PAST
         )
         await seed_fact(owner, "bob knew carol", other_vec("n"), bob, recorded_from=PAST)
-        return await recall(query, principal_id=owner, k=4, as_of=as_of)
+        return await recall(query, user_id=owner, k=4, as_of=as_of)
 
     result = dbutil.run(flow())
     assert result.as_of == as_of
@@ -633,7 +633,7 @@ def test_recall_fills_a_thin_recall_with_one_extra_round(
             await seed_chunk(doc, owner, "lone chunk", qvec(query))
             subject = await seed_entity("Seed")
             await seed_fact(owner, "a lone fact", qvec(query), subject)
-        return await recall(query, principal_id=owner, k=4)
+        return await recall(query, user_id=owner, k=4)
 
     result = dbutil.run(flow())
     assert isinstance(result, RecallResult)
@@ -672,7 +672,7 @@ def test_recall_lane_toggles_leave_their_slice_empty(
         await seed_profile(owner, subject, "a portrait")
         await seed_community(owner, "c", "a cluster", qvec(query))
         await seed_session(owner, "a note", qvec(query))
-        return await recall(query, principal_id=owner, k=4)
+        return await recall(query, user_id=owner, k=4)
 
     result = dbutil.run(flow())
     assert not getattr(result, field)
@@ -781,7 +781,7 @@ def test_assemble_context_pack_recalls_and_packs_the_seeded_graph(
         await dbutil.seed_user(owner)
         doc = await seed_doc(owner, title="src")
         await seed_chunk(doc, owner, f"packable passage for {query}", qvec(query))
-        return await assemble_context_pack(query, principal_id=owner, token_budget=4000, k=4)
+        return await assemble_context_pack(query, user_id=owner, token_budget=4000, k=4)
 
     pack = dbutil.run(flow())
     assert isinstance(pack, ContextPack)

@@ -11,7 +11,7 @@ from ..store import Chunk, Community, EntityContent, FactContent, Profile, actin
 from .admin import admin_session
 
 # the three per-tenant embedded tables, each carrying an id, an owner, and a halfvec embedding
-# column, re-embedded one principal's rows at a time under ordinary row level security.
+# column, re-embedded one user's rows at a time under ordinary row level security.
 ScopedEmbedded = Chunk | Community | Profile
 
 # every scoped embedded table paired with the source column its vector is built from, so
@@ -66,18 +66,18 @@ async def rewrite_embeddings(
 
 async def reembed_scoped_table(
     embedder: Embedder,
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     model: type[ScopedEmbedded],
     field: str,
 ) -> int:
-    """Re-embed one per-tenant table's rows under the acting principal, return the count rewritten.
+    """Re-embed one per-tenant table's rows under the acting user, return the count rewritten.
 
     embedder: backend that maps the source text to fresh vectors.
-    principal_id: identity whose visibility scopes and owns the rewritten rows.
+    user_id: identity whose visibility scopes and owns the rewritten rows.
     model: the embedded ORM table to walk.
     field: name of the source text column the vector is built from.
     """
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         count = await rewrite_embeddings(session, embedder, model, field)
     logger.info("re-embedded {} {} rows", count, model.__tablename__)
     return count
@@ -93,7 +93,7 @@ async def reembed_content_table(
     Content carries no owner of its own and no UPDATE policy at all under row level security, so
     an ordinary `acting_as` session can never rewrite its embedding column. This runs instead on
     the owner-role admin engine, the same connection migrations use. A model change benefits every
-    claim on the content at once, with no per-principal repetition needed.
+    claim on the content at once, with no per-user repetition needed.
 
     embedder: backend that maps the source text to fresh vectors.
     model: the content ORM table to walk.
@@ -106,21 +106,21 @@ async def reembed_content_table(
     return count
 
 
-async def reembed(principal_id: uuid.UUID) -> int:
+async def reembed(user_id: uuid.UUID) -> int:
     """Re-encode every stored embedding with the current embedder, the one-command model migration.
 
-    Walks each per-tenant embedded table under the acting principal's own row level security, then
+    Walks each per-tenant embedded table under the acting user's own row level security, then
     walks the two deduplicated content tables system-wide, re-reading each row's source text and
     overwriting its halfvec with a fresh vector from the configured embedder in batches, so
     switching `embed_model` or `embed_url` needs no re-ingest. The stored text and the schema stay
     untouched, only the embedding columns change.
 
-    principal_id: identity whose visibility scopes and owns the rewritten per-tenant rows.
+    user_id: identity whose visibility scopes and owns the rewritten per-tenant rows.
     """
     embedder = Embedder()
     scoped = sum(
         [
-            await reembed_scoped_table(embedder, principal_id, model, field)
+            await reembed_scoped_table(embedder, user_id, model, field)
             for model, field in SCOPED_TARGETS.items()
         ]
     )

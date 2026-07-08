@@ -11,8 +11,8 @@ import aizk.background.queue as queue_mod
 
 
 @dataclass(frozen=True)
-class FakePrincipal:
-    """The one attribute the fan-out reads off a roster entry, the principal id.
+class FakeUser:
+    """The one attribute the fan-out reads off a roster entry, the user id.
 
     id: identity the fanned-out job runs its pass for.
     """
@@ -200,6 +200,6 @@ def job_factory() -> type[FakeJob]:
 
 
 @pytest.fixture
-def principal_factory() -> type[FakePrincipal]:
+def user_factory() -> type[FakeUser]:
     """The roster-entry double class, called with an id to seed the fan-out roster."""
-    return FakePrincipal
+    return FakeUser

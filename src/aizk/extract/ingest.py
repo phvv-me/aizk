@@ -53,7 +53,7 @@ async def store_document(
     under it through :func:`refresh_document`, since ``source_uri`` is the document's stable
     identity and a second insert would violate its unique constraint.
 
-    owner_id: principal the transaction acts as.
+    owner_id: user the transaction acts as.
     dedupe: the `Document` column-equality clause idempotency is checked against before insert.
     document: the fully assembled row to store when nothing already matches.
 
@@ -123,7 +123,7 @@ async def ingest_image(
     path: image file to ingest.
     title: human-readable label, defaulted from the file stem when null.
     caption: text stored on the chunk, defaulted to the file name when null.
-    owner_id: principal that owns the stored rows, the system principal when null.
+    owner_id: user that owns the stored rows, the system user when null.
     scopes: group set the stored rows are shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
@@ -173,7 +173,7 @@ async def ingest_file(
     content CHANGED refreshes its standing document in place, counting as written.
 
     file: source file to ingest.
-    owner_id: principal that owns the stored rows.
+    owner_id: user that owns the stored rows.
     scopes: group set the stored rows are shared with.
     embedder: the shared embedder every file in the walk reuses.
     """
@@ -219,7 +219,7 @@ async def ingest_path(
     its embedded chunks writes in one owner-scoped transaction.
 
     path: file or directory to ingest.
-    owner_id: principal that owns the stored rows, the system principal when null.
+    owner_id: user that owns the stored rows, the system user when null.
     scopes: group set the stored rows are shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
@@ -248,7 +248,7 @@ async def ingest_text(
     text: the content to remember.
     title: human-readable label, defaulted from the leading words when null.
     kind: coarse type tag stamped on the document, such as note or code.
-    owner_id: principal that owns the stored rows, the system principal when null.
+    owner_id: user that owns the stored rows, the system user when null.
     scopes: group set the stored rows are shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
@@ -296,7 +296,7 @@ async def record_reference(
 
     uri: locator of the paper, url, or file to reference.
     title: human-readable label, defaulted to the uri when null.
-    owner_id: principal that owns the stored row, the system principal when null.
+    owner_id: user that owns the stored row, the system user when null.
     scopes: group set the row is shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
@@ -329,7 +329,7 @@ async def remember_session(
 
     text: the content to remember.
     kind: coarse type tag carried through to the promoted document.
-    owner_id: principal that owns the stored item, the system principal when null.
+    owner_id: user that owns the stored item, the system user when null.
     scopes: group set the item is shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id

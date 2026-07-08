@@ -74,7 +74,8 @@ def test_extractable_names_exclude_structural_members() -> None:
     assert ontology.RAPTOR_SUMMARY not in entities
     assert ontology.OBSERVATION not in entities
     assert ontology.OBSERVES not in relations
-    assert ontology.PROJECT in entities  # a real, always-seeded, non-structural member
+    assert ontology.PROJECT not in entities  # structural, declared-only, never extractor-emitted
+    assert ontology.CONCEPT in entities  # a real, always-seeded, non-structural member stays
 
 
 def test_seed_baseline_carries_domain_and_structural() -> None:
@@ -88,7 +89,7 @@ def test_seed_baseline_carries_domain_and_structural() -> None:
             )
 
     project, raptor = dbutil.run(body())
-    assert project.domain == "general" and project.structural is False
+    assert project.domain == "general" and project.structural is True
     assert raptor.structural is True
 
 

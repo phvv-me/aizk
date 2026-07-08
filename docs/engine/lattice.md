@@ -40,7 +40,7 @@ flowchart TD
 All of it is forced Postgres row level security compiled from declarative policies on the
 models. The app role cannot bypass it, anonymous callers get a rate-limited read-only view of
 public singletons, and the test suite proves the compiled policies against an independent
-Python specification across the full principal, role, scope-set, and lens cross-product. No
+Python specification across the full user, role, scope-set, and lens cross-product. No
 open memory engine offers a multi-tenant graph with per-row isolation.
 
 The generic policy machinery ships as its own package,

@@ -21,7 +21,7 @@ async def noop_enqueue(*args: object, **kwargs: object) -> int:
 async def seed_item(owner: uuid.UUID, text: str, scopes: tuple[uuid.UUID, ...] = ()) -> uuid.UUID:
     """Insert one still-working session item with arbitrary scopes, bypassing the write policy.
 
-    owner: principal that owns the working item.
+    owner: user that owns the working item.
     text: the remembered content promotion reingests.
     scopes: group set the item is shared with, private when empty.
     """
@@ -41,7 +41,7 @@ def test_promote_moves_due_items_into_the_graph_and_skips_unwritable_scopes(
 
     With the age cutoff dropped so everything is due, the promotion pass feeds the writable private
     item through the ingest pipeline into a chunk and stamps it promoted, while the item scoped to
-    a group the principal only reads is filtered out by `writable_scopes` and stays working.
+    a group the user only reads is filtered out by `writable_scopes` and stays working.
     """
     monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
     monkeypatch.setattr(settings, "session_promote_age_minutes", 0.0)
@@ -76,7 +76,7 @@ def test_promote_moves_due_items_into_the_graph_and_skips_unwritable_scopes(
 
 
 def test_promote_is_a_no_op_when_nothing_is_due(monkeypatch: pytest.MonkeyPatch) -> None:
-    """An empty working set promotes nothing, so a quiet principal never touches the graph."""
+    """An empty working set promotes nothing, so a quiet user never touches the graph."""
     monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
 
     async def body() -> int:
@@ -86,12 +86,12 @@ def test_promote_is_a_no_op_when_nothing_is_due(monkeypatch: pytest.MonkeyPatch)
     assert dbutil.run(body()) == 0
 
 
-def test_promote_defaults_to_the_system_principal_on_an_empty_working_set(
+def test_promote_defaults_to_the_system_user_on_an_empty_working_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With no principal given the pass acts as the system principal over an empty working set.
+    """With no user given the pass acts as the system user over an empty working set.
 
-    Covers the `principal_id or system` default branch, so the selection runs over nothing due and
+    Covers the `user_id or system` default branch, so the selection runs over nothing due and
     returns zero before any reingest.
     """
     monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)

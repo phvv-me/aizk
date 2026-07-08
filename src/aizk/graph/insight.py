@@ -13,7 +13,7 @@ from .ids import entity_id, fact_id
 from .models import InsightReport, Observation
 from .tier_builder import TierBuilder
 
-# the single node every observation hangs off, one per principal, so the derived insights form one
+# the single node every observation hangs off, one per user, so the derived insights form one
 # small structural subgraph the recall fact lane already surfaces rather than a scattered set.
 OBSERVATION_NODE = "graph observations"
 
@@ -35,19 +35,19 @@ def kept_observations(report: InsightReport) -> list[Observation]:
 
 
 async def observation_already_claimed(
-    session: AsyncSession, principal_id: uuid.UUID, identity: uuid.UUID
+    session: AsyncSession, user_id: uuid.UUID, identity: uuid.UUID
 ) -> bool:
-    """Whether this principal already stakes an observes claim on this exact content id, ever.
+    """Whether this user already stakes an observes claim on this exact content id, ever.
 
-    session: open session already acting as principal_id.
-    principal_id: identity the observation would be claimed under.
+    session: open session already acting as user_id.
+    user_id: identity the observation would be claimed under.
     identity: content-addressed id for the observation's statement.
     """
     claimed = await session.scalar(
         select(FactClaim.id)
         .where(
             FactClaim.content_id == identity,
-            FactClaim.owner_id == principal_id,
+            FactClaim.owner_id == user_id,
             FactClaim.scopes == [],
         )
         .execution_options(**{settings.skip_live_gate: True})
@@ -57,21 +57,21 @@ async def observation_already_claimed(
 
 async def write_observation(
     session: AsyncSession,
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     node_id: uuid.UUID,
     obs: Observation,
     vector: list[float],
 ) -> bool:
     """Idempotently write one gated observation as an observes fact, returning whether it was new.
 
-    session: open session already acting as principal_id.
-    principal_id: identity the observation is claimed under, always privately (empty scopes).
+    session: open session already acting as user_id.
+    user_id: identity the observation is claimed under, always privately (empty scopes).
     node_id: the OBSERVATION_NODE entity content id every observation hangs off.
     obs: the gated observation to write.
     vector: the observation's own statement, already embedded.
     """
     identity = fact_id(OBSERVATION_NODE, ontology.OBSERVES, "", obs.statement)
-    if await observation_already_claimed(session, principal_id, identity):
+    if await observation_already_claimed(session, user_id, identity):
         return False
     await mint_content(
         session,
@@ -84,12 +84,12 @@ async def write_observation(
             embedding=vector,
         ),
     )
-    # an observation carries no scope of its own, always private to the principal reflected on,
+    # an observation carries no scope of its own, always private to the user reflected on,
     # so it stamps reviewed immediately like any other private write.
     await claim_fact(
         session,
         identity,
-        principal_id,
+        user_id,
         [],
         attributes={"significance": obs.significance},
         reviewed_at=datetime.now(UTC),
@@ -98,7 +98,7 @@ async def write_observation(
 
 
 class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
-    """The reflective pass over one principal's whole graph, deriving higher-level observations.
+    """The reflective pass over one user's whole graph, deriving higher-level observations.
 
     Grounds the reflection in the latest claims, asks the LLM for observations it scores itself,
     keeps only those that clear the significance gate, then writes each surviving one back as a
@@ -107,12 +107,12 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
     content-addressed id makes a rerun idempotent, so a stable insight is never claimed twice.
     """
 
-    def __init__(self, principal_id: uuid.UUID) -> None:
-        super().__init__(principal_id, settings.insight_system, InsightReport)
+    def __init__(self, user_id: uuid.UUID) -> None:
+        super().__init__(user_id, settings.insight_system, InsightReport)
 
     async def gather(self) -> list[str] | None:
         """The latest fact statements to reflect on, null when too few exist to ground on."""
-        async with acting_as(self.principal_id) as session:
+        async with acting_as(self.user_id) as session:
             statements = list(
                 await session.scalars(
                     select(LiveFact.statement)
@@ -123,7 +123,7 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
             )
         if len(statements) < 2:
             logger.info(
-                "insight pass skipped for {}, too few facts to ground on", self.principal_id
+                "insight pass skipped for {}, too few facts to ground on", self.user_id
             )
             return None
         return statements
@@ -138,7 +138,7 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
         if not kept:
             logger.info(
                 "insight pass wrote nothing for {}, no observation cleared the gate",
-                self.principal_id,
+                self.user_id,
             )
         return [obs.statement for obs in kept]
 
@@ -148,29 +148,29 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
         """Write each gated observation as its own content-addressed, idempotent observes claim."""
         kept = kept_observations(report)
         node_id = entity_id(OBSERVATION_NODE, ontology.OBSERVATION)
-        async with acting_as(self.principal_id) as session:
+        async with acting_as(self.user_id) as session:
             await mint_content(
                 session,
                 EntityContent(id=node_id, name=OBSERVATION_NODE, type=ontology.OBSERVATION),
             )
-            await claim_entity(session, node_id, self.principal_id, [])
+            await claim_entity(session, node_id, self.user_id, [])
             written = sum(
                 [
-                    await write_observation(session, self.principal_id, node_id, obs, vector)
+                    await write_observation(session, self.user_id, node_id, obs, vector)
                     for obs, vector in zip(kept, vectors, strict=True)
                 ]
             )
-        logger.info("insight pass wrote {} observations for {}", written, self.principal_id)
+        logger.info("insight pass wrote {} observations for {}", written, self.user_id)
         return written
 
 
 async def derive_insights(
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> int:
-    """Derive observations from a principal's graph and write the significant ones back.
+    """Derive observations from a user's graph and write the significant ones back.
 
-    principal_id: identity whose graph is reflected on and that owns the written observations, the
-        system principal when null.
+    user_id: identity whose graph is reflected on and that owns the written observations, the
+        system user when null.
     """
-    principal_id = principal_id or settings.system_user_id
-    return await InsightTierBuilder(principal_id).build()
+    user_id = user_id or settings.system_user_id
+    return await InsightTierBuilder(user_id).build()

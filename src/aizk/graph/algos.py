@@ -28,7 +28,7 @@ async def ppr_expand(
     table keeps a superseded edge out of the walk with no separate visibility gate to hand-repeat.
     Returns [] for no seeds or none present in the graph.
 
-    session: open, principal-scoped session whose visibility bounds the loaded graph.
+    session: open, user-scoped session whose visibility bounds the loaded graph.
     seed_entity_ids: entities to teleport back to, the matched graph seeds.
     top_n: number of related entities to return, excluding the seeds.
     """

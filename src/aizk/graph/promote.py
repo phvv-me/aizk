@@ -13,7 +13,7 @@ from .dedupe import claim_entity, claim_fact
 
 
 async def target_groups(
-    session: AsyncSession, principal_id: uuid.UUID, to_scopes: str
+    session: AsyncSession, user_id: uuid.UUID, to_scopes: str
 ) -> list[uuid.UUID]:
     """The target group ids named by a comma-separated scope list, vetted as writable.
 
@@ -22,15 +22,15 @@ async def target_groups(
     error that surfaces from a refused write is far less legible than this early, explicit check.
 
     session: open session under the promoter's own visibility.
-    principal_id: the promoter, whose writable groups gate the target set.
+    user_id: the promoter, whose writable groups gate the target set.
     to_scopes: comma-separated names of the target groups the copy is published into.
     """
     names = [name.strip() for name in to_scopes.split(",") if name.strip()]
     groups = [await Group.named(session, name) for name in names]
     target = sorted(group.id for group in groups)
-    writable = set(await session.scalars(Membership.writable_group_ids(principal_id)))
+    writable = set(await session.scalars(Membership.writable_group_ids(user_id)))
     if not set(target) <= writable:
-        raise ValueError(f"principal {principal_id} may not publish into {to_scopes!r}")
+        raise ValueError(f"user {user_id} may not publish into {to_scopes!r}")
     return target
 
 
@@ -66,7 +66,7 @@ async def source_live_facts(session: AsyncSession, chunks: list[Chunk]) -> list[
 
 
 def copied_chunks(
-    chunks: list[Chunk], principal_id: uuid.UUID, target: list[uuid.UUID]
+    chunks: list[Chunk], user_id: uuid.UUID, target: list[uuid.UUID]
 ) -> dict[uuid.UUID, Chunk]:
     """Fresh copies of a document's chunks in the target scope set, keyed by their source chunk id.
 
@@ -74,7 +74,7 @@ def copied_chunks(
     new chunk rather than the original, keeping the copy a self-contained subgraph.
 
     chunks: the source document's own chunks, in document order.
-    principal_id: the promoter, owner of every copy.
+    user_id: the promoter, owner of every copy.
     target: the target group set every copy is published into.
     """
     return {
@@ -83,7 +83,7 @@ def copied_chunks(
             text=chunk.text,
             tokens=chunk.tokens,
             embedding=chunk.embedding,
-            owner_id=principal_id,
+            owner_id=user_id,
             scopes=target,
         )
         for chunk in chunks
@@ -91,7 +91,7 @@ def copied_chunks(
 
 
 async def claim_promoted_entities(
-    session: AsyncSession, facts: list[LiveFact], principal_id: uuid.UUID, target: list[uuid.UUID]
+    session: AsyncSession, facts: list[LiveFact], user_id: uuid.UUID, target: list[uuid.UUID]
 ) -> None:
     """Claim, in the target scope set, every entity a promoted fact's subject or object names.
 
@@ -100,21 +100,21 @@ async def claim_promoted_entities(
 
     session: open session under the promoter's own visibility.
     facts: the live facts being promoted.
-    principal_id: the promoter, owner of the new claims.
+    user_id: the promoter, owner of the new claims.
     target: the target group set the claims are published into.
     """
     entity_ids = {fact.subject_id for fact in facts} | {
         fact.object_id for fact in facts if fact.object_id is not None
     }
     for entity_id in entity_ids:
-        await claim_entity(session, entity_id, principal_id, target)
+        await claim_entity(session, entity_id, user_id, target)
 
 
 async def claim_promoted_facts(
     session: AsyncSession,
     facts: list[LiveFact],
     copies: dict[uuid.UUID, Chunk],
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     target: list[uuid.UUID],
     stamp: datetime | None,
 ) -> None:
@@ -127,7 +127,7 @@ async def claim_promoted_facts(
     session: open session under the promoter's own visibility.
     facts: the live facts being promoted.
     copies: source chunk id to its fresh copy, from copied_chunks.
-    principal_id: the promoter, owner of the new claims.
+    user_id: the promoter, owner of the new claims.
     target: the target group set the claims are published into.
     stamp: this promotion's own reviewed_at stamp, from Group.review_stamp.
     """
@@ -138,7 +138,7 @@ async def claim_promoted_facts(
         await claim_fact(
             session,
             fact.content_id,
-            principal_id,
+            user_id,
             target,
             valid=fact.valid,
             source_chunk_id=origin.id,
@@ -151,7 +151,7 @@ async def claim_promoted_facts(
 async def promote(
     document_id: uuid.UUID,
     to_scopes: str,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> int:
     """Copy a document and its chunks into a wider scope set, and claim its facts there too.
 
@@ -165,33 +165,33 @@ async def promote(
     document_id: source document to promote, read under the promoter's visibility.
     to_scopes: comma-separated names of the target groups the copy is published into, one step
         wider than the source.
-    principal_id: the promoter, owner of the new copy and the principal the writes act as, the
-        system principal when null.
+    user_id: the promoter, owner of the new copy and the user the writes act as, the
+        system user when null.
     """
-    principal_id = principal_id or settings.system_user_id
-    async with acting_as(principal_id) as session:
-        target = await target_groups(session, principal_id, to_scopes)
+    user_id = user_id or settings.system_user_id
+    async with acting_as(user_id) as session:
+        target = await target_groups(session, user_id, to_scopes)
         source = await source_document(session, document_id)
         # resolved once for the whole copy, since every promoted claim shares the same target
         # scope set and promoter.
-        stamp = await Group.review_stamp(session, tuple(target), principal_id)
+        stamp = await Group.review_stamp(session, tuple(target), user_id)
         chunks = source.chunks
         facts = await source_live_facts(session, chunks)
-        copies = copied_chunks(chunks, principal_id, target)
+        copies = copied_chunks(chunks, user_id, target)
         session.add(
             Document(
                 kind=source.kind,
                 title=source.title,
                 content_hash=source.content_hash,
-                owner_id=principal_id,
+                owner_id=user_id,
                 scopes=target,
                 promoted_from=source.id,
                 chunks=list(copies.values()),
             )
         )
         await session.flush()
-        await claim_promoted_entities(session, facts, principal_id, target)
-        await claim_promoted_facts(session, facts, copies, principal_id, target, stamp)
+        await claim_promoted_entities(session, facts, user_id, target)
+        await claim_promoted_facts(session, facts, copies, user_id, target, stamp)
     promoted = 1 + len(chunks) + len(facts)
     logger.info("promoted document {} into {} as {} rows", document_id, to_scopes, promoted)
     return promoted

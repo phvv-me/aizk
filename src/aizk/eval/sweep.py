@@ -215,7 +215,7 @@ def percentile(values: list[float], q: float) -> float:
 async def measure_config(
     config: SweepConfig,
     gold: list[QA],
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     k: int,
 ) -> Measurement:
     """Recall every gold question under one config, timing each and metering the memory peak.
@@ -226,7 +226,7 @@ async def measure_config(
 
     config: the grid point whose axes overlay the live settings.
     gold: the evaluation items that carry an expected fact.
-    principal_id: identity whose row level security visibility scopes the recall.
+    user_id: identity whose row level security visibility scopes the recall.
     k: number of hits and seed facts each recall surfaces.
     """
     scores: dict[str, dict[str, float]] = {}
@@ -234,7 +234,7 @@ async def measure_config(
     with swept_settings(**config.overrides), open_meter() as meter:
         for index, qa in enumerate(gold):
             start = time.perf_counter()
-            result = await recall(qa.question, principal_id=principal_id, k=k)
+            result = await recall(qa.question, user_id=user_id, k=k)
             latencies.append((time.perf_counter() - start) * 1000.0)
             scores[f"q{index}"] = retrieved_scores(qa, result)
             meter.sample()
@@ -247,17 +247,17 @@ async def measure_config(
 
 
 async def measure_configs(
-    configs: list[SweepConfig], gold: list[QA], principal_id: uuid.UUID, k: int
+    configs: list[SweepConfig], gold: list[QA], user_id: uuid.UUID, k: int
 ) -> dict[str, Measurement]:
     """Measure every config in the grid and return its raw scores, latencies, and memory peaks.
 
     configs: the grid points to measure, in the order the report lists them.
     gold: the evaluation items that carry an expected fact.
-    principal_id: identity whose row level security visibility scopes the recall.
+    user_id: identity whose row level security visibility scopes the recall.
     k: number of hits and seed facts each recall surfaces.
     """
     return {
-        config.label: await measure_config(config, gold, principal_id, k) for config in configs
+        config.label: await measure_config(config, gold, user_id, k) for config in configs
     }
 
 
@@ -326,7 +326,7 @@ def config_result(
 async def run_sweep(
     questions: list[str] | None = None,
     k: int = 8,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     matrix: SweepMatrix | None = None,
     gold: list[QA] | None = None,
 ) -> SweepReport:
@@ -338,24 +338,24 @@ async def run_sweep(
 
     questions: the caller's questions, or null to synthesize gold from sampled facts.
     k: number of hits and seed facts each recall surfaces.
-    principal_id: identity whose row level security visibility scopes the recall and the sample,
-        the system principal when null.
+    user_id: identity whose row level security visibility scopes the recall and the sample,
+        the system user when null.
     matrix: the axis grid to sweep, the default toggle grid when null.
     gold: pre-built evaluation items, such as a benchmark's, bypassing question synthesis.
     """
     from ranx import Qrels
 
-    principal_id = principal_id or settings.system_user_id
+    user_id = user_id or settings.system_user_id
     matrix = matrix or SweepMatrix()
     if gold is None:
-        items = await build_questions(questions, principal_id)
+        items = await build_questions(questions, user_id)
         gold = [qa for qa in items if qa.expected is not None]
     configs = build_matrix(matrix)
     if not gold:
         return SweepReport(n=0, k=k, results=[], comparison=None, best_label=None)
     metrics = [f"recall@{k}", f"ndcg@{k}", "mrr"]
     qrels = Qrels({f"q{index}": {"rel": 1} for index in range(len(gold))})
-    measured = await measure_configs(configs, gold, principal_id, k)
+    measured = await measure_configs(configs, gold, user_id, k)
     scored, comparison, best_label = score_runs(
         qrels, config_runs(measured), configs[0].label, metrics
     )

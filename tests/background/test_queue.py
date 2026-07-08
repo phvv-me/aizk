@@ -29,9 +29,9 @@ uuids = st.uuids()
 InstallSeam = Callable[[object], RecordingQueue]
 
 
-@given(entities=st.lists(uuids, max_size=5, unique=True), principal=uuids)
+@given(entities=st.lists(uuids, max_size=5, unique=True), user=uuids)
 def test_enqueue_profiles_debounces_per_entity_and_skips_when_empty(
-    queue_seam: InstallSeam, entities: list[uuid.UUID], principal: uuid.UUID
+    queue_seam: InstallSeam, entities: list[uuid.UUID], user: uuid.UUID
 ) -> None:
     """Each touched entity gets one rebuild job keyed on it, an empty set opens no connection.
 
@@ -41,8 +41,8 @@ def test_enqueue_profiles_debounces_per_entity_and_skips_when_empty(
     """
     recorder = queue_seam(queue_mod)
 
-    asyncio.run(enqueue_profiles(entities, principal))
-    asyncio.run(enqueue_profiles(entities, principal))  # every key already queued, all skipped
+    asyncio.run(enqueue_profiles(entities, user))
+    asyncio.run(enqueue_profiles(entities, user))  # every key already queued, all skipped
 
     assert len(recorder.enqueues) == len(entities)
     assert {call.dedupe_key for call in recorder.enqueues} == {f"profile:{e}" for e in entities}
@@ -52,7 +52,7 @@ def test_enqueue_profiles_debounces_per_entity_and_skips_when_empty(
 
 @given(
     chunks=st.lists(uuids, max_size=5, unique=True),
-    principal=st.none() | uuids,
+    user=st.none() | uuids,
     limit=st.none() | st.integers(1, 4),
     source=st.none() | st.text(alphabet="abc", max_size=3),
 )
@@ -60,30 +60,30 @@ def test_enqueue_pending_queues_one_deduped_job_per_chunk_and_counts_them(
     monkeypatch: pytest.MonkeyPatch,
     queue_seam: InstallSeam,
     chunks: list[uuid.UUID],
-    principal: uuid.UUID | None,
+    user: uuid.UUID | None,
     limit: int | None,
     source: str | None,
 ) -> None:
     """Every pending chunk the lister returns enqueues one deduped extraction job, counted once.
 
-    A null principal falls back to the system identity the lister is then queried under, and the
+    A null user falls back to the system identity the lister is then queried under, and the
     chunk id is the dedupe key so re-enqueuing the same backlog is harmless. The lister arguments
-    are captured to prove the caller's limit, source, and resolved principal reach it verbatim.
+    are captured to prove the caller's limit, source, and resolved user reach it verbatim.
     """
     recorder = queue_seam(queue_mod)
     seen_args: list[tuple[uuid.UUID, int | None, str | None]] = []
 
     async def fake_pending(
-        principal_id: uuid.UUID, chunk_limit: int | None, chunk_source: str | None
+        user_id: uuid.UUID, chunk_limit: int | None, chunk_source: str | None
     ) -> list[SimpleNamespace]:
-        seen_args.append((principal_id, chunk_limit, chunk_source))
+        seen_args.append((user_id, chunk_limit, chunk_source))
         return [SimpleNamespace(id=chunk) for chunk in chunks]
 
     monkeypatch.setattr(queue_mod, "pending_chunks", fake_pending)
 
-    queued = asyncio.run(enqueue_pending(limit=limit, principal_id=principal, source=source))
+    queued = asyncio.run(enqueue_pending(limit=limit, user_id=user, source=source))
 
-    resolved = principal or settings.system_user_id
+    resolved = user or settings.system_user_id
     assert seen_args == [(resolved, limit, source)]
     assert queued == len(chunks)
     assert {call.dedupe_key for call in recorder.enqueues} == {str(chunk) for chunk in chunks}
@@ -102,7 +102,7 @@ def test_enqueue_pending_swallows_the_already_queued_duplicate(
     recorder = queue_seam(queue_mod)
     chunk = SimpleNamespace(id=uuid.uuid4())
 
-    async def fake_pending(principal_id: uuid.UUID, limit: int | None, source: str | None):
+    async def fake_pending(user_id: uuid.UUID, limit: int | None, source: str | None):
         return [chunk]
 
     monkeypatch.setattr(queue_mod, "pending_chunks", fake_pending)
@@ -147,10 +147,10 @@ def patch_chunk_pipeline(
     bumped: list[tuple[Watermark.Kind, str]] = []
 
     @asynccontextmanager
-    async def fake_acting_as(principal_id: uuid.UUID) -> AsyncIterator[FakeSession]:
+    async def fake_acting_as(user_id: uuid.UUID) -> AsyncIterator[FakeSession]:
         yield FakeSession(chunk)
 
-    async def fake_extract(built_chunk: object, principal_id: uuid.UUID) -> set[uuid.UUID]:
+    async def fake_extract(built_chunk: object, user_id: uuid.UUID) -> set[uuid.UUID]:
         return touched
 
     async def fake_bump(
@@ -196,7 +196,7 @@ def test_process_chunk_skips_a_chunk_it_cannot_see(monkeypatch: pytest.MonkeyPat
     """
     extracted: list[object] = []
 
-    def guard(built_chunk: object, principal_id: uuid.UUID) -> set[uuid.UUID]:
+    def guard(built_chunk: object, user_id: uuid.UUID) -> set[uuid.UUID]:
         extracted.append(built_chunk)
         raise AssertionError("extract must not run for an invisible chunk")
 
@@ -211,15 +211,15 @@ def test_process_profile_rebuilds_then_clears_the_dirty_mark(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Rebuilding one profile clears that entity's dirty counter back to zero under its owner."""
-    entity, principal = uuid.uuid4(), uuid.uuid4()
+    entity, user = uuid.uuid4(), uuid.uuid4()
     built: list[tuple[uuid.UUID, uuid.UUID]] = []
     cleared: list[tuple[Watermark.Kind, int, str]] = []
 
-    async def fake_build_profile(entity_id: uuid.UUID, principal_id: uuid.UUID) -> None:
-        built.append((entity_id, principal_id))
+    async def fake_build_profile(entity_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        built.append((entity_id, user_id))
 
     @asynccontextmanager
-    async def fake_acting_as(principal_id: uuid.UUID) -> AsyncIterator[None]:
+    async def fake_acting_as(user_id: uuid.UUID) -> AsyncIterator[None]:
         yield None
 
     async def fake_set_value(
@@ -236,9 +236,9 @@ def test_process_profile_rebuilds_then_clears_the_dirty_mark(
     monkeypatch.setattr(queue_mod, "acting_as", fake_acting_as)
     monkeypatch.setattr(queue_mod.Watermark, "set_value", fake_set_value)
 
-    asyncio.run(process_profile(entity, principal))
+    asyncio.run(process_profile(entity, user))
 
-    assert built == [(entity, principal)]
+    assert built == [(entity, user)]
     assert cleared == [(Watermark.Kind.entity_dirty, 0, str(entity))]
 
 

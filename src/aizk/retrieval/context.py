@@ -104,7 +104,7 @@ def pack_context(result: RecallResult, token_budget: int) -> ContextPack:
 
 async def assemble_context_pack(
     query: str,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     token_budget: int | None = None,
     k: int = 8,
     scopes: tuple[uuid.UUID, ...] = (),
@@ -117,13 +117,13 @@ async def assemble_context_pack(
     choosing the lane mix itself.
 
     query: what to assemble context about.
-    principal_id: identity whose row level security visibility scopes the recall, the system
-        principal when null.
+    user_id: identity whose row level security visibility scopes the recall, the system
+        user when null.
     token_budget: the token ceiling, the configured default when null.
     k: how many hits and seed facts the underlying recall surfaces.
     scopes: group ids narrowing the read to that combination's composed graph, the whole visible
         union when empty.
     """
-    principal_id = principal_id or settings.system_user_id
-    result = await recall(query, principal_id=principal_id, k=k, scopes=scopes)
+    user_id = user_id or settings.system_user_id
+    result = await recall(query, user_id=user_id, k=k, scopes=scopes)
     return pack_context(result, token_budget or settings.context_token_budget)

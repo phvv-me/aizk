@@ -124,8 +124,8 @@ opening a port at all, Cloudflare terminates TLS at its edge and the tunnel carr
 ### Authentication
 
 A public deployment must resolve real users, which is the Zitadel path, a bearer token validated
-against the issuer's JWKS and mapped to a principal, provisioning one on first sight. The wiring
+against the issuer's JWKS and mapped to a user, provisioning one on first sight. The wiring
 is in place but awaits a live end-to-end pass against a real Zitadel instance, tracked on the
 [Roadmap](https://github.com/phvv-me/aizk/blob/main/ROADMAP.md). Until then the local API key and
-the default principal are the single-user paths, so stand a deployment up behind TLS first, then
+the default user are the single-user paths, so stand a deployment up behind TLS first, then
 turn on Zitadel once its flow is proven.

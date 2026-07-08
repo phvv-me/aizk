@@ -14,11 +14,11 @@ from ..exceptions import NotGroupAdminError
 from ..extract import ingest as extract_ingest
 from ..retrieval import ContextPack
 from ..scopes import resolve_scopes
-from ..store import Group, system_session
+from ..store import Document, Group, Membership, acting_as, system_session
 from ..store import User as UserRow
 from .middleware import AnonymousRateLimit, IdentityMiddleware
-from .models import PendingFact, ReviewResult, WriteResult
-from .principal import current_user, require_identified
+from .models import MoveResult, PendingFact, ReviewResult, WriteResult
+from .user import current_user, require_identified
 
 
 @asynccontextmanager
@@ -49,15 +49,15 @@ class AizkMCP(FastMCP):
     `aizk` CLI, reached by ssh rather than over the network, so a leaked key can never drive it.
     This server keeps only the client verbs, recall, remember, reference, and the group-curation
     trio, the last three gated on group-admin membership in-body rather than a server-wide role.
-    `__init__` wires the principal-resolving middleware, the startup health-and-auto-setup
+    `__init__` wires the user-resolving middleware, the startup health-and-auto-setup
     lifespan, the anonymous rate limit on a shared HTTP transport, and a token verifier when one
     is configured.
     """
 
     def __init__(self, name: str) -> None:
-        active_verifier = UserRow.verifier()
-        if active_verifier:
-            super().__init__(name, auth=active_verifier, lifespan=startup_check)
+        auth = UserRow.auth_provider()
+        if auth:
+            super().__init__(name, auth=auth, lifespan=startup_check)
         else:
             super().__init__(name, lifespan=startup_check)
         self.add_middleware(IdentityMiddleware())
@@ -91,10 +91,10 @@ async def recall(query: str, scopes: str | None = None, budget: int | None = Non
         excludes the caller's own private notes, which surface only when scopes is left null.
     budget: token ceiling the pack fits within, the configured default when null.
     """
-    principal = current_user()
-    lens = await resolve_scopes(scopes, principal.id)
+    user = current_user()
+    lens = await resolve_scopes(scopes, user.id)
     return await retrieval.assemble_context_pack(
-        query, principal_id=principal.id, token_budget=budget, scopes=lens
+        query, user_id=user.id, token_budget=budget, scopes=lens
     )
 
 
@@ -113,10 +113,10 @@ async def remember(text: str, scopes: str | None = None, kind: str = "note") -> 
         when null.
     kind: coarse type tag, such as note or code.
     """
-    principal = require_identified(current_user())
-    target = await resolve_scopes(scopes, principal.id)
+    user = require_identified(current_user())
+    target = await resolve_scopes(scopes, user.id)
     item_id = await extract_ingest.remember_session(
-        text, kind=kind, owner_id=principal.id, scopes=target
+        text, kind=kind, owner_id=user.id, scopes=target
     )
     return WriteResult(id=item_id)
 
@@ -128,10 +128,34 @@ async def reference(uri: str, scopes: str | None = None) -> WriteResult:
     uri: locator of the paper, url, or file.
     scopes: comma-separated group names to share it with, private to the caller when null.
     """
-    principal = require_identified(current_user())
-    target = await resolve_scopes(scopes, principal.id)
-    document_id = await extract_ingest.record_reference(uri, owner_id=principal.id, scopes=target)
+    user = require_identified(current_user())
+    target = await resolve_scopes(scopes, user.id)
+    document_id = await extract_ingest.record_reference(uri, owner_id=user.id, scopes=target)
     return WriteResult(id=document_id)
+
+
+@server.tool
+async def move(documents: str, scopes: str) -> MoveResult:
+    """Move your own notes into a group scope, carrying each document's chunks and facts with it.
+
+    Re-scopes whole documents you own, the source rows and the claims mined from them travelling
+    together, so a note recalled after the move reads only under its new scope. Moving into a group
+    needs writer or admin standing in every named group, and only documents you own move, so
+    another member's contribution is never re-scoped from under them. Naming no scopes moves the
+    documents back to private to you.
+
+    documents: comma-separated document ids to move, as recall reports them in its source blocks.
+    scopes: comma-separated group names to move them into, blank to make them private again.
+    """
+    user = require_identified(current_user())
+    target = await resolve_scopes(scopes, user.id)
+    document_ids = [uuid.UUID(d.strip()) for d in documents.split(",") if d.strip()]
+    async with acting_as(user.id) as session:
+        writable = set((await session.scalars(Membership.writable_group_ids(user.id))).all())
+        if not set(target) <= writable:
+            raise ToolError("move needs writer or admin standing in every target group")
+        moved = await Document.move_to_scope(session, user.id, document_ids, target)
+    return MoveResult(moved=moved, scopes=scopes or "")
 
 
 async def resolve_group_admin(session: AsyncSession, group: str) -> Group:
@@ -143,13 +167,13 @@ async def resolve_group_admin(session: AsyncSession, group: str) -> Group:
     and `Membership` carry no row level security of their own, so reading and checking them
     through the system-acting session is exactly as visible as through the caller's own.
 
-    session: open session, already acting as the system principal.
+    session: open session, already acting as the system user.
     group: name of the curated group the call would administer.
     """
-    principal = current_user()
+    user = current_user()
     group_row = await Group.named(session, group)
     try:
-        await group_row.require_admin(session, principal.id)
+        await group_row.require_admin(session, user.id)
     except NotGroupAdminError as error:
         raise ToolError(str(error)) from error
     return group_row

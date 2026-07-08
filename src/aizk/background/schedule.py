@@ -20,53 +20,53 @@ from .tasks import ScheduledTask
 
 
 async def fan_out(task: ScheduledTask) -> None:
-    """Read the principal roster as the system principal and enqueue one task job per principal.
+    """Read the user roster as the system user and enqueue one task job per user.
 
-    The load-bearing no-leak boundary. A scheduled pass fires outside any principal scope, so it
-    reads every principal once as the system identity, then enqueues a separate job carrying each
-    principal id whose body runs inside acting_as that principal. No pass ever reads the roster and
-    writes another principal's rows in the same transaction. Each job is deduplicated on the task
-    and principal so a pass that fires while the last one is still draining never piles up.
+    The load-bearing no-leak boundary. A scheduled pass fires outside any user scope, so it
+    reads every user once as the system identity, then enqueues a separate job carrying each
+    user id whose body runs inside acting_as that user. No pass ever reads the roster and
+    writes another user's rows in the same transaction. Each job is deduplicated on the task
+    and user so a pass that fires while the last one is still draining never piles up.
 
     task: the scheduled task being fanned out.
     """
     async with system_session() as session:
-        principals = await User.list_all(session)
+        users = await User.list_all(session)
     async with queue_queries() as queries:
         queued = sum(
             [
                 await enqueue_deduped(
                     queries,
                     task.queue_entrypoint,
-                    TaskJob(principal_id=principal.id),
-                    f"{task.name}:{principal.id}",
+                    TaskJob(user_id=user.id),
+                    f"{task.name}:{user.id}",
                 )
-                for principal in principals
+                for user in users
             ]
         )
-    logger.info("fan-out {} enqueued {} principal jobs", task.name, queued)
+    logger.info("fan-out {} enqueued {} user jobs", task.name, queued)
 
 
 async def handle_chunk_job(job: Job) -> None:
     """Build one dequeued chunk's graph slice, chaining a profile enqueue for what it touched.
 
-    job: dequeued job whose payload names the chunk and owning principal.
+    job: dequeued job whose payload names the chunk and owning user.
     """
     assert job.payload is not None
     chunk_job = ChunkJob.decode(job.payload)
-    touched = await process_chunk(chunk_job.chunk_id, chunk_job.principal_id)
+    touched = await process_chunk(chunk_job.chunk_id, chunk_job.user_id)
     if settings.profile_on_write:
-        await enqueue_profiles(touched, chunk_job.principal_id)
+        await enqueue_profiles(touched, chunk_job.user_id)
 
 
 async def handle_profile_job(job: Job) -> None:
-    """Rebuild one dequeued job's touched entity profile under its owning principal.
+    """Rebuild one dequeued job's touched entity profile under its owning user.
 
-    job: dequeued job whose payload names the entity and owning principal.
+    job: dequeued job whose payload names the entity and owning user.
     """
     assert job.payload is not None
     profile_job = ProfileJob.decode(job.payload)
-    await process_profile(profile_job.entity_id, profile_job.principal_id)
+    await process_profile(profile_job.entity_id, profile_job.user_id)
 
 
 async def run_worker(batch_size: int = 10) -> None:

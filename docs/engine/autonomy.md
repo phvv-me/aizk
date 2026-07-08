@@ -1,7 +1,7 @@
 # Autonomy
 
 Maintenance never blocks a caller. A pgqueuer worker drains durable jobs, and a cron scheduler
-fans scheduled passes out per principal, so a pass can never leak across tenants. Each pass is
+fans scheduled passes out per user, so a pass can never leak across tenants. Each pass is
 debounced on a watermark, so an unchanged corpus costs nothing.
 
 | Pass | What it does | Trigger |

@@ -16,7 +16,7 @@ class PendingFact(FrozenModel):
     """One curated group's unreviewed fact awaiting a group admin's approval.
 
     id: identity of the pending claim.
-    owner_id: principal that authored the claim.
+    owner_id: user that authored the claim.
     predicate: ontology relation type the fact asserts.
     statement: self-contained natural-language rendering of the fact.
     """
@@ -36,3 +36,14 @@ class ReviewResult(FrozenModel):
 
     group: str
     count: int
+
+
+class MoveResult(FrozenModel):
+    """How many documents one move call re-scoped, and where they now live.
+
+    moved: documents re-scoped, each carrying its chunks and derived facts with it.
+    scopes: comma-separated group names they now live under, empty when moved back to private.
+    """
+
+    moved: int
+    scopes: str

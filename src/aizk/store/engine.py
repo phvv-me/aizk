@@ -14,9 +14,9 @@ from ..config import settings
 def build_engine() -> AsyncEngine:
     """Build the app-role async engine, a real pool by default, NullPool when opted in.
 
-    A pooled connection is safe to reuse across transactions since `events.bind_principal` rebinds
+    A pooled connection is safe to reuse across transactions since `events.bind_user` rebinds
     `app.uid`/`app.scopes` transaction-locally on every `after_begin`, so no pooled connection ever
-    carries one principal's identity into another's transaction. `db_null_pool` exists only for
+    carries one user's identity into another's transaction. `db_null_pool` exists only for
     the pytest suite, whose many per-test `asyncio.run` loops each need their own fresh connection
     since an asyncpg connection cannot cross event loops. `conftest.py` sets it before any engine
     is built. `pool_pre_ping` stays off since the health-check round trip it adds on every checkout

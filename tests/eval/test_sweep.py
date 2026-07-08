@@ -142,7 +142,7 @@ def test_run_sweep_scores_each_config_or_short_circuits(
     if mode == "synth":
 
         async def stub_build_questions(
-            questions: list[str] | None, principal_id: uuid.UUID
+            questions: list[str] | None, user_id: uuid.UUID
         ) -> list[QA]:
             return [QA(question="what does alpha hold", expected="alpha holds")]
 

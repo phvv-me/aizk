@@ -28,7 +28,7 @@ class LiveFact(ViewBase):
     predicate: ontology relation type.
     statement: self-contained natural-language rendering of the fact.
     embedding: halfvec dense vector of the statement, null until embedded.
-    owner_id: principal that holds this claim.
+    owner_id: user that holds this claim.
     scopes: group set this claim is shared with, empty when private to the owner.
     valid: world-time range when the statement holds.
     recorded: transaction-time range, always open on every row this view admits.

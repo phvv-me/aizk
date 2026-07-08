@@ -99,19 +99,19 @@ def test_each_task_reads_its_own_cadence_and_flag_off_settings(
         (CurationReviewTask, "review_curated_groups"),
     ],
 )
-def test_thin_passes_delegate_under_the_principal(
+def test_thin_passes_delegate_under_the_user(
     monkeypatch: pytest.MonkeyPatch, task_cls: type[ScheduledTask], target: str
 ) -> None:
-    """Each thin maintenance pass forwards its principal to the graph routine it wraps."""
-    principal = uuid.uuid4()
+    """Each thin maintenance pass forwards its user to the graph routine it wraps."""
+    user = uuid.uuid4()
     seen: list[uuid.UUID] = []
 
-    async def record(*, principal_id: uuid.UUID, **kwargs: float) -> None:
-        seen.append(principal_id)
+    async def record(*, user_id: uuid.UUID, **kwargs: float) -> None:
+        seen.append(user_id)
 
     monkeypatch.setattr(tasks_mod, target, record)
-    asyncio.run(task_cls().run(principal))
-    assert seen == [principal]
+    asyncio.run(task_cls().run(user))
+    assert seen == [user]
 
 
 class GateSession:
@@ -160,12 +160,12 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     the last build, and on a build the high-water mark advances to the current count so the next
     pass measures growth from here; below the threshold nothing is built and the mark holds.
     """
-    principal = uuid.uuid4()
+    user = uuid.uuid4()
     builds: list[uuid.UUID] = []
     set_calls: list[tuple[Watermark.Kind, int]] = []
 
     @asynccontextmanager
-    async def fake_acting_as(principal_id: uuid.UUID) -> AsyncIterator[GateSession]:
+    async def fake_acting_as(user_id: uuid.UUID) -> AsyncIterator[GateSession]:
         yield GateSession(current)
 
     async def fake_read(
@@ -182,8 +182,8 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     ) -> None:
         set_calls.append((watermark_kind, counter))
 
-    async def fake_build(*, principal_id: uuid.UUID) -> None:
-        builds.append(principal_id)
+    async def fake_build(*, user_id: uuid.UUID) -> None:
+        builds.append(user_id)
 
     monkeypatch.setattr(tasks_mod, "acting_as", fake_acting_as)
     monkeypatch.setattr(tasks_mod.Watermark, "read", fake_read)
@@ -191,10 +191,10 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     monkeypatch.setattr(tasks_mod, build_target, fake_build)
     monkeypatch.setattr(settings, threshold_field, threshold)
 
-    asyncio.run(task_cls().run(principal))
+    asyncio.run(task_cls().run(user))
 
     should_build = current - last >= threshold
-    assert (builds == [principal]) is should_build
+    assert (builds == [user]) is should_build
     assert set_calls == ([(kind, current)] if should_build else [])
 
 
@@ -251,12 +251,12 @@ def test_self_improve_stores_the_scorecard_and_flips_only_on_a_significant_win(
     writes: list[tuple[Watermark.Kind, dict[str, object] | None]] = []
 
     async def stub_run_eval(
-        questions: object, k: int = 8, principal_id: uuid.UUID | None = None
+        questions: object, k: int = 8, user_id: uuid.UUID | None = None
     ) -> EvalReport:
         return report_with(significant_best, per_config)
 
     @asynccontextmanager
-    async def fake_acting_as(principal_id: uuid.UUID) -> AsyncIterator[None]:
+    async def fake_acting_as(user_id: uuid.UUID) -> AsyncIterator[None]:
         yield None
 
     async def fake_set_value(
@@ -289,7 +289,7 @@ def test_self_improve_stores_the_scorecard_and_flips_only_on_a_significant_win(
 
 
 def test_backup_task_fire_cron_runs_the_scheduled_backup(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The backup cron runs the dump directly, no per-principal fan-out unlike every other pass."""
+    """The backup cron runs the dump directly, no per-user fan-out unlike every other pass."""
     ran = []
 
     async def fake_scheduled_backup() -> object:
@@ -297,15 +297,15 @@ def test_backup_task_fire_cron_runs_the_scheduled_backup(monkeypatch: pytest.Mon
         return SimpleNamespace(bytes=7, path="/backups/x.dump")
 
     async def fail_fan_out(task: ScheduledTask) -> None:
-        raise AssertionError("a backup must never fan out across principals")
+        raise AssertionError("a backup must never fan out across users")
 
     monkeypatch.setattr(tasks_mod, "scheduled_backup", fake_scheduled_backup)
     asyncio.run(BackupTask().fire_cron(fail_fan_out, schedule=cast("Schedule", None)))
     assert ran == [True]
 
 
-def test_backup_task_run_is_never_fanned_out_per_principal() -> None:
-    """A backup carries no per-principal body, so `run` refuses rather than being reachable."""
+def test_backup_task_run_is_never_fanned_out_per_user() -> None:
+    """A backup carries no per-user body, so `run` refuses rather than being reachable."""
     with pytest.raises(NotImplementedError, match="system pass"):
         asyncio.run(BackupTask().run(uuid.uuid4()))
 
@@ -314,7 +314,7 @@ def test_backup_task_run_is_never_fanned_out_per_principal() -> None:
 def test_backup_task_registers_only_the_cron_and_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> None:
-    """The backup registers its cron only when enabled, and never a per-principal entrypoint."""
+    """The backup registers its cron only when enabled, and never a per-user entrypoint."""
     from bg_doubles import RecordingPg
 
     monkeypatch.setattr(settings, "backup_enabled", enabled)
@@ -323,7 +323,7 @@ def test_backup_task_registers_only_the_cron_and_only_when_enabled(
 
     BackupTask().register(pg, fan_out=lambda task: None)  # type: ignore[arg-type,return-value]
 
-    assert pg.entrypoints == {}  # never a per-principal entrypoint, whatever the flag
+    assert pg.entrypoints == {}  # never a per-user entrypoint, whatever the flag
     assert len(pg.schedules) == (1 if enabled else 0)
     if enabled:
         assert pg.schedules[0][:2] == ("aizk_cron_backup", "0 2 * * *")

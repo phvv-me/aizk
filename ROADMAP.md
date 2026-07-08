@@ -23,7 +23,7 @@ paper or design each piece traces to.
   to configure (`docker-compose.yml`, `serving/embed/embedder.py`).
 - [x] The background registry, one `ScheduledTask` per maintenance pass (decay, dedup, communities,
   RAPTOR, profile refresh, self-improve, session promotion, insight, curation review) fanned out
-  per principal through a pgqueuer worker (`background/tasks.py`, `background/schedule.py`).
+  per user through a pgqueuer worker (`background/tasks.py`, `background/schedule.py`).
 - [x] The retrieval lanes beyond plain hybrid search, personalized pagerank, community summaries,
   the RAPTOR tree, and rolled-up entity profiles, all fused into one `recall` call
   (`retrieval/recall.py`).
@@ -70,10 +70,10 @@ Open items carried over from the earlier gap analysis, still unbuilt or partial.
   and chunks publish immediately while their extracted facts wait for review, a gap between what
   is visible as source text and what is visible as graph knowledge.
 - [ ] **Zitadel hardening end to end, plus service-account PAT docs.** The introspection and JWKS
-  paths are wired (`store/models/principal.py`) and unit-tested, but not yet exercised start to
+  paths are wired (`store/models/tables/user.py`) and unit-tested, but not yet exercised start to
   finish against a live Zitadel instance, and there is no written guide yet for minting a
   service-account personal access token for a non-interactive caller.
-- [ ] **An import counterpart to `export_scope`.** Export emits a principal-scoped, bi-temporal
+- [ ] **An import counterpart to `export_scope`.** Export emits a user-scoped, bi-temporal
   JSONL dump today (`export.py`); nothing reads one back in, so a dump is currently a one-way
   archive rather than a portable transfer.
 - [ ] **Erasure, a `forget(document)` tool plus content garbage collection.** Supersession handles

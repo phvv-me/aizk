@@ -28,7 +28,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
         until the first pass. Set regardless of whether that pass minted any claim, so `chunk`'s
         own column, not an anti-join against `fact_claim`, is what `pending_chunks` reads. A chunk
         whose prose asserts nothing worth keeping still finished a real pass and stays finished.
-    owner_id: principal that owns the row, enforced by row level security.
+    owner_id: user that owns the row, enforced by row level security.
     scopes: group set the row is shared with, an implicit intersection when it names more than
         one, empty when private to the owner.
 

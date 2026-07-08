@@ -86,26 +86,26 @@ def test_unit_vector_has_the_stored_width_and_unit_norm(dim: int, seed: int) -> 
 
 
 @given(
-    principals=st.lists(st.uuids(version=4), min_size=2, max_size=2, unique=True),
+    users=st.lists(st.uuids(version=4), min_size=2, max_size=2, unique=True),
     size=st.integers(min_value=1, max_value=40),
     dim=st.sampled_from([256, 512, 1024]),
 )
 def test_corpus_rows_are_deterministic_and_structurally_sound(
-    principals: list[uuid.UUID], size: int, dim: int
+    users: list[uuid.UUID], size: int, dim: int
 ) -> None:
-    """Rows key by principal and index, pack chunks under documents, and never dangle an edge."""
-    principal, other = principals
+    """Rows key by user and index, pack chunks under documents, and never dangle an edge."""
+    user, other = users
     scale = CorpusScale.for_size(size)
-    rows = corpus_rows(principal, Generated(), scale, np.random.default_rng(0), dim)
-    again = corpus_rows(principal, Generated(), scale, np.random.default_rng(0), dim)
+    rows = corpus_rows(user, Generated(), scale, np.random.default_rng(0), dim)
+    again = corpus_rows(user, Generated(), scale, np.random.default_rng(0), dim)
 
     documents = rows[Document]
     assert [row["id"] for row in documents] == [row["id"] for row in again[Document]]
     # content carries no owner of its own, so only the per-tenant families carry an owner_id
     owned_families = (Document, Chunk, EntityClaim, FactClaim)
-    assert all(row["owner_id"] == principal for table in owned_families for row in rows[table])
+    assert all(row["owner_id"] == user for table in owned_families for row in rows[table])
     assert len({row["content_hash"] for row in documents}) == scale.documents  # none dedupes away
-    # a different principal namespaces a different id for the same index
+    # a different user namespaces a different id for the same index
     other_rows = corpus_rows(other, Generated(), scale, np.random.default_rng(0), dim)
     assert documents[0]["id"] != other_rows[Document][0]["id"]
 
@@ -115,7 +115,7 @@ def test_corpus_rows_are_deterministic_and_structurally_sound(
     ]
     assert widths == [dim] * scale.chunks
     for index, chunk in enumerate(chunks):
-        assert chunk["document_id"] == index_id(principal, "document", index // CHUNKS_PER_DOC)
+        assert chunk["document_id"] == index_id(user, "document", index // CHUNKS_PER_DOC)
 
     entity_ids = {row["id"] for row in rows[EntityContent]}
     for fact in rows[FactContent]:
@@ -129,13 +129,13 @@ def test_corpus_rows_are_deterministic_and_structurally_sound(
 @given(size=st.integers(min_value=1, max_value=40))
 def test_corpus_rows_grow_additively_without_key_collisions(size: int) -> None:
     """The delta past a grown tally starts where the first batch stopped, no id inserted twice."""
-    principal = uuid.uuid5(uuid.NAMESPACE_DNS, "scale-test")
+    user = uuid.uuid5(uuid.NAMESPACE_DNS, "scale-test")
     rng = np.random.default_rng(0)
     first = CorpusScale.for_size(size)
     second = CorpusScale.for_size(size * 2)
 
-    base = corpus_rows(principal, Generated(), first, rng, 256)
-    delta = corpus_rows(principal, Generated(**first.model_dump()), second, rng, 256)
+    base = corpus_rows(user, Generated(), first, rng, 256)
+    delta = corpus_rows(user, Generated(**first.model_dump()), second, rng, 256)
 
     for table in (Document, Chunk, EntityContent, FactContent, EntityClaim, FactClaim):
         base_ids = {row["id"] for row in base[table]}

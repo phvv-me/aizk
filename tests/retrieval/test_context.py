@@ -153,9 +153,9 @@ def stub_recall_into(
     """
 
     async def stub(
-        query: str, principal_id: uuid.UUID, k: int, scopes: tuple[uuid.UUID, ...]
+        query: str, user_id: uuid.UUID, k: int, scopes: tuple[uuid.UUID, ...]
     ) -> RecallResult:
-        captured.update(query=query, principal_id=principal_id, k=k, scopes=scopes)
+        captured.update(query=query, user_id=user_id, k=k, scopes=scopes)
         return a_bundle()
 
     return stub
@@ -164,25 +164,25 @@ def stub_recall_into(
 def test_assemble_context_pack_reuses_recall_and_packs_within_the_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The pack entrypoint recalls once under the principal and scopes, then packs the lanes."""
+    """The pack entrypoint recalls once under the user and scopes, then packs the lanes."""
     captured: dict[str, object] = {}
-    principal = uuid.uuid4()
+    user = uuid.uuid4()
     monkeypatch.setattr(context_module, "recall", stub_recall_into(captured))
     pack = asyncio.run(
-        assemble_context_pack("what holds", principal_id=principal, token_budget=4000, k=5)
+        assemble_context_pack("what holds", user_id=user, token_budget=4000, k=5)
     )
-    assert captured == {"query": "what holds", "principal_id": principal, "k": 5, "scopes": ()}
+    assert captured == {"query": "what holds", "user_id": user, "k": 5, "scopes": ()}
     lanes = {block.lane for block in pack.blocks}
     assert {"profile", "facts", "working memory"} <= lanes
 
 
-def test_assemble_context_pack_defaults_principal_and_budget(
+def test_assemble_context_pack_defaults_user_and_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A null principal and budget fall back to the configured system principal and ceiling."""
+    """A null user and budget fall back to the configured system user and ceiling."""
     captured: dict[str, object] = {}
     monkeypatch.setattr(context_module, "recall", stub_recall_into(captured))
     pack = asyncio.run(assemble_context_pack("what holds"))
-    assert captured["principal_id"] == settings.system_user_id
+    assert captured["user_id"] == settings.system_user_id
     assert pack.budget == settings.context_token_budget
     assert pack.used_tokens <= settings.context_token_budget

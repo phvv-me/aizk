@@ -99,7 +99,7 @@ class GraphWriter:
     whether the other's private content already existed.
 
     session: an open session already acting as owner_id under row level security.
-    owner_id: principal that owns a newly created claim.
+    owner_id: user that owns a newly created claim.
     scopes: group set a newly created claim is shared with, private when empty. Always the
         already-canonicalized (sorted) tuple a chunk's own `scopes` carries, so every claim this
         writer mints compares equal to any other write of the identical set.
@@ -419,7 +419,7 @@ def merged_verdicts(
 
 
 async def pending_chunks(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     limit: int | None,
     source: str | None,
 ) -> list[Chunk]:
@@ -428,25 +428,25 @@ async def pending_chunks(
     A chunk counts as pending until its own `processed_at` is set, so a finished build never
     reprocesses it and a build resumed after an interruption picks up where it stopped, regardless
     of whether that earlier pass minted any claim at all. Extraction stamps its entities and facts
-    with the source chunk's scope set, so only chunks in scope sets the principal may write are
+    with the source chunk's scope set, so only chunks in scope sets the user may write are
     pending for it. A reader or public visitor never extracts into someone else's shared graph,
     that scope's own writers do.
 
-    principal_id: identity whose row level security visibility and write access scope the chunks.
+    user_id: identity whose row level security visibility and write access scope the chunks.
     limit: maximum number of chunks to return, all of them when null.
     source: when set, restrict to chunks of documents whose title matches this substring.
     """
     selection = (
         select(Chunk)
         .where(Chunk.processed_at.is_(None))
-        .where(Membership.writable_scopes(Chunk.scopes, principal_id))
+        .where(Membership.writable_scopes(Chunk.scopes, user_id))
         .order_by(Chunk.id)
         .limit(limit)
     )
     if source is not None:
         titled = select(Document.id).where(Document.title.ilike(f"%{source}%"))
         selection = selection.where(Chunk.document_id.in_(titled))
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         return list(await session.scalars(selection))
 
 
@@ -458,7 +458,7 @@ async def mark_processed(session: AsyncSession, chunk_id: uuid.UUID) -> None:
     never re-extracted on the next build. Left unset entirely when extraction itself fails, the
     transient case a later build retries.
 
-    session: open session already acting as the chunk's owning principal.
+    session: open session already acting as the chunk's owning user.
     chunk_id: chunk to mark processed.
     """
     await session.execute(
@@ -466,12 +466,12 @@ async def mark_processed(session: AsyncSession, chunk_id: uuid.UUID) -> None:
     )
 
 
-async def graph_counts(principal_id: uuid.UUID) -> tuple[int, int]:
-    """Return the entity and fact claim counts visible to a principal under row level security.
+async def graph_counts(user_id: uuid.UUID) -> tuple[int, int]:
+    """Return the entity and fact claim counts visible to a user under row level security.
 
-    principal_id: identity whose row level security visibility scopes the counts.
+    user_id: identity whose row level security visibility scopes the counts.
     """
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         entities = await session.scalar(select(func.count()).select_from(EntityClaim)) or 0
         # the count spans the whole visible claim history including superseded versions, so it
         # opts out of the live gate that would otherwise narrow it to the latest open claims.
@@ -493,7 +493,7 @@ async def document_declared_type(session: AsyncSession, document_id: uuid.UUID) 
     usually lives in the front-matter chunk rather than the one carrying the dated line. Every
     sibling's text is scanned rather than only this chunk's own.
 
-    session: open, principal-scoped session.
+    session: open, user-scoped session.
     document_id: the chunk's parent document.
     """
     siblings = await session.scalars(select(Chunk.text).where(Chunk.document_id == document_id))
@@ -505,7 +505,7 @@ async def document_declared_type(session: AsyncSession, document_id: uuid.UUID) 
 
 
 async def journal_extraction(
-    principal_id: uuid.UUID, chunk: Chunk, document: Document | None
+    user_id: uuid.UUID, chunk: Chunk, document: Document | None
 ) -> tuple[list[ExtractedEntity], list[TimedFact]]:
     """The note's declared title entity and any dated journal facts, empty when neither applies.
 
@@ -517,7 +517,7 @@ async def journal_extraction(
     dated line returns empty, left to the LLM to characterize, and one carrying either is never
     skipped by extract_min_chars for being short since the signal is already the whole fact.
 
-    principal_id: identity that will own the written claims, whose visibility scopes the sibling
+    user_id: identity that will own the written claims, whose visibility scopes the sibling
         tag read.
     chunk: the chunk whose text is scanned for the declaring tag and the dated line.
     document: the chunk's parent document, null when it no longer exists.
@@ -529,7 +529,7 @@ async def journal_extraction(
     if declared is None and not has_journal:
         return [], []
     if declared is None:
-        async with acting_as(principal_id) as session:
+        async with acting_as(user_id) as session:
             declared = await document_declared_type(session, chunk.document_id)
     entity = journal.title_entity(document.title, declared)
     facts = journal.journal_facts(chunk.text, document.title) if has_journal else []
@@ -629,7 +629,7 @@ async def resolve_entities(
 
 
 async def write_graph_slice(
-    principal_id: uuid.UUID,
+    user_id: uuid.UUID,
     chunk: Chunk,
     entities: list[ExtractedEntity],
     dated_facts: list[TimedFact],
@@ -641,7 +641,7 @@ async def write_graph_slice(
     rather than losing the chunk. Every mint GraphWriter performs is ON CONFLICT DO NOTHING or an
     equivalent idempotent upsert, so a retried write is safe.
 
-    principal_id: identity that owns the written claims.
+    user_id: identity that owns the written claims.
     chunk: the chunk being resolved and consolidated.
     entities: this chunk's already-extracted entities, journal and/or LLM sourced.
     dated_facts: this chunk's already-extracted, dated candidate facts.
@@ -654,15 +654,15 @@ async def write_graph_slice(
         reraise=True,
     ):
         with attempt, span("db_write"):
-            async with acting_as(principal_id) as session:
-                writer = GraphWriter(session, principal_id, tuple(chunk.scopes))
+            async with acting_as(user_id) as session:
+                writer = GraphWriter(session, user_id, tuple(chunk.scopes))
                 resolved = await resolve_entities(writer, entities)
                 await writer.consolidate_facts(dated_facts, resolved, chunk.id)
                 await mark_processed(session, chunk.id)
     return set(resolved.values())
 
 
-async def extract_and_consolidate(chunk: Chunk, principal_id: uuid.UUID) -> set[uuid.UUID]:
+async def extract_and_consolidate(chunk: Chunk, user_id: uuid.UUID) -> set[uuid.UUID]:
     """Extract, resolve, and consolidate one chunk's graph slice, return the entities it touched.
 
     The shared per-chunk core both build_graph's concurrent loop and the pgqueuer worker's
@@ -679,15 +679,15 @@ async def extract_and_consolidate(chunk: Chunk, principal_id: uuid.UUID) -> set[
     unreachable endpoint raises immediately rather than grinding through the rest of the queue.
 
     chunk: the pending chunk to build a graph slice from.
-    principal_id: identity that owns the written claims.
+    user_id: identity that owns the written claims.
     """
     async with extraction_semaphore():
-        async with acting_as(principal_id) as session:
+        async with acting_as(user_id) as session:
             document = await session.get(Document, chunk.document_id)
-        entities, dated_facts = await journal_extraction(principal_id, chunk, document)
+        entities, dated_facts = await journal_extraction(user_id, chunk, document)
         short = len(chunk.text.strip()) < settings.extract_min_chars
         if short and not dated_facts:
-            async with acting_as(principal_id) as session:
+            async with acting_as(user_id) as session:
                 await mark_processed(session, chunk.id)
             return set()
         if not short:
@@ -697,7 +697,7 @@ async def extract_and_consolidate(chunk: Chunk, principal_id: uuid.UUID) -> set[
                 return set()
             entities = [*entities, *llm_entities]
             dated_facts = [*dated_facts, *llm_facts]
-        touched = await write_graph_slice(principal_id, chunk, entities, dated_facts)
+        touched = await write_graph_slice(user_id, chunk, entities, dated_facts)
         logger.info("graph slice from chunk {} done", chunk.id)
         return touched
 
@@ -717,7 +717,7 @@ def raise_unreachable(chunks: list[Chunk], results: list[set[uuid.UUID] | BaseEx
 
 async def build_graph(
     limit: int | None = None,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     source: str | None = None,
 ) -> tuple[int, int]:
     """Build the graph from chunks the build has never run over and return the counts created.
@@ -731,21 +731,21 @@ async def build_graph(
     cancelling every other chunk's own in-flight coroutine, return_exceptions=True's own job.
 
     limit: maximum number of chunks to process, all of them when null.
-    principal_id: identity that owns the written claims, the system principal when null.
+    user_id: identity that owns the written claims, the system user when null.
     source: when set, restrict the build to chunks of documents whose title matches this
         substring, so the graph can be grown one source subset at a time.
     """
-    principal_id = principal_id or settings.system_user_id
+    user_id = user_id or settings.system_user_id
     # DEFER GraphRAG and LightRAG community detection and summaries, and RAPTOR recursive summary
     # trees, run as a second pass over the graph this builds to serve global queries.
-    chunks = await pending_chunks(principal_id, limit, source)
-    entities_before, facts_before = await graph_counts(principal_id)
+    chunks = await pending_chunks(user_id, limit, source)
+    entities_before, facts_before = await graph_counts(user_id)
     results = await asyncio.gather(
-        *(extract_and_consolidate(chunk, principal_id) for chunk in chunks),
+        *(extract_and_consolidate(chunk, user_id) for chunk in chunks),
         return_exceptions=True,
     )
     raise_unreachable(chunks, results)
-    entities_after, facts_after = await graph_counts(principal_id)
+    entities_after, facts_after = await graph_counts(user_id)
     return entities_after - entities_before, facts_after - facts_before
 
 
@@ -945,18 +945,18 @@ async def merge_duplicates(
     return merged
 
 
-async def dedup_entities(principal_id: uuid.UUID | None = None) -> int:
+async def dedup_entities(user_id: uuid.UUID | None = None) -> int:
     """Merge entity content sharing a normalized name and type, repoint claims, return the count.
 
     Reads the duplicates under the caller's own row-level-security visibility, then merges them on
     the admin-bypassed connection, the reach a real structural merge needs to migrate every
-    tenant's claim, not merely the ones the merging principal can itself see.
+    tenant's claim, not merely the ones the merging user can itself see.
 
-    principal_id: identity whose row level security visibility scopes which content this pass can
-        find and merge, the system principal when null.
+    user_id: identity whose row level security visibility scopes which content this pass can
+        find and merge, the system user when null.
     """
-    principal_id = principal_id or settings.system_user_id
-    async with acting_as(principal_id) as session:
+    user_id = user_id or settings.system_user_id
+    async with acting_as(user_id) as session:
         redirect = await find_duplicates(session)
         if not redirect:
             return 0

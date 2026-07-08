@@ -2,9 +2,10 @@ import functools
 import uuid
 from typing import TYPE_CHECKING, Self
 
-from fastmcp.server.auth import TokenVerifier
+from fastmcp.server.auth import AuthProvider, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.introspection import IntrospectionTokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
+from pydantic import AnyHttpUrl
 from sqlalchemy import Text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import Field, Relationship
@@ -33,30 +34,30 @@ class User(Id, Timestamped, TableBase, table=True):
 
     # `user` is a reserved SQL word, so the physical table keeps its original name rather than the
     # class-derived `user` an unquoted CREATE TABLE would choke on
-    __tablename__ = "principal"
+    __tablename__ = "users"
 
     display_name: str | None = Field(default=None, sa_type=Text)
     oidc_subject: str | None = Field(default=None, unique=True, sa_type=Text)
     is_admin: bool = Field(default=False, sa_column_kwargs={"server_default": "false"})
 
-    # no back_populates: Membership carries no `principal` relationship of its own, every read
+    # no back_populates: Membership carries no `user` relationship of its own, every read
     # site already id-keyed rather than navigating from a loaded Membership. No `groups`
     # association proxy either, the one thing that would have chained off this into `Group` and
-    # was itself never called; a caller that wants a principal's groups resolves them by id
+    # was itself never called; a caller that wants a user's groups resolves them by id
     # through `Membership.writable_group_ids` or a plain query instead.
     memberships: list[Membership] = Relationship(cascade_delete=True, passive_deletes=True)
 
     @classmethod
     async def create(cls, session: AsyncSession, display_name: str) -> Self:
-        """Create a principal row, the multi-user onboarding seam.
+        """Create a user row, the multi-user onboarding seam.
 
         session: open session the row is minted through.
         display_name: human-readable label for the new actor.
         """
-        principal = cls(display_name=display_name)
-        session.add(principal)
+        user = cls(display_name=display_name)
+        session.add(user)
         await session.flush()
-        return principal
+        return user
 
     @classmethod
     async def link_oidc(cls, session: AsyncSession, oidc_subject: str, display_name: str) -> Self:
@@ -105,19 +106,19 @@ class User(Id, Timestamped, TableBase, table=True):
         return list(await session.scalars(select(cls).order_by(cls.created_at)))
 
     @classmethod
-    async def recent_writes(cls, principal_id: uuid.UUID, limit: int = 20) -> list[Document]:
+    async def recent_writes(cls, user_id: uuid.UUID, limit: int = 20) -> list[Document]:
         """List the most recent visible document writes with their owner, scope, and promotion.
 
         Returns the latest documents under the caller's row level security visibility, newest
         first, so an audit reads who wrote what, into which scope, and whether the row was
         promoted from another document, the provenance `promoted_from` link records. The caller
         holds only the id here, resolved from an MCP string argument rather than a loaded
-        `User`, so this stays id-keyed and opens its own principal-scoped session.
+        `User`, so this stays id-keyed and opens its own user-scoped session.
 
-        principal_id: identity whose visibility scopes the audit listing.
+        user_id: identity whose visibility scopes the audit listing.
         limit: maximum number of documents to return.
         """
-        async with acting_as(principal_id) as session:
+        async with acting_as(user_id) as session:
             return list(
                 await session.scalars(
                     select(Document).order_by(Document.created_at.desc()).limit(limit)
@@ -126,29 +127,36 @@ class User(Id, Timestamped, TableBase, table=True):
 
     @classmethod
     async def for_subject(cls, subject: str) -> uuid.UUID:
-        """Map a OIDC subject to its aizk principal, provisioning one on first sight.
+        """Map a OIDC subject to its aizk user, provisioning one on first sight.
 
-        Looks up the principal whose oidc_subject matches and returns its id, and when none exists
+        Looks up the user whose oidc_subject matches and returns its id, and when none exists
         yet creates one stamped with the subject so a OIDC user is provisioned on first
-        authenticated call and stays stable across calls after. Runs as the system principal since
-        no aizk principal is known until this resolves one, and the token-verification call site
+        authenticated call and stays stable across calls after. Runs as the system user since
+        no aizk user is known until this resolves one, and the token-verification call site
         holds no session of its own to reuse.
 
         subject: the OIDC subject claim naming the external user.
         """
         async with system_session() as session:
-            principal_id = await session.scalar(select(cls.id).where(cls.oidc_subject == subject))
-            if principal_id is not None:
-                return principal_id
-            principal = cls(oidc_subject=subject)
-            session.add(principal)
+            user_id = await session.scalar(select(cls.id).where(cls.oidc_subject == subject))
+            if user_id is not None:
+                return user_id
+            user = cls(oidc_subject=subject)
+            session.add(user)
             await session.flush()
-            return principal.id
+            return user.id
 
     @classmethod
     @functools.cache
     def cached_verifier(
-        cls, issuer: str, jwks_uri: str, introspect_url: str, client_id: str, client_secret: str
+        cls,
+        issuer: str,
+        jwks_uri: str,
+        introspect_url: str,
+        client_id: str,
+        client_secret: str,
+        algorithm: str,
+        required_scopes: str,
     ) -> TokenVerifier | None:
         """Build the verifier for one set of OIDC settings, memoized so repeat settings reuse
         it.
@@ -166,14 +174,26 @@ class User(Id, Timestamped, TableBase, table=True):
         introspect_url: RFC 7662 introspection endpoint, empty to prefer the offline JWKS path.
         client_id: resource server client id the introspection call authenticates as.
         client_secret: resource server client secret paired with client_id.
+        algorithm: JWS algorithm the issuer signs its tokens with, matched against the token
+            header on the offline JWKS path. Providers differ, Logto signs ES384 while many
+            others default to RS256, so the wrong value fails every signature silently.
+        required_scopes: comma-separated scopes a token must carry, also the `scopes_supported`
+            the resource metadata advertises so a client requests exactly them, empty to accept
+            any and advertise none.
         """
         if not issuer:
             return None
+        scopes = [scope.strip() for scope in required_scopes.split(",") if scope.strip()] or None
         if introspect_url:
             return IntrospectionTokenVerifier(
-                introspection_url=introspect_url, client_id=client_id, client_secret=client_secret
+                introspection_url=introspect_url,
+                client_id=client_id,
+                client_secret=client_secret,
+                required_scopes=scopes,
             )
-        return JWTVerifier(jwks_uri=jwks_uri, issuer=issuer)
+        return JWTVerifier(
+            jwks_uri=jwks_uri, issuer=issuer, algorithm=algorithm, required_scopes=scopes
+        )
 
     @classmethod
     def verifier(cls) -> TokenVerifier | None:
@@ -188,20 +208,46 @@ class User(Id, Timestamped, TableBase, table=True):
             settings.oidc_introspect_url,
             settings.oidc_client_id,
             settings.oidc_client_secret,
+            settings.oidc_algorithm,
+            settings.oidc_required_scopes,
+        )
+
+    @classmethod
+    def auth_provider(cls) -> AuthProvider | None:
+        """The MCP server's auth: verify tokens, and advertise the issuer when a URL is set.
+
+        Wrapping the token verifier in a `RemoteAuthProvider` publishes the RFC 9728 protected
+        resource metadata that names the OIDC issuer as this server's authorization server, so a
+        client that hits the endpoint unauthenticated is told where to log in and then obtains and
+        refreshes its own tokens through the identity provider, no key to mint or paste. With no
+        `mcp_resource_url` to advertise from, the bare verifier is served instead, the single-user
+        path where the caller already presents a token, and none at all leaves auth off.
+        """
+        verifier = cls.verifier()
+        if verifier is None or not settings.mcp_resource_url:
+            return verifier
+        return RemoteAuthProvider(
+            token_verifier=verifier,
+            authorization_servers=[AnyHttpUrl(settings.oidc_issuer)],
+            base_url=settings.mcp_resource_url,
+            resource_name="aizk",
         )
 
     @classmethod
     async def from_token(cls, token: str) -> uuid.UUID | None:
-        """Validate a OIDC bearer token and resolve it to an aizk principal, null when invalid.
+        """Validate a OIDC bearer token and resolve it to an aizk user, null when invalid.
 
         Verifies the token through the configured verifier, introspection or the offline JWKS
-        check, and on a valid token maps its `sub` claim to a principal, provisioning one on first
+        check, and on a valid token maps its `sub` claim to a user, provisioning one on first
         sight. An invalid, unverifiable, or unauthenticated (no verifier configured) token resolves
         to null so it authenticates no one and the caller falls through to the next auth source,
-        and `is_admin` stays governed by the principal row aizk owns rather than any claim the
-        token carries. The token verification runs outside any session, and `for_subject` opens its
-        own only once a claim is actually ready to resolve, so a slow network round trip to OIDC
-        never holds one open for nothing.
+        and `is_admin` stays governed by the user row aizk owns rather than any claim the
+        token carries. When the provider injects the configured `oidc_groups_claim`, its list of
+        `{id, role, name}` organizations drives `Group.sync_user_groups`, so the caller's group
+        memberships follow the identity provider on every authenticated request rather than a
+        hand-run `add-member`. The token verification runs outside any session, and `for_subject`
+        opens its own only once a claim is actually ready to resolve, so a slow network round trip
+        to OIDC never holds one open for nothing.
 
         token: the raw bearer token presented by the caller.
         """
@@ -214,4 +260,11 @@ class User(Id, Timestamped, TableBase, table=True):
         subject = access_token.claims.get("sub")
         if not isinstance(subject, str):
             return None
-        return await cls.for_subject(subject)
+        user_id = await cls.for_subject(subject)
+        claim = access_token.claims.get(settings.oidc_groups_claim)
+        if settings.oidc_groups_claim and isinstance(claim, list):
+            from .group import Group  # local import breaks the User<->Group definition cycle
+
+            async with system_session() as session:
+                await Group.sync_user_groups(session, user_id, claim)
+        return user_id

@@ -47,8 +47,8 @@ def test_user_lifecycle_create_link_and_list() -> None:
     dbutil.run(body())
 
 
-def test_unknown_principal_administers_reads_false() -> None:
-    """An id with no principal row administers nothing, the fail-closed default."""
+def test_unknown_user_administers_reads_false() -> None:
+    """An id with no user row administers nothing, the fail-closed default."""
 
     async def body() -> None:
         await dbutil.reset_db()
@@ -175,7 +175,7 @@ def test_watermark_bump_read_and_payload_round_trip() -> None:
 
 
 def test_watermark_is_private_to_its_owner() -> None:
-    """A watermark counter never leaks across principals, the private-bookkeeping guarantee."""
+    """A watermark counter never leaks across users, the private-bookkeeping guarantee."""
 
     async def body() -> None:
         await dbutil.reset_db()
@@ -211,17 +211,17 @@ def test_writable_scopes_clause_matches_the_write_lattice() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        principal = await dbutil.seed_user(uuid.uuid4())
+        user = await dbutil.seed_user(uuid.uuid4())
         writable = await dbutil.seed_group(uuid.uuid4())
         readonly = await dbutil.seed_group(uuid.uuid4())
-        await dbutil.seed_membership(principal, writable, "writer")
-        await dbutil.seed_membership(principal, readonly, "reader")
-        private = await dbutil.seed_document(principal, [])
-        in_writable = await dbutil.seed_document(principal, [writable])
-        in_readonly = await dbutil.seed_document(principal, [readonly])
-        async with acting_as(principal) as session:
+        await dbutil.seed_membership(user, writable, "writer")
+        await dbutil.seed_membership(user, readonly, "reader")
+        private = await dbutil.seed_document(user, [])
+        in_writable = await dbutil.seed_document(user, [writable])
+        in_readonly = await dbutil.seed_document(user, [readonly])
+        async with acting_as(user) as session:
             rows = await session.execute(
-                select(Document.id).where(Membership.writable_scopes(Document.scopes, principal))
+                select(Document.id).where(Membership.writable_scopes(Document.scopes, user))
             )
             selected = set(rows.scalars().all())
         assert private in selected and in_writable in selected
@@ -257,3 +257,91 @@ def test_session_item_nothing_due_when_fresh_and_under_threshold() -> None:
     made.id = uuid.uuid4()
     made.created_at = now
     assert SessionItem.due_for_promotion([made], now, age_minutes=60, threshold=20) == []
+
+
+async def group_roles(session, user_id: uuid.UUID) -> set[tuple[str, str]]:
+    """The (group name, role) pairs a user currently holds, for asserting a synced roster."""
+    from sqlalchemy import select
+
+    rows = await session.execute(
+        select(Group.name, Membership.role)
+        .join(Membership, Membership.group_id == Group.id)
+        .where(Membership.user_id == user_id)
+    )
+    return {(name, str(role)) for name, role in rows}
+
+
+def test_for_oidc_org_mints_once_then_reuses_the_mirror() -> None:
+    """`for_oidc_org` mints the local group on first sight and returns the same one after."""
+
+    async def body() -> tuple[uuid.UUID, uuid.UUID, str | None]:
+        await dbutil.reset_db()
+        async with system_session() as session:
+            first = await Group.for_oidc_org(session, "org-abc", "Finance")
+            again = await Group.for_oidc_org(session, "org-abc", "ignored-second-time")
+            return first.id, again.id, first.oidc_org_id
+
+    first_id, again_id, org = dbutil.run(body())
+    assert first_id == again_id  # idempotent on the organization id
+    assert org == "org-abc"
+
+
+def test_for_oidc_org_disambiguates_a_taken_label() -> None:
+    """A mirror whose label collides with an existing group name gets the org id appended."""
+
+    async def body() -> str:
+        await dbutil.reset_db()
+        async with system_session() as session:
+            await Group.create(session, "Finance")
+            mirror = await Group.for_oidc_org(session, "org-xyz", "Finance")
+            return mirror.name
+
+    assert dbutil.run(body()) == "Finance (org-xyz)"
+
+
+def test_sync_user_groups_reconciles_membership_to_the_claim() -> None:
+    """Syncing upserts claimed memberships, updates a changed role, and drops the unclaimed."""
+
+    async def body() -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+        await dbutil.reset_db()
+        user = await dbutil.seed_user(uuid.uuid4())
+        async with system_session() as session:
+            await Group.sync_user_groups(
+                session,
+                user,
+                [
+                    {"id": "A", "name": "Alpha", "role": "reader"},
+                    {"id": "B", "name": "Beta", "role": "writer"},
+                ],
+            )
+            before = await group_roles(session, user)
+        async with system_session() as session:
+            # user leaves A, is promoted in B, and joins C
+            await Group.sync_user_groups(
+                session,
+                user,
+                [
+                    {"id": "B", "name": "Beta", "role": "admin"},
+                    {"id": "C", "name": "Gamma", "role": "reader"},
+                ],
+            )
+            after = await group_roles(session, user)
+        return before, after
+
+    before, after = dbutil.run(body())
+    assert before == {("Alpha", "reader"), ("Beta", "writer")}
+    assert after == {("Beta", "admin"), ("Gamma", "reader")}  # A dropped, B updated, C added
+
+
+def test_sync_user_groups_empty_claim_drops_all_memberships() -> None:
+    """An empty claim means the user belongs nowhere, so every prior membership is removed."""
+
+    async def body() -> set[tuple[str, str]]:
+        await dbutil.reset_db()
+        user = await dbutil.seed_user(uuid.uuid4())
+        async with system_session() as session:
+            await Group.sync_user_groups(session, user, [{"id": "A", "name": "Alpha"}])
+            await Group.sync_user_groups(session, user, [])
+            return await group_roles(session, user)
+
+    assert dbutil.run(body()) == set()

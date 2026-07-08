@@ -27,7 +27,7 @@ DIM = 1024
 
 @pytest.fixture
 def owner(migrated_db: None) -> Iterator[uuid.UUID]:
-    """A freshly reset schema seeding one principal, the owner every tree body climbs under."""
+    """A freshly reset schema seeding one user, the owner every tree body climbs under."""
     pid = uuid.uuid4()
 
     async def setup() -> None:
@@ -133,14 +133,14 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
     """Four communities become level-0 leaves under a part_of-linked parent, no rebuild doubling.
 
     The leaves cluster two-and-two and roll up, every leaf gains a part_of edge climbing to a
-    higher level, and building a second time first clears this principal's own prior tree, so a
+    higher level, and building a second time first clears this user's own prior tree, so a
     rebuild never doubles the tree it already owns.
     """
 
     async def probe() -> tuple[int, int, int, list[tuple[int, int]]]:
         await seed_communities(owner, [0, 0, 1, 1])
-        await build_raptor(principal_id=owner)
-        written = await build_raptor(principal_id=owner)
+        await build_raptor(user_id=owner)
+        written = await build_raptor(user_id=owner)
         async with acting_as(owner) as session:
             leaves = await session.scalar(
                 text(
@@ -204,7 +204,7 @@ def test_build_raptor_writes_the_expected_summary_count(
 
     async def probe() -> int:
         await seed_communities(owner, axes)
-        return await build_raptor(principal_id=owner)
+        return await build_raptor(user_id=owner)
 
     assert dbutil.run(probe()) == expected
 

@@ -8,8 +8,8 @@ here directly rather than through a tool wrapper. The MCP server keeps only the 
 (recall, remember, reference, and the group-curation trio); everything in this module is reached
 through the CLI, so a leaked API key can never drive a rebuild, a promotion, or a grant.
 
-Operator functions act as the system principal by default (the owner role, past row level
-security), the identity an ssh operator legitimately is, and take an explicit `principal_id`
+Operator functions act as the system user by default (the owner role, past row level
+security), the identity an ssh operator legitimately is, and take an explicit `user_id`
 where the operation is genuinely one tenant's view (forget, export, audit).
 """
 
@@ -78,59 +78,59 @@ class OntologyKindRow(FrozenModel):
 
 
 def system() -> uuid.UUID:
-    """The system principal id, the identity an operator's CLI call acts as by default."""
+    """The system user id, the identity an operator's CLI call acts as by default."""
     return settings.system_user_id
 
 
 async def rebuild(
-    limit: int | None = None, source: str | None = None, principal_id: uuid.UUID | None = None
+    limit: int | None = None, source: str | None = None, user_id: uuid.UUID | None = None
 ) -> tuple[int, int]:
-    """Build the graph now over the principal's pending chunks, the on-demand extraction.
+    """Build the graph now over the user's pending chunks, the on-demand extraction.
 
     Runs inline rather than waiting for the worker to drain the queue, returning the entities and
     facts created. The autonomous default is the queue the worker drains.
 
     limit: maximum number of chunks to process, all of them when null.
     source: restrict the build to chunks of documents whose title matches this substring.
-    principal_id: identity that owns the written claims, the system principal when null.
+    user_id: identity that owns the written claims, the system user when null.
     """
     return await graph.build_graph(
-        limit=limit, principal_id=principal_id or system(), source=source
+        limit=limit, user_id=user_id or system(), source=source
     )
 
 
-async def decay(half_life_days: float = 90.0, principal_id: uuid.UUID | None = None) -> int:
+async def decay(half_life_days: float = 90.0, user_id: uuid.UUID | None = None) -> int:
     """Run the decay pass now, archiving stale facts that leave recall but stay in history.
 
     half_life_days: age in days at which an unaccessed fact's relevance halves.
-    principal_id: identity whose facts are decayed, the system principal when null.
+    user_id: identity whose facts are decayed, the system user when null.
     """
-    return await graph.decay(principal_id=principal_id or system(), half_life_days=half_life_days)
+    return await graph.decay(user_id=user_id or system(), half_life_days=half_life_days)
 
 
-async def reembed(principal_id: uuid.UUID | None = None) -> int:
+async def reembed(user_id: uuid.UUID | None = None) -> int:
     """Re-embed every visible stored vector with the current embedder, a backend migration.
 
     Re-encodes the chunk, entity, fact, community, and profile embeddings from their stored source
     text, so switching the embed model needs no re-ingest.
 
-    principal_id: identity whose vectors are re-embedded, the system principal when null.
+    user_id: identity whose vectors are re-embedded, the system user when null.
     """
-    return await graph.reembed(principal_id=principal_id or system())
+    return await graph.reembed(user_id=user_id or system())
 
 
-async def raptor(principal_id: uuid.UUID | None = None) -> int:
+async def raptor(user_id: uuid.UUID | None = None) -> int:
     """Build the RAPTOR tree now, the recursive summary tiers above the communities.
 
     Clusters the communities up level by level into the summary-of-summaries a broad query reads.
     Build the communities first, since the tree climbs above them.
 
-    principal_id: identity whose tree is built, the system principal when null.
+    user_id: identity whose tree is built, the system user when null.
     """
-    return await graph.build_raptor(principal_id=principal_id or system())
+    return await graph.build_raptor(user_id=user_id or system())
 
 
-async def forget(query: str, k: int = 8, principal_id: uuid.UUID | None = None) -> ForgetResult:
+async def forget(query: str, k: int = 8, user_id: uuid.UUID | None = None) -> ForgetResult:
     """Retract the claims a query's own source notes contributed, remember's erasure counterpart.
 
     Where decay forgets by age, this forgets by provenance: it finds the notes most relevant to the
@@ -141,9 +141,9 @@ async def forget(query: str, k: int = 8, principal_id: uuid.UUID | None = None) 
 
     query: what to forget, described the way you would recall it.
     k: how many of the most relevant source notes to retract the derived claims of.
-    principal_id: identity whose notes are searched and retracted, the system principal when null.
+    user_id: identity whose notes are searched and retracted, the system user when null.
     """
-    owner = principal_id or system()
+    owner = user_id or system()
     [vector] = await Embedder().embed([query], mode="query")
     async with acting_as(owner) as session:
         ranked = (
@@ -163,7 +163,7 @@ async def forget(query: str, k: int = 8, principal_id: uuid.UUID | None = None) 
     return ForgetResult(documents=[t for t in titles if t], claims=len(retracted))
 
 
-async def promote(document: str, to_scopes: str, principal_id: uuid.UUID | None = None) -> int:
+async def promote(document: str, to_scopes: str, user_id: uuid.UUID | None = None) -> int:
     """Promote a document and its chunks and facts into a wider scope-set as a new audited copy.
 
     A deliberate governance write, never autonomous, so widening a memory's visibility always
@@ -171,15 +171,15 @@ async def promote(document: str, to_scopes: str, principal_id: uuid.UUID | None 
 
     document: id of the source document to promote.
     to_scopes: comma-separated names of the target groups the copy is published into.
-    principal_id: identity the promotion acts under, the system principal when null.
+    user_id: identity the promotion acts under, the system user when null.
     """
     return await graph.promote(
-        uuid.UUID(document), to_scopes, principal_id=principal_id or system()
+        uuid.UUID(document), to_scopes, user_id=user_id or system()
     )
 
 
 async def ingest(
-    path: str, scopes: str | None = None, principal_id: uuid.UUID | None = None
+    path: str, scopes: str | None = None, user_id: uuid.UUID | None = None
 ) -> int:
     """Ingest a file or directory of notes and code into memory, the document count back.
 
@@ -188,9 +188,9 @@ async def ingest(
 
     path: file or directory to ingest.
     scopes: comma-separated group names to share it with, private to the owner when null.
-    principal_id: identity that owns the stored rows, the system principal when null.
+    user_id: identity that owns the stored rows, the system user when null.
     """
-    owner = principal_id or system()
+    owner = user_id or system()
     target = await resolve_scopes(scopes, owner)
     return await extract_ingest.ingest_path(Path(path), owner_id=owner, scopes=target)
 
@@ -199,7 +199,7 @@ async def ingest_image(
     path: str,
     caption: str | None = None,
     scopes: str | None = None,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     """Ingest an image into the shared multimodal space so a text query can recall it.
 
@@ -209,35 +209,35 @@ async def ingest_image(
     path: image file to ingest.
     caption: text stored on the chunk and shown in recall, the file name when null.
     scopes: comma-separated group names to share it with, private to the owner when null.
-    principal_id: identity that owns the stored row, the system principal when null.
+    user_id: identity that owns the stored row, the system user when null.
     """
-    owner = principal_id or system()
+    owner = user_id or system()
     target = await resolve_scopes(scopes, owner)
     return await extract_ingest.ingest_image(
         Path(path), caption=caption, owner_id=owner, scopes=target
     )
 
 
-async def export_scope(path: str, principal_id: uuid.UUID | None = None) -> export.ExportReport:
-    """Export a principal's visible memory to a JSONL file, the scoped portable dump.
+async def export_scope(path: str, user_id: uuid.UUID | None = None) -> export.ExportReport:
+    """Export a user's visible memory to a JSONL file, the scoped portable dump.
 
-    Writes every document, chunk, entity, and fact the principal can see, the facts carrying both
+    Writes every document, chunk, entity, and fact the user can see, the facts carrying both
     their valid-time and transaction-time windows so the bi-temporal history rides along. Runs
-    under that principal's own row level security, so exactly the rows it may see leave.
+    under that user's own row level security, so exactly the rows it may see leave.
 
     path: the JSONL file the dump is written to.
-    principal_id: identity whose visible rows are exported, the system principal when null.
+    user_id: identity whose visible rows are exported, the system user when null.
     """
-    return await export.export_scope(Path(path), principal_id=principal_id or system())
+    return await export.export_scope(Path(path), user_id=user_id or system())
 
 
-async def audit(limit: int = 20, principal_id: uuid.UUID | None = None) -> list[Document]:
+async def audit(limit: int = 20, user_id: uuid.UUID | None = None) -> list[Document]:
     """The most recent visible document writes, for the operator's write log.
 
     limit: maximum number of writes to return.
-    principal_id: identity whose visible writes are listed, the system principal when null.
+    user_id: identity whose visible writes are listed, the system user when null.
     """
-    return await UserRow.recent_writes(principal_id or system(), limit=limit)
+    return await UserRow.recent_writes(user_id or system(), limit=limit)
 
 
 async def create_user(name: str) -> UserRow:
@@ -277,7 +277,7 @@ async def create_group(
     public: whether the group's rows are readable by anyone from the start, else members-only.
     curated: whether a write into this group's canon must clear group-admin review before it is
         visible to the rest of the group, immediate when false.
-    creator: the principal founded as the group's admin member, the system principal when null.
+    creator: the user founded as the group's admin member, the system user when null.
     """
     async with system_session() as session:
         return await Group.create(
@@ -285,27 +285,27 @@ async def create_group(
         )
 
 
-async def add_member(principal: str, group: str, role: str = "writer") -> None:
-    """Add a principal to a group so that group's scope becomes visible to it under RLS.
+async def add_member(user: str, group: str, role: str = "writer") -> None:
+    """Add a user to a group so that group's scope becomes visible to it under RLS.
 
-    principal: id of the principal joining the group.
-    group: name of the group the principal joins.
+    user: id of the user joining the group.
+    group: name of the group the user joins.
     role: standing within the group, reader for read-only, writer or admin to also write.
     """
     async with system_session() as session:
         group_row = await Group.named(session, group)
-        await group_row.add_member(session, uuid.UUID(principal), role=role)
+        await group_row.add_member(session, uuid.UUID(user), role=role)
 
 
-async def remove_member(principal: str, group: str) -> None:
-    """Remove a principal from a group, its scope no longer visible to them.
+async def remove_member(user: str, group: str) -> None:
+    """Remove a user from a group, its scope no longer visible to them.
 
-    principal: id of the principal leaving the group.
-    group: name of the group the principal leaves.
+    user: id of the user leaving the group.
+    group: name of the group the user leaves.
     """
     async with system_session() as session:
         group_row = await Group.named(session, group)
-        await group_row.remove_member(session, uuid.UUID(principal))
+        await group_row.remove_member(session, uuid.UUID(user))
 
 
 async def publish_group(group: str, public: bool = True) -> None:
@@ -433,7 +433,7 @@ async def bench(questions_file: str | None = None, k: int = 8) -> EvalReport:
     k: how many hits and seed facts each recall surfaces.
     """
     questions = _read_questions(questions_file)
-    return await run_eval(questions, k=k, principal_id=system())
+    return await run_eval(questions, k=k, user_id=system())
 
 
 async def sweep(
@@ -447,7 +447,7 @@ async def sweep(
     """
     questions = _read_questions(questions_file)
     matrix = SweepMatrix(embed_dim=[int(dim) for dim in dims.split(",")] if dims else [])
-    return await run_sweep(questions, k=k, principal_id=system(), matrix=matrix)
+    return await run_sweep(questions, k=k, user_id=system(), matrix=matrix)
 
 
 async def benchmark(name: str, dataset_path: str, k: int = 8) -> SweepReport:
@@ -466,7 +466,7 @@ async def benchmark(name: str, dataset_path: str, k: int = 8) -> SweepReport:
             f"unknown benchmark {name!r}, expected one of {sorted(benchmarks.LOADERS)}"
         )
     gold = benchmarks.benchmark_gold(benchmarks.LOADERS[name](Path(dataset_path)))
-    return await run_sweep(None, k=k, principal_id=system(), gold=gold)
+    return await run_sweep(None, k=k, user_id=system(), gold=gold)
 
 
 async def scale(

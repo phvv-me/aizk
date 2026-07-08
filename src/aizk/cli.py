@@ -51,7 +51,7 @@ def migrate() -> None:
     """Apply database migrations up to head, the pre-auth bootstrap step `ops.setup` also runs.
 
     A thin wrapper over `ops.run_alembic`, kept as its own command since a fresh database has no
-    admin principal yet to call the MCP `setup` tool through.
+    admin user yet to call the MCP `setup` tool through.
     """
     ops.run_alembic(command.upgrade, ops.alembic_config(), "head")
     print("done")
@@ -92,7 +92,7 @@ async def worker(batch_size: int = settings.queue_batch_size) -> None:
 
     Drains the on-write extraction and profile jobs and fires the scheduled maintenance passes,
     decay, dedup, communities, RAPTOR, profile refresh, self-improve, session promotion, insight,
-    and curation review, each fanning out one job per principal under its own row level security
+    and curation review, each fanning out one job per user under its own row level security
     scope, so a single `aizk worker` self-maintains.
 
     batch_size: maximum number of jobs dequeued per round, settings.queue_batch_size by default,
@@ -109,7 +109,7 @@ async def install_queue() -> None:
     """Install the pgqueuer schema as the owner and grant the app role access.
 
     A thin wrapper over the same `install_queue_schema` the MCP `setup` tool runs, kept as its own
-    command for the pre-auth bootstrap case where no admin principal exists to call it through yet.
+    command for the pre-auth bootstrap case where no admin user exists to call it through yet.
     """
     await install_queue_schema()
     print("done")
@@ -174,7 +174,7 @@ async def serve_mcp() -> None:
 async def recall_context(
     query: str | None = None,
     k: int = 8,
-    principal: uuid.UUID | None = None,
+    user: uuid.UUID | None = None,
 ) -> None:
     """Recall memory and print it for a SessionStart hook to inject as context.
 
@@ -185,10 +185,10 @@ async def recall_context(
 
     query: what to recall, the recent project context when null.
     k: number of hits and seed facts to surface.
-    principal: identity whose visibility scopes the recall, the system principal when null.
+    user: identity whose visibility scopes the recall, the system user when null.
     """
     pack = await assemble_context_pack(
-        query or PROJECT_CONTEXT_QUERY, principal_id=principal or settings.system_user_id, k=k
+        query or PROJECT_CONTEXT_QUERY, user_id=user or settings.system_user_id, k=k
     )
     print(
         "\n".join(f"[{block.lane}] {block.line}" for block in pack.blocks) or "no context recalled"
@@ -197,7 +197,7 @@ async def recall_context(
 
 @app.command
 async def capture_session(
-    principal: uuid.UUID | None = None,
+    user: uuid.UUID | None = None,
 ) -> None:
     """Capture the session's decisions into memory for a Stop hook to run at the end of a session.
 
@@ -207,19 +207,19 @@ async def capture_session(
     enqueues graph extraction so the extractor turns them into facts. Without a transcript path it
     is a quiet no-op, so the hook is safe to run in any session.
 
-    principal: identity that owns the captured memory, the system principal when null.
+    user: identity that owns the captured memory, the system user when null.
     """
     transcript = os.environ.get(TRANSCRIPT_ENV)
     if not transcript or not Path(transcript).is_file():
         print("no session transcript to capture")
         return
-    principal_id = principal or settings.system_user_id
+    user_id = user or settings.system_user_id
     text_content = Path(transcript).read_text(encoding="utf-8")
 
     document_id = await ingest_text(
-        text_content, title=Path(transcript).stem, owner_id=principal_id
+        text_content, title=Path(transcript).stem, owner_id=user_id
     )
-    await enqueue_pending(principal_id=principal_id)
+    await enqueue_pending(user_id=user_id)
     print(f"captured session into document {document_id}")
 
 
@@ -232,10 +232,10 @@ async def scale(
 ) -> None:
     """Run the scale benchmark and print the scaling curve with the knee flagged per component.
 
-    Grows a synthetic corpus through the sizes under a throwaway principal, measures recall latency
+    Grows a synthetic corpus through the sizes under a throwaway user, measures recall latency
     percentiles with a per-lane breakdown, ingestion throughput, the pagerank and community-detect
     graph ops, and the storage footprint at each size, then prints the curve and the first size
-    each component broke its budget. The throwaway principal and its rows are purged at the end.
+    each component broke its budget. The throwaway user and its rows are purged at the end.
 
     sizes: comma-separated corpus chunk counts to measure, the hundred-thousand point left opt-in.
     k: number of hits and seed facts each recall surfaces.
@@ -297,26 +297,26 @@ async def create_group(name: str, public: bool = False, curated: bool = False) -
 
 
 @group.command(name="add-member")
-async def add_member(principal: str, group: str, role: str = "writer") -> None:
-    """Add a principal to a group so that group's scope becomes visible to it under RLS.
+async def add_member(user: str, group: str, role: str = "writer") -> None:
+    """Add a user to a group so that group's scope becomes visible to it under RLS.
 
-    principal: id of the principal joining the group.
-    group: name of the group the principal joins.
+    user: id of the user joining the group.
+    group: name of the group the user joins.
     role: standing within the group, reader for read-only, writer or admin to also write.
     """
-    await admin.add_member(principal, group, role=role)
-    print(f"{principal} joined {group} as {role}")
+    await admin.add_member(user, group, role=role)
+    print(f"{user} joined {group} as {role}")
 
 
 @group.command(name="remove-member")
-async def remove_member(principal: str, group: str) -> None:
-    """Remove a principal from a group, its scope no longer visible to them.
+async def remove_member(user: str, group: str) -> None:
+    """Remove a user from a group, its scope no longer visible to them.
 
-    principal: id of the principal leaving the group.
-    group: name of the group the principal leaves.
+    user: id of the user leaving the group.
+    group: name of the group the user leaves.
     """
-    await admin.remove_member(principal, group)
-    print(f"{principal} removed from {group}")
+    await admin.remove_member(user, group)
+    print(f"{user} removed from {group}")
 
 
 @group.command(name="publish")
@@ -360,14 +360,14 @@ async def list_groups() -> None:
 
 
 @data.command(name="ingest")
-async def ingest(path: str, scopes: str | None = None, principal: uuid.UUID | None = None) -> None:
+async def ingest(path: str, scopes: str | None = None, user: uuid.UUID | None = None) -> None:
     """Ingest a file or directory of notes and code into memory, the document count back.
 
     path: file or directory to ingest.
     scopes: comma-separated group names to share it with, private to the owner when null.
-    principal: identity that owns the stored rows, the system principal when null.
+    user: identity that owns the stored rows, the system user when null.
     """
-    count = await admin.ingest(path, scopes=scopes, principal_id=principal)
+    count = await admin.ingest(path, scopes=scopes, user_id=user)
     print(f"ingested {count} documents from {path}")
 
 
@@ -376,111 +376,111 @@ async def ingest_image(
     path: str,
     caption: str | None = None,
     scopes: str | None = None,
-    principal: uuid.UUID | None = None,
+    user: uuid.UUID | None = None,
 ) -> None:
     """Ingest an image into the shared multimodal space so a text query can recall it.
 
     path: image file to ingest.
     caption: text stored on the chunk and shown in recall, the file name when null.
     scopes: comma-separated group names to share it with, private to the owner when null.
-    principal: identity that owns the stored row, the system principal when null.
+    user: identity that owns the stored row, the system user when null.
     """
     document_id = await admin.ingest_image(
-        path, caption=caption, scopes=scopes, principal_id=principal
+        path, caption=caption, scopes=scopes, user_id=user
     )
     print(document_id)
 
 
 @graph.command(name="rebuild")
 async def rebuild(
-    limit: int | None = None, source: str | None = None, principal: uuid.UUID | None = None
+    limit: int | None = None, source: str | None = None, user: uuid.UUID | None = None
 ) -> None:
-    """Build the graph now over the principal's pending chunks, the on-demand extraction.
+    """Build the graph now over the user's pending chunks, the on-demand extraction.
 
     limit: maximum number of chunks to process, all of them when null.
     source: restrict the build to chunks of documents whose title matches this substring.
-    principal: identity that owns the written claims, the system principal when null.
+    user: identity that owns the written claims, the system user when null.
     """
-    entities, facts = await admin.rebuild(limit=limit, source=source, principal_id=principal)
+    entities, facts = await admin.rebuild(limit=limit, source=source, user_id=user)
     print(f"built {entities} entities and {facts} facts")
 
 
 @graph.command(name="decay")
-async def decay(half_life_days: float = 90.0, principal: uuid.UUID | None = None) -> None:
+async def decay(half_life_days: float = 90.0, user: uuid.UUID | None = None) -> None:
     """Run the decay pass now, archiving stale facts that leave recall but stay in history.
 
     half_life_days: age in days at which an unaccessed fact's relevance halves.
-    principal: identity whose facts are decayed, the system principal when null.
+    user: identity whose facts are decayed, the system user when null.
     """
-    archived = await admin.decay(half_life_days=half_life_days, principal_id=principal)
+    archived = await admin.decay(half_life_days=half_life_days, user_id=user)
     print(f"archived {archived} stale facts")
 
 
 @graph.command(name="reembed")
-async def reembed(principal: uuid.UUID | None = None) -> None:
+async def reembed(user: uuid.UUID | None = None) -> None:
     """Re-embed every visible stored vector with the current embedder, a backend migration.
 
-    principal: identity whose vectors are re-embedded, the system principal when null.
+    user: identity whose vectors are re-embedded, the system user when null.
     """
-    written = await admin.reembed(principal_id=principal)
+    written = await admin.reembed(user_id=user)
     print(f"re-embedded {written} vectors")
 
 
 @graph.command(name="raptor")
-async def raptor(principal: uuid.UUID | None = None) -> None:
+async def raptor(user: uuid.UUID | None = None) -> None:
     """Build the RAPTOR tree now, the recursive summary tiers above the communities.
 
-    principal: identity whose tree is built, the system principal when null.
+    user: identity whose tree is built, the system user when null.
     """
-    written = await admin.raptor(principal_id=principal)
+    written = await admin.raptor(user_id=user)
     print(f"built {written} summaries")
 
 
 @graph.command(name="forget")
-async def forget(query: str, k: int = 8, principal: uuid.UUID | None = None) -> None:
+async def forget(query: str, k: int = 8, user: uuid.UUID | None = None) -> None:
     """Retract the claims a query's own source notes contributed, the erasure counterpart to write.
 
     query: what to forget, described the way you would recall it.
     k: how many of the most relevant source notes to retract the derived claims of.
-    principal: identity whose notes are searched and retracted, the system principal when null.
+    user: identity whose notes are searched and retracted, the system user when null.
     """
-    result = await admin.forget(query, k=k, principal_id=principal)
+    result = await admin.forget(query, k=k, user_id=user)
     print(f"retracted {result.claims} claims from {len(result.documents)} notes")
     for title in result.documents:
         print(f"  - {title}")
 
 
 @data.command(name="promote")
-async def promote(document: str, to_scopes: str, principal: uuid.UUID | None = None) -> None:
+async def promote(document: str, to_scopes: str, user: uuid.UUID | None = None) -> None:
     """Promote a document and its chunks and facts into a wider scope-set as a new audited copy.
 
     document: id of the source document to promote.
     to_scopes: comma-separated names of the target groups the copy is published into.
-    principal: identity the promotion acts under, the system principal when null.
+    user: identity the promotion acts under, the system user when null.
     """
-    count = await admin.promote(document, to_scopes, principal_id=principal)
+    count = await admin.promote(document, to_scopes, user_id=user)
     print(f"promoted {count} rows into {to_scopes}")
 
 
 @data.command(name="export")
-async def export_scope(path: str, principal: uuid.UUID | None = None) -> None:
-    """Export a principal's visible memory to a JSONL file, the scoped portable dump.
+async def export_scope(path: str, user: uuid.UUID | None = None) -> None:
+    """Export a user's visible memory to a JSONL file, the scoped portable dump.
 
     path: the JSONL file the dump is written to.
-    principal: identity whose visible rows are exported, the system principal when null.
+    user: identity whose visible rows are exported, the system user when null.
     """
-    report = await admin.export_scope(path, principal_id=principal)
+    report = await admin.export_scope(path, user_id=user)
     print(report.render() if hasattr(report, "render") else report)
 
 
 @data.command(name="audit")
-async def audit(limit: int = 20, principal: uuid.UUID | None = None) -> None:
+async def audit(limit: int = 20, user: uuid.UUID | None = None) -> None:
     """List the most recent visible document writes with owner, scope-set, and title.
 
     limit: maximum number of writes to return.
-    principal: identity whose visible writes are listed, the system principal when null.
+    user: identity whose visible writes are listed, the system user when null.
     """
-    for doc in await admin.audit(limit=limit, principal_id=principal):
+    for doc in await admin.audit(limit=limit, user_id=user):
         scopes = ",".join(str(s) for s in doc.scopes) or "private"
         print(f"{doc.id}  {doc.kind}  [{scopes}]  {doc.title or '-'}")
 

@@ -4,7 +4,7 @@ from fastmcp.tools.tool import FunctionTool
 
 import aizk.mcp.server as server_module
 from aizk.config import settings
-from aizk.mcp.principal import User
+from aizk.mcp.user import User
 from aizk.mcp.server import server
 
 

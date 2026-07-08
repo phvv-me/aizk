@@ -75,7 +75,7 @@ class ProfileFactory(AizkTableFactory[Profile]):
 
 
 class WatermarkFactory(AizkTableFactory[Watermark]):
-    """Builds a transient `Watermark`, the per-principal bookkeeping counter."""
+    """Builds a transient `Watermark`, the per-user bookkeeping counter."""
 
 
 class HitFactory(AizkModelFactory[Hit]):

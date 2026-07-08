@@ -22,8 +22,8 @@ class RecordingTier(TierBuilder[str, TinyReport]):
     grounding: the value `gather` returns, None to exercise the nothing-to-run short-circuit.
     """
 
-    def __init__(self, principal_id: uuid.UUID, grounding: str | None) -> None:
-        super().__init__(principal_id, "system prompt", TinyReport)
+    def __init__(self, user_id: uuid.UUID, grounding: str | None) -> None:
+        super().__init__(user_id, "system prompt", TinyReport)
         self.grounding = grounding
         self.body_calls: list[str] = []
         self.upsert_calls: list[tuple[str, TinyReport, list[list[float]]]] = []

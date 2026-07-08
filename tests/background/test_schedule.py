@@ -17,8 +17,8 @@ from aizk.background.tasks import BackupTask, ScheduledTask
 from aizk.config import settings
 
 InstallSeam = Callable[[object], RecordingQueue]
-# the per-principal, fanned-out passes, excluding BackupTask, whose system-level cron-only shape
-# (no per-principal queue entrypoint, never fanned) is covered on its own in test_tasks.py.
+# the per-user, fanned-out passes, excluding BackupTask, whose system-level cron-only shape
+# (no per-user queue entrypoint, never fanned) is covered on its own in test_tasks.py.
 fanned_task_classes = sorted(
     (cls for cls in ScheduledTask.implementations() if cls is not BackupTask),
     key=lambda cls: cls.name,
@@ -27,18 +27,18 @@ task_classes = st.sampled_from(fanned_task_classes)
 crons = st.sampled_from(["0 3 * * *", "30 4 * * 0", "*/15 * * * *"])
 
 
-@given(task_cls=task_classes, principals=st.lists(st.uuids(), max_size=6, unique=True))
-def test_fan_out_enqueues_one_deduped_job_per_principal(
+@given(task_cls=task_classes, users=st.lists(st.uuids(), max_size=6, unique=True))
+def test_fan_out_enqueues_one_deduped_job_per_user(
     monkeypatch: pytest.MonkeyPatch,
     queue_seam: InstallSeam,
     task_cls: type[ScheduledTask],
-    principals: list[uuid.UUID],
+    users: list[uuid.UUID],
 ) -> None:
-    """The RLS-safe fan-out reads the roster once then queues exactly one job per principal.
+    """The RLS-safe fan-out reads the roster once then queues exactly one job per user.
 
     The load-bearing no-leak boundary: each job targets the task's own entrypoint, carries one
-    principal's id, and is deduped on the task-and-principal pair, so a fire that lands while the
-    last is still draining re-enqueues nothing and no pass writes a second principal's rows.
+    user's id, and is deduped on the task-and-user pair, so a fire that lands while the
+    last is still draining re-enqueues nothing and no pass writes a second user's rows.
     """
     # the enqueue seam (AsyncpgDriver/Queries/asyncpg) now lives entirely in queue.queue_queries,
     # which fan_out drains through, so the recorder is installed on the queue module, not schedule
@@ -47,7 +47,7 @@ def test_fan_out_enqueues_one_deduped_job_per_principal(
 
     async def fake_list_all(session: object) -> list[SimpleNamespace]:
         roster_reads.append(None)
-        return [SimpleNamespace(id=pid) for pid in principals]
+        return [SimpleNamespace(id=pid) for pid in users]
 
     class FakeSystemSession:
         async def __aenter__(self) -> None:
@@ -64,11 +64,11 @@ def test_fan_out_enqueues_one_deduped_job_per_principal(
     asyncio.run(fan_out(task))  # a fire while the last is still draining re-enqueues nothing
 
     assert roster_reads == [None, None]
-    assert len(recorder.enqueues) == len(principals)
-    for call, pid in zip(recorder.enqueues, principals, strict=True):
+    assert len(recorder.enqueues) == len(users)
+    for call, pid in zip(recorder.enqueues, users, strict=True):
         assert call.entrypoint == task.queue_entrypoint
         assert call.dedupe_key == f"{task.name}:{pid}"
-        assert TaskJob.decode(call.payload).principal_id == pid
+        assert TaskJob.decode(call.payload).user_id == pid
     assert recorder.opened == recorder.closed == 2
 
 
@@ -83,15 +83,15 @@ def test_register_wires_the_queue_always_and_the_cron_only_when_enabled(
 ) -> None:
     """The queue body registers regardless of cadence, the cron fan-out only when the task is on.
 
-    Drives both registered bodies too: the queue body runs the per-principal pass under the
-    principal its payload names, and, when enabled, the cron body fires the fan-out for this task
+    Drives both registered bodies too: the queue body runs the per-user pass under the
+    user its payload names, and, when enabled, the cron body fires the fan-out for this task
     on exactly the crontab expression the task read off settings.
     """
     pg = pg_factory()
     body_calls: list[uuid.UUID] = []
 
-    async def record_body(self: ScheduledTask, principal_id: uuid.UUID) -> None:
-        body_calls.append(principal_id)
+    async def record_body(self: ScheduledTask, user_id: uuid.UUID) -> None:
+        body_calls.append(user_id)
 
     monkeypatch.setattr(task_cls, "run", record_body)
     fanned: list[ScheduledTask] = []
@@ -108,10 +108,10 @@ def test_register_wires_the_queue_always_and_the_cron_only_when_enabled(
     cron_registered = [entry for entry in pg.schedules if entry[0] == task.cron_entrypoint]
     assert bool(cron_registered) is enabled
 
-    principal = uuid.uuid4()
-    job = job_factory(TaskJob(principal_id=principal).encode())
+    user = uuid.uuid4()
+    job = job_factory(TaskJob(user_id=user).encode())
     asyncio.run(pg.entrypoints[task.queue_entrypoint](job))
-    assert body_calls == [principal]
+    assert body_calls == [user]
 
     if enabled:
         (_, registered_expression, fire) = cron_registered[0]
@@ -148,20 +148,20 @@ def test_run_worker_registers_every_entrypoint_and_chains_profiles_only_when_on(
         schedule_mod, "PgQueuer", SimpleNamespace(from_asyncpg_connection=lambda conn: pg)
     )
 
-    chunk, principal, entity = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    chunk, user, entity = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     process_calls: list[tuple[uuid.UUID, uuid.UUID]] = []
     profile_jobs: list[list[uuid.UUID]] = []
     profile_calls: list[tuple[uuid.UUID, uuid.UUID]] = []
 
-    async def fake_process_chunk(chunk_id: uuid.UUID, principal_id: uuid.UUID) -> list[uuid.UUID]:
-        process_calls.append((chunk_id, principal_id))
+    async def fake_process_chunk(chunk_id: uuid.UUID, user_id: uuid.UUID) -> list[uuid.UUID]:
+        process_calls.append((chunk_id, user_id))
         return [entity]
 
-    async def fake_enqueue_profiles(entity_ids: list[uuid.UUID], principal_id: uuid.UUID) -> None:
+    async def fake_enqueue_profiles(entity_ids: list[uuid.UUID], user_id: uuid.UUID) -> None:
         profile_jobs.append(list(entity_ids))
 
-    async def fake_process_profile(entity_id: uuid.UUID, principal_id: uuid.UUID) -> None:
-        profile_calls.append((entity_id, principal_id))
+    async def fake_process_profile(entity_id: uuid.UUID, user_id: uuid.UUID) -> None:
+        profile_calls.append((entity_id, user_id))
 
     monkeypatch.setattr(schedule_mod, "process_chunk", fake_process_chunk)
     monkeypatch.setattr(schedule_mod, "enqueue_profiles", fake_enqueue_profiles)
@@ -173,19 +173,19 @@ def test_run_worker_registers_every_entrypoint_and_chains_profiles_only_when_on(
     assert {EXTRACT_ENTRYPOINT, PROFILE_ENTRYPOINT} <= set(pg.entrypoints)
     for task_cls in ScheduledTask.implementations():
         task = task_cls()
-        # the fanned passes register a per-principal queue entrypoint always; BackupTask, the one
-        # system-level pass, registers only its cron, never a per-principal entrypoint.
+        # the fanned passes register a per-user queue entrypoint always; BackupTask, the one
+        # system-level pass, registers only its cron, never a per-user entrypoint.
         assert (task.queue_entrypoint in pg.entrypoints) is (task_cls is not BackupTask)
         registered = any(entry[0] == task.cron_entrypoint for entry in pg.schedules)
         assert registered is task.enabled
     assert pg.runs == [7]
     assert closed == [True]
 
-    chunk_job = job_factory(ChunkJob(chunk_id=chunk, principal_id=principal).encode())
+    chunk_job = job_factory(ChunkJob(chunk_id=chunk, user_id=user).encode())
     asyncio.run(pg.entrypoints[EXTRACT_ENTRYPOINT](chunk_job))
-    assert process_calls == [(chunk, principal)]
+    assert process_calls == [(chunk, user)]
     assert profile_jobs == ([[entity]] if profile_on_write else [])
 
-    profile_job = job_factory(ProfileJob(entity_id=entity, principal_id=principal).encode())
+    profile_job = job_factory(ProfileJob(entity_id=entity, user_id=user).encode())
     asyncio.run(pg.entrypoints[PROFILE_ENTRYPOINT](profile_job))
-    assert profile_calls == [(entity, principal)]
+    assert profile_calls == [(entity, user)]

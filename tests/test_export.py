@@ -41,7 +41,7 @@ async def seed_graph(owner: uuid.UUID, tag: str) -> dict[str, uuid.UUID]:
     fact claims stake one content row, the deduplicated structure a content-addressed statement
     mints once.
 
-    owner: principal the seeded rows belong to.
+    owner: user the seeded rows belong to.
     tag: distinctive marker woven into the row text so a cross-tenant leak is unambiguous.
     """
     ids = {
@@ -102,10 +102,10 @@ def read_jsonl(path: Path) -> list[dict[str, object]]:
 def test_export_dumps_the_acting_slice_with_history_and_no_other_tenant(
     migrated_db: None, tmp_path: Path
 ) -> None:
-    """A scoped export dumps the principal's own rows and fact history, never another tenant's.
+    """A scoped export dumps the user's own rows and fact history, never another tenant's.
 
-    Two principals each own a private slice; exporting one under `acting_as` lets row level
-    security decide exactly which rows leave, so the dump carries every id the acting principal
+    Two users each own a private slice; exporting one under `acting_as` lets row level
+    security decide exactly which rows leave, so the dump carries every id the acting user
     owns, including the superseded claim the live-gate opt-out preserves, and none of the other's.
     The report counts match the rows written and every line is tagged with a known table.
     """
@@ -116,7 +116,7 @@ def test_export_dumps_the_acting_slice_with_history_and_no_other_tenant(
         other = await dbutil.seed_user(uuid.uuid4())
         my_ids = await seed_graph(mine, "mine")
         other_ids = await seed_graph(other, "other")
-        report = await export_scope(tmp_path / "dump.jsonl", principal_id=mine)
+        report = await export_scope(tmp_path / "dump.jsonl", user_id=mine)
         records = read_jsonl(tmp_path / "dump.jsonl")
         mine_values = {str(value) for value in my_ids.values()}
         other_values = {str(value) for value in other_ids.values()}
@@ -125,7 +125,7 @@ def test_export_dumps_the_acting_slice_with_history_and_no_other_tenant(
     report, records, mine_values, other_values = dbutil.run(run())
 
     dumped = id_values(records)
-    assert mine_values <= dumped  # every row the acting principal owns leaves
+    assert mine_values <= dumped  # every row the acting user owns leaves
     assert not (other_values & dumped)  # no other tenant's row ever does
     assert {record["table"] for record in records} <= EXPORTED_TABLES
     assert (report.documents, report.chunks) == (1, 1)
@@ -149,10 +149,10 @@ def test_export_dumps_the_acting_slice_with_history_and_no_other_tenant(
     assert all(set(record) >= FACT_CLAIM_WINDOW_KEYS for record in fact_claims)
 
 
-def test_export_defaults_the_principal_to_the_system_identity(
+def test_export_defaults_the_user_to_the_system_identity(
     migrated_db: None, tmp_path: Path
 ) -> None:
-    """With no principal given the export scopes to the system principal, dumping its own slice."""
+    """With no user given the export scopes to the system user, dumping its own slice."""
 
     async def run() -> tuple[ExportReport, list[dict[str, object]], set[str]]:
         await dbutil.reset_db()
@@ -165,4 +165,4 @@ def test_export_defaults_the_principal_to_the_system_identity(
     report, records, seeded = dbutil.run(run())
 
     assert seeded <= id_values(records)
-    assert report.fact_claims == 2  # the default-principal path still opts out of the live gate
+    assert report.fact_claims == 2  # the default-user path still opts out of the live gate

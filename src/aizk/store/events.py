@@ -9,14 +9,14 @@ from .models import FactClaim
 
 
 @event.listens_for(Session, "after_begin")
-def bind_principal(
+def bind_user(
     session: Session, transaction: SessionTransaction, connection: Connection
 ) -> None:
     """Bind app.uid and app.scopes for the transaction from the session's own acting identity.
 
     A global ORM-level listener rather than a per-engine Core `begin` hook, so every session ever
     opened through `async_session` binds the GUCs the moment its transaction starts, with no
-    per-engine wiring to remember at construction. Reads the acting principal and the optional
+    per-engine wiring to remember at construction. Reads the acting user and the optional
     narrowing lens straight off `session.info`, the dict `acting_as` stamps at construction, so the
     identity travels with the session object itself rather than through a ContextVar bound around
     it. The lens binds as a Postgres array literal (`{a,b,c}`), the same `CAST(... AS UUID[])`
@@ -31,7 +31,7 @@ def bind_principal(
     transaction: the session transaction that just began, unused beyond the event signature.
     connection: the DBAPI connection the transaction runs on, the GUCs bind to.
     """
-    uid = session.info.get("principal") or settings.anonymous_user_id
+    uid = session.info.get("user") or settings.anonymous_user_id
     narrowed = session.info.get("lens") or ()
     lens = "{" + ",".join(str(group_id) for group_id in narrowed) + "}" if narrowed else ""
     connection.execute(
@@ -42,21 +42,21 @@ def bind_principal(
 
 @event.listens_for(Session, "do_orm_execute")
 def require_tenant_context(state: ORMExecuteState) -> None:
-    """Refuse an ORM statement against a scoped table when no principal is in context.
+    """Refuse an ORM statement against a scoped table when no user is in context.
 
-    The acting principal is unset only when a session was opened outside `acting_as`, so a scoped
+    The acting user is unset only when a session was opened outside `acting_as`, so a scoped
     read there would silently return nothing. Raising instead surfaces the missing context at the
     call site. Core text statements carry no mapper and so pass through, leaving writes to the
-    non-scoped identity tables (principals, groups, memberships) untouched.
+    non-scoped identity tables (users, groups, memberships) untouched.
     """
-    if state.session.info.get("principal") is not None:
+    if state.session.info.get("user") is not None:
         return
     scoped = {
         TableBase.metadata.tables[name] for name in TableBase.metadata.info.get("rls", set())
     }
     if any(table in scoped for mapper in state.all_mappers for table in mapper.tables):
         raise NoTenantContext(
-            "scoped query ran without `acting_as`; open the session under a principal"
+            "scoped query ran without `acting_as`; open the session under a user"
         )
 
 
@@ -67,8 +67,8 @@ def apply_live_temporal_gate(state: ORMExecuteState) -> None:
     `with_loader_criteria` registers one combined predicate on each top-level select, the temporal
     `FactClaim.is_current` gate together with the curation gate that hides a claim still pending
     review from everyone but its author, `FactClaim.reviewed_at IS NOT NULL OR
-    FactClaim.owner_id == <acting principal>`. Both live in the one lambda closing over the acting
-    principal, so every fact lane, and any future relationship load of claims, shares one criteria
+    FactClaim.owner_id == <acting user>`. Both live in the one lambda closing over the acting
+    user, so every fact lane, and any future relationship load of claims, shares one criteria
     application rather than two listeners layering separately. This is temporal and curation
     correctness in the ORM, never the security boundary, which stays in Postgres row level
     security. A read that must see history or every pending row regardless of author opts out with
@@ -81,7 +81,7 @@ def apply_live_temporal_gate(state: ORMExecuteState) -> None:
         return
     if state.execution_options.get(settings.skip_live_gate):
         return
-    acting = state.session.info.get("principal")
+    acting = state.session.info.get("user")
     state.statement = state.statement.options(
         with_loader_criteria(
             FactClaim,

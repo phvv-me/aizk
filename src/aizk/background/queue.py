@@ -70,7 +70,7 @@ async def enqueue_deduped(
     return True
 
 
-async def process_chunk(chunk_id: uuid.UUID, principal_id: uuid.UUID) -> list[uuid.UUID]:
+async def process_chunk(chunk_id: uuid.UUID, user_id: uuid.UUID) -> list[uuid.UUID]:
     """Build one chunk's graph slice under its owner and return the entity ids it touched.
 
     The durable per-job wrapper around extract_and_consolidate, the same core build_graph's
@@ -81,39 +81,39 @@ async def process_chunk(chunk_id: uuid.UUID, principal_id: uuid.UUID) -> list[uu
     core's.
 
     chunk_id: chunk whose graph slice to build.
-    principal_id: identity that owns the written entities and facts.
+    user_id: identity that owns the written entities and facts.
     """
-    async with acting_as(principal_id) as session:
+    async with acting_as(user_id) as session:
         chunk = await session.get(Chunk, chunk_id)
     if chunk is None:
-        logger.warning("chunk {} not visible to {}, skipping", chunk_id, principal_id)
+        logger.warning("chunk {} not visible to {}, skipping", chunk_id, user_id)
         return []
-    touched = await extract_and_consolidate(chunk, principal_id)
+    touched = await extract_and_consolidate(chunk, user_id)
     if touched:
-        async with acting_as(principal_id) as session:
+        async with acting_as(user_id) as session:
             for entity_id in touched:
                 await Watermark.bump(
-                    session, principal_id, Watermark.Kind.entity_dirty, ref=str(entity_id)
+                    session, user_id, Watermark.Kind.entity_dirty, ref=str(entity_id)
                 )
     return list(touched)
 
 
-async def process_profile(entity_id: uuid.UUID, principal_id: uuid.UUID) -> None:
+async def process_profile(entity_id: uuid.UUID, user_id: uuid.UUID) -> None:
     """Rebuild one entity's profile under its owner and clear its dirty watermark.
 
     entity_id: entity whose profile to rebuild.
-    principal_id: identity that owns the profile.
+    user_id: identity that owns the profile.
     """
-    await build_profile(entity_id, principal_id=principal_id)
-    async with acting_as(principal_id) as session:
+    await build_profile(entity_id, user_id=user_id)
+    async with acting_as(user_id) as session:
         await Watermark.set_value(
-            session, principal_id, Watermark.Kind.entity_dirty, counter=0, ref=str(entity_id)
+            session, user_id, Watermark.Kind.entity_dirty, counter=0, ref=str(entity_id)
         )
 
 
 async def enqueue_pending(
     limit: int | None = None,
-    principal_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
     source: str | None = None,
 ) -> int:
     """Enqueue a durable job for every pending chunk and return how many were queued.
@@ -121,19 +121,19 @@ async def enqueue_pending(
     Each job is deduplicated on its chunk id, so enqueuing twice is harmless.
 
     limit: maximum number of chunks to enqueue, all of them when null.
-    principal_id: identity whose visibility scopes the chunks and that owns the written rows, the
-        system principal when null.
+    user_id: identity whose visibility scopes the chunks and that owns the written rows, the
+        system user when null.
     source: when set, restrict to chunks of documents whose title matches this substring.
     """
-    principal_id = principal_id or settings.system_user_id
-    chunks = await pending_chunks(principal_id, limit, source)
+    user_id = user_id or settings.system_user_id
+    chunks = await pending_chunks(user_id, limit, source)
     async with queue_queries() as queries:
         queued = sum(
             [
                 await enqueue_deduped(
                     queries,
                     EXTRACT_ENTRYPOINT,
-                    ChunkJob(chunk_id=chunk.id, principal_id=principal_id),
+                    ChunkJob(chunk_id=chunk.id, user_id=user_id),
                     str(chunk.id),
                 )
                 for chunk in chunks
@@ -143,14 +143,14 @@ async def enqueue_pending(
     return queued
 
 
-async def enqueue_profiles(entity_ids: Iterable[uuid.UUID], principal_id: uuid.UUID) -> None:
+async def enqueue_profiles(entity_ids: Iterable[uuid.UUID], user_id: uuid.UUID) -> None:
     """Enqueue a debounced profile-rebuild job for each touched entity, the on-write chain.
 
     Each job is deduplicated on its entity, so a burst of writes touching one entity collapses to a
     single rebuild while that rebuild is still queued or in flight.
 
     entity_ids: the entities a finished extraction touched.
-    principal_id: identity that owns the profiles.
+    user_id: identity that owns the profiles.
     """
     entity_ids = list(entity_ids)
     if not entity_ids:
@@ -160,7 +160,7 @@ async def enqueue_profiles(entity_ids: Iterable[uuid.UUID], principal_id: uuid.U
             await enqueue_deduped(
                 queries,
                 PROFILE_ENTRYPOINT,
-                ProfileJob(entity_id=entity_id, principal_id=principal_id),
+                ProfileJob(entity_id=entity_id, user_id=user_id),
                 f"profile:{entity_id}",
             )
 

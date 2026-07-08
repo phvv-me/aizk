@@ -9,7 +9,7 @@ from hypothesis import strategies as st
 import aizk.mcp.middleware as middleware_module
 from aizk.config import settings
 from aizk.mcp.middleware import AnonymousRateLimit, IdentityMiddleware
-from aizk.mcp.principal import USER_STATE_KEY, User
+from aizk.mcp.user import USER_STATE_KEY, User
 
 
 class FakeFastmcpContext:
@@ -43,7 +43,7 @@ def test_anonymous_bucket_is_sized_to_a_five_second_burst_never_below_one(rate: 
     assert limiter.refill_rate == rate
 
 
-def test_principal_middleware_resolves_once_and_stashes_it_for_the_call(
+def test_user_middleware_resolves_once_and_stashes_it_for_the_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`on_call_tool` resolves the caller once and stashes it in Context state, then delegates."""
@@ -68,7 +68,7 @@ def test_principal_middleware_resolves_once_and_stashes_it_for_the_call(
     ids=["unresolved", "authenticated"],
 )
 def test_rate_limit_lets_any_non_anonymous_call_pass_uncharged(state: object) -> None:
-    """A missing or authenticated principal is never charged, so the shared bucket stays full."""
+    """A missing or authenticated user is never charged, so the shared bucket stays full."""
     limit = AnonymousRateLimit(max_requests_per_second=0.2)  # capacity == max(1, round(1.0)) == 1
     seed = {USER_STATE_KEY: state} if state is not None else {}
     context = FakeContext(seed)
@@ -81,7 +81,7 @@ def test_rate_limit_lets_any_non_anonymous_call_pass_uncharged(state: object) ->
 
 
 def test_rate_limit_drains_one_shared_burst_then_refuses_the_stranger() -> None:
-    """The anonymous principal drains the lone burst token, then the next call is refused."""
+    """The anonymous user drains the lone burst token, then the next call is refused."""
     limit = AnonymousRateLimit(max_requests_per_second=0.2)  # capacity floors at one token
     anon = User(id=settings.anonymous_user_id)
     context = FakeContext({USER_STATE_KEY: anon})

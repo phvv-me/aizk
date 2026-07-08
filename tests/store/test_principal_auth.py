@@ -32,6 +32,7 @@ def test_cached_verifier_selects_the_verifier_class_from_the_zitadel_settings(
         introspect_url=introspect,
         client_id="cid",
         client_secret="secret",
+        algorithm="ES384",
     )
     assert isinstance(verifier, expected)
 
@@ -82,23 +83,21 @@ def test_from_token_resolves_no_one_when_the_token_never_yields_a_string_subject
     """from_token returns null for an unconfigured, invalid, or subject-less token.
 
     `for_subject` is stubbed to fail loudly so a wrongly-taken provisioning path would surface
-    rather than silently minting a principal on a token that should authenticate no one.
+    rather than silently minting a user on a token that should authenticate no one.
     """
 
     async def forbidden(subject: str) -> uuid.UUID:
         raise AssertionError("for_subject must not run on a subject-less token")
 
     monkeypatch.setattr(User, "verifier", classmethod(lambda cls: verifier))
-    monkeypatch.setattr(
-        User, "for_subject", classmethod(lambda cls, subject: forbidden(subject))
-    )
+    monkeypatch.setattr(User, "for_subject", classmethod(lambda cls, subject: forbidden(subject)))
     assert dbutil.run(User.from_token("tok")) is None
 
 
-def test_from_token_maps_a_verified_subject_to_its_provisioned_principal(
+def test_from_token_maps_a_verified_subject_to_its_provisioned_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A verified token maps its `sub` claim to the principal `for_subject` resolves for it."""
+    """A verified token maps its `sub` claim to the user `for_subject` resolves for it."""
     resolved = uuid.uuid4()
     seen: dict[str, str] = {}
 
@@ -115,15 +114,15 @@ def test_from_token_maps_a_verified_subject_to_its_provisioned_principal(
     assert seen == {"subject": "zitadel|42"}
 
 
-def test_for_subject_provisions_on_first_sight_then_reuses_the_same_principal(
+def test_for_subject_provisions_on_first_sight_then_reuses_the_same_user(
     migrated_db: None,
 ) -> None:
-    """for_subject mints a principal for an unseen subject and returns the same one thereafter."""
+    """for_subject mints a user for an unseen subject and returns the same one thereafter."""
 
     async def probe() -> None:
         await dbutil.reset_db()
         first = await User.for_subject("sub-A")
         assert await User.for_subject("sub-A") == first  # stable across calls
-        assert await User.for_subject("sub-B") != first  # a new subject, a new principal
+        assert await User.for_subject("sub-B") != first  # a new subject, a new user
 
     dbutil.run(probe())

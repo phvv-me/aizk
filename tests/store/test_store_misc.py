@@ -60,7 +60,7 @@ def test_intermediate_scoped_mixin_registers_no_table() -> None:
 
 
 def test_writable_group_ids_selects_non_reader_roles() -> None:
-    """`writable_group_ids` compiles to a select over the principal's writer/admin memberships."""
+    """`writable_group_ids` compiles to a select over the user's writer/admin memberships."""
     statement = Membership.writable_group_ids(uuid.uuid4())
     compiled = str(statement.compile(compile_kwargs={"literal_binds": True})).lower()
     assert "membership" in compiled and "role" in compiled

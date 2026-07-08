@@ -22,7 +22,7 @@ UNIT_VECTOR = [1.0] + [0.0] * 1023
 
 
 class Grid(NamedTuple):
-    """The principals and the bridging team one promotion is probed against."""
+    """The users and the bridging team one promotion is probed against."""
 
     promoter: uuid.UUID
     member: uuid.UUID
@@ -33,13 +33,13 @@ class Grid(NamedTuple):
 
 @pytest.fixture
 def grid(migrated_db: None) -> Iterator[Grid]:
-    """A reset schema seeding three principals and one team, memberships added per test."""
+    """A reset schema seeding three users and one team, memberships added per test."""
     lattice = Grid(uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), f"team-{uuid.uuid4()}")
 
     async def setup() -> None:
         await dbutil.reset_db()
-        for principal in (lattice.promoter, lattice.member, lattice.outsider):
-            await dbutil.seed_user(principal)
+        for user in (lattice.promoter, lattice.member, lattice.outsider):
+            await dbutil.seed_user(user)
         await dbutil.seed_group(lattice.team, name=lattice.team_name)
 
     dbutil.run(setup())
@@ -89,7 +89,7 @@ def test_promote_copies_into_scope_and_an_outsider_stays_blind(grid: Grid) -> No
         await dbutil.seed_membership(grid.promoter, grid.team, "writer")
         await dbutil.seed_membership(grid.member, grid.team, "reader")
         source = await seed_source(grid.promoter)
-        count = await promote(source, grid.team_name, principal_id=grid.promoter)
+        count = await promote(source, grid.team_name, user_id=grid.promoter)
         async with acting_as(grid.promoter) as session:
             source_scopes = await session.scalar(
                 text("SELECT scopes FROM document WHERE id = :id"), {"id": source}
@@ -116,7 +116,7 @@ def test_promote_into_an_unknown_scope_raises(grid: Grid) -> None:
     async def probe() -> None:
         await dbutil.seed_membership(grid.promoter, grid.team, "writer")
         with pytest.raises(ScopeNotFoundError, match="no scope named"):
-            await promote(uuid.uuid4(), "no such team", principal_id=grid.promoter)
+            await promote(uuid.uuid4(), "no such team", user_id=grid.promoter)
 
     dbutil.run(probe())
 
@@ -126,7 +126,7 @@ def test_promote_by_a_non_member_raises(grid: Grid) -> None:
 
     async def probe() -> None:
         with pytest.raises(ValueError, match="may not publish"):
-            await promote(uuid.uuid4(), grid.team_name, principal_id=grid.promoter)
+            await promote(uuid.uuid4(), grid.team_name, user_id=grid.promoter)
 
     dbutil.run(probe())
 
@@ -137,6 +137,6 @@ def test_promote_of_an_invisible_document_raises(grid: Grid) -> None:
     async def probe() -> None:
         await dbutil.seed_membership(grid.promoter, grid.team, "writer")
         with pytest.raises(NotVisibleError, match="no visible document"):
-            await promote(uuid.uuid4(), grid.team_name, principal_id=grid.promoter)
+            await promote(uuid.uuid4(), grid.team_name, user_id=grid.promoter)
 
     dbutil.run(probe())

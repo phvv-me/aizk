@@ -21,7 +21,7 @@ async def plant_graph(
 ) -> list[uuid.UUID]:
     """Plant `node_count` entities and one binary `cites` fact per edge, return the node ids.
 
-    owner: principal that owns every planted content and claim.
+    owner: user that owns every planted content and claim.
     node_count: how many Concept entities to create.
     edges: directed (subject index, object index) pairs, each a fact linking two entities.
     """

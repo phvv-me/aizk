@@ -4,7 +4,7 @@ from fastmcp.server.middleware.rate_limiting import RateLimitError, TokenBucketR
 from fastmcp.tools.tool import ToolResult
 
 from ..config import settings
-from .principal import USER_STATE_KEY, User, resolve_user
+from .user import USER_STATE_KEY, User, resolve_user
 
 
 class IdentityMiddleware(Middleware):
@@ -22,9 +22,9 @@ class IdentityMiddleware(Middleware):
         context: MiddlewareContext[mt.CallToolRequestParams],
         call_next: CallNext[mt.CallToolRequestParams, ToolResult],
     ) -> ToolResult:
-        principal = await resolve_user()
+        user = await resolve_user()
         assert context.fastmcp_context is not None  # every tool call carries a request context
-        context.fastmcp_context.set_state(USER_STATE_KEY, principal)
+        context.fastmcp_context.set_state(USER_STATE_KEY, user)
         return await call_next(context)
 
 
@@ -32,7 +32,7 @@ class AnonymousRateLimit(Middleware):
     """Token-bucket rate limiting applied only to unauthenticated tool calls.
 
     A public group makes the HTTP server readable by strangers, so anonymous tool calls consume
-    from one shared token bucket while any authenticated principal, keyed or OIDC resolved,
+    from one shared token bucket while any authenticated user, keyed or OIDC resolved,
     passes through unthrottled. Composing the bucket rather than subclassing fastmcp's
     RateLimitingMiddleware keeps its inherited on_request hook from also charging every protocol
     handshake and listing, which would drain the bucket before the first tool call arrived. One
@@ -56,8 +56,8 @@ class AnonymousRateLimit(Middleware):
         call_next: CallNext[mt.CallToolRequestParams, ToolResult],
     ) -> ToolResult:
         assert context.fastmcp_context is not None  # every tool call carries a request context
-        principal = context.fastmcp_context.get_state(USER_STATE_KEY)
-        if not isinstance(principal, User) or principal.id != settings.anonymous_user_id:
+        user = context.fastmcp_context.get_state(USER_STATE_KEY)
+        if not isinstance(user, User) or user.id != settings.anonymous_user_id:
             return await call_next(context)
         if not await self.limiter.consume():
             raise RateLimitError("anonymous rate limit exceeded, authenticate for more")

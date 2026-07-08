@@ -12,7 +12,7 @@ from aizk.store import EntityClaim, EntityContent, FactClaim, FactContent, Profi
 
 @pytest.fixture
 def owner(migrated_db: None) -> Iterator[uuid.UUID]:
-    """A freshly reset schema seeding one principal, the owner every profile body acts as."""
+    """A freshly reset schema seeding one user, the owner every profile body acts as."""
     pid = uuid.uuid4()
 
     async def setup() -> None:
@@ -61,8 +61,8 @@ def test_build_profile_upserts_one_row_and_is_idempotent(
 
     async def probe() -> tuple[uuid.UUID, uuid.UUID, str | None]:
         subject = await seed_entity_with_facts(owner, "Leech lattice")
-        first = await build_profile(subject, principal_id=owner)
-        second = await build_profile(subject, principal_id=owner)
+        first = await build_profile(subject, user_id=owner)
+        second = await build_profile(subject, user_id=owner)
         return first, second, await stored_summary(owner, subject)
 
     first, second, summary = dbutil.run(probe())
@@ -79,7 +79,7 @@ def test_refresh_profiles_rebuilds_every_writable_entity(
     async def probe() -> tuple[int, str | None, str | None]:
         alpha = await seed_entity_with_facts(owner, "alpha")
         beta = await seed_entity_with_facts(owner, "beta")
-        count = await refresh_profiles(principal_id=owner)
+        count = await refresh_profiles(user_id=owner)
         return count, await stored_summary(owner, alpha), await stored_summary(owner, beta)
 
     count, alpha, beta = dbutil.run(probe())
@@ -89,10 +89,10 @@ def test_refresh_profiles_rebuilds_every_writable_entity(
 
 @pytest.mark.usefixtures("fake_embedder")
 def test_build_profile_refuses_an_invisible_entity(owner: uuid.UUID, fake_llm: object) -> None:
-    """A subject the principal cannot see raises rather than minting a profile from nothing."""
+    """A subject the user cannot see raises rather than minting a profile from nothing."""
 
     async def probe() -> None:
         with pytest.raises(NotVisibleError, match="not visible"):
-            await build_profile(uuid.uuid4(), principal_id=owner)
+            await build_profile(uuid.uuid4(), user_id=owner)
 
     dbutil.run(probe())

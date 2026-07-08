@@ -69,75 +69,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # Zitadel, the self-hosted identity provider aizk rents rather than managing users itself. It
-  # shares the one Postgres in the db container, creating its own `zitadel` database and role on
-  # first init through the aizk superuser admin connection, so the whole stack still runs one
-  # database server. TLS is off and the external scheme is plain http because a reverse proxy or
-  # tunnel terminates TLS in front of the stack, the same seam the aizk server sits behind.
-  # start-from-init runs the one-time setup, the schema, the first instance, and the bootstrap
-  # machine service account whose long-lived PAT is written to the mounted file below, then starts
-  # serving in one go and is idempotent on every later boot. That machine user carries the
-  # IAM_OWNER role, so its PAT both authenticates this machine to aizk and lets the one-time
-  # bootstrap create the introspection app aizk validates tokens through. Reached at
-  # http://zitadel:8080 inside the compose network and published on the host port for the console.
-  # a one-shot that makes the machinekey volume writable by Zitadel's own uid 1000 before it
-  # starts. A fresh named volume is root-owned, and Zitadel runs non-root, so without this the
-  # setup step that writes the bootstrap PAT fails with a permission error, which aborts the whole
-  # first-instance migration after it has already claimed the instance domain, and every restart
-  # then dies on that half-written leftover. Chowning the volume up front keeps Zitadel non-root
-  # and lets the PAT land on the very first init.
-  zitadel-init:
-    image: alpine:3
-    command: ["sh", "-c", "chown -R 1000:1000 /machinekey && chmod 700 /machinekey"]
-    volumes:
-      - zitadel-machinekey:/machinekey
-    restart: "no"
-
-  zitadel:
-    image: ghcr.io/zitadel/zitadel:v4.15.3
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-      zitadel-init:
-        condition: service_completed_successfully
-    command: start-from-init --masterkeyFromEnv --tlsMode disabled
-    environment:
-      ZITADEL_MASTERKEY: ${AIZK_ZITADEL_MASTERKEY}
-      ZITADEL_DATABASE_POSTGRES_HOST: db
-      ZITADEL_DATABASE_POSTGRES_PORT: "5432"
-      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
-      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
-      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${AIZK_ZITADEL_DB_PASSWORD}
-      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
-      # the aizk superuser is Zitadel's admin connection, the one that creates the zitadel db and role
-      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: aizk
-      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${AIZK_ADMIN_PASSWORD:-aizk}
-      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
-      ZITADEL_EXTERNALSECURE: "false"
-      # the external domain is the compose service name, not localhost, because the caller that
-      # matters is the aizk server reaching this over the compose network at http://zitadel:8080,
-      # and Zitadel resolves the instance by the request origin, which must match ExternalDomain and
-      # ExternalPort exactly. Matching the internal address is what lets the server introspect a
-      # token with no host-header trickery. The port is Zitadel's own internal 8080, still published
-      # on the host for the console, which a host browser reaches by mapping this name to 127.0.0.1.
-      ZITADEL_EXTERNALDOMAIN: zitadel
-      ZITADEL_EXTERNALPORT: "8080"
-      ZITADEL_TLS_ENABLED: "false"
-      # the first instance's human admin for the console, and the bootstrap machine service account
-      # whose PAT lands in the mounted file the one-time bootstrap reads
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${AIZK_ZITADEL_ADMIN_PASSWORD}
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: aizk-admin
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: aizk-admin
-      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2099-12-31T23:59:59Z"
-      ZITADEL_FIRSTINSTANCE_PATPATH: /machinekey/pat.txt
-    ports:
-      - "${AIZK_ZITADEL_PUBLISH_PORT:-8091}:8080"
-    volumes:
-      - zitadel-machinekey:/machinekey
-
   # vLLM serves Qwen3-VL-Embedding-2B over an OpenAI-compatible /v1/embeddings, so the model loads
   # in this container, never inside aizk. --runner pooling is the current flag (--task embed was
   # removed), is_matryoshka lets a request set dimensions=1024 to truncate the native 2048-d output.
@@ -376,5 +307,3 @@ services:
 volumes:
   db-data:
   backups:
-  # holds the bootstrap machine account's PAT that Zitadel writes on first init
-  zitadel-machinekey:
