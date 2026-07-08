@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
+from loguru import logger
+from openai import APIConnectionError
 from patos import FrozenModel
 from pydantic import BaseModel, Field, create_model
 from sqlalchemy import select
@@ -99,7 +101,9 @@ async def build_snapshot(session: AsyncSession) -> OntologySnapshot:
 
     Embeds every entity description in one batched call here, once per refresh rather than once
     per auto-create suggestion, since the comparison side of that cascade is fixed between
-    refreshes and only the suggestion itself is ever new.
+    refreshes and only the suggestion itself is ever new. An unreachable embed endpoint degrades
+    gracefully: the structure still refreshes and only the description vectors are left empty, so a
+    transient serving outage cannot block every `ops.setup` the way a hard failure here would.
 
     session: open session the catalog is read through, `entity_kind`/`relation_kind` carry no
         row level security so any session works.
@@ -111,11 +115,18 @@ async def build_snapshot(session: AsyncSession) -> OntologySnapshot:
     entity_descriptions = dict(
         (await session.execute(select(EntityKind.name, EntityKind.description))).all()
     )
-    description_vectors = (
-        await Embedder().embed(list(entity_descriptions.values()), mode="document")
-        if entity_descriptions
-        else []
-    )
+    try:
+        embedded = (
+            await Embedder().embed(list(entity_descriptions.values()), mode="document")
+            if entity_descriptions
+            else []
+        )
+        description_vectors = dict(zip(entity_descriptions, embedded, strict=True))
+    except APIConnectionError:
+        logger.warning(
+            "ontology embed endpoint unreachable, refreshing structure without description vectors"
+        )
+        description_vectors = {}
     prompt = settings.ontology_prompt_template.format(
         entity_count=len(entity_names),
         entity_types=", ".join(entity_names),
@@ -127,9 +138,7 @@ async def build_snapshot(session: AsyncSession) -> OntologySnapshot:
         entity_names=entity_names,
         relation_names=relation_names,
         entity_descriptions=entity_descriptions,
-        entity_description_vectors=dict(
-            zip(entity_descriptions, description_vectors, strict=True)
-        ),
+        entity_description_vectors=description_vectors,
         llm_entity=llm_entity,
         llm_fact=llm_fact,
         llm_extraction=llm_extraction,

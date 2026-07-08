@@ -1,10 +1,34 @@
 {
   "errors": [
     {
-      "line": 235,
+      "line": 150,
+      "column": 27,
+      "stop_line": 150,
+      "stop_column": 58,
+      "path": "src/aizk/admin.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `NoneType` has no attribute `cosine_distance`\nObject of class `list` has no attribute `cosine_distance`",
+      "concise_description": "Object of class `NoneType` has no attribute `cosine_distance`\nObject of class `list` has no attribute `cosine_distance`",
+      "severity": "error"
+    },
+    {
+      "line": 157,
+      "column": 68,
+      "stop_line": 157,
+      "stop_column": 83,
+      "path": "src/aizk/admin.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
+      "concise_description": "Object of class `UUID` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 239,
       "column": 13,
-      "stop_line": 235,
-      "stop_column": 66,
+      "stop_line": 239,
+      "stop_column": 56,
       "path": "src/aizk/background/tasks.py",
       "code": -2,
       "name": "bad-argument-type",
@@ -13,10 +37,10 @@
       "severity": "error"
     },
     {
-      "line": 250,
+      "line": 256,
       "column": 13,
-      "stop_line": 250,
-      "stop_column": 61,
+      "stop_line": 256,
+      "stop_column": 51,
       "path": "src/aizk/background/tasks.py",
       "code": -2,
       "name": "bad-argument-type",
@@ -85,9 +109,9 @@
       "severity": "error"
     },
     {
-      "line": 685,
+      "line": 683,
       "column": 57,
-      "stop_line": 685,
+      "stop_line": 683,
       "stop_column": 75,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -97,9 +121,9 @@
       "severity": "error"
     },
     {
-      "line": 687,
+      "line": 685,
       "column": 41,
-      "stop_line": 687,
+      "stop_line": 685,
       "stop_column": 61,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -181,9 +205,9 @@
       "severity": "error"
     },
     {
-      "line": 153,
+      "line": 154,
       "column": 20,
-      "stop_line": 153,
+      "stop_line": 154,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -193,9 +217,9 @@
       "severity": "error"
     },
     {
-      "line": 259,
+      "line": 260,
       "column": 36,
-      "stop_line": 259,
+      "stop_line": 260,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -205,9 +229,9 @@
       "severity": "error"
     },
     {
-      "line": 440,
+      "line": 441,
       "column": 16,
-      "stop_line": 440,
+      "stop_line": 441,
       "stop_column": 38,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -217,9 +241,9 @@
       "severity": "error"
     },
     {
-      "line": 446,
+      "line": 447,
       "column": 44,
-      "stop_line": 446,
+      "stop_line": 447,
       "stop_column": 64,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -229,9 +253,9 @@
       "severity": "error"
     },
     {
-      "line": 447,
+      "line": 448,
       "column": 37,
-      "stop_line": 447,
+      "stop_line": 448,
       "stop_column": 58,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -241,9 +265,9 @@
       "severity": "error"
     },
     {
-      "line": 880,
+      "line": 912,
       "column": 21,
-      "stop_line": 880,
+      "stop_line": 912,
       "stop_column": 47,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -253,9 +277,9 @@
       "severity": "error"
     },
     {
-      "line": 880,
+      "line": 912,
       "column": 59,
-      "stop_line": 880,
+      "stop_line": 912,
       "stop_column": 84,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -301,9 +325,9 @@
       "severity": "error"
     },
     {
-      "line": 35,
+      "line": 34,
       "column": 43,
-      "stop_line": 35,
+      "stop_line": 34,
       "stop_column": 66,
       "path": "src/aizk/graph/consolidation.py",
       "code": -2,
@@ -313,9 +337,9 @@
       "severity": "error"
     },
     {
-      "line": 53,
+      "line": 54,
       "column": 20,
-      "stop_line": 53,
+      "stop_line": 54,
       "stop_column": 44,
       "path": "src/aizk/graph/curation_review.py",
       "code": -2,
@@ -325,9 +349,9 @@
       "severity": "error"
     },
     {
-      "line": 53,
+      "line": 54,
       "column": 58,
-      "stop_line": 53,
+      "stop_line": 54,
       "stop_column": 85,
       "path": "src/aizk/graph/curation_review.py",
       "code": -2,
@@ -361,9 +385,9 @@
       "severity": "error"
     },
     {
-      "line": 400,
+      "line": 399,
       "column": 59,
-      "stop_line": 400,
+      "stop_line": 399,
       "stop_column": 79,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -373,9 +397,9 @@
       "severity": "error"
     },
     {
-      "line": 443,
+      "line": 442,
       "column": 59,
-      "stop_line": 443,
+      "stop_line": 442,
       "stop_column": 85,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -385,9 +409,9 @@
       "severity": "error"
     },
     {
-      "line": 546,
+      "line": 545,
       "column": 16,
-      "stop_line": 546,
+      "stop_line": 545,
       "stop_column": 55,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -397,9 +421,9 @@
       "severity": "error"
     },
     {
-      "line": 555,
+      "line": 554,
       "column": 13,
-      "stop_line": 555,
+      "stop_line": 554,
       "stop_column": 43,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -430,54 +454,6 @@
       "name": "missing-attribute",
       "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
       "concise_description": "Object of class `UUID` has no attribute `in_`",
-      "severity": "error"
-    },
-    {
-      "line": 96,
-      "column": 52,
-      "stop_line": 96,
-      "stop_column": 76,
-      "path": "src/aizk/graph/timeline.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `str` has no attribute `ilike`",
-      "concise_description": "Object of class `str` has no attribute `ilike`",
-      "severity": "error"
-    },
-    {
-      "line": 98,
-      "column": 21,
-      "stop_line": 98,
-      "stop_column": 47,
-      "path": "src/aizk/graph/timeline.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
-      "concise_description": "Object of class `UUID` has no attribute `in_`",
-      "severity": "error"
-    },
-    {
-      "line": 98,
-      "column": 56,
-      "stop_line": 98,
-      "stop_column": 81,
-      "path": "src/aizk/graph/timeline.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `NoneType` has no attribute `in_`\nObject of class `UUID` has no attribute `in_`",
-      "concise_description": "Object of class `NoneType` has no attribute `in_`\nObject of class `UUID` has no attribute `in_`",
-      "severity": "error"
-    },
-    {
-      "line": 708,
-      "column": 26,
-      "stop_line": 708,
-      "stop_column": 33,
-      "path": "src/aizk/mcp/server.py",
-      "code": -2,
-      "name": "bad-argument-type",
-      "description": "Unpacked keyword argument `bool | int | str` is not assignable to parameter `name` with type `bytearray | bytes | str` in function `aizk.mcp.models.GroupSummary.__init__`",
-      "concise_description": "Unpacked keyword argument `bool | int | str` is not assignable to parameter `name` with type `bytearray | bytes | str` in function `aizk.mcp.models.GroupSummary.__init__`",
       "severity": "error"
     },
     {
@@ -649,9 +625,9 @@
       "severity": "error"
     },
     {
-      "line": 573,
+      "line": 787,
       "column": 9,
-      "stop_line": 573,
+      "stop_line": 787,
       "stop_column": 28,
       "path": "src/aizk/store/migrations/versions/0001_init.py",
       "code": -2,
@@ -661,9 +637,9 @@
       "severity": "error"
     },
     {
-      "line": 598,
+      "line": 812,
       "column": 9,
-      "stop_line": 598,
+      "stop_line": 812,
       "stop_column": 27,
       "path": "src/aizk/store/migrations/versions/0001_init.py",
       "code": -2,
@@ -673,9 +649,9 @@
       "severity": "error"
     },
     {
-      "line": 240,
+      "line": 238,
       "column": 29,
-      "stop_line": 240,
+      "stop_line": 238,
       "stop_column": 42,
       "path": "src/aizk/store/mixins/scoped.py",
       "code": -2,
@@ -685,9 +661,93 @@
       "severity": "error"
     },
     {
-      "line": 281,
+      "line": 83,
+      "column": 44,
+      "stop_line": 83,
+      "stop_column": 65,
+      "path": "src/aizk/store/models/tables/document.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
+      "concise_description": "Object of class `UUID` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 86,
+      "column": 20,
+      "stop_line": 86,
+      "stop_column": 49,
+      "path": "src/aizk/store/models/tables/document.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `NoneType` has no attribute `in_`\nObject of class `UUID` has no attribute `in_`",
+      "concise_description": "Object of class `NoneType` has no attribute `in_`\nObject of class `UUID` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 91,
+      "column": 20,
+      "stop_line": 91,
+      "stop_column": 41,
+      "path": "src/aizk/store/models/tables/document.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
+      "concise_description": "Object of class `UUID` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 96,
+      "column": 20,
+      "stop_line": 96,
+      "stop_column": 30,
+      "path": "src/aizk/store/models/tables/document.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
+      "concise_description": "Object of class `UUID` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 170,
+      "column": 44,
+      "stop_line": 170,
+      "stop_column": 66,
+      "path": "src/aizk/store/models/tables/group.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `NoneType` has no attribute `is_not`\nObject of class `str` has no attribute `is_not`",
+      "concise_description": "Object of class `NoneType` has no attribute `is_not`\nObject of class `str` has no attribute `is_not`",
+      "severity": "error"
+    },
+    {
+      "line": 174,
+      "column": 17,
+      "stop_line": 174,
+      "stop_column": 40,
+      "path": "src/aizk/store/models/tables/group.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
+      "concise_description": "Object of class `UUID` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 175,
+      "column": 17,
+      "stop_line": 175,
+      "stop_column": 43,
+      "path": "src/aizk/store/models/tables/group.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `UUID` has no attribute `not_in`",
+      "concise_description": "Object of class `UUID` has no attribute `not_in`",
+      "severity": "error"
+    },
+    {
+      "line": 349,
       "column": 56,
-      "stop_line": 281,
+      "stop_line": 349,
       "stop_column": 66,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -697,9 +757,9 @@
       "severity": "error"
     },
     {
-      "line": 289,
+      "line": 357,
       "column": 21,
-      "stop_line": 289,
+      "stop_line": 357,
       "stop_column": 44,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -709,9 +769,9 @@
       "severity": "error"
     },
     {
-      "line": 315,
+      "line": 383,
       "column": 24,
-      "stop_line": 315,
+      "stop_line": 383,
       "stop_column": 48,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -721,9 +781,9 @@
       "severity": "error"
     },
     {
-      "line": 315,
+      "line": 383,
       "column": 61,
-      "stop_line": 315,
+      "stop_line": 383,
       "stop_column": 85,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -733,9 +793,9 @@
       "severity": "error"
     },
     {
-      "line": 334,
+      "line": 402,
       "column": 13,
-      "stop_line": 334,
+      "stop_line": 402,
       "stop_column": 38,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -745,9 +805,9 @@
       "severity": "error"
     },
     {
-      "line": 334,
+      "line": 402,
       "column": 51,
-      "stop_line": 334,
+      "stop_line": 402,
       "stop_column": 76,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -757,9 +817,9 @@
       "severity": "error"
     },
     {
-      "line": 337,
+      "line": 405,
       "column": 41,
-      "stop_line": 337,
+      "stop_line": 405,
       "stop_column": 57,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -769,9 +829,9 @@
       "severity": "error"
     },
     {
-      "line": 354,
+      "line": 422,
       "column": 17,
-      "stop_line": 354,
+      "stop_line": 422,
       "stop_column": 42,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -781,9 +841,9 @@
       "severity": "error"
     },
     {
-      "line": 355,
+      "line": 423,
       "column": 17,
-      "stop_line": 355,
+      "stop_line": 423,
       "stop_column": 42,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -793,9 +853,9 @@
       "severity": "error"
     },
     {
-      "line": 356,
+      "line": 424,
       "column": 17,
-      "stop_line": 356,
+      "stop_line": 424,
       "stop_column": 33,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -805,11 +865,11 @@
       "severity": "error"
     },
     {
-      "line": 104,
+      "line": 124,
       "column": 47,
-      "stop_line": 104,
+      "stop_line": 124,
       "stop_column": 71,
-      "path": "src/aizk/store/models/tables/principal.py",
+      "path": "src/aizk/store/models/tables/user.py",
       "code": -2,
       "name": "missing-attribute",
       "description": "Object of class `datetime` has no attribute `desc`",
@@ -817,9 +877,9 @@
       "severity": "error"
     },
     {
-      "line": 99,
+      "line": 105,
       "column": 19,
-      "stop_line": 99,
+      "stop_line": 105,
       "stop_column": 21,
       "path": "tests/background/test_schedule.py",
       "code": -2,
@@ -829,9 +889,9 @@
       "severity": "error"
     },
     {
-      "line": 73,
+      "line": 70,
       "column": 15,
-      "stop_line": 73,
+      "stop_line": 70,
       "stop_column": 27,
       "path": "tests/doubles.py",
       "code": -2,
@@ -901,9 +961,9 @@
       "severity": "error"
     },
     {
-      "line": 55,
+      "line": 53,
       "column": 73,
-      "stop_line": 55,
+      "stop_line": 53,
       "stop_column": 77,
       "path": "tests/extract/test_llm.py",
       "code": -2,
@@ -913,9 +973,9 @@
       "severity": "error"
     },
     {
-      "line": 57,
+      "line": 55,
       "column": 33,
-      "stop_line": 57,
+      "stop_line": 55,
       "stop_column": 44,
       "path": "tests/extract/test_llm.py",
       "code": -2,
@@ -925,9 +985,9 @@
       "severity": "error"
     },
     {
-      "line": 67,
+      "line": 65,
       "column": 10,
-      "stop_line": 67,
+      "stop_line": 65,
       "stop_column": 29,
       "path": "tests/extract/test_llm.py",
       "code": -2,
@@ -937,9 +997,9 @@
       "severity": "error"
     },
     {
-      "line": 67,
+      "line": 65,
       "column": 10,
-      "stop_line": 67,
+      "stop_line": 65,
       "stop_column": 29,
       "path": "tests/extract/test_llm.py",
       "code": -2,
@@ -961,9 +1021,9 @@
       "severity": "error"
     },
     {
-      "line": 105,
+      "line": 103,
       "column": 10,
-      "stop_line": 105,
+      "stop_line": 103,
       "stop_column": 29,
       "path": "tests/extract/test_llm.py",
       "code": -2,
@@ -973,9 +1033,9 @@
       "severity": "error"
     },
     {
-      "line": 105,
+      "line": 103,
       "column": 10,
-      "stop_line": 105,
+      "stop_line": 103,
       "stop_column": 29,
       "path": "tests/extract/test_llm.py",
       "code": -2,
@@ -985,9 +1045,9 @@
       "severity": "error"
     },
     {
-      "line": 166,
+      "line": 165,
       "column": 27,
-      "stop_line": 166,
+      "stop_line": 165,
       "stop_column": 35,
       "path": "tests/graph/test_build.py",
       "code": -2,
@@ -997,9 +1057,9 @@
       "severity": "error"
     },
     {
-      "line": 167,
+      "line": 166,
       "column": 11,
-      "stop_line": 167,
+      "stop_line": 166,
       "stop_column": 19,
       "path": "tests/graph/test_build.py",
       "code": -2,
@@ -1009,9 +1069,9 @@
       "severity": "error"
     },
     {
-      "line": 465,
+      "line": 464,
       "column": 5,
-      "stop_line": 465,
+      "stop_line": 464,
       "stop_column": 32,
       "path": "tests/graph/test_build.py",
       "code": -2,
@@ -1021,9 +1081,9 @@
       "severity": "error"
     },
     {
-      "line": 470,
+      "line": 469,
       "column": 38,
-      "stop_line": 470,
+      "stop_line": 469,
       "stop_column": 51,
       "path": "tests/graph/test_build.py",
       "code": -2,
@@ -1129,57 +1189,33 @@
       "severity": "error"
     },
     {
-      "line": 70,
-      "column": 60,
-      "stop_line": 70,
-      "stop_column": 67,
+      "line": 59,
+      "column": 59,
+      "stop_line": 59,
+      "stop_column": 66,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `FakeContext` is not assignable to parameter `context` with type `MiddlewareContext[CallToolRequestParams]` in function `aizk.mcp.middleware.PrincipalMiddleware.on_call_tool`",
-      "concise_description": "Argument `FakeContext` is not assignable to parameter `context` with type `MiddlewareContext[CallToolRequestParams]` in function `aizk.mcp.middleware.PrincipalMiddleware.on_call_tool`",
+      "description": "Argument `FakeContext` is not assignable to parameter `context` with type `MiddlewareContext[CallToolRequestParams]` in function `aizk.mcp.middleware.IdentityMiddleware.on_call_tool`",
+      "concise_description": "Argument `FakeContext` is not assignable to parameter `context` with type `MiddlewareContext[CallToolRequestParams]` in function `aizk.mcp.middleware.IdentityMiddleware.on_call_tool`",
       "severity": "error"
     },
     {
-      "line": 70,
-      "column": 69,
-      "stop_line": 70,
-      "stop_column": 78,
+      "line": 59,
+      "column": 68,
+      "stop_line": 59,
+      "stop_column": 77,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `(ctx: object) -> Coroutine[Unknown, Unknown, str]` is not assignable to parameter `call_next` with type `CallNext[CallToolRequestParams, ToolResult]` in function `aizk.mcp.middleware.PrincipalMiddleware.on_call_tool`\n  Positional parameter name mismatch: got `ctx`, want `context`",
-      "concise_description": "Argument `(ctx: object) -> Coroutine[Unknown, Unknown, str]` is not assignable to parameter `call_next` with type `CallNext[CallToolRequestParams, ToolResult]` in function `aizk.mcp.middleware.PrincipalMiddleware.on_call_tool`",
+      "description": "Argument `(ctx: object) -> Coroutine[Unknown, Unknown, str]` is not assignable to parameter `call_next` with type `CallNext[CallToolRequestParams, ToolResult]` in function `aizk.mcp.middleware.IdentityMiddleware.on_call_tool`\n  Positional parameter name mismatch: got `ctx`, want `context`",
+      "concise_description": "Argument `(ctx: object) -> Coroutine[Unknown, Unknown, str]` is not assignable to parameter `call_next` with type `CallNext[CallToolRequestParams, ToolResult]` in function `aizk.mcp.middleware.IdentityMiddleware.on_call_tool`",
       "severity": "error"
     },
     {
-      "line": 92,
-      "column": 72,
-      "stop_line": 92,
-      "stop_column": 80,
-      "path": "tests/mcp/test_middleware.py",
-      "code": -2,
-      "name": "bad-argument-type",
-      "description": "Argument `object` is not assignable to parameter `context` with type `MiddlewareContext[ListToolsRequest]` in function `aizk.mcp.middleware.PrincipalMiddleware.on_list_tools`",
-      "concise_description": "Argument `object` is not assignable to parameter `context` with type `MiddlewareContext[ListToolsRequest]` in function `aizk.mcp.middleware.PrincipalMiddleware.on_list_tools`",
-      "severity": "error"
-    },
-    {
-      "line": 92,
-      "column": 82,
-      "stop_line": 92,
-      "stop_column": 91,
-      "path": "tests/mcp/test_middleware.py",
-      "code": -2,
-      "name": "bad-argument-type",
-      "description": "Argument `(ctx: object) -> Coroutine[Unknown, Unknown, list[FakeTool]]` is not assignable to parameter `call_next` with type `CallNext[ListToolsRequest, Sequence[Tool]]` in function `aizk.mcp.middleware.PrincipalMiddleware.on_list_tools`\n  Positional parameter name mismatch: got `ctx`, want `context`",
-      "concise_description": "Argument `(ctx: object) -> Coroutine[Unknown, Unknown, list[FakeTool]]` is not assignable to parameter `call_next` with type `CallNext[ListToolsRequest, Sequence[Tool]]` in function `aizk.mcp.middleware.PrincipalMiddleware.on_list_tools`",
-      "severity": "error"
-    },
-    {
-      "line": 112,
+      "line": 80,
       "column": 46,
-      "stop_line": 112,
+      "stop_line": 80,
       "stop_column": 53,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1189,9 +1225,9 @@
       "severity": "error"
     },
     {
-      "line": 112,
+      "line": 80,
       "column": 55,
-      "stop_line": 112,
+      "stop_line": 80,
       "stop_column": 64,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1201,9 +1237,9 @@
       "severity": "error"
     },
     {
-      "line": 126,
+      "line": 94,
       "column": 42,
-      "stop_line": 126,
+      "stop_line": 94,
       "stop_column": 49,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1213,9 +1249,9 @@
       "severity": "error"
     },
     {
-      "line": 126,
+      "line": 94,
       "column": 51,
-      "stop_line": 126,
+      "stop_line": 94,
       "stop_column": 60,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1225,9 +1261,9 @@
       "severity": "error"
     },
     {
-      "line": 128,
+      "line": 96,
       "column": 39,
-      "stop_line": 128,
+      "stop_line": 96,
       "stop_column": 46,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1237,27 +1273,15 @@
       "severity": "error"
     },
     {
-      "line": 128,
+      "line": 96,
       "column": 48,
-      "stop_line": 128,
+      "stop_line": 96,
       "stop_column": 57,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
       "name": "bad-argument-type",
       "description": "Argument `(ctx: object) -> Coroutine[Unknown, Unknown, str]` is not assignable to parameter `call_next` with type `CallNext[CallToolRequestParams, ToolResult]` in function `aizk.mcp.middleware.AnonymousRateLimit.on_call_tool`\n  Positional parameter name mismatch: got `ctx`, want `context`",
       "concise_description": "Argument `(ctx: object) -> Coroutine[Unknown, Unknown, str]` is not assignable to parameter `call_next` with type `CallNext[CallToolRequestParams, ToolResult]` in function `aizk.mcp.middleware.AnonymousRateLimit.on_call_tool`",
-      "severity": "error"
-    },
-    {
-      "line": 532,
-      "column": 30,
-      "stop_line": 532,
-      "stop_column": 56,
-      "path": "tests/mcp/test_server.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `object` has no attribute `embed_dim`",
-      "concise_description": "Object of class `object` has no attribute `embed_dim`",
       "severity": "error"
     },
     {
