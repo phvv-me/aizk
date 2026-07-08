@@ -45,7 +45,6 @@ for _sub in (user, group, graph, ontology, data, db, eval):
     app.command(_sub)
 
 
-
 @db.command(name="migrate")
 def migrate() -> None:
     """Apply database migrations up to head, the pre-auth bootstrap step `ops.setup` also runs.
@@ -216,9 +215,7 @@ async def capture_session(
     user_id = user or settings.system_user_id
     text_content = Path(transcript).read_text(encoding="utf-8")
 
-    document_id = await ingest_text(
-        text_content, title=Path(transcript).stem, owner_id=user_id
-    )
+    document_id = await ingest_text(text_content, title=Path(transcript).stem, owner_id=user_id)
     await enqueue_pending(user_id=user_id)
     print(f"captured session into document {document_id}")
 
@@ -385,9 +382,7 @@ async def ingest_image(
     scopes: comma-separated group names to share it with, private to the owner when null.
     user: identity that owns the stored row, the system user when null.
     """
-    document_id = await admin.ingest_image(
-        path, caption=caption, scopes=scopes, user_id=user
-    )
+    document_id = await admin.ingest_image(path, caption=caption, scopes=scopes, user_id=user)
     print(document_id)
 
 

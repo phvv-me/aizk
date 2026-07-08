@@ -7,6 +7,7 @@ USER_TOOLS = {
     "recall",
     "remember",
     "reference",
+    "move",
     "pending",
     "approve",
     "reject",

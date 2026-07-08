@@ -9,9 +9,7 @@ from .models import FactClaim
 
 
 @event.listens_for(Session, "after_begin")
-def bind_user(
-    session: Session, transaction: SessionTransaction, connection: Connection
-) -> None:
+def bind_user(session: Session, transaction: SessionTransaction, connection: Connection) -> None:
     """Bind app.uid and app.scopes for the transaction from the session's own acting identity.
 
     A global ORM-level listener rather than a per-engine Core `begin` hook, so every session ever

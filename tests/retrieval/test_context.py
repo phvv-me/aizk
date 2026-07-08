@@ -168,9 +168,7 @@ def test_assemble_context_pack_reuses_recall_and_packs_within_the_budget(
     captured: dict[str, object] = {}
     user = uuid.uuid4()
     monkeypatch.setattr(context_module, "recall", stub_recall_into(captured))
-    pack = asyncio.run(
-        assemble_context_pack("what holds", user_id=user, token_budget=4000, k=5)
-    )
+    pack = asyncio.run(assemble_context_pack("what holds", user_id=user, token_budget=4000, k=5))
     assert captured == {"query": "what holds", "user_id": user, "k": 5, "scopes": ()}
     lanes = {block.lane for block in pack.blocks}
     assert {"profile", "facts", "working memory"} <= lanes

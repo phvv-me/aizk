@@ -148,9 +148,7 @@ async def gather_lanes(
     ctx: the shared per-call inputs every lane reads its own slice off.
     """
     async with stage("recall_lanes"):
-        return await asyncio.gather(
-            *(timed_lane(lane, user_id, scopes, ctx) for lane in LANES)
-        )
+        return await asyncio.gather(*(timed_lane(lane, user_id, scopes, ctx) for lane in LANES))
 
 
 @span

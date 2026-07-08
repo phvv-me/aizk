@@ -232,9 +232,7 @@ def test_run_eval_scores_a_half_hitting_gold_sweep_and_ab(monkeypatch: pytest.Mo
         QA(question="what does beta hold", expected="beta holds"),
     ]
 
-    async def stub_build_questions(
-        questions: list[str] | None, user_id: uuid.UUID
-    ) -> list[QA]:
+    async def stub_build_questions(questions: list[str] | None, user_id: uuid.UUID) -> list[QA]:
         return gold
 
     monkeypatch.setattr(harness, "build_questions", stub_build_questions)

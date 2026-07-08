@@ -66,9 +66,7 @@ async def promote_sessions(
     if not due:
         return 0
     for item in due:
-        await ingest_text(
-            item.text, kind=item.kind, owner_id=user_id, scopes=tuple(item.scopes)
-        )
+        await ingest_text(item.text, kind=item.kind, owner_id=user_id, scopes=tuple(item.scopes))
     await mark_promoted(user_id, due, now)
     await enqueue_pending(user_id=user_id)
     logger.info("promoted {} working items into the graph for {}", len(due), user_id)

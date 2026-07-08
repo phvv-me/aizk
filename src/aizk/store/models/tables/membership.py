@@ -31,9 +31,7 @@ class Membership(TableBase, table=True):
         writer = auto()
         admin = auto()
 
-    user_id: uuid.UUID = Field(
-        foreign_key="users.id", ondelete="CASCADE", primary_key=True
-    )
+    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE", primary_key=True)
     group_id: uuid.UUID = Field(foreign_key="group_.id", ondelete="CASCADE", primary_key=True)
     role: Role = Field(
         default=Role.writer,
@@ -51,9 +49,7 @@ class Membership(TableBase, table=True):
         user_id: user whose writable groups are selected.
         """
         return (
-            select(cls.group_id)
-            .where(cls.user_id == user_id)
-            .where(cls.role != cls.Role.reader)
+            select(cls.group_id).where(cls.user_id == user_id).where(cls.role != cls.Role.reader)
         )
 
     @classmethod

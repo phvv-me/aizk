@@ -27,9 +27,7 @@ def test_bearer_token_prefers_the_environment_over_the_header(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The stdio `AIZK_AUTH_TOKEN` env var wins; otherwise the HTTP Authorization bearer scheme."""
-    monkeypatch.setattr(
-        user_mod, "get_http_headers", lambda: {"authorization": "Bearer hval"}
-    )
+    monkeypatch.setattr(user_mod, "get_http_headers", lambda: {"authorization": "Bearer hval"})
     monkeypatch.setenv(AUTH_TOKEN_ENV, "envval")
     assert bearer_token() == "envval"
     monkeypatch.delenv(AUTH_TOKEN_ENV, raising=False)
@@ -76,9 +74,7 @@ def test_current_user_reads_the_resolved_state(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.parametrize("http", [False, True])
-def test_resolve_user_falls_back_by_transport(
-    monkeypatch: pytest.MonkeyPatch, http: bool
-) -> None:
+def test_resolve_user_falls_back_by_transport(monkeypatch: pytest.MonkeyPatch, http: bool) -> None:
     """With no token, stdio resolves the configured user and HTTP the anonymous one."""
     monkeypatch.setattr(user_mod, "bearer_token", lambda: None)
     monkeypatch.setattr(settings, "mcp_http", http)

@@ -94,9 +94,7 @@ async def rebuild(
     source: restrict the build to chunks of documents whose title matches this substring.
     user_id: identity that owns the written claims, the system user when null.
     """
-    return await graph.build_graph(
-        limit=limit, user_id=user_id or system(), source=source
-    )
+    return await graph.build_graph(limit=limit, user_id=user_id or system(), source=source)
 
 
 async def decay(half_life_days: float = 90.0, user_id: uuid.UUID | None = None) -> int:
@@ -173,14 +171,10 @@ async def promote(document: str, to_scopes: str, user_id: uuid.UUID | None = Non
     to_scopes: comma-separated names of the target groups the copy is published into.
     user_id: identity the promotion acts under, the system user when null.
     """
-    return await graph.promote(
-        uuid.UUID(document), to_scopes, user_id=user_id or system()
-    )
+    return await graph.promote(uuid.UUID(document), to_scopes, user_id=user_id or system())
 
 
-async def ingest(
-    path: str, scopes: str | None = None, user_id: uuid.UUID | None = None
-) -> int:
+async def ingest(path: str, scopes: str | None = None, user_id: uuid.UUID | None = None) -> int:
     """Ingest a file or directory of notes and code into memory, the document count back.
 
     Code files are chunked AST-aware and stamped `kind=code`, notes flow through the prose

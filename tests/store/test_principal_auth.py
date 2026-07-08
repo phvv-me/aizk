@@ -33,6 +33,7 @@ def test_cached_verifier_selects_the_verifier_class_from_the_zitadel_settings(
         client_id="cid",
         client_secret="secret",
         algorithm="ES384",
+        required_scopes="",
     )
     assert isinstance(verifier, expected)
 

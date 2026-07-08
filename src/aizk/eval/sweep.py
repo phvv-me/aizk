@@ -256,9 +256,7 @@ async def measure_configs(
     user_id: identity whose row level security visibility scopes the recall.
     k: number of hits and seed facts each recall surfaces.
     """
-    return {
-        config.label: await measure_config(config, gold, user_id, k) for config in configs
-    }
+    return {config.label: await measure_config(config, gold, user_id, k) for config in configs}
 
 
 def config_runs(measured: dict[str, Measurement]) -> list[Run]:

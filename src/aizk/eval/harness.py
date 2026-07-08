@@ -155,9 +155,7 @@ def retrieved_scores(qa: QA, result: RecallResult) -> dict[str, float]:
     return scores
 
 
-async def config_scores(
-    gold: list[QA], user_id: uuid.UUID, k: int
-) -> dict[str, dict[str, float]]:
+async def config_scores(gold: list[QA], user_id: uuid.UUID, k: int) -> dict[str, dict[str, float]]:
     """Recall every gold question under one config and score each ranking into a ranx run.
 
     gold: the evaluation items that carry an expected fact.

@@ -13,7 +13,6 @@ import aizk.mcp.server as server_module
 from aizk.config import settings
 from aizk.exceptions import NotGroupAdminError, ScopeNotFoundError
 from aizk.mcp.models import PendingFact, ReviewResult, WriteResult
-from aizk.mcp.user import User
 from aizk.mcp.server import (
     AizkMCP,
     parse_fact_ids,
@@ -22,6 +21,7 @@ from aizk.mcp.server import (
     server,
     startup_check,
 )
+from aizk.mcp.user import User
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 

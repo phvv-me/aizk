@@ -67,9 +67,7 @@ class ScopeLattice:
     def is_admin(cls) -> ColumnElement[bool]:
         """Whether the acting user carries the server-wide admin flag."""
         return sa.exists(
-            sa.select(sa.literal(1)).where(
-                cls._users.c.id == cls._uid, cls._users.c.is_admin
-            )
+            sa.select(sa.literal(1)).where(cls._users.c.id == cls._uid, cls._users.c.is_admin)
         )
 
     @classmethod

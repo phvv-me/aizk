@@ -19,9 +19,7 @@ class TierBuilder[GroundingT, ReportT: FrozenModel](ABC):
     user_id: identity that owns the written rows and whose visibility scopes the grounding.
     """
 
-    def __init__(
-        self, user_id: uuid.UUID, system_prompt: str, report_type: type[ReportT]
-    ) -> None:
+    def __init__(self, user_id: uuid.UUID, system_prompt: str, report_type: type[ReportT]) -> None:
         self.user_id = user_id
         self.system_prompt = system_prompt
         self.report_type = report_type

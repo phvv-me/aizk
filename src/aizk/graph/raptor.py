@@ -318,9 +318,7 @@ async def write_level(
         session.add_all(edge_contents)
         await session.flush()
         session.add_all(claims)
-        session.add_all(
-            part_of_claim(user_id, edge_content.id) for edge_content in edge_contents
-        )
+        session.add_all(part_of_claim(user_id, edge_content.id) for edge_content in edge_contents)
 
 
 async def build_level(

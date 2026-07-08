@@ -4,6 +4,6 @@
 from bg_doubles import (  # noqa: F401
     job_factory,
     pg_factory,
-    user_factory,
     queue_seam,
+    user_factory,
 )

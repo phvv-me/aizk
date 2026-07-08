@@ -592,9 +592,7 @@ async def measure_point(
     repeats: how many recall and per-lane calls each percentile is read over.
     """
     with open_meter() as meter:
-        recalled = await LaneLatency.timed(
-            "recall", partial(recall, query, user_id, k), repeats
-        )
+        recalled = await LaneLatency.timed("recall", partial(recall, query, user_id, k), repeats)
         meter.sample()
         async with acting_as(user_id) as session:
             lanes = await measure_lanes(session, query, vector, k, repeats)

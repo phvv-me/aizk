@@ -122,9 +122,7 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
                 )
             )
         if len(statements) < 2:
-            logger.info(
-                "insight pass skipped for {}, too few facts to ground on", self.user_id
-            )
+            logger.info("insight pass skipped for {}, too few facts to ground on", self.user_id)
             return None
         return statements
 
