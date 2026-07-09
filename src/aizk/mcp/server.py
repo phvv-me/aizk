@@ -149,7 +149,7 @@ async def move(documents: str, scopes: str) -> MoveResult:
     """
     user = require_identified(current_user())
     target = await resolve_scopes(scopes, user.id)
-    document_ids = [uuid.UUID(d.strip()) for d in documents.split(",") if d.strip()]
+    document_ids = parse_ids(documents)
     async with acting_as(user.id):
         writable = set((await session().scalars(Membership.writable_group_ids(user.id))).all())
         if not set(target) <= writable:
@@ -178,12 +178,15 @@ async def resolve_group_admin(group: str) -> Group:
     return group_row
 
 
-def parse_fact_ids(facts: str) -> list[uuid.UUID]:
-    """Parse a comma-separated fact id list into uuids, ignoring stray whitespace.
+def parse_ids(raw: str) -> list[uuid.UUID]:
+    """Parse a comma-separated id list into uuids, a malformed id a clean ToolError not a 500.
 
-    facts: comma-separated fact ids, as a curation verb receives them.
+    raw: comma-separated uuids, as a verb receives its document or fact ids.
     """
-    return [uuid.UUID(fact.strip()) for fact in facts.split(",") if fact.strip()]
+    try:
+        return [uuid.UUID(part.strip()) for part in raw.split(",") if part.strip()]
+    except ValueError as error:
+        raise ToolError(f"malformed id in {raw!r}") from error
 
 
 @server.tool
@@ -216,7 +219,7 @@ async def approve(group: str, facts: str = "all") -> ReviewResult:
     """
     async with system_session():
         group_row = await resolve_group_admin(group)
-        ids = None if facts == "all" else parse_fact_ids(facts)
+        ids = None if facts == "all" else parse_ids(facts)
         count = await group_row.approve_facts(ids)
     return ReviewResult(group=group, count=count)
 
@@ -230,5 +233,5 @@ async def reject(group: str, facts: str) -> ReviewResult:
     """
     async with system_session():
         group_row = await resolve_group_admin(group)
-        count = await group_row.reject_facts(parse_fact_ids(facts))
+        count = await group_row.reject_facts(parse_ids(facts))
     return ReviewResult(group=group, count=count)

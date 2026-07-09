@@ -15,7 +15,7 @@ from aizk.exceptions import NotGroupAdminError, ScopeNotFoundError
 from aizk.mcp.models import MoveResult, PendingFact, ReviewResult, WriteResult
 from aizk.mcp.server import (
     AizkMCP,
-    parse_fact_ids,
+    parse_ids,
     resolve_group_admin,
     resolve_scopes,
     server,
@@ -132,13 +132,13 @@ def test_resolve_scopes_canonicalizes_names_to_a_sorted_id_tuple_and_fails_on_an
 
 
 @given(ids=st.lists(st.uuids(), max_size=6))
-def test_parse_fact_ids_round_trips_a_comma_list_and_ignores_stray_whitespace(
+def test_parse_ids_round_trips_a_comma_list_and_ignores_stray_whitespace(
     ids: list[uuid.UUID],
 ) -> None:
     """The id parser recovers exactly the ids from a padded comma list, dropping empty fields."""
     rendered = " , ".join(f" {fact} " for fact in ids) + " ,"
-    assert parse_fact_ids(rendered) == ids
-    assert parse_fact_ids("") == []
+    assert parse_ids(rendered) == ids
+    assert parse_ids("") == []
 
 
 @pytest.mark.parametrize("vetted", [True, False], ids=["admin", "non-admin"])
