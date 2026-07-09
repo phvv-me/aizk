@@ -1,3 +1,4 @@
+from inflection import parameterize, underscore
 from sqlalchemy import Boolean, Text, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Field
@@ -37,6 +38,21 @@ class OntologyKind:
         default=False, sa_type=Boolean, sa_column_kwargs={"server_default": "false"}
     )
 
+    @staticmethod
+    def canonical(name: str) -> str:
+        """Fold any type or predicate name to snake_case so casing and spacing never fork the
+        catalog.
+
+        "RaptorSummary", "raptor summary", and "Raptor  Summary" all land on `raptor_summary`, so
+        the name primary key dedups near-variants at write time rather than letting a stray capital
+        or space mint a second row for one concept. `underscore` breaks CamelCase apart,
+        `parameterize` then folds spacing and punctuation into single underscores. Idempotent, an
+        already-canonical name is unchanged, and every write below routes through it.
+
+        name: a raw type or predicate name, from the extractor, an admin, or a migration.
+        """
+        return parameterize(underscore(name), separator="_")
+
     @classmethod
     async def mint(cls, name: str, description: str, domain: str) -> None:
         """Insert one catalog row, tolerating a name another writer already minted.
@@ -52,7 +68,7 @@ class OntologyKind:
         """
         await session().execute(
             insert(cls)
-            .values(name=name, description=description, domain=domain)
+            .values(name=cls.canonical(name), description=description, domain=domain)
             .on_conflict_do_nothing(index_elements=["name"])
         )
 
@@ -74,7 +90,7 @@ class OntologyKind:
         """
         await session().execute(
             insert(cls)
-            .values(name=name, description=description, domain=domain)
+            .values(name=cls.canonical(name), description=description, domain=domain)
             .on_conflict_do_update(
                 index_elements=["name"], set_={"description": description, "domain": domain}
             )

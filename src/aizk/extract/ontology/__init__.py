@@ -11,6 +11,8 @@ from .constants import (
     RAPTOR_SUMMARY,
     RELATED_TO,
     SUPERSEDES,
+    EntityType,
+    Predicate,
 )
 
 __all__ = [
@@ -20,9 +22,11 @@ __all__ = [
     "DEPENDS_ON",
     "OBSERVATION",
     "OBSERVES",
+    "EntityType",
     "OntologySnapshot",
     "PART_OF",
     "PROJECT",
+    "Predicate",
     "RAPTOR_SUMMARY",
     "RELATED_TO",
     "SUPERSEDES",

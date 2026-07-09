@@ -5,20 +5,23 @@ from ..extract import ontology
 from ..store.models.tables.ontology import EntityKind
 from .consolidation import cosine_similarity
 
-# words a suggestion's own free text folds into a PascalCase type name from, three at most so a
+# words a suggestion's own free text folds into a snake_case type name from, three at most so a
 # whole sentence never becomes the name, "a financial goal for the house down payment" mints
-# FinancialGoalFor rather than the entire clause.
+# `a_financial_goal` rather than the entire clause.
 NAME_WORDS = re.compile(r"[A-Za-z0-9]+")
 MAX_NAME_WORDS = 3
 
 
 def derive_type_name(suggested: str) -> str:
-    """A PascalCase entity kind name from the extractor's own free-text suggestion.
+    """A snake_case entity kind name from the extractor's own free-text suggestion.
 
-    suggested: the extractor's own guess at what `Concept` was really standing in for.
+    Routes through `EntityKind.canonical` so a minted name carries the exact spelling the catalog's
+    own writes canonicalize to, never a near-variant the primary key would fork a second row on.
+
+    suggested: the extractor's own guess at what `concept` was really standing in for.
     """
     words = NAME_WORDS.findall(suggested)[:MAX_NAME_WORDS]
-    return "".join(word.capitalize() for word in words) or ontology.CONCEPT
+    return EntityKind.canonical(" ".join(words)) or ontology.CONCEPT
 
 
 def best_matching_kind(vector: list[float]) -> tuple[str, float] | None:
