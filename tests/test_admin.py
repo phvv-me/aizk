@@ -113,25 +113,18 @@ def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
     assert result.documents == ["Note A"]  # the null title dropped, the real one kept
 
 
-def test_link_user_binds_a_subject_without_granting_admin(migrated_db: None) -> None:
-    """Linking an OIDC subject mints a regular user, never an admin, and is idempotent.
+def test_link_user_binds_a_subject_and_is_idempotent(migrated_db: None) -> None:
+    """Linking an OIDC subject mints a user, and a second link over the same subject reuses it."""
 
-    Engine admin is the seeded system user alone now, so the identity-provider bridge only ever
-    provisions a plain user; a second link over the same subject returns the same row.
-    """
-
-    async def run() -> tuple[uuid.UUID, uuid.UUID, bool]:
+    async def run() -> tuple[uuid.UUID, uuid.UUID]:
         await dbutil.reset_db()
-        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        await dbutil.seed_user(settings.system_user_id)
         first = await admin.link_user("gh|7", "Ada")
         again = await admin.link_user("gh|7", "ignored")
-        async with admin.as_system():
-            is_admin = await admin.UserRow.administers(first.id)
-        return first.id, again.id, is_admin
+        return first.id, again.id
 
-    first_id, again_id, is_admin = dbutil.run(run())
+    first_id, again_id = dbutil.run(run())
     assert first_id == again_id  # idempotent over the same subject
-    assert is_admin is False  # a linked user is never granted engine admin
 
 
 def test_benchmark_refuses_when_the_engine_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -157,14 +150,14 @@ def test_create_group_and_add_member_run_against_the_live_schema(migrated_db: No
 
     async def run() -> list[dict]:
         await dbutil.reset_db()
-        await dbutil.seed_user(settings.system_user_id, is_admin=True)
+        await dbutil.seed_user(settings.system_user_id)
         member = await dbutil.seed_user(uuid.uuid4())
         await admin.create_group("team", public=True)
-        await admin.add_member(str(member), "team", role="writer")
+        await admin.add_member(str(member), "team", role="editor")
         return await admin.list_groups()
 
     roster = dbutil.run(run())
 
     team = next(row for row in roster if row["name"] == "team")
     assert team["public"] is True
-    assert team["members"] >= 1  # the creator-admin plus the added writer
+    assert team["members"] >= 1  # the creator-admin plus the added editor

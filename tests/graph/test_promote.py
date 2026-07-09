@@ -54,7 +54,7 @@ async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
             Document(id=document, content_hash="promote", owner_id=promoter, title="source")
         )
         session.add(Chunk(id=chunk, document_id=document, ord=0, text="span", owner_id=promoter))
-        session.add(EntityContent(id=entity, name="Leech", type="Concept", embedding=UNIT_VECTOR))
+        session.add(EntityContent(id=entity, name="Leech", type="concept", embedding=UNIT_VECTOR))
         await session.flush()
         session.add(EntityClaim(content_id=entity, owner_id=promoter))
         content = FactContent(
@@ -86,8 +86,8 @@ def test_promote_copies_into_scope_and_an_outsider_stays_blind(grid: Grid) -> No
     """
 
     async def probe() -> tuple[int, uuid.UUID | None, uuid.UUID | None, uuid.UUID | None, list]:
-        await dbutil.seed_membership(grid.promoter, grid.team, "writer")
-        await dbutil.seed_membership(grid.member, grid.team, "reader")
+        await dbutil.seed_membership(grid.promoter, grid.team, "editor")
+        await dbutil.seed_membership(grid.member, grid.team, "viewer")
         source = await seed_source(grid.promoter)
         count = await promote(source, grid.team_name, user_id=grid.promoter)
         async with acting_as(grid.promoter) as session:
@@ -114,7 +114,7 @@ def test_promote_into_an_unknown_scope_raises(grid: Grid) -> None:
     """Naming a group that does not exist fails before any copy is written."""
 
     async def probe() -> None:
-        await dbutil.seed_membership(grid.promoter, grid.team, "writer")
+        await dbutil.seed_membership(grid.promoter, grid.team, "editor")
         with pytest.raises(ScopeNotFoundError, match="no scope named"):
             await promote(uuid.uuid4(), "no such team", user_id=grid.promoter)
 
@@ -135,7 +135,7 @@ def test_promote_of_an_invisible_document_raises(grid: Grid) -> None:
     """A member promoting a document they cannot see is refused before any copy is written."""
 
     async def probe() -> None:
-        await dbutil.seed_membership(grid.promoter, grid.team, "writer")
+        await dbutil.seed_membership(grid.promoter, grid.team, "editor")
         with pytest.raises(NotVisibleError, match="no visible document"):
             await promote(uuid.uuid4(), grid.team_name, user_id=grid.promoter)
 

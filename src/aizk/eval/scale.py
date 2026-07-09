@@ -678,7 +678,7 @@ async def purge_user(user_id: uuid.UUID) -> None:
         await session().execute(
             delete(EntityContent).where(EntityContent.id.in_(entity_content_ids))
         )
-        await session().execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+        await session().execute(text("DELETE FROM user_ WHERE id = :id"), {"id": user_id})
 
 
 async def measure_size(

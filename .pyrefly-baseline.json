@@ -25,9 +25,9 @@
       "severity": "error"
     },
     {
-      "line": 248,
+      "line": 247,
       "column": 13,
-      "stop_line": 248,
+      "stop_line": 247,
       "stop_column": 56,
       "path": "src/aizk/background/tasks.py",
       "code": -2,
@@ -37,9 +37,9 @@
       "severity": "error"
     },
     {
-      "line": 265,
+      "line": 264,
       "column": 13,
-      "stop_line": 265,
+      "stop_line": 264,
       "stop_column": 51,
       "path": "src/aizk/background/tasks.py",
       "code": -2,
@@ -205,9 +205,9 @@
       "severity": "error"
     },
     {
-      "line": 149,
+      "line": 131,
       "column": 20,
-      "stop_line": 149,
+      "stop_line": 131,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -217,9 +217,9 @@
       "severity": "error"
     },
     {
-      "line": 257,
+      "line": 239,
       "column": 36,
-      "stop_line": 257,
+      "stop_line": 239,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -229,9 +229,9 @@
       "severity": "error"
     },
     {
-      "line": 436,
+      "line": 417,
       "column": 16,
-      "stop_line": 436,
+      "stop_line": 417,
       "stop_column": 38,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -241,9 +241,9 @@
       "severity": "error"
     },
     {
-      "line": 442,
+      "line": 423,
       "column": 44,
-      "stop_line": 442,
+      "stop_line": 423,
       "stop_column": 64,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -253,9 +253,9 @@
       "severity": "error"
     },
     {
-      "line": 443,
+      "line": 424,
       "column": 37,
-      "stop_line": 443,
+      "stop_line": 424,
       "stop_column": 58,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -265,9 +265,9 @@
       "severity": "error"
     },
     {
-      "line": 902,
+      "line": 882,
       "column": 21,
-      "stop_line": 902,
+      "stop_line": 882,
       "stop_column": 47,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -277,9 +277,9 @@
       "severity": "error"
     },
     {
-      "line": 902,
+      "line": 882,
       "column": 59,
-      "stop_line": 902,
+      "stop_line": 882,
       "stop_column": 84,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -337,30 +337,6 @@
       "severity": "error"
     },
     {
-      "line": 53,
-      "column": 20,
-      "stop_line": 53,
-      "stop_column": 44,
-      "path": "src/aizk/graph/curation_review.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `list` has no attribute `contains`",
-      "concise_description": "Object of class `list` has no attribute `contains`",
-      "severity": "error"
-    },
-    {
-      "line": 53,
-      "column": 58,
-      "stop_line": 53,
-      "stop_column": 85,
-      "path": "src/aizk/graph/curation_review.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `NoneType` has no attribute `is_not`\nObject of class `datetime` has no attribute `is_not`",
-      "concise_description": "Object of class `NoneType` has no attribute `is_not`\nObject of class `datetime` has no attribute `is_not`",
-      "severity": "error"
-    },
-    {
       "line": 13,
       "column": 19,
       "stop_line": 13,
@@ -373,9 +349,9 @@
       "severity": "error"
     },
     {
-      "line": 58,
+      "line": 54,
       "column": 36,
-      "stop_line": 58,
+      "stop_line": 54,
       "stop_column": 64,
       "path": "src/aizk/graph/promote.py",
       "code": -2,
@@ -385,9 +361,9 @@
       "severity": "error"
     },
     {
-      "line": 400,
+      "line": 397,
       "column": 59,
-      "stop_line": 400,
+      "stop_line": 397,
       "stop_column": 79,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -397,9 +373,9 @@
       "severity": "error"
     },
     {
-      "line": 443,
+      "line": 440,
       "column": 61,
-      "stop_line": 443,
+      "stop_line": 440,
       "stop_column": 87,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -409,9 +385,9 @@
       "severity": "error"
     },
     {
-      "line": 542,
+      "line": 539,
       "column": 16,
-      "stop_line": 542,
+      "stop_line": 539,
       "stop_column": 55,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -421,9 +397,9 @@
       "severity": "error"
     },
     {
-      "line": 551,
+      "line": 548,
       "column": 13,
-      "stop_line": 551,
+      "stop_line": 548,
       "stop_column": 43,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -673,9 +649,33 @@
       "severity": "error"
     },
     {
-      "line": 241,
+      "line": 124,
+      "column": 9,
+      "stop_line": 124,
+      "stop_column": 27,
+      "path": "src/aizk/store/migrations/versions/0005_simplify_sharing_model.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "No attribute `drop_scoped_rls` in module `alembic.op`",
+      "concise_description": "No attribute `drop_scoped_rls` in module `alembic.op`",
+      "severity": "error"
+    },
+    {
+      "line": 125,
+      "column": 9,
+      "stop_line": 125,
+      "stop_column": 28,
+      "path": "src/aizk/store/migrations/versions/0005_simplify_sharing_model.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "No attribute `apply_scoped_rls` in module `alembic.op`",
+      "concise_description": "No attribute `apply_scoped_rls` in module `alembic.op`",
+      "severity": "error"
+    },
+    {
+      "line": 217,
       "column": 29,
-      "stop_line": 241,
+      "stop_line": 217,
       "stop_column": 42,
       "path": "src/aizk/store/mixins/scoped.py",
       "code": -2,
@@ -685,9 +685,9 @@
       "severity": "error"
     },
     {
-      "line": 87,
+      "line": 81,
       "column": 44,
-      "stop_line": 87,
+      "stop_line": 81,
       "stop_column": 65,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -697,9 +697,9 @@
       "severity": "error"
     },
     {
-      "line": 90,
+      "line": 84,
       "column": 20,
-      "stop_line": 90,
+      "stop_line": 84,
       "stop_column": 49,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -709,9 +709,9 @@
       "severity": "error"
     },
     {
-      "line": 95,
+      "line": 89,
       "column": 20,
-      "stop_line": 95,
+      "stop_line": 89,
       "stop_column": 41,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -721,9 +721,9 @@
       "severity": "error"
     },
     {
-      "line": 100,
+      "line": 94,
       "column": 20,
-      "stop_line": 100,
+      "stop_line": 94,
       "stop_column": 30,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -733,11 +733,23 @@
       "severity": "error"
     },
     {
-      "line": 147,
-      "column": 44,
-      "stop_line": 147,
-      "stop_column": 66,
-      "path": "src/aizk/store/models/tables/group.py",
+      "line": 93,
+      "column": 47,
+      "stop_line": 93,
+      "stop_column": 71,
+      "path": "src/aizk/store/models/tables/user.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `datetime` has no attribute `desc`",
+      "concise_description": "Object of class `datetime` has no attribute `desc`",
+      "severity": "error"
+    },
+    {
+      "line": 287,
+      "column": 46,
+      "stop_line": 287,
+      "stop_column": 70,
+      "path": "src/aizk/store/models/tables/user.py",
       "code": -2,
       "name": "missing-attribute",
       "description": "Object of class `NoneType` has no attribute `is_not`\nObject of class `str` has no attribute `is_not`",
@@ -745,11 +757,11 @@
       "severity": "error"
     },
     {
-      "line": 151,
-      "column": 17,
-      "stop_line": 151,
-      "stop_column": 40,
-      "path": "src/aizk/store/models/tables/group.py",
+      "line": 291,
+      "column": 52,
+      "stop_line": 291,
+      "stop_column": 75,
+      "path": "src/aizk/store/models/tables/user.py",
       "code": -2,
       "name": "missing-attribute",
       "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
@@ -757,171 +769,39 @@
       "severity": "error"
     },
     {
-      "line": 152,
+      "line": 299,
+      "column": 59,
+      "stop_line": 299,
+      "stop_column": 80,
+      "path": "src/aizk/store/models/tables/user.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `NoneType` has no attribute `in_`\nObject of class `str` has no attribute `in_`",
+      "concise_description": "Object of class `NoneType` has no attribute `in_`\nObject of class `str` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 312,
       "column": 17,
-      "stop_line": 152,
+      "stop_line": 312,
+      "stop_column": 40,
+      "path": "src/aizk/store/models/tables/user.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
+      "concise_description": "Object of class `UUID` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 313,
+      "column": 17,
+      "stop_line": 313,
       "stop_column": 43,
-      "path": "src/aizk/store/models/tables/group.py",
+      "path": "src/aizk/store/models/tables/user.py",
       "code": -2,
       "name": "missing-attribute",
       "description": "Object of class `UUID` has no attribute `not_in`",
       "concise_description": "Object of class `UUID` has no attribute `not_in`",
-      "severity": "error"
-    },
-    {
-      "line": 295,
-      "column": 35,
-      "stop_line": 295,
-      "stop_column": 56,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `list` has no attribute `contains`",
-      "concise_description": "Object of class `list` has no attribute `contains`",
-      "severity": "error"
-    },
-    {
-      "line": 302,
-      "column": 45,
-      "stop_line": 302,
-      "stop_column": 66,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `list` has no attribute `contains`",
-      "concise_description": "Object of class `list` has no attribute `contains`",
-      "severity": "error"
-    },
-    {
-      "line": 336,
-      "column": 58,
-      "stop_line": 336,
-      "stop_column": 68,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
-      "concise_description": "Object of class `UUID` has no attribute `in_`",
-      "severity": "error"
-    },
-    {
-      "line": 344,
-      "column": 21,
-      "stop_line": 344,
-      "stop_column": 44,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
-      "concise_description": "Object of class `UUID` has no attribute `in_`",
-      "severity": "error"
-    },
-    {
-      "line": 368,
-      "column": 24,
-      "stop_line": 368,
-      "stop_column": 48,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `list` has no attribute `contains`",
-      "concise_description": "Object of class `list` has no attribute `contains`",
-      "severity": "error"
-    },
-    {
-      "line": 368,
-      "column": 61,
-      "stop_line": 368,
-      "stop_column": 85,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `NoneType` has no attribute `is_`\nObject of class `datetime` has no attribute `is_`",
-      "concise_description": "Object of class `NoneType` has no attribute `is_`\nObject of class `datetime` has no attribute `is_`",
-      "severity": "error"
-    },
-    {
-      "line": 384,
-      "column": 13,
-      "stop_line": 384,
-      "stop_column": 38,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `list` has no attribute `contains`",
-      "concise_description": "Object of class `list` has no attribute `contains`",
-      "severity": "error"
-    },
-    {
-      "line": 384,
-      "column": 51,
-      "stop_line": 384,
-      "stop_column": 76,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `NoneType` has no attribute `is_`\nObject of class `datetime` has no attribute `is_`",
-      "concise_description": "Object of class `NoneType` has no attribute `is_`\nObject of class `datetime` has no attribute `is_`",
-      "severity": "error"
-    },
-    {
-      "line": 387,
-      "column": 41,
-      "stop_line": 387,
-      "stop_column": 57,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
-      "concise_description": "Object of class `UUID` has no attribute `in_`",
-      "severity": "error"
-    },
-    {
-      "line": 403,
-      "column": 17,
-      "stop_line": 403,
-      "stop_column": 42,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `list` has no attribute `contains`",
-      "concise_description": "Object of class `list` has no attribute `contains`",
-      "severity": "error"
-    },
-    {
-      "line": 404,
-      "column": 17,
-      "stop_line": 404,
-      "stop_column": 42,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `NoneType` has no attribute `is_`\nObject of class `datetime` has no attribute `is_`",
-      "concise_description": "Object of class `NoneType` has no attribute `is_`\nObject of class `datetime` has no attribute `is_`",
-      "severity": "error"
-    },
-    {
-      "line": 405,
-      "column": 17,
-      "stop_line": 405,
-      "stop_column": 33,
-      "path": "src/aizk/store/models/tables/group.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
-      "concise_description": "Object of class `UUID` has no attribute `in_`",
-      "severity": "error"
-    },
-    {
-      "line": 117,
-      "column": 47,
-      "stop_line": 117,
-      "stop_column": 71,
-      "path": "src/aizk/store/models/tables/user.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `datetime` has no attribute `desc`",
-      "concise_description": "Object of class `datetime` has no attribute `desc`",
       "severity": "error"
     },
     {
@@ -937,9 +817,9 @@
       "severity": "error"
     },
     {
-      "line": 70,
+      "line": 69,
       "column": 15,
-      "stop_line": 70,
+      "stop_line": 69,
       "stop_column": 27,
       "path": "tests/doubles.py",
       "code": -2,
@@ -1141,54 +1021,6 @@
       "severity": "error"
     },
     {
-      "line": 164,
-      "column": 9,
-      "stop_line": 164,
-      "stop_column": 26,
-      "path": "tests/graph/test_curation_review.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `object` has no attribute `register`",
-      "concise_description": "Object of class `object` has no attribute `register`",
-      "severity": "error"
-    },
-    {
-      "line": 203,
-      "column": 9,
-      "stop_line": 203,
-      "stop_column": 26,
-      "path": "tests/graph/test_curation_review.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `object` has no attribute `register`",
-      "concise_description": "Object of class `object` has no attribute `register`",
-      "severity": "error"
-    },
-    {
-      "line": 211,
-      "column": 22,
-      "stop_line": 211,
-      "stop_column": 42,
-      "path": "tests/graph/test_curation_review.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `object` has no attribute `completions`",
-      "concise_description": "Object of class `object` has no attribute `completions`",
-      "severity": "error"
-    },
-    {
-      "line": 213,
-      "column": 21,
-      "stop_line": 213,
-      "stop_column": 41,
-      "path": "tests/graph/test_curation_review.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `object` has no attribute `completions`",
-      "concise_description": "Object of class `object` has no attribute `completions`",
-      "severity": "error"
-    },
-    {
       "line": 83,
       "column": 5,
       "stop_line": 83,
@@ -1333,9 +1165,9 @@
       "severity": "error"
     },
     {
-      "line": 352,
+      "line": 351,
       "column": 16,
-      "stop_line": 352,
+      "stop_line": 351,
       "stop_column": 92,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
@@ -1345,9 +1177,9 @@
       "severity": "error"
     },
     {
-      "line": 376,
+      "line": 375,
       "column": 16,
-      "stop_line": 376,
+      "stop_line": 375,
       "stop_column": 92,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
@@ -1357,9 +1189,9 @@
       "severity": "error"
     },
     {
-      "line": 411,
+      "line": 410,
       "column": 22,
-      "stop_line": 411,
+      "stop_line": 410,
       "stop_column": 28,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
@@ -1369,9 +1201,9 @@
       "severity": "error"
     },
     {
-      "line": 411,
+      "line": 410,
       "column": 37,
-      "stop_line": 411,
+      "stop_line": 410,
       "stop_column": 42,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,

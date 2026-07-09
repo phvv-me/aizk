@@ -36,7 +36,7 @@ class Membership(TableBase, table=True):
         editor = auto()
         admin = auto()
 
-    user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE", primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user_.id", ondelete="CASCADE", primary_key=True)
     group_id: uuid.UUID = Field(foreign_key="group_.id", ondelete="CASCADE", primary_key=True)
     role: Role = Field(
         default=Role.editor,

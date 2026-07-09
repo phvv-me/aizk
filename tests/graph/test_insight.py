@@ -45,7 +45,7 @@ async def seed_two_facts(owner: uuid.UUID) -> None:
     """Plant one entity and two latest facts, the grounding the reflective pass reasons over."""
     subject = uuid.uuid4()
     async with acting_as(owner) as session:
-        session.add(EntityContent(id=subject, name="alice", type="Author", embedding=None))
+        session.add(EntityContent(id=subject, name="alice", type="author", embedding=None))
         await session.flush()
         session.add(EntityClaim(content_id=subject, owner_id=owner))
         for index in range(2):

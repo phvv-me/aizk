@@ -243,35 +243,35 @@ def test_resolve_mints_reuses_folds_or_drops(
                     session,
                     owner,
                     "Exact Fixture",
-                    type="Author",
-                    content_id=entity_id("Exact Fixture", "Author"),
+                    type="author",
+                    content_id=entity_id("Exact Fixture", "author"),
                 )
             if scenario == "fuzzy":
                 await seedgraph.add_entity(
                     session,
                     owner,
                     "Existing",
-                    type="Concept",
+                    type="concept",
                     embedding=deterministic("document:Newcomer"),
-                    content_id=entity_id("Existing", "Concept"),
+                    content_id=entity_id("Existing", "concept"),
                 )
         async with acting_as(owner) as session:
             writer = GraphWriter(owner, ())
             if scenario == "insert":
-                first = await writer.resolve("Brand New", "Concept")
-                second = await writer.resolve("Brand New", "Concept")
+                first = await writer.resolve("Brand New", "concept")
+                second = await writer.resolve("Brand New", "concept")
                 assert first == second  # the second resolve reuses off the minted claim
                 return first
             if scenario == "exact":
-                return await writer.resolve("Exact Fixture", "Author")
+                return await writer.resolve("Exact Fixture", "author")
             if scenario == "fuzzy":
-                return await writer.resolve("Newcomer", "Concept")
-            return await writer.resolve("notes/graph_rag.md", "Concept")
+                return await writer.resolve("Newcomer", "concept")
+            return await writer.resolve("notes/graph_rag.md", "concept")
 
     expected = {
-        "insert": entity_id("Brand New", "Concept"),
-        "exact": entity_id("Exact Fixture", "Author"),
-        "fuzzy": entity_id("Existing", "Concept"),
+        "insert": entity_id("Brand New", "concept"),
+        "exact": entity_id("Exact Fixture", "author"),
+        "fuzzy": entity_id("Existing", "concept"),
         "path": None,
     }
     assert dbutil.run(body()) == expected[scenario]
@@ -471,13 +471,13 @@ def test_resolve_entity_type_passes_through_a_confident_type_unchanged(
     fake_embedder: RecordingEmbedder,
 ) -> None:
     """An entity the extractor typed confidently never touches the auto-create cascade at all."""
-    entity = ExtractedEntity(name="Ada", type="Author")
+    entity = ExtractedEntity(name="Ada", type="author")
 
     async def body() -> str:
         async with acting_as(await seedgraph.fresh_owner()):
             return await resolve_entity_type(GraphWriter(uuid.uuid4(), ()), entity)
 
-    assert dbutil.run(body()) == "Author"
+    assert dbutil.run(body()) == "author"
 
 
 def test_resolve_entity_type_grows_the_catalog_for_a_concept_fallback_with_a_suggestion(
@@ -531,8 +531,8 @@ def test_build_graph_writes_a_slice_then_resumes(
         snapshot.llm_extraction,
         snapshot.llm_extraction(
             e=[
-                snapshot.llm_entity(n="Ada", t="Author"),
-                snapshot.llm_entity(n="Notes", t="Concept"),
+                snapshot.llm_entity(n="Ada", t="author"),
+                snapshot.llm_entity(n="Notes", t="concept"),
             ],
             f=[snapshot.llm_fact(s="Ada", p="related_to", o="Notes", statement="Ada keeps notes")],
         ),
@@ -561,9 +561,9 @@ def test_build_graph_source_filter_drops_a_path_and_skips_a_ghost_subject(
         snapshot.llm_extraction,
         snapshot.llm_extraction(
             e=[
-                snapshot.llm_entity(n="Ada", t="Author"),
-                snapshot.llm_entity(n="Ada", t="Author"),
-                snapshot.llm_entity(n="notes/graph_rag.md", t="Concept"),
+                snapshot.llm_entity(n="Ada", t="author"),
+                snapshot.llm_entity(n="Ada", t="author"),
+                snapshot.llm_entity(n="notes/graph_rag.md", t="concept"),
             ],
             f=[
                 snapshot.llm_fact(s="Ada", p="related_to", statement="Ada keeps notes"),
@@ -763,7 +763,7 @@ def test_dedup_merges_a_slug_twin_and_converges(fake_embedder: RecordingEmbedder
     deleted, so the second pass finds one canonical node and is a no-op, and the surviving node is
     exactly the one the repointed fact content now names.
     """
-    canonical_id = entity_id("Team Memory", "Concept")
+    canonical_id = entity_id("Team Memory", "concept")
     # a duplicate whose id sorts after the canonical's, so `find_duplicates` keeps "Team Memory"
     # and redirects the fact-bearing "team-memory", exercising the repoint rather than the reverse.
     duplicate_id = uuid.UUID(int=canonical_id.int + 1)

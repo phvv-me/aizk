@@ -10,7 +10,6 @@ from aizk.extract import ontology
 from aizk.extract.models import BatchConsolidationVerdict, ConsolidationVerdict
 from aizk.graph.models import (
     CommunitySummary,
-    CurationReview,
     InsightReport,
     ProfileReport,
     RaptorReport,
@@ -151,7 +150,6 @@ def default_response(schema: type[BaseModel]) -> BaseModel:
         ProfileReport.__name__: ProfileReport(summary="a static and dynamic paragraph"),
         RaptorReport.__name__: RaptorReport(label="broad theme", summary="a rolled-up paragraph"),
         InsightReport.__name__: InsightReport(observations=[]),
-        CurationReview.__name__: CurationReview(verdicts=[]),
     }
     return defaults[schema.__name__]
 

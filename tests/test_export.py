@@ -57,7 +57,7 @@ async def seed_graph(owner: uuid.UUID, tag: str) -> dict[str, uuid.UUID]:
         session.add(
             Chunk(id=ids["chunk"], document_id=ids["document"], ord=0, text=tag, owner_id=owner)
         )
-        session.add(EntityContent(id=ids["entity_content"], name=tag, type="Concept"))
+        session.add(EntityContent(id=ids["entity_content"], name=tag, type="concept"))
         session.add(
             FactContent(
                 id=ids["fact_content"],

@@ -7,7 +7,7 @@ def test_default_dsns_are_built_from_host_port_db_and_passwords() -> None:
         db_host="h", db_port=6000, db_name="mem", app_password="ap", admin_password="op"
     )
     assert cfg.database_url == "postgresql+asyncpg://aizk_app:ap@h:6000/mem"
-    assert cfg.admin_database_url == "postgresql+asyncpg://aizk:op@h:6000/mem"
+    assert cfg.admin_database_url == "postgresql+asyncpg://aizk_admin:op@h:6000/mem"
 
 
 def test_explicit_dsn_wins_over_the_template() -> None:
@@ -16,7 +16,7 @@ def test_explicit_dsn_wins_over_the_template() -> None:
     cfg = Settings(database_url=explicit, db_host="ignored")
     assert cfg.database_url == explicit
     # the admin DSN, left unset, still fills from the template independently
-    assert cfg.admin_database_url.startswith("postgresql+asyncpg://aizk:")
+    assert cfg.admin_database_url.startswith("postgresql+asyncpg://aizk_admin:")
 
 
 def test_explicit_admin_dsn_is_also_preserved() -> None:

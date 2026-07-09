@@ -67,7 +67,7 @@ def test_entity_id_is_deterministic_uuid5(name: str, type_: str) -> None:
 
 def test_entity_id_collapses_slug_equivalent_names() -> None:
     """Two surface forms of one name mint one entity id, making ingestion idempotent."""
-    assert entity_id("team-memory-spine", "Project") == entity_id("Team Memory Spine", "Project")
+    assert entity_id("team-memory-spine", "project") == entity_id("Team Memory Spine", "project")
 
 
 @given(

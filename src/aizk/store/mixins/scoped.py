@@ -188,7 +188,7 @@ class Scoped:
         cascade.
     """
 
-    owner_id: uuid.UUID = Field(foreign_key="users.id", nullable=False, index=True)
+    owner_id: uuid.UUID = Field(foreign_key="user_.id", nullable=False, index=True)
     # `sa_type=`/`sa_column_kwargs=` rather than a literal `sa_column=Column(...)`: a mixin's own
     # class body runs once, so a fully constructed `Column` object assigned there would be the
     # exact same instance every subclass inherits, and SQLAlchemy refuses to attach one physical

@@ -49,7 +49,7 @@ class WireExtraction(Protocol):
 # current()`, these strategies are drawn at collection time by test modules that never touch the
 # database, so they cannot depend on `ops.setup()` having run. `ExtractedEntity.type`/`TimedFact.
 # predicate` are plain `str` fields, any value works, this pool only keeps examples readable.
-ENTITY_TYPE_LIST = ("Concept", "Decision", "Pattern", "Project", "Paper", "Tool")
+ENTITY_TYPE_LIST = ("concept", "decision", "pattern", "project", "paper", "tool")
 PREDICATE_LIST = ("related_to", "because", "depends_on", "cites", "uses")
 
 entity_types = st.sampled_from(ENTITY_TYPE_LIST)

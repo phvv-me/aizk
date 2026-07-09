@@ -113,8 +113,6 @@ dense_fact AS (
            1 - (f.embedding <=> qvec) AS score
     FROM live_fact f
     WHERE f.embedding IS NOT NULL
-      AND (f.reviewed_at IS NOT NULL
-           OR f.owner_id = nullif(current_setting('app.uid', true), '')::uuid)
     ORDER BY f.embedding <=> qvec
     LIMIT k
 ),
@@ -129,8 +127,6 @@ neighbor_fact AS (
            1 - (f.embedding <=> qvec) AS score
     FROM live_fact f
     WHERE f.embedding IS NOT NULL
-      AND (f.reviewed_at IS NOT NULL
-           OR f.owner_id = nullif(current_setting('app.uid', true), '')::uuid)
       AND f.id NOT IN (SELECT id FROM dense_fact)
       AND (
           f.subject_id IN (SELECT entity_id FROM seed_entities)

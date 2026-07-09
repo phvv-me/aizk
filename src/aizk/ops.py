@@ -34,7 +34,7 @@ MAIN_TABLES = (
     "community",
     "profile",
     "session_item",
-    "users",
+    "user_",
     "group_",
 )
 

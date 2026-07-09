@@ -1,16 +1,12 @@
 import uuid
 from typing import Self
 
-from sqlalchemy import Text, delete, exists, false, func, select, update
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.orm import aliased
+from sqlalchemy import Text, delete, false, func, select
 from sqlmodel import Field
 
-from ....config import settings
 from ....exceptions import ScopeNotFoundError
 from ...engine import session
 from ...mixins import Id, TableBase
-from .fact import FactClaim
 from .membership import Membership
 
 
@@ -25,10 +21,15 @@ class Group(Id, TableBase, table=True):
     name: unique human-readable label the tools resolve a scope by.
     public: whether the group's rows are readable by anyone, member or not, the shared-brain
         publishing switch. Writing always requires an explicit writer or admin membership.
+    oidc_org_id: the Logto organization this group is the local projection of, when membership is
+        sourced from the identity provider rather than hand-managed. Null for a purely local group.
+        Unique so one local group stands for one organization; Postgres treats nulls as distinct,
+        so any number of local-only groups coexist.
     """
 
     name: str = Field(sa_type=Text, unique=True)
     public: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
+    oidc_org_id: str | None = Field(default=None, sa_type=Text, unique=True)
 
     @classmethod
     async def create(cls, name: str, creator: uuid.UUID, public: bool = False) -> Self:
@@ -112,70 +113,14 @@ class Group(Id, TableBase, table=True):
         self.public = not self.public
         session().add(self)
 
-    async def demote_scoped_rows(self) -> None:
-        """Drop colliding claims, then demote every scoped row naming this group back to private.
-
-        A `uuid[]` scope-set column carries no foreign key, Postgres has no such constraint on an
-        array element, so nothing cascades on its own when a group is deleted. This method is the
-        explicit demotion `ON DELETE SET NULL` gave a singleton `scope` column for free. It
-        widens, never narrows, an id containing group B out of a set never becomes `{A}`, the
-        whole set resets to `{}` together, so `{A, B}` demotes to fully private rather than
-        silently collapsing to A's own scope alone. The claim dedup runs first since
-        `entity_claim`/`fact_claim`'s own uniqueness treats every private claim on the same
-        content by the same owner as one identity, so an owner who already privately claims a node
-        and also claimed it inside this group would collide the moment both land on the same empty
-        set. The redundant about-to-be-demoted claim is simply the one to drop first, since the
-        owner already privately holds the same content. Both passes run on the owner-role admin
-        connection rather than the ordinary app session, since they must reach every owner's rows,
-        not only the caller's own visible slice.
-        """
-        from .chunk import Chunk
-        from .community import Community
-        from .document import Document
-        from .entity import EntityClaim
-        from .profile import Profile
-        from .session_item import SessionItem
-        from .watermark import Watermark
-
-        scoped = (
-            Document,
-            Chunk,
-            EntityClaim,
-            FactClaim,
-            Community,
-            Profile,
-            SessionItem,
-            Watermark,
-        )
-        engine = create_async_engine(settings.admin_database_url)
-        try:
-            async with engine.begin() as connection:
-                for claim in (EntityClaim, FactClaim):
-                    held = aliased(claim)  # a private claim the same owner already holds
-                    collision = select(held.content_id).where(
-                        func.cardinality(held.scopes) == 0,
-                        held.owner_id == claim.owner_id,
-                        held.content_id == claim.content_id,
-                    )
-                    predicates = [claim.scopes.contains([self.id])]
-                    if claim is FactClaim:  # its partial unique index governs only live rows
-                        collision = collision.where(func.upper_inf(held.recorded))
-                        predicates.append(func.upper_inf(claim.recorded))
-                    await connection.execute(delete(claim).where(*predicates, exists(collision)))
-                for model in scoped:
-                    await connection.execute(
-                        update(model).where(model.scopes.contains([self.id])).values(scopes=[])
-                    )
-        finally:
-            await engine.dispose()
-
     async def delete(self) -> None:
-        """Delete this group, its memberships cascading and its rows falling back to private.
+        """Delete this group; the `group_demote_scopes` trigger resets its scoped rows to private.
 
-        `demote_scoped_rows` is what makes the group's shared rows fall back to their owners'
-        private scope rather than left naming a group that no longer exists, since a scope-set
-        array carries no foreign key for Postgres to cascade through on its own the way a
-        singleton `scope` column once did.
+        A `uuid[]` scope-set column carries no foreign key, so Postgres cannot cascade a group
+        deletion into the rows naming it the way it does for `membership`. The `BEFORE DELETE`
+        trigger on `group_` (migration `0005`) runs that demotion in the database, dropping a claim
+        whose owner already holds the same content privately and resetting every other scoped row
+        to `{}`, so this method only deletes the row and lets the trigger widen its shared rows
+        back to private on the way out.
         """
-        await self.demote_scoped_rows()
         await session().delete(self)

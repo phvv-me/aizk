@@ -19,7 +19,7 @@ async def seed_one_of_each(owner: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
     await seedgraph.seed_scoped_row(owner, "community")
     await seedgraph.seed_scoped_row(owner, "profile")
     async with acting_as(owner) as session:
-        entity = await seedgraph.add_entity(session, owner, "Ada", type="Author")
+        entity = await seedgraph.add_entity(session, owner, "Ada", type="author")
         fact, _ = await seedgraph.add_fact(session, owner, entity, statement="Ada relates memory")
     return entity, fact
 

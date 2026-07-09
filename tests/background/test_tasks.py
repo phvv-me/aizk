@@ -15,7 +15,6 @@ import aizk.background.tasks as tasks_mod
 from aizk.background.tasks import (
     BackupTask,
     CommunitiesTask,
-    CurationReviewTask,
     DecayTask,
     DedupTask,
     InsightTask,
@@ -53,7 +52,6 @@ def test_the_roster_carries_every_maintenance_pass() -> None:
         "self_improve",
         "session_promote",
         "insight",
-        "curation_review",
         "backup",
     }
 
@@ -70,7 +68,7 @@ def test_entrypoint_names_are_prefixed_and_injective() -> None:
 
 
 @given(
-    flags=st.lists(st.booleans(), min_size=10, max_size=10),
+    flags=st.lists(st.booleans(), min_size=9, max_size=9),
     cron=st.sampled_from(["0 3 * * *", "30 4 * * 0"]),
 )
 def test_each_task_reads_its_own_cadence_and_flag_off_settings(
@@ -97,7 +95,6 @@ def test_each_task_reads_its_own_cadence_and_flag_off_settings(
         (ProfileRefreshTask, "refresh_profiles"),
         (SessionPromoteTask, "promote_sessions"),
         (InsightTask, "derive_insights"),
-        (CurationReviewTask, "review_curated_groups"),
     ],
 )
 def test_thin_passes_delegate_under_the_user(

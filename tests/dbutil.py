@@ -44,7 +44,7 @@ APP_TABLES = (
     "session_item",
     "watermark",
     "group_",
-    "users",
+    "user_",
 )
 
 
@@ -81,12 +81,9 @@ async def reset_db() -> None:
     await admin_exec(f"TRUNCATE {', '.join(APP_TABLES)} RESTART IDENTITY CASCADE")
 
 
-async def seed_user(user_id: uuid.UUID, is_admin: bool = False) -> uuid.UUID:
-    """Insert one user, optionally carrying the server-wide admin flag."""
-    await admin_exec(
-        "INSERT INTO users (id, is_admin) VALUES (:id, :is_admin)",
-        {"id": user_id, "is_admin": is_admin},
-    )
+async def seed_user(user_id: uuid.UUID) -> uuid.UUID:
+    """Insert one user row."""
+    await admin_exec("INSERT INTO user_ (id) VALUES (:id)", {"id": user_id})
     return user_id
 
 
@@ -94,12 +91,11 @@ async def seed_group(
     group_id: uuid.UUID,
     name: str | None = None,
     public: bool = False,
-    curated: bool = False,
 ) -> uuid.UUID:
-    """Insert one group with its visibility and curation flags."""
+    """Insert one group with its visibility flag."""
     await admin_exec(
-        "INSERT INTO group_ (id, name, public, curated) VALUES (:id, :name, :public, :curated)",
-        {"id": group_id, "name": name or f"g-{group_id}", "public": public, "curated": curated},
+        "INSERT INTO group_ (id, name, public) VALUES (:id, :name, :public)",
+        {"id": group_id, "name": name or f"g-{group_id}", "public": public},
     )
     return group_id
 

@@ -353,7 +353,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("group_id", sa.Uuid(), nullable=False),
         sa.Column(
-            "role", sa.Enum("reader", "writer", "admin", name="membership_role"), nullable=False
+            "role", sa.Enum("viewer", "editor", "admin", name="membership_role"), nullable=False
         ),
         sa.ForeignKeyConstraint(["group_id"], ["group_.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),

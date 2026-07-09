@@ -13,8 +13,8 @@ from aizk.store import Document, NoTenantContext, acting_as, app_sessions
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
-ROLES = ("reader", "writer", "admin")
-WRITER_ROLES = frozenset({"writer", "admin"})
+ROLES = ("viewer", "editor", "admin")
+WRITER_ROLES = frozenset({"editor", "admin"})
 
 
 @dataclass
@@ -48,7 +48,7 @@ class Scenario:
 
     @property
     def writer_groups(self) -> set[uuid.UUID]:
-        """Every group the probe may write into, a writer or admin role."""
+        """Every group the probe may write into, an editor or admin role."""
         return {gid for gid, role in self.roles.items() if role in WRITER_ROLES}
 
     @property
@@ -128,8 +128,8 @@ def test_read_predicate_enforces_lattice(scenario: Scenario) -> None:
 def test_write_predicate_enforces_lattice(scenario: Scenario) -> None:
     """The document write-check policy admits exactly the inserts `ScopeLattice.write` allows.
 
-    Visibility never implies write: a reader member and a public visitor read the shared graph but
-    cannot insert into it, and a multi-group row needs writer standing in every group it names.
+    Visibility never implies write: a viewer member and a public visitor read the shared graph but
+    cannot insert into it, and a multi-group row needs editor standing in every group it names.
     """
 
     async def body() -> None:
@@ -177,8 +177,8 @@ def test_missing_lens_reaches_full_union_and_lens_narrows() -> None:
         owner = await dbutil.seed_user(uuid.uuid4())
         group_a = await dbutil.seed_group(uuid.uuid4())
         group_b = await dbutil.seed_group(uuid.uuid4())
-        await dbutil.seed_membership(owner, group_a, "writer")
-        await dbutil.seed_membership(owner, group_b, "writer")
+        await dbutil.seed_membership(owner, group_a, "editor")
+        await dbutil.seed_membership(owner, group_b, "editor")
         private = await dbutil.seed_document(owner, [])
         in_a = await dbutil.seed_document(owner, [group_a])
         in_b = await dbutil.seed_document(owner, [group_b])
@@ -199,8 +199,8 @@ def test_public_group_reaches_non_member_only_as_singleton() -> None:
         stranger = await dbutil.seed_user(uuid.uuid4())
         public = await dbutil.seed_group(uuid.uuid4(), public=True)
         private_group = await dbutil.seed_group(uuid.uuid4(), public=False)
-        await dbutil.seed_membership(owner, public, "writer")
-        await dbutil.seed_membership(owner, private_group, "writer")
+        await dbutil.seed_membership(owner, public, "editor")
+        await dbutil.seed_membership(owner, private_group, "editor")
         singleton = await dbutil.seed_document(owner, [public])
         bridge = await dbutil.seed_document(owner, [public, private_group])
 

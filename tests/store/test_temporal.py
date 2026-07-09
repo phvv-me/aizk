@@ -119,11 +119,11 @@ def test_relevance_rises_with_access_and_decays_with_age(access_count: int) -> N
 
 async def seed_live_claim(owner: uuid.UUID, statement: str, days_old: float) -> uuid.UUID:
     """Seed one live (open-recorded) fact claim aged `days_old`, superuser-inserted."""
-    subject = entity_id("subj", "Concept")
+    subject = entity_id("subj", "concept")
     content = fact_id("subj", "related_to", "", statement)
     claim = uuid.uuid4()
     await dbutil.admin_exec(
-        "INSERT INTO entity_content (id, name, type) VALUES (:i, 'subj', 'Concept') "
+        "INSERT INTO entity_content (id, name, type) VALUES (:i, 'subj', 'concept') "
         "ON CONFLICT (id) DO NOTHING",
         {"i": subject},
     )
@@ -133,8 +133,8 @@ async def seed_live_claim(owner: uuid.UUID, statement: str, days_old: float) -> 
         {"i": content, "s": subject, "st": statement},
     )
     await dbutil.admin_exec(
-        "INSERT INTO fact_claim (id, content_id, owner_id, scopes, recorded, reviewed_at) "
-        "VALUES (:i, :c, :o, '{}', tstzrange(now() - make_interval(days => :d), NULL), now())",
+        "INSERT INTO fact_claim (id, content_id, owner_id, scopes, recorded) "
+        "VALUES (:i, :c, :o, '{}', tstzrange(now() - make_interval(days => :d), NULL))",
         {"i": claim, "c": content, "o": owner, "d": int(days_old)},
     )
     return claim

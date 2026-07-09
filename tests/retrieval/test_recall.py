@@ -123,7 +123,7 @@ async def seed_entity(
     embedding = None if vector is None else vec_sql(vector)
     await dbutil.admin_exec(
         "INSERT INTO entity_content (id, name, type, embedding) "
-        "VALUES (:id, :name, 'Concept', CAST(:emb AS halfvec))",
+        "VALUES (:id, :name, 'concept', CAST(:emb AS halfvec))",
         {"id": entity_id, "name": name, "emb": embedding},
     )
     if owner is not None:
@@ -169,9 +169,8 @@ async def seed_fact(
     )
     lower = "now()" if recorded_from is None else ":rec"
     await dbutil.admin_exec(
-        "INSERT INTO fact_claim (id, content_id, owner_id, scopes, recorded, reviewed_at) "
-        f"VALUES (:id, :cid, :owner, CAST(:scopes AS uuid[]), tstzrange({lower}, NULL, '[)'), "
-        "now())",
+        "INSERT INTO fact_claim (id, content_id, owner_id, scopes, recorded) "
+        f"VALUES (:id, :cid, :owner, CAST(:scopes AS uuid[]), tstzrange({lower}, NULL, '[)'))",
         {
             "id": uuid.uuid4(),
             "cid": content_id,
@@ -394,8 +393,8 @@ def test_hybrid_recall_lens_narrows_to_the_named_group(
         group_a, group_b = uuid.uuid4(), uuid.uuid4()
         await dbutil.seed_group(group_a)
         await dbutil.seed_group(group_b)
-        await dbutil.seed_membership(owner, group_a, "reader")
-        await dbutil.seed_membership(owner, group_b, "reader")
+        await dbutil.seed_membership(owner, group_a, "viewer")
+        await dbutil.seed_membership(owner, group_b, "viewer")
         doc_a = await seed_doc(owner, title="a", scopes=[group_a])
         doc_b = await seed_doc(owner, title="b", scopes=[group_b])
         await seed_chunk(doc_a, owner, "in group a", qvec(query), scopes=[group_a])

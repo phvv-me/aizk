@@ -96,8 +96,8 @@ def build_live_fact(**overrides: object) -> LiveFact:
     `LiveFact` maps imperatively onto a view with no pydantic schema of its own, so it carries no
     polyfactory factory; this plain keyword `__init__` (the one SQLAlchemy's imperative mapping
     installs) is the substitute, defaulting every field a caller does not override to a value valid
-    for the closed predicate vocabulary and the live-claim shape (an open `recorded`, a stamped
-    `reviewed_at`, the empty private scope set).
+    for the closed predicate vocabulary and the live-claim shape (an open `recorded`, the empty
+    private scope set).
 
     overrides: fields to set instead of the default, keyed by `LiveFact`'s own attribute names.
     """
@@ -113,7 +113,6 @@ def build_live_fact(**overrides: object) -> LiveFact:
         "scopes": [],
         "valid": None,
         "recorded": Range(datetime.now(UTC), None),
-        "reviewed_at": datetime.now(UTC),
         "last_accessed": None,
         "access_count": 0,
         "attributes": {},

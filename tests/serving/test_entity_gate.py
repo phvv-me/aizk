@@ -73,7 +73,7 @@ def test_gate_construction_drops_concept_and_reads_the_floor(
     """The gate classifies against extractable types minus Concept, plus the configured floor."""
     gate = build_gate(["Person"], monkeypatch)
     assert ontology.CONCEPT not in gate.labels
-    assert "Tool" in gate.labels
+    assert "tool" in gate.labels
     assert gate.floor == settings.gliner_gate_floor
     assert gate.threshold == settings.gliner_gate_threshold
 

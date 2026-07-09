@@ -48,7 +48,7 @@ def test_group_deletion_cascades_memberships_and_removes_the_group() -> None:
         await dbutil.reset_db()
         member = await dbutil.seed_user(uuid.uuid4())
         group_id = await dbutil.seed_group(uuid.uuid4())
-        await dbutil.seed_membership(member, group_id, "writer")
+        await dbutil.seed_membership(member, group_id, "editor")
         async with as_system() as session:
             loaded = await session.get(Group, group_id)
             assert loaded is not None
@@ -78,9 +78,9 @@ def test_demotion_dedupes_a_colliding_private_claim() -> None:
         await dbutil.reset_db()
         owner = await dbutil.seed_user(uuid.uuid4())
         group_id = await dbutil.seed_group(uuid.uuid4())
-        content = entity_id("node", "Concept")
+        content = entity_id("node", "concept")
         await dbutil.admin_exec(
-            "INSERT INTO entity_content (id, name, type) VALUES (:id, 'node', 'Concept')",
+            "INSERT INTO entity_content (id, name, type) VALUES (:id, 'node', 'concept')",
             {"id": content},
         )
         await dbutil.admin_exec(

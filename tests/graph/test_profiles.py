@@ -27,7 +27,7 @@ async def seed_entity_with_facts(owner: uuid.UUID, name: str, count: int = 2) ->
     """Plant one entity and `count` latest facts naming it, the material a profile summarizes."""
     subject = uuid.uuid4()
     async with acting_as(owner) as session:
-        session.add(EntityContent(id=subject, name=name, type="Concept", embedding=None))
+        session.add(EntityContent(id=subject, name=name, type="concept", embedding=None))
         await session.flush()
         session.add(EntityClaim(content_id=subject, owner_id=owner))
         for index in range(count):

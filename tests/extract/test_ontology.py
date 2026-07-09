@@ -56,7 +56,7 @@ def test_timed_fact_defaults_to_open_window() -> None:
 
 def test_extracted_entity_suggested_type_defaults_to_none() -> None:
     """An entity the extractor typed confidently carries no suggestion at all."""
-    entity = ExtractedEntity(name="Ada", type="Author")
+    entity = ExtractedEntity(name="Ada", type="author")
     assert entity.suggested_type is None
 
 
@@ -99,10 +99,10 @@ def test_mint_is_idempotent_on_a_conflicting_name(clean_ontology_growth: None) -
 
     async def body() -> tuple[int, str]:
         async with as_system() as session:
-            await EntityKind.mint(name="GrowthProbe", description="first", domain="auto")
-            await EntityKind.mint(name="GrowthProbe", description="second", domain="auto")
+            await EntityKind.mint(name="growth_probe", description="first", domain="auto")
+            await EntityKind.mint(name="growth_probe", description="second", domain="auto")
             rows = list(
-                await session.scalars(select(EntityKind).where(EntityKind.name == "GrowthProbe"))
+                await session.scalars(select(EntityKind).where(EntityKind.name == "growth_probe"))
             )
         return len(rows), rows[0].description
 
@@ -150,12 +150,12 @@ def test_gate_labels_exclude_concept_but_include_a_real_member() -> None:
     """The GLiNER2 gate's own label list drops Concept, the catch-all calibration rejected."""
     labels = ontology.gate_labels()
     assert ontology.CONCEPT not in labels
-    assert "Decision" in labels
+    assert "decision" in labels
 
 
-def test_derive_type_name_builds_pascal_case_from_the_first_few_words() -> None:
-    """A free-text suggestion folds to a short PascalCase identifier, never a whole sentence."""
-    assert derive_type_name("a financial goal for the house") == "AFinancialGoal"
+def test_derive_type_name_builds_snake_case_from_the_first_few_words() -> None:
+    """A free-text suggestion folds to a short snake_case identifier, never a whole sentence."""
+    assert derive_type_name("a financial goal for the house") == "a_financial_goal"
     assert derive_type_name("!!!") == ontology.CONCEPT  # no usable words falls back safely
 
 

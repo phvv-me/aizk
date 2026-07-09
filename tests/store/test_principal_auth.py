@@ -34,6 +34,7 @@ def test_cached_verifier_selects_the_verifier_class_from_the_zitadel_settings(
         client_secret="secret",
         algorithm="ES384",
         required_scopes="",
+        audience="",
     )
     assert isinstance(verifier, expected)
 
@@ -134,12 +135,12 @@ def test_from_token_syncs_group_memberships_from_the_configured_claim(
 ) -> None:
     """A token carrying the configured groups claim reconciles membership after resolving the user.
 
-    The claim, `as_system`, and `Group.sync_user_groups` are all stubbed, so the sync branch
-    runs and forwards the verified membership list without a database.
+    The claim, `as_system`, and `User.sync_groups` are all stubbed, so the sync branch runs and
+    forwards the verified membership list without a database.
     """
     resolved = uuid.uuid4()
     synced: dict[str, object] = {}
-    claim = [{"id": "org_a", "name": "Alpha", "role": "writer"}]
+    claim = [{"id": "org_a", "name": "Alpha", "role": "editor"}]
 
     async def stub_for_subject(subject: str) -> uuid.UUID:
         return resolved
@@ -161,9 +162,6 @@ def test_from_token_syncs_group_memberships_from_the_configured_claim(
         User, "for_subject", classmethod(lambda cls, subject: stub_for_subject(subject))
     )
     monkeypatch.setattr("aizk.store.models.tables.user.as_system", lambda: _Session())
-    monkeypatch.setattr(
-        "aizk.store.models.tables.group.Group.sync_user_groups",
-        classmethod(lambda cls, u, m: stub_sync(u, m)),
-    )
+    monkeypatch.setattr(User, "sync_groups", classmethod(lambda cls, u, m: stub_sync(u, m)))
     assert dbutil.run(User.from_token("tok")) == resolved
     assert synced == {"user_id": resolved, "memberships": claim}

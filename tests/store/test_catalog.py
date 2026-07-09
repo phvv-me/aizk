@@ -62,19 +62,18 @@ def test_scope_lattice_default_policies_cover_the_four_commands() -> None:
     }
 
 
-def test_fact_claim_adds_the_curation_admin_escape() -> None:
-    """`FactClaim` extends the scope policies with the curation-admin read/update/delete."""
+def test_fact_claim_carries_only_the_default_scope_policies() -> None:
+    """`FactClaim` carries exactly the default scope policies, no extra curation-admin escape."""
     names = {policy.name for policy in FactClaim.__rls_policies__()}
-    assert {"scope_read", "scope_insert"} <= names
-    assert {"curation_admin_read", "curation_admin_update", "curation_admin_delete"} <= names
+    assert names == {"scope_read", "scope_insert", "scope_update", "scope_delete"}
 
 
-def test_content_visibility_has_no_update_policy() -> None:
-    """A content table is visible-through-a-claim, freely mintable, and never updatable."""
+def test_content_visibility_carries_only_read_and_insert() -> None:
+    """A content table is visible through a claim and mintable, but never updated or deleted."""
     policies = content_policies(FactClaim)
     commands = {policy.command for policy in policies}
-    assert Command.update not in commands
-    assert commands == {Command.select, Command.insert, Command.delete}
+    assert Command.update not in commands and Command.delete not in commands
+    assert commands == {Command.select, Command.insert}
     # the read predicate compiles to an EXISTS/IN over the claim table, never a bare column ref
     assert ContentVisibility(FactClaim).read() is not None
 

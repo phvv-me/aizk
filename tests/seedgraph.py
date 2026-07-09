@@ -18,20 +18,17 @@ from aizk.store import (
 )
 
 
-async def fresh_owner(is_admin: bool = False) -> uuid.UUID:
-    """Wipe every app table and seed one user, the isolated start of a graph DB test.
-
-    is_admin: whether the seeded user carries the server-wide admin flag.
-    """
+async def fresh_owner() -> uuid.UUID:
+    """Wipe every app table and seed one user, the isolated start of a graph DB test."""
     await dbutil.reset_db()
-    return await dbutil.seed_user(uuid.uuid4(), is_admin=is_admin)
+    return await dbutil.seed_user(uuid.uuid4())
 
 
 async def add_entity(
     session: AsyncSession,
     owner: uuid.UUID,
     name: str,
-    type: str = "Concept",
+    type: str = "concept",
     embedding: list[float] | None = None,
     content_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
@@ -143,7 +140,7 @@ async def seed_scoped_row(owner: uuid.UUID, kind: str) -> None:
                 Community(owner_id=owner, label="theme", summary="a summary", embedding=None)
             )
         elif kind == "profile":
-            subject = await add_entity(session, owner, "Ada", type="Author")
+            subject = await add_entity(session, owner, "Ada", type="author")
             session.add(Profile(owner_id=owner, subject_id=subject, summary="a portrait"))
         else:
             document = uuid.uuid4()

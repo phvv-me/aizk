@@ -81,7 +81,7 @@ def test_resolve_user_falls_back_by_transport(monkeypatch: pytest.MonkeyPatch, h
 
     async def body() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_user(settings.default_user_id, is_admin=True)
+        await dbutil.seed_user(settings.default_user_id)
         user = await resolve_user()
         expected = settings.anonymous_user_id if http else settings.default_user_id
         assert user.id == expected

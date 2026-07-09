@@ -1,4 +1,3 @@
-import uuid
 from collections.abc import Awaitable, Callable
 
 # the client verbs the server registers, the whole surface a key-holder reaches; every operational
@@ -8,9 +7,6 @@ USER_TOOLS = {
     "remember",
     "reference",
     "move",
-    "pending",
-    "approve",
-    "reject",
 }
 
 
@@ -47,50 +43,3 @@ class Rendered:
 
     def render(self) -> str:
         return self.text
-
-
-class FakeTarget:
-    """A fetched-row stand-in for the one `session.get` an admin tool body still runs.
-
-    id: the row id the `grant_admin` body reads and reports back.
-    """
-
-    def __init__(self, id_: uuid.UUID | None = None) -> None:
-        self.id = id_ or uuid.uuid4()
-
-    async def grant_admin(self, session: object) -> None:
-        """No-op, the call the `grant_admin` tool body makes on the fetched row."""
-
-
-class FakeSession:
-    """A session stand-in exposing only `.get`, the one raw session call an admin tool body runs.
-
-    get_result: the row `.get(Model, id)` resolves to, null included to drive the not-found branch.
-    """
-
-    def __init__(self, get_result: object) -> None:
-        self.get_result = get_result
-
-    async def get(self, model: type, id_: object, **kwargs: object) -> object:
-        return self.get_result
-
-
-class FakeSystemSession:
-    """An async context manager standing in for `as_system()`, no real database touched.
-
-    session: the `FakeSession` the block acts under, a fresh `FakeTarget`-carrying one by default.
-    """
-
-    def __init__(self, session: FakeSession | None = None) -> None:
-        self.session = session or FakeSession(FakeTarget())
-
-    async def __aenter__(self) -> FakeSession:
-        return self.session
-
-    async def __aexit__(self, *exc: object) -> bool:
-        return False
-
-
-def fake_system_session() -> FakeSystemSession:
-    """Zero-arg stand-in for `as_system`, the shape an operator operation calls it in."""
-    return FakeSystemSession()

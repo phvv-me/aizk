@@ -98,7 +98,7 @@ def test_build_then_search_lands_a_searchable_community(
             for index, node in enumerate(nodes):
                 session.add(
                     EntityContent(
-                        id=node, name=f"node {index}", type="Concept", embedding=UNIT_VECTOR
+                        id=node, name=f"node {index}", type="concept", embedding=UNIT_VECTOR
                     )
                 )
             await session.flush()

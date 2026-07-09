@@ -7,16 +7,15 @@ from fastmcp.exceptions import ToolError
 from fastmcp.tools.tool import FunctionTool
 from hypothesis import given
 from hypothesis import strategies as st
-from mcp_probe import USER_TOOLS, const, fake_system_session
+from mcp_probe import USER_TOOLS, const
 
 import aizk.mcp.server as server_module
 from aizk.config import settings
-from aizk.exceptions import NotGroupAdminError, ScopeNotFoundError
-from aizk.mcp.models import MoveResult, PendingFact, ReviewResult, WriteResult
+from aizk.exceptions import ScopeNotFoundError
+from aizk.mcp.models import MoveResult, WriteResult
 from aizk.mcp.server import (
     AizkMCP,
     parse_ids,
-    resolve_group_admin,
     resolve_scopes,
     server,
     startup_check,
@@ -30,8 +29,8 @@ def apply_patches(monkeypatch: pytest.MonkeyPatch, patches: dict[str, object]) -
     """Install each `patches` seam, a dotted path resolving to a submodule attribute else `server`.
 
     monkeypatch: the active patcher whose reverts restore the seams after the test.
-    patches: seam path to its stand-in, `extract_ingest.record_reference` on the submodule,
-        `resolve_group_admin` on the server module itself.
+    patches: seam path to its stand-in, `extract_ingest.record_reference` on the submodule, or a
+        bare name on the server module itself.
     """
     for path, fake in patches.items():
         module_name, _, attr = path.rpartition(".")
@@ -40,7 +39,7 @@ def apply_patches(monkeypatch: pytest.MonkeyPatch, patches: dict[str, object]) -
 
 
 def test_registration_is_exactly_the_client_verbs(tools: dict[str, FunctionTool]) -> None:
-    """The server registers exactly the six client verbs, the whole surface a key-holder reaches.
+    """The server registers exactly the four client verbs, the whole surface a key-holder reaches.
 
     Every operational operation moved to the CLI, so there is no tagged, listing-hidden tool left:
     the registered set is precisely the client verbs and nothing more.
@@ -147,27 +146,6 @@ def test_parse_ids_rejects_a_malformed_id_with_a_tool_error() -> None:
         parse_ids("not-a-uuid")
 
 
-@pytest.mark.parametrize("vetted", [True, False], ids=["admin", "non-admin"])
-def test_resolve_group_admin_returns_the_group_or_wraps_a_domain_refusal(
-    monkeypatch: pytest.MonkeyPatch, vetted: bool
-) -> None:
-    """A vetted caller gets the group back; a non-admin reads a plain ToolError, not the domain."""
-    monkeypatch.setattr(server_module, "current_user", lambda: User(id=uuid.uuid4()))
-
-    class FakeGroup:
-        async def require_admin(self, user_id: uuid.UUID) -> None:
-            if not vetted:
-                raise NotGroupAdminError("not your group")
-
-    fake_group = FakeGroup()
-    monkeypatch.setattr(server_module.Group, "named", const(fake_group))
-    if vetted:
-        assert dbutil.run(resolve_group_admin("team")) is fake_group
-    else:
-        with pytest.raises(ToolError, match="not your group"):
-            dbutil.run(resolve_group_admin("team"))
-
-
 def test_recall_forwards_the_query_budget_and_resolved_lens_to_the_context_pack(
     monkeypatch: pytest.MonkeyPatch, as_caller: User, tools: dict[str, FunctionTool]
 ) -> None:
@@ -219,59 +197,15 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
     """Each client verb with its faked seams, call kwargs, and the exact result its body returns.
 
     Every body runs under a fixed caller with `scopes=None`, so `resolve_scopes` yields the empty
-    lens with no database and the delegate or `resolve_group_admin` under a faked `as_system`
-    is the seam. The curation trio resolves its group admin, the write verb its record id.
+    lens with no database and the delegate is the only seam. The write verb returns its record id.
     """
     new_id = uuid.uuid4()
-    fact = SimpleNamespace(
-        id=uuid.uuid4(), owner_id=uuid.uuid4(), predicate="knows", statement="a claim"
-    )
     return [
         (
             "reference",
             {"extract_ingest.record_reference": const(new_id)},
             {"uri": "u"},
             WriteResult(id=new_id),
-        ),
-        (
-            "pending",
-            {
-                "as_system": fake_system_session,
-                "resolve_group_admin": const(SimpleNamespace(pending_facts=const([fact]))),
-            },
-            {"group": "team"},
-            [
-                PendingFact(
-                    id=fact.id, owner_id=fact.owner_id, predicate="knows", statement="a claim"
-                )
-            ],
-        ),
-        (
-            "approve",
-            {
-                "as_system": fake_system_session,
-                "resolve_group_admin": const(SimpleNamespace(approve_facts=const(2))),
-            },
-            {"group": "team", "facts": "all"},
-            ReviewResult(group="team", count=2),
-        ),
-        (
-            "approve",
-            {
-                "as_system": fake_system_session,
-                "resolve_group_admin": const(SimpleNamespace(approve_facts=const(1))),
-            },
-            {"group": "team", "facts": str(uuid.uuid4())},
-            ReviewResult(group="team", count=1),
-        ),
-        (
-            "reject",
-            {
-                "as_system": fake_system_session,
-                "resolve_group_admin": const(SimpleNamespace(reject_facts=const(3))),
-            },
-            {"group": "team", "facts": f"{uuid.uuid4()}, {uuid.uuid4()}"},
-            ReviewResult(group="team", count=3),
         ),
     ]
 

@@ -146,7 +146,7 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
                 text(
                     "SELECT count(*) FROM entity_claim ec "
                     "JOIN entity_content ent ON ent.id = ec.content_id "
-                    "WHERE ec.owner_id = :o AND ent.type = 'RaptorSummary' "
+                    "WHERE ec.owner_id = :o AND ent.type = 'raptor_summary' "
                     "AND (ec.attributes->>'level')::int = 0"
                 ),
                 {"o": owner},
@@ -155,7 +155,7 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
                 text(
                     "SELECT count(*) FROM entity_claim ec "
                     "JOIN entity_content ent ON ent.id = ec.content_id "
-                    "WHERE ec.owner_id = :o AND ent.type = 'RaptorSummary' "
+                    "WHERE ec.owner_id = :o AND ent.type = 'raptor_summary' "
                     "AND (ec.attributes->>'level')::int >= 1"
                 ),
                 {"o": owner},
