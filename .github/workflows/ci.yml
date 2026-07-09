@@ -32,13 +32,13 @@ jobs:
       db:
         image: tensorchord/vchord-suite:pg18-latest
         env:
-          POSTGRES_USER: aizk
+          POSTGRES_USER: aizk_admin
           POSTGRES_PASSWORD: aizk
           POSTGRES_DB: aizk
         ports:
           - 5433:5432
         options: >-
-          --health-cmd "pg_isready -U aizk"
+          --health-cmd "pg_isready -U aizk_admin"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
@@ -52,7 +52,7 @@ jobs:
       # container cannot mount repo files, so the same statements run here over the wire
       - name: bootstrap app role
         run: |
-          PGPASSWORD=aizk psql -h localhost -p 5433 -U aizk -d aizk -v ON_ERROR_STOP=1 <<'SQL'
+          PGPASSWORD=aizk psql -h localhost -p 5433 -U aizk_admin -d aizk -v ON_ERROR_STOP=1 <<'SQL'
           CREATE ROLE aizk_app LOGIN PASSWORD 'aizk_app' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
           GRANT USAGE ON SCHEMA public TO aizk_app;
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
