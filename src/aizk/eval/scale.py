@@ -32,7 +32,7 @@ from ..store import (
     acting_as,
     system_session,
 )
-from ..store.context import session
+from ..store.engine import session
 from .sweep import open_meter, percentile
 
 # corpus sizes the scaling curve is read at; a million is opt-in since one run writes a million

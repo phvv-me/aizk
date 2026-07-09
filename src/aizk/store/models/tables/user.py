@@ -10,7 +10,7 @@ from sqlalchemy import Text, select
 from sqlmodel import Field, Relationship
 
 from ....config import settings
-from ...context import acting_as, session, system_session
+from ...engine import acting_as, session, system_session
 from ...mixins import Id, TableBase, Timestamped
 from .document import Document
 

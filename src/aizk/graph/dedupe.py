@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import Range, insert
 from sqlalchemy.exc import IntegrityError
 
 from ..store import EntityClaim, FactClaim
-from ..store.context import session
+from ..store.engine import session
 from ..store.mixins import TableBase
 
 # the value types a caller stakes an optional `FactClaim` column with (`valid`, `source_chunk_id`,

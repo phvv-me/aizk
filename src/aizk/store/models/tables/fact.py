@@ -21,7 +21,7 @@ from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.functions import GenericFunction
 from sqlmodel import Field
 
-from ...context import session
+from ...engine import session
 from ...mixins import Embedded, Id, Scoped, TableBase
 from ...mixins.scoped import ScopeLattice
 from .entity import content_policies

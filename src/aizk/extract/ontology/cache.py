@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from ...config import settings
 from ...exceptions import OntologyNotReadyError
-from ...store.context import session
+from ...store.engine import session
 from ...store.models.tables.ontology import EntityKind, RelationKind
 from .constants import CONCEPT
 

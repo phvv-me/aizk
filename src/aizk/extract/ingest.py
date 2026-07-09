@@ -9,7 +9,7 @@ from ..config import settings
 from ..serving.chunk import ChonkieChunker, CodeChunker, is_code, is_text
 from ..serving.embed import Embedder
 from ..store import Chunk, Document, SessionItem, acting_as
-from ..store.context import session
+from ..store.engine import session
 
 # re-exported so aizk.extract.ingest keeps naming this directory-walk filter, even though the
 # detection it runs lives in aizk.serving.chunk.

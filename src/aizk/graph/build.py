@@ -34,8 +34,7 @@ from ..store import (
     Membership,
     acting_as,
 )
-from ..store.context import session
-from .admin import admin_session
+from ..store.engine import admin_session, session
 from .consolidation import decide_by_rule, rank_pool
 from .dedupe import claim_entity, claim_fact, mint_content
 from .ids import entity_id, fact_id

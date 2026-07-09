@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import insert
 from ..config import settings
 from ..exceptions import NotVisibleError
 from ..store import EntityClaim, EntityContent, LiveFact, Membership, Profile, acting_as
-from ..store.context import session
+from ..store.engine import session
 from .models import ProfileReport
 from .tier_builder import TierBuilder
 

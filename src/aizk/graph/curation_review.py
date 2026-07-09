@@ -6,7 +6,7 @@ from sqlalchemy import select
 from ..config import settings
 from ..extract.llm import structured
 from ..store import Group, LiveFact, Membership, Watermark, acting_as, system_session
-from ..store.context import session
+from ..store.engine import session
 from .models import CurationReview
 
 

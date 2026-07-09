@@ -1,8 +1,8 @@
 import asyncio
 import functools
 import uuid
-from collections.abc import Coroutine, Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncGenerator, Coroutine, Sequence
+from contextlib import asynccontextmanager
 from typing import cast
 
 from sqlalchemy import text
@@ -11,16 +11,22 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engin
 
 from aizk.config import settings
 from aizk.store import acting_as
-from aizk.store.context import bound_session
+from aizk.store.engine import _current_session
 
 
-def use_session(fake: object) -> AbstractAsyncContextManager[AsyncSession]:
+@asynccontextmanager
+async def use_session(fake: object) -> AsyncGenerator[AsyncSession]:
     """Bind a fake session to the task-local context so `session()` resolves to it in a unit test.
 
-    Production `acting_as`/`admin_session` bind their real session; a test that fakes `acting_as`
-    binds its stand-in the same way through here, so the converted `session()` reads it back.
+    Production `acting_as`/`admin_session` bind their real session inline; a faking test binds its
+    stand-in the same way here, reaching the store's context var directly.
     """
-    return bound_session(cast(AsyncSession, fake))
+    bound = cast(AsyncSession, fake)
+    token = _current_session.set(bound)
+    try:
+        yield bound
+    finally:
+        _current_session.reset(token)
 
 
 # every app-owned table, ordered so a single TRUNCATE ... CASCADE wipes the world between DB

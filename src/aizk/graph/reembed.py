@@ -7,8 +7,7 @@ from sqlalchemy import select, update
 from ..config import settings
 from ..serving import Embedder
 from ..store import Chunk, Community, EntityContent, FactContent, Profile, acting_as
-from ..store.context import session
-from .admin import admin_session
+from ..store.engine import admin_session, session
 
 # the three per-tenant embedded tables, each carrying an id, an owner, and a halfvec embedding
 # column, re-embedded one user's rows at a time under ordinary row level security.

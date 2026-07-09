@@ -8,7 +8,7 @@ from sqlalchemy import cast as sql_cast
 
 from ..config import settings
 from ..store import LiveFact
-from ..store.context import session
+from ..store.engine import session
 
 
 async def ppr_expand(

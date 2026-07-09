@@ -7,7 +7,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB, insert
 from sqlmodel import Field
 
-from ...context import session
+from ...engine import session
 from ...mixins import Id, Scoped, TableBase, Timestamped
 
 # the single ref every non-entity watermark is keyed under, since those counters are graph-wide

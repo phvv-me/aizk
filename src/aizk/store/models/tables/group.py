@@ -3,52 +3,19 @@ from datetime import UTC, datetime
 from typing import Self
 
 from loguru import logger
-from sqlalchemy import Text, delete, false, func, select, text, true, update
+from sqlalchemy import Text, delete, false, func, select, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import Field
 
 from ....config import settings
 from ....exceptions import NotGroupAdminError, ScopeNotFoundError
-from ...context import session
+from ...engine import session
 from ...mixins import Id, TableBase
 from ..views.live_fact import LiveFact
 from .fact import FactClaim
 from .membership import Membership
 from .user import User
-
-# claim tables whose (content_id, owner_id, scopes) uniqueness can collide once a deleted group's
-# demotion resets every claim containing it to the empty scope set: an owner who already privately
-# claims a node and also claimed it inside this group would collide the moment both land on the
-# same empty array. `scopes @> ARRAY[:group_id]` is the about-to-be-demoted set, every row whose
-# scope set contains this group regardless of what else it is paired with, not only an exact
-# singleton match, since the whole set resets to private together rather than only this one
-# element dropping out of it; fact_claim's own extra predicate keeps the check to its live rows,
-# the only ones its own partial unique index governs.
-CLAIM_DEDUPE_STATEMENTS = (
-    "DELETE FROM entity_claim demoted USING entity_claim private "
-    "WHERE demoted.scopes @> ARRAY[:group_id]::uuid[] AND private.scopes = '{}' "
-    "AND private.owner_id = demoted.owner_id AND private.content_id = demoted.content_id",
-    "DELETE FROM fact_claim demoted USING fact_claim private "
-    "WHERE demoted.scopes @> ARRAY[:group_id]::uuid[] AND private.scopes = '{}' "
-    "AND private.owner_id = demoted.owner_id AND private.content_id = demoted.content_id "
-    "AND upper_inf(demoted.recorded) AND upper_inf(private.recorded)",
-)
-
-# every Scoped table's own name, so a deleted group's demotion sweep reaches all of them: with no
-# foreign key on a `uuid[]` element for Postgres to cascade through on its own, this explicit
-# UPDATE is what makes a deleted group demote its rows to private rather than leaving a dangling
-# id sitting inside a scope-set array forever.
-SCOPED_TABLES = (
-    "document",
-    "chunk",
-    "entity_claim",
-    "fact_claim",
-    "community",
-    "profile",
-    "session_item",
-    "watermark",
-)
 
 
 class Group(Id, TableBase, table=True):
@@ -294,21 +261,48 @@ class Group(Id, TableBase, table=True):
         connection rather than the ordinary app session, since they must reach every owner's rows,
         not only the caller's own visible slice.
         """
-        admin = create_async_engine(settings.admin_database_url)
+        from sqlalchemy import exists
+        from sqlalchemy.orm import aliased
+
+        from .chunk import Chunk
+        from .community import Community
+        from .document import Document
+        from .entity import EntityClaim
+        from .profile import Profile
+        from .session_item import SessionItem
+        from .watermark import Watermark
+
+        scoped = (
+            Document,
+            Chunk,
+            EntityClaim,
+            FactClaim,
+            Community,
+            Profile,
+            SessionItem,
+            Watermark,
+        )
+        engine = create_async_engine(settings.admin_database_url)
         try:
-            async with admin.begin() as connection:
-                for statement in CLAIM_DEDUPE_STATEMENTS:
-                    await connection.execute(text(statement), {"group_id": self.id})
-                for table in SCOPED_TABLES:
+            async with engine.begin() as connection:
+                for claim in (EntityClaim, FactClaim):
+                    held = aliased(claim)  # a private claim the same owner already holds
+                    collision = select(held.content_id).where(
+                        func.cardinality(held.scopes) == 0,
+                        held.owner_id == claim.owner_id,
+                        held.content_id == claim.content_id,
+                    )
+                    predicates = [claim.scopes.contains([self.id])]
+                    if claim is FactClaim:  # its partial unique index governs only live rows
+                        collision = collision.where(func.upper_inf(held.recorded))
+                        predicates.append(func.upper_inf(claim.recorded))
+                    await connection.execute(delete(claim).where(*predicates, exists(collision)))
+                for model in scoped:
                     await connection.execute(
-                        text(
-                            f"UPDATE {table} SET scopes = '{{}}' "
-                            "WHERE scopes @> ARRAY[:group_id]::uuid[]"
-                        ),
-                        {"group_id": self.id},
+                        update(model).where(model.scopes.contains([self.id])).values(scopes=[])
                     )
         finally:
-            await admin.dispose()
+            await engine.dispose()
 
     async def delete(self) -> None:
         """Delete this group, its memberships cascading and its rows falling back to private.

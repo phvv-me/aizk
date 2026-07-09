@@ -15,7 +15,7 @@ from ..retrieval import ContextPack
 from ..scopes import resolve_scopes
 from ..store import Document, Group, Membership, acting_as, system_session
 from ..store import User as UserRow
-from ..store.context import session
+from ..store.engine import session
 from .middleware import AnonymousRateLimit, IdentityMiddleware
 from .models import MoveResult, PendingFact, ReviewResult, WriteResult
 from .user import current_user, require_identified

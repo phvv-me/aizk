@@ -8,7 +8,7 @@ from ..background.queue import enqueue_pending
 from ..config import settings
 from ..extract.ingest import ingest_text
 from ..store import Membership, SessionItem, acting_as
-from ..store.context import session
+from ..store.engine import session
 
 
 async def writable_working_items(user_id: uuid.UUID) -> list[SessionItem]:

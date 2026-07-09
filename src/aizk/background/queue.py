@@ -13,7 +13,7 @@ from ..config import settings
 from ..graph.build import extract_and_consolidate, pending_chunks
 from ..graph.profiles import build_profile
 from ..store import Chunk, Watermark, acting_as
-from ..store.context import session
+from ..store.engine import session
 from .payloads import ChunkJob, JobPayload, ProfileJob
 
 # the on-write entrypoint, one durable job per pending chunk, building its graph slice then

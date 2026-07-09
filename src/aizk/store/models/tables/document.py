@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import Index, select, update
 from sqlmodel import Field, Relationship
 
-from ...context import session
+from ...engine import session
 from ...mixins import Id, Scoped, TableBase, Timestamped
 
 if TYPE_CHECKING:

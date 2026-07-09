@@ -11,7 +11,7 @@ from ..config import settings
 from ..extract.llm import structured
 from ..retrieval import RecallResult, recall
 from ..store import LiveFact, acting_as
-from ..store.context import session
+from ..store.engine import session
 from .eval_report import EvalReport
 from .generated_question import GeneratedQuestion
 from .judge_verdict import JudgeVerdict

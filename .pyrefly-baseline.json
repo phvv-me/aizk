@@ -205,9 +205,9 @@
       "severity": "error"
     },
     {
-      "line": 150,
+      "line": 149,
       "column": 20,
-      "stop_line": 150,
+      "stop_line": 149,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -217,9 +217,9 @@
       "severity": "error"
     },
     {
-      "line": 258,
+      "line": 257,
       "column": 36,
-      "stop_line": 258,
+      "stop_line": 257,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -229,9 +229,9 @@
       "severity": "error"
     },
     {
-      "line": 437,
+      "line": 436,
       "column": 16,
-      "stop_line": 437,
+      "stop_line": 436,
       "stop_column": 38,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -241,9 +241,9 @@
       "severity": "error"
     },
     {
-      "line": 443,
+      "line": 442,
       "column": 44,
-      "stop_line": 443,
+      "stop_line": 442,
       "stop_column": 64,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -253,9 +253,9 @@
       "severity": "error"
     },
     {
-      "line": 444,
+      "line": 443,
       "column": 37,
-      "stop_line": 444,
+      "stop_line": 443,
       "stop_column": 58,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -265,9 +265,9 @@
       "severity": "error"
     },
     {
-      "line": 903,
+      "line": 902,
       "column": 21,
-      "stop_line": 903,
+      "stop_line": 902,
       "stop_column": 47,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -277,9 +277,9 @@
       "severity": "error"
     },
     {
-      "line": 903,
+      "line": 902,
       "column": 59,
-      "stop_line": 903,
+      "stop_line": 902,
       "stop_column": 84,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -385,9 +385,9 @@
       "severity": "error"
     },
     {
-      "line": 401,
+      "line": 400,
       "column": 59,
-      "stop_line": 401,
+      "stop_line": 400,
       "stop_column": 79,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -397,9 +397,9 @@
       "severity": "error"
     },
     {
-      "line": 444,
+      "line": 443,
       "column": 61,
-      "stop_line": 444,
+      "stop_line": 443,
       "stop_column": 87,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -409,9 +409,9 @@
       "severity": "error"
     },
     {
-      "line": 543,
+      "line": 542,
       "column": 16,
-      "stop_line": 543,
+      "stop_line": 542,
       "stop_column": 55,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -421,9 +421,9 @@
       "severity": "error"
     },
     {
-      "line": 552,
+      "line": 551,
       "column": 13,
-      "stop_line": 552,
+      "stop_line": 551,
       "stop_column": 43,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -733,9 +733,9 @@
       "severity": "error"
     },
     {
-      "line": 180,
+      "line": 147,
       "column": 44,
-      "stop_line": 180,
+      "stop_line": 147,
       "stop_column": 66,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -745,9 +745,9 @@
       "severity": "error"
     },
     {
-      "line": 184,
+      "line": 151,
       "column": 17,
-      "stop_line": 184,
+      "stop_line": 151,
       "stop_column": 40,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -757,9 +757,9 @@
       "severity": "error"
     },
     {
-      "line": 185,
+      "line": 152,
       "column": 17,
-      "stop_line": 185,
+      "stop_line": 152,
       "stop_column": 43,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -769,9 +769,33 @@
       "severity": "error"
     },
     {
-      "line": 342,
+      "line": 295,
+      "column": 35,
+      "stop_line": 295,
+      "stop_column": 56,
+      "path": "src/aizk/store/models/tables/group.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `list` has no attribute `contains`",
+      "concise_description": "Object of class `list` has no attribute `contains`",
+      "severity": "error"
+    },
+    {
+      "line": 302,
+      "column": 45,
+      "stop_line": 302,
+      "stop_column": 66,
+      "path": "src/aizk/store/models/tables/group.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `list` has no attribute `contains`",
+      "concise_description": "Object of class `list` has no attribute `contains`",
+      "severity": "error"
+    },
+    {
+      "line": 336,
       "column": 58,
-      "stop_line": 342,
+      "stop_line": 336,
       "stop_column": 68,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -781,9 +805,9 @@
       "severity": "error"
     },
     {
-      "line": 350,
+      "line": 344,
       "column": 21,
-      "stop_line": 350,
+      "stop_line": 344,
       "stop_column": 44,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -793,9 +817,9 @@
       "severity": "error"
     },
     {
-      "line": 374,
+      "line": 368,
       "column": 24,
-      "stop_line": 374,
+      "stop_line": 368,
       "stop_column": 48,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -805,9 +829,9 @@
       "severity": "error"
     },
     {
-      "line": 374,
+      "line": 368,
       "column": 61,
-      "stop_line": 374,
+      "stop_line": 368,
       "stop_column": 85,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -817,9 +841,9 @@
       "severity": "error"
     },
     {
-      "line": 390,
+      "line": 384,
       "column": 13,
-      "stop_line": 390,
+      "stop_line": 384,
       "stop_column": 38,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -829,9 +853,9 @@
       "severity": "error"
     },
     {
-      "line": 390,
+      "line": 384,
       "column": 51,
-      "stop_line": 390,
+      "stop_line": 384,
       "stop_column": 76,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -841,9 +865,9 @@
       "severity": "error"
     },
     {
-      "line": 393,
+      "line": 387,
       "column": 41,
-      "stop_line": 393,
+      "stop_line": 387,
       "stop_column": 57,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -853,9 +877,9 @@
       "severity": "error"
     },
     {
-      "line": 409,
+      "line": 403,
       "column": 17,
-      "stop_line": 409,
+      "stop_line": 403,
       "stop_column": 42,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -865,9 +889,9 @@
       "severity": "error"
     },
     {
-      "line": 410,
+      "line": 404,
       "column": 17,
-      "stop_line": 410,
+      "stop_line": 404,
       "stop_column": 42,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -877,9 +901,9 @@
       "severity": "error"
     },
     {
-      "line": 411,
+      "line": 405,
       "column": 17,
-      "stop_line": 411,
+      "stop_line": 405,
       "stop_column": 33,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,

@@ -17,8 +17,7 @@ from ..store import (
     FactContent,
     acting_as,
 )
-from ..store.context import session
-from .admin import admin_session
+from ..store.engine import admin_session, session
 from .models import Node, RaptorReport
 from .tier_builder import TierBuilder
 

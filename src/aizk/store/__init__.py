@@ -14,8 +14,7 @@ from . import rls as rls
 from . import events as events
 
 # isort: on
-from .context import acting_as, system_session
-from .engine import async_session
+from .engine import acting_as, async_session, system_session
 from .mixins import TableBase
 from .models import (
     Chunk,

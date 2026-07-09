@@ -21,7 +21,7 @@ from ..graph.profiles import refresh_profiles
 from ..graph.raptor import build_raptor
 from ..graph.session_tier import promote_sessions
 from ..store import FactClaim, Watermark, acting_as
-from ..store.context import session
+from ..store.engine import session
 from .payloads import TaskJob
 
 FanOut = Callable[["ScheduledTask"], Awaitable[None]]

@@ -13,7 +13,7 @@ from ..config import settings
 from ..graph.algos import ppr_expand
 from ..serving import Embedder, Reranker
 from ..store import EntityContent, FactClaim, FactContent, Profile, SessionItem, acting_as
-from ..store.context import session
+from ..store.engine import session
 from .models import FactHit, Hit, SessionNote
 
 

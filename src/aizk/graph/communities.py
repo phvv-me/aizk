@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from ..config import settings
 from ..store import Community, EntityContent, LiveFact, acting_as
-from ..store.context import session
+from ..store.engine import session
 from .models import CommunitySummary
 from .tier_builder import TierBuilder
 

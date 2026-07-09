@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from .config import settings
 from .store import Chunk, Document, EntityClaim, EntityContent, FactClaim, FactContent, acting_as
-from .store.context import session
+from .store.engine import session
 
 
 class ExportReport(FrozenModel):

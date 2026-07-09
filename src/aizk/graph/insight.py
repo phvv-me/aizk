@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from ..config import settings
 from ..extract import ontology
 from ..store import EntityContent, FactClaim, FactContent, LiveFact, acting_as
-from ..store.context import session
+from ..store.engine import session
 from .dedupe import claim_entity, claim_fact, mint_content
 from .ids import entity_id, fact_id
 from .models import InsightReport, Observation

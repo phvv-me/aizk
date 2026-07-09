@@ -2,7 +2,7 @@ from sqlalchemy import Boolean, Text, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Field
 
-from ...context import session
+from ...engine import session
 from ...mixins import TableBase, Timestamped
 
 

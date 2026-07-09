@@ -22,7 +22,7 @@ pytestmark = pytest.mark.usefixtures("migrated_db")
 def test_session_outside_a_block_fails_fast() -> None:
     """session() raises NoTenantContext when read outside any acting_as/admin_session block."""
     from aizk.exceptions import NoTenantContext
-    from aizk.store.context import session
+    from aizk.store.engine import session
 
     with pytest.raises(NoTenantContext):
         session()

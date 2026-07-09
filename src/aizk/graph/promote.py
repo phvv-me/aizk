@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from ..config import settings
 from ..exceptions import NotVisibleError
 from ..store import Chunk, Document, Group, LiveFact, Membership, acting_as
-from ..store.context import session
+from ..store.engine import session
 from .dedupe import claim_entity, claim_fact
 
 
