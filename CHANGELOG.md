@@ -6,6 +6,33 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ## Unreleased
 
+### Security
+
+- Closed an RLS write-policy bypass: an empty scope set made `scopes <@ writer_groups` trivially
+  true, so any authenticated caller could write into another user's private space. The empty-scope
+  write branch is now guarded on ownership, re-applied to the live schema by migration `0003`.
+- Gated curated-group pending facts out of the default recall SQL and re-stamped `reviewed_at` on
+  document moves, so a member never recalls another's unreviewed facts and a move cannot smuggle
+  unreviewed content into a curated canon.
+- A malformed identity-provider groups claim is skipped rather than crashing every authenticated
+  request the token makes.
+
+### Fixed
+
+- Retrieval: gap-fill truncates to the requested `k`, rerank guards a score-count mismatch, and a
+  pagerank non-convergence degrades instead of failing the whole recall.
+- Extraction: consolidation checks every same-predicate claim, a non-UTF-8 file no longer aborts a
+  directory ingest, and the community/RAPTOR growth watermark stays monotonic under decay.
+- The GLiNER2 relevance gate is re-enabled on the classification head with a `Person` floor and
+  loads offline from a persistent cache; structural kinds no longer leak into the auto-create pool.
+
+### Changed
+
+- Store operations read the open session from a task-local `session()` accessor bound by
+  `acting_as`/`admin_session`, rather than threading a `session` parameter through every call.
+- Client-generated ids use uuid7 for index locality, and the server image caches its dependency
+  layer so a source edit rebuilds in seconds instead of re-resolving every wheel.
+
 ## 0.0.1 - 2026-07-04
 
 ### Added
