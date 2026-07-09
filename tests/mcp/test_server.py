@@ -12,7 +12,7 @@ from mcp_probe import USER_TOOLS, const, fake_system_session
 import aizk.mcp.server as server_module
 from aizk.config import settings
 from aizk.exceptions import NotGroupAdminError, ScopeNotFoundError
-from aizk.mcp.models import PendingFact, ReviewResult, WriteResult
+from aizk.mcp.models import MoveResult, PendingFact, ReviewResult, WriteResult
 from aizk.mcp.server import (
     AizkMCP,
     parse_fact_ids,
@@ -372,3 +372,74 @@ def test_no_operational_tool_leaks_onto_the_server(tools: dict[str, FunctionTool
         "force_raptor",
     }
     assert not (operational & set(tools))
+
+
+class _MoveScalars:
+    """A `scalars` result whose `.all()` is a fixed writable-group list, no database touched."""
+
+    def __init__(self, groups: list[uuid.UUID]) -> None:
+        self.groups = groups
+
+    def all(self) -> list[uuid.UUID]:
+        return self.groups
+
+
+class _MoveSession:
+    """A session stand-in exposing only the `scalars` the move body runs for writable groups."""
+
+    def __init__(self, writable: list[uuid.UUID]) -> None:
+        self.writable = writable
+
+    async def scalars(self, *args: object) -> _MoveScalars:
+        return _MoveScalars(self.writable)
+
+
+class _MoveActing:
+    """An `acting_as` stand-in yielding a `_MoveSession`, no real session for the move body."""
+
+    def __init__(self, writable: list[uuid.UUID]) -> None:
+        self.writable = writable
+
+    async def __aenter__(self) -> _MoveSession:
+        return _MoveSession(self.writable)
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+def test_move_rescopes_the_callers_own_documents_and_reports_the_count(
+    monkeypatch: pytest.MonkeyPatch, as_caller: User, tools: dict[str, FunctionTool]
+) -> None:
+    """move delegates the caller's documents and target lens to `move_to_scope`, the count back.
+
+    A blank scope resolves to the private lens, contained by any writable set, so the writer gate
+    passes and the private re-scope path runs with no database.
+    """
+    captured: dict[str, object] = {}
+
+    async def stub_move(
+        session: object, owner_id: uuid.UUID, document_ids: list[uuid.UUID], scopes: tuple
+    ) -> int:
+        captured.update(owner_id=owner_id, document_ids=document_ids, scopes=scopes)
+        return 3
+
+    doc = uuid.uuid4()
+    monkeypatch.setattr(server_module, "acting_as", lambda user_id: _MoveActing([]))
+    monkeypatch.setattr(
+        server_module.Document,
+        "move_to_scope",
+        classmethod(lambda cls, s, o, d, sc: stub_move(s, o, d, sc)),
+    )
+    out = dbutil.run(tools["move"].fn(documents=str(doc), scopes=None))
+    assert out == MoveResult(moved=3, scopes="")
+    assert captured == {"owner_id": as_caller.id, "document_ids": [doc], "scopes": ()}
+
+
+def test_move_refuses_a_target_group_the_caller_cannot_write(
+    monkeypatch: pytest.MonkeyPatch, as_caller: User, tools: dict[str, FunctionTool]
+) -> None:
+    """move refuses a target group outside the caller's writable set, no document touched."""
+    monkeypatch.setattr(server_module, "acting_as", lambda user_id: _MoveActing([]))
+    monkeypatch.setattr(server_module, "resolve_scopes", const((uuid.uuid4(),)))
+    with pytest.raises(ToolError):
+        dbutil.run(tools["move"].fn(documents=str(uuid.uuid4()), scopes="locked"))

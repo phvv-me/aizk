@@ -127,3 +127,43 @@ def test_for_subject_provisions_on_first_sight_then_reuses_the_same_user(
         assert await User.for_subject("sub-B") != first  # a new subject, a new user
 
     dbutil.run(probe())
+
+
+def test_from_token_syncs_group_memberships_from_the_configured_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A token carrying the configured groups claim reconciles membership after resolving the user.
+
+    The claim, `system_session`, and `Group.sync_user_groups` are all stubbed, so the sync branch
+    runs and forwards the verified membership list without a database.
+    """
+    resolved = uuid.uuid4()
+    synced: dict[str, object] = {}
+    claim = [{"id": "org_a", "name": "Alpha", "role": "writer"}]
+
+    async def stub_for_subject(subject: str) -> uuid.UUID:
+        return resolved
+
+    async def stub_sync(session: object, user_id: uuid.UUID, memberships: object) -> None:
+        synced.update(user_id=user_id, memberships=memberships)
+
+    class _Session:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+    token = type("Tok", (), {"claims": {"sub": "u|9", "aizk_groups": claim}})()
+    monkeypatch.setattr(settings, "oidc_groups_claim", "aizk_groups")
+    monkeypatch.setattr(User, "verifier", classmethod(lambda cls: FakeVerifier(token)))
+    monkeypatch.setattr(
+        User, "for_subject", classmethod(lambda cls, subject: stub_for_subject(subject))
+    )
+    monkeypatch.setattr("aizk.store.models.tables.user.system_session", lambda: _Session())
+    monkeypatch.setattr(
+        "aizk.store.models.tables.group.Group.sync_user_groups",
+        classmethod(lambda cls, s, u, m: stub_sync(s, u, m)),
+    )
+    assert dbutil.run(User.from_token("tok")) == resolved
+    assert synced == {"user_id": resolved, "memberships": claim}

@@ -104,6 +104,14 @@ Open items carried over from the earlier gap analysis, still unbuilt or partial.
   reflective pass writing overconfident junk. Their execution harness (worktrees, PR automation,
   CI repair) stays out of scope, aizk is the memory substrate such a harness stores into, not a
   workflow orchestrator.
+- [ ] **Test the operator surface, restore 99% coverage.** The `admin.py` and `cli.py` operator
+  commands the two-plane-auth rework moved off the MCP surface landed undertested, so `fail_under`
+  sits at a temporary 97 (`pyproject.toml [tool.coverage.report]`). Cover them and put the gate
+  back to 99.
+- [ ] **Persist the GLiNER gate model, re-enable the gate.** A fresh server recreate re-downloads
+  `fastino/gliner2-base-v1` from HF Hub and, with no token or cache, hangs startup; the recovery
+  set `AIZK_GLINER_GATE_ENABLED=false`, degrading background extraction. Bake the model into the
+  image or mount a persistent HF cache, then re-enable.
 
 ## v1.0.0
 
