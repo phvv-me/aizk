@@ -360,7 +360,6 @@ OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
         SimpleNamespace(id=USER_ID),
         str(USER_ID),
     ),
-    (["group", "create", "team"], "create_group", SimpleNamespace(id=DOC_ID), str(DOC_ID)),
     (["group", "add-member", str(USER_ID), "team"], "add_member", None, "joined team"),
     (["group", "publish", "team"], "publish_group", None, "public=True"),
     (["group", "delete", "team"], "delete_group", None, "team deleted"),

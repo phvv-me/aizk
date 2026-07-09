@@ -19,6 +19,21 @@ from aizk.store import (
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 
+async def make_group(name: str, creator: uuid.UUID, *, public: bool = False) -> Group:
+    """Mint a Logto-backed group with its creator enrolled as admin, in the open session.
+
+    `Group.create` is gone since groups come only from Logto org sync, so a store test that needs a
+    group to probe builds one directly here, standing in for the mirror `User.sync_groups` mints.
+    """
+    from aizk.store.engine import session
+
+    group = Group(name=name, oidc_org_id=f"org-{name}", public=public)
+    session().add(group)
+    await session().flush()
+    session().add(Membership(user_id=creator, group_id=group.id, role=Membership.Role.admin))
+    return group
+
+
 def test_session_outside_a_block_fails_fast() -> None:
     """session() raises NoTenantContext when read outside any acting_as/bypass_rls block."""
     from aizk.exceptions import NoTenantContext
@@ -69,19 +84,6 @@ def test_user_lifecycle_create_link_and_list() -> None:
     dbutil.run(body())
 
 
-def test_group_creation_enrolls_creator_as_admin() -> None:
-    """`create` with a creator enrolls it as the group's admin member in the same transaction."""
-
-    async def body() -> None:
-        await dbutil.reset_db()
-        creator = await dbutil.seed_user(uuid.uuid4())
-        async with as_system():
-            group = await Group.create("team", creator=creator)
-            assert await group.is_admin(creator)
-
-    dbutil.run(body())
-
-
 def test_named_resolves_or_raises() -> None:
     """`named` returns the group for a known name and raises `ScopeNotFoundError` otherwise."""
 
@@ -89,7 +91,7 @@ def test_named_resolves_or_raises() -> None:
         await dbutil.reset_db()
         creator = await dbutil.seed_user(uuid.uuid4())
         async with as_system():
-            made = await Group.create("known", creator=creator)
+            made = await make_group("known", creator)
             found = await Group.named("known")
             assert found.id == made.id
             with pytest.raises(ScopeNotFoundError):
@@ -106,7 +108,7 @@ def test_membership_add_remove_and_admin_gate() -> None:
         creator = await dbutil.seed_user(uuid.uuid4())
         member = await dbutil.seed_user(uuid.uuid4())
         async with as_system():
-            group = await Group.create("g", creator=creator)
+            group = await make_group("g", creator)
             await group.add_member(member, role="viewer")
             assert not await group.is_admin(member)
             await group.remove_member(member)
@@ -122,7 +124,7 @@ def test_toggle_public_flips_visibility() -> None:
         await dbutil.reset_db()
         creator = await dbutil.seed_user(uuid.uuid4())
         async with as_system() as session:
-            group = await Group.create("g", creator=creator)
+            group = await make_group("g", creator)
             await group.toggle_public()
             await session.flush()
             reread = await session.get(Group, group.id)
@@ -139,7 +141,7 @@ def test_list_all_counts_members() -> None:
         a = await dbutil.seed_user(uuid.uuid4())
         b = await dbutil.seed_user(uuid.uuid4())
         async with as_system():
-            group = await Group.create("team", public=True, creator=a)
+            group = await make_group("team", a, public=True)
             await group.add_member(b, role="editor")
         async with as_system():
             rows = await Group.list_all()

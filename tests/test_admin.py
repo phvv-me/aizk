@@ -141,23 +141,24 @@ def test_benchmark_rejects_an_unknown_dataset_name(monkeypatch: pytest.MonkeyPat
         dbutil.run(admin.benchmark("nope", "x.jsonl"))
 
 
-def test_create_group_and_add_member_run_against_the_live_schema(migrated_db: None) -> None:
-    """The governance ops mint a real group and membership under one system-acting session.
+def test_add_member_runs_against_the_live_schema(migrated_db: None) -> None:
+    """`add_member` mints a real membership on a Logto-mirrored group under one system session.
 
-    Runs the actual `Group.create`/`add_member` and their commits so the row-level-security grants
-    land for real, then reads the roster back to prove the group exists with its new member.
+    Groups come only from the identity provider, so the group is seeded as its mirror would be,
+    then the actual `add_member` commit runs so the row-level-security grants land for real, and
+    the roster read back proves the member joined.
     """
 
     async def run() -> list[dict]:
         await dbutil.reset_db()
         await dbutil.seed_user(settings.system_user_id)
         member = await dbutil.seed_user(uuid.uuid4())
-        await admin.create_group("team", public=True)
+        await dbutil.seed_group(uuid.uuid4(), name="team", public=True)
         await admin.add_member(str(member), "team", role="editor")
         return await admin.list_groups()
 
     roster = dbutil.run(run())
 
     team = next(row for row in roster if row["name"] == "team")
-    assert team["public"] is True
+    assert team["public"] is True and team["members"] == 1
     assert team["members"] >= 1  # the creator-admin plus the added editor

@@ -91,11 +91,17 @@ async def seed_group(
     group_id: uuid.UUID,
     name: str | None = None,
     public: bool = False,
+    oidc_org_id: str | None = None,
 ) -> uuid.UUID:
-    """Insert one group with its visibility flag."""
+    """Insert one group with its visibility flag and its required Logto organization id."""
     await admin_exec(
-        "INSERT INTO group_ (id, name, public) VALUES (:id, :name, :public)",
-        {"id": group_id, "name": name or f"g-{group_id}", "public": public},
+        "INSERT INTO group_ (id, name, public, oidc_org_id) VALUES (:id, :name, :public, :org)",
+        {
+            "id": group_id,
+            "name": name or f"g-{group_id}",
+            "public": public,
+            "org": oidc_org_id or f"org-{group_id}",
+        },
     )
     return group_id
 

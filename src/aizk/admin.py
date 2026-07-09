@@ -263,17 +263,6 @@ async def list_users() -> list[UserRow]:
         return await UserRow.list_all()
 
 
-async def create_group(name: str, public: bool = False, creator: uuid.UUID | None = None) -> Group:
-    """Create a sharing group, the scope memberships and promotions target, the row back.
-
-    name: unique human-readable label for the group.
-    public: whether the group's rows are readable by anyone from the start, else members-only.
-    creator: the user founded as the group's admin member, the system user when null.
-    """
-    async with as_system():
-        return await Group.create(name, public=public, creator=creator or system())
-
-
 async def add_member(user: str, group: str, role: str = "editor") -> None:
     """Add a user to a group so that group's scope becomes visible to it under RLS.
 

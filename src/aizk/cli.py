@@ -280,17 +280,6 @@ async def list_users() -> None:
         print(f"{user.id}  {user.display_name or '-'}")
 
 
-@group.command(name="create")
-async def create_group(name: str, public: bool = False) -> None:
-    """Create a sharing group and print its id, the scope memberships and promotions target.
-
-    name: unique human-readable label for the group.
-    public: whether the group's rows are readable by anyone from the start, else members-only.
-    """
-    group = await admin.create_group(name, public=public)
-    print(group.id)
-
-
 @group.command(name="add-member")
 async def add_member(user: str, group: str, role: str = "editor") -> None:
     """Add a user to a group so that group's scope becomes visible to it under RLS.

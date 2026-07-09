@@ -111,6 +111,20 @@ def test_mint_is_idempotent_on_a_conflicting_name(clean_ontology_growth: None) -
     assert description == "first"  # ON CONFLICT DO NOTHING keeps the original
 
 
+def test_define_creates_then_refines_a_catalog_row(clean_ontology_growth: None) -> None:
+    """`define` mints a new kind and, unlike `mint`, refreshes an existing one's gloss, the
+    deliberate curator write, canonicalizing the name the same way `mint` does."""
+
+    async def body() -> str:
+        async with as_system() as session:
+            await EntityKind.define(name="Curated Kind", description="first", domain="auto")
+            await EntityKind.define(name="curated_kind", description="second", domain="auto")
+            row = await session.get_one(EntityKind, "curated_kind")
+        return row.description
+
+    assert dbutil.run(body()) == "second"  # ON CONFLICT DO UPDATE refreshes, unlike mint
+
+
 def test_entity_content_rejects_an_off_vocabulary_type() -> None:
     """Postgres itself refuses a type outside the live catalog, the FK that replaced the old
     hardcoded `CHECK` constraint."""

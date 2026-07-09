@@ -21,33 +21,15 @@ class Group(Id, TableBase, table=True):
     name: unique human-readable label the tools resolve a scope by.
     public: whether the group's rows are readable by anyone, member or not, the shared-brain
         publishing switch. Writing always requires an explicit writer or admin membership.
-    oidc_org_id: the Logto organization this group is the local projection of, when membership is
-        sourced from the identity provider rather than hand-managed. Null for a purely local group.
-        Unique so one local group stands for one organization; Postgres treats nulls as distinct,
-        so any number of local-only groups coexist.
+    oidc_org_id: the Logto organization this group is the local projection of, the sole way a group
+        comes to exist. Every group mirrors one organization, minted by `User.sync_groups` on first
+        sight of a member's token, never hand-created, so this is required and unique rather than a
+        nullable marker of a local-only group.
     """
 
     name: str = Field(sa_type=Text, unique=True)
     public: bool = Field(default=False, sa_column_kwargs={"server_default": false()})
-    oidc_org_id: str | None = Field(default=None, sa_type=Text, unique=True)
-
-    @classmethod
-    async def create(cls, name: str, creator: uuid.UUID, public: bool = False) -> Self:
-        """Create a sharing group, enrolling its creator as the admin member.
-
-        The creator joins as admin in the same transaction, so whoever mints a group can
-        immediately write into it rather than being locked out of their own scope until a separate
-        `add_member`. Requiring a creator means no group is ever born unadministered.
-
-        name: unique human-readable label for the group.
-        creator: user that founds the group, enrolled as its admin member.
-        public: whether the group's rows are readable by anyone from the start.
-        """
-        group = cls(name=name, public=public)
-        session().add(group)
-        await session().flush()
-        session().add(Membership(user_id=creator, group_id=group.id, role=Membership.Role.admin))
-        return group
+    oidc_org_id: str = Field(sa_type=Text, unique=True)
 
     @classmethod
     async def named(cls, name: str) -> Self:
