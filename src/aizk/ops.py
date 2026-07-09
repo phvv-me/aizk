@@ -19,7 +19,7 @@ from .background.queue import install_queue_schema
 from .background.status import TasksStatus, tasks_overview
 from .config import settings
 from .extract import ontology
-from .store import TableBase, system_session, verify_scoped_rls
+from .store import TableBase, as_system, verify_scoped_rls
 
 # the tables a health read counts, the main entities of the store rather than every join and
 # mixin table, read through the owner's superuser connection so the count is the true total
@@ -294,7 +294,7 @@ async def setup() -> SetupReport:
         await install_queue_schema()
     await grant_app_role_privileges()
     await enable_query_stats()
-    async with system_session():
+    async with as_system():
         await ontology.refresh()
     return SetupReport(
         migrated_from=before, migrated_to=alembic_head(config), queue_installed=not already_queued

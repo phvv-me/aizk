@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from ..config import settings
 from ..serving import Embedder
 from ..store import Chunk, Community, EntityContent, FactContent, Profile, acting_as
-from ..store.engine import admin_session, session
+from ..store.engine import bypass_rls, session
 
 # the three per-tenant embedded tables, each carrying an id, an owner, and a halfvec embedding
 # column, re-embedded one user's rows at a time under ordinary row level security.
@@ -95,7 +95,7 @@ async def reembed_content_table(
     model: the content ORM table to walk.
     field: name of the source text column the vector is built from.
     """
-    async with admin_session() as session:
+    async with bypass_rls() as session:
         count = await rewrite_embeddings(embedder, model, field)
         await session.commit()
     logger.info("re-embedded {} {} content rows", count, model.__tablename__)

@@ -6,10 +6,10 @@ services:
     # single file `.env.example` documents field for field alongside `config/settings.py`'s own
     # defaults, so a password or port changed once here is the same edit `Settings` picks up.
     environment:
-      # POSTGRES_USER stays the fixed "aizk" literal, not a var: it is the owning role every
+      # POSTGRES_USER stays the fixed "aizk_admin" literal, not a var: it is the owning role every
       # migration and `initdb/roles.sh` connects as, and `Settings.admin_database_url` hardcodes
       # the same literal role name, only the password travels through the environment.
-      POSTGRES_USER: aizk
+      POSTGRES_USER: aizk_admin
       POSTGRES_PASSWORD: ${AIZK_ADMIN_PASSWORD:-aizk}
       POSTGRES_DB: ${AIZK_DB_NAME:-aizk}
     # unlike the interpolations above, which compose resolves on the host before the container

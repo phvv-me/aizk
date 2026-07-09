@@ -219,7 +219,7 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
     """Each client verb with its faked seams, call kwargs, and the exact result its body returns.
 
     Every body runs under a fixed caller with `scopes=None`, so `resolve_scopes` yields the empty
-    lens with no database and the delegate or `resolve_group_admin` under a faked `system_session`
+    lens with no database and the delegate or `resolve_group_admin` under a faked `as_system`
     is the seam. The curation trio resolves its group admin, the write verb its record id.
     """
     new_id = uuid.uuid4()
@@ -236,7 +236,7 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
         (
             "pending",
             {
-                "system_session": fake_system_session,
+                "as_system": fake_system_session,
                 "resolve_group_admin": const(SimpleNamespace(pending_facts=const([fact]))),
             },
             {"group": "team"},
@@ -249,7 +249,7 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
         (
             "approve",
             {
-                "system_session": fake_system_session,
+                "as_system": fake_system_session,
                 "resolve_group_admin": const(SimpleNamespace(approve_facts=const(2))),
             },
             {"group": "team", "facts": "all"},
@@ -258,7 +258,7 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
         (
             "approve",
             {
-                "system_session": fake_system_session,
+                "as_system": fake_system_session,
                 "resolve_group_admin": const(SimpleNamespace(approve_facts=const(1))),
             },
             {"group": "team", "facts": str(uuid.uuid4())},
@@ -267,7 +267,7 @@ def body_cases() -> list[tuple[str, dict[str, object], dict[str, object], object
         (
             "reject",
             {
-                "system_session": fake_system_session,
+                "as_system": fake_system_session,
                 "resolve_group_admin": const(SimpleNamespace(reject_facts=const(3))),
             },
             {"group": "team", "facts": f"{uuid.uuid4()}, {uuid.uuid4()}"},

@@ -34,7 +34,7 @@ from ..store import (
     Membership,
     acting_as,
 )
-from ..store.engine import admin_session, session
+from ..store.engine import bypass_rls, session
 from .consolidation import decide_by_rule, rank_pool
 from .dedupe import claim_entity, claim_fact, mint_content
 from .ids import entity_id, fact_id
@@ -69,7 +69,7 @@ def extraction_semaphore() -> asyncio.Semaphore:
     entrypoint (`background.queue.process_chunk`), so both paths bound how hard they hit the LLM
     endpoint at the same `settings.graph_build_concurrency` width regardless of how many chunk
     jobs pgqueuer itself has dispatched as concurrent asyncio tasks. Cached the way
-    `store.engine.async_session` caches its engine, one semaphore for the process's lifetime.
+    `store.engine.app_sessions` caches its engine, one semaphore for the process's lifetime.
     """
     return asyncio.Semaphore(settings.graph_build_concurrency)
 
@@ -962,7 +962,7 @@ async def merge_duplicates(
     redirect: duplicate content id to its canonical replacement, from find_duplicates.
     """
     merged = 0
-    async with admin_session() as session:
+    async with bypass_rls() as session:
         async with session.begin():
             for content_id in affected_ids:
                 await repoint_fact_content(content_id, redirect)

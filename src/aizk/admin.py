@@ -41,7 +41,7 @@ from .store import (
     Group,
     RelationKind,
     acting_as,
-    system_session,
+    as_system,
 )
 from .store import User as UserRow
 from .store.engine import session
@@ -240,7 +240,7 @@ async def create_user(name: str) -> UserRow:
 
     name: human-readable display name for the new actor.
     """
-    async with system_session():
+    async with as_system():
         return await UserRow.create(name)
 
 
@@ -253,13 +253,13 @@ async def link_user(oidc_subject: str, name: str = "") -> UserRow:
     oidc_subject: the subject claim the provider mints this identity's tokens against.
     name: human-readable display name for a freshly minted user.
     """
-    async with system_session():
+    async with as_system():
         return await UserRow.link_oidc(oidc_subject, name)
 
 
 async def list_users() -> list[UserRow]:
     """Every user known to the engine, the roster."""
-    async with system_session():
+    async with as_system():
         return await UserRow.list_all()
 
 
@@ -274,7 +274,7 @@ async def create_group(
         visible to the rest of the group, immediate when false.
     creator: the user founded as the group's admin member, the system user when null.
     """
-    async with system_session():
+    async with as_system():
         return await Group.create(
             name, public=public, curated=curated, creator=creator or system()
         )
@@ -287,7 +287,7 @@ async def add_member(user: str, group: str, role: str = "writer") -> None:
     group: name of the group the user joins.
     role: standing within the group, reader for read-only, writer or admin to also write.
     """
-    async with system_session():
+    async with as_system():
         group_row = await Group.named(group)
         await group_row.add_member(uuid.UUID(user), role=role)
 
@@ -298,7 +298,7 @@ async def remove_member(user: str, group: str) -> None:
     user: id of the user leaving the group.
     group: name of the group the user leaves.
     """
-    async with system_session():
+    async with as_system():
         group_row = await Group.named(group)
         await group_row.remove_member(uuid.UUID(user))
 
@@ -309,7 +309,7 @@ async def publish_group(group: str, public: bool = True) -> None:
     group: name of the group to publish or unpublish.
     public: true to publish, false to make members-only again.
     """
-    async with system_session():
+    async with as_system():
         group_row = await Group.named(group)
         await group_row.publish(public=public)
 
@@ -320,7 +320,7 @@ async def curate_group(group: str, curated: bool = True) -> None:
     group: name of the group to curate or uncurate.
     curated: true to require review, false to write straight through.
     """
-    async with system_session():
+    async with as_system():
         group_row = await Group.named(group)
         await group_row.curate(curated=curated)
 
@@ -330,14 +330,14 @@ async def delete_group(group: str) -> None:
 
     group: name of the group to delete.
     """
-    async with system_session():
+    async with as_system():
         group_row = await Group.named(group)
         await group_row.delete()
 
 
 async def list_groups() -> list[dict]:
     """Every group with its visibility and member count, the sharing roster."""
-    async with system_session():
+    async with as_system():
         return await Group.list_all()
 
 
@@ -351,7 +351,7 @@ async def define_entity_kind(name: str, description: str, domain: str = "general
     description: one-line gloss the extraction prompt renders and the auto-create fold matches.
     domain: grouping tag, general by default, or core, coding, research, finance, personal.
     """
-    async with system_session():
+    async with as_system():
         await EntityKind.define(name, description, domain)
         await ontology.refresh()
 
@@ -363,7 +363,7 @@ async def define_relation_kind(name: str, description: str, domain: str = "gener
     description: one-line gloss the extraction prompt renders and the auto-create fold matches.
     domain: grouping tag, general by default, or core, coding, research, finance, personal.
     """
-    async with system_session():
+    async with as_system():
         await RelationKind.define(name, description, domain)
         await ontology.refresh()
 
@@ -375,7 +375,7 @@ async def list_ontology() -> list[OntologyKindRow]:
     carry it, so the operator sees the whole vocabulary at once and can tell a load-bearing type
     from dead weight worth folding into another.
     """
-    async with system_session():
+    async with as_system():
         entity_uses = dict(
             (
                 await session().execute(

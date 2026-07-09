@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import text
 
 from aizk.graph.ids import entity_id
-from aizk.store import Group, system_session
+from aizk.store import Group, as_system
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -30,7 +30,7 @@ def test_deleting_a_group_demotes_bridge_rows_fully_private() -> None:
         bridge = await dbutil.seed_document(owner, [group_a, group_b])
         only_b = await dbutil.seed_document(owner, [group_b])
 
-        async with system_session() as session:
+        async with as_system() as session:
             loaded = await session.get(Group, group_a)
             assert loaded is not None
             await loaded.delete()
@@ -49,7 +49,7 @@ def test_group_deletion_cascades_memberships_and_removes_the_group() -> None:
         member = await dbutil.seed_user(uuid.uuid4())
         group_id = await dbutil.seed_group(uuid.uuid4())
         await dbutil.seed_membership(member, group_id, "writer")
-        async with system_session() as session:
+        async with as_system() as session:
             loaded = await session.get(Group, group_id)
             assert loaded is not None
             await loaded.delete()
@@ -93,7 +93,7 @@ def test_demotion_dedupes_a_colliding_private_claim() -> None:
             "VALUES (:id, :c, :o, CAST(:s AS uuid[]))",
             {"id": uuid.uuid4(), "c": content, "o": owner, "s": [str(group_id)]},
         )
-        async with system_session() as session:
+        async with as_system() as session:
             loaded = await session.get(Group, group_id)
             assert loaded is not None
             await loaded.delete()

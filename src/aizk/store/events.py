@@ -13,7 +13,7 @@ def bind_user(session: Session, transaction: SessionTransaction, connection: Con
     """Bind app.uid and app.scopes for the transaction from the session's own acting identity.
 
     A global ORM-level listener rather than a per-engine Core `begin` hook, so every session ever
-    opened through `async_session` binds the GUCs the moment its transaction starts, with no
+    opened through `app_sessions` binds the GUCs the moment its transaction starts, with no
     per-engine wiring to remember at construction. Reads the acting user and the optional
     narrowing lens straight off `session.info`, the dict `acting_as` stamps at construction, so the
     identity travels with the session object itself rather than through a ContextVar bound around

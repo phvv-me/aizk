@@ -15,9 +15,11 @@ from sqlalchemy.ext.asyncio import (
 from ..config import settings
 from ..exceptions import NoTenantContext
 
+_current_session: ContextVar[AsyncSession] = ContextVar("aizk_session")
+
 
 def build_engine() -> AsyncEngine:
-    """Build the app-role async engine, a real pool by default, NullPool when opted in.
+    """Build the `aizk_app` engine, a real pool by default, NullPool when opted in.
 
     A pooled connection is safe to reuse across transactions since `events.bind_user` rebinds
     `app.uid`/`app.scopes` transaction-locally on every `after_begin`, so no pooled connection ever
@@ -39,15 +41,28 @@ def build_engine() -> AsyncEngine:
 
 
 @functools.cache
-def async_session() -> async_sessionmaker[AsyncSession]:
+def app_sessions() -> async_sessionmaker[AsyncSession]:
+    """The cached `aizk_app` sessionmaker, the role row level security is always enforced under."""
     return async_sessionmaker(build_engine(), expire_on_commit=False)
 
 
-_current_session: ContextVar[AsyncSession] = ContextVar("aizk_session")
+@functools.cache
+def admin_sessions() -> async_sessionmaker[AsyncSession]:
+    """The cached `aizk_admin` sessionmaker, the owner role that bypasses row level security.
+
+    `aizk_admin` owns the schema and is not subject to the FORCE-RLS policies `aizk_app` runs
+    under, so it is the only connection that can touch the ownerless content tables
+    `entity_content`/`fact_content`, which carry no UPDATE policy at all. NullPool under the test
+    suite for the same cross-event-loop reason `build_engine` uses one.
+    """
+    pool = {"poolclass": NullPool} if settings.db_null_pool else {}
+    return async_sessionmaker(
+        create_async_engine(settings.admin_database_url, **pool), expire_on_commit=False
+    )
 
 
 def session() -> AsyncSession:
-    """The open session the enclosing `acting_as`/`admin_session` block bound to the task-local
+    """The open session the enclosing `acting_as`/`bypass_rls` block bound to the task-local
     context.
 
     Store operations read the session from context here rather than receiving it as a parameter.
@@ -60,54 +75,72 @@ def session() -> AsyncSession:
 
 
 @asynccontextmanager
+async def bound(opened: AsyncSession) -> AsyncGenerator[AsyncSession]:
+    """Bind `opened` to the task-local context for the block so `session()` resolves to it, then
+    unbind on exit. One of the two building blocks every session context manager composes from.
+    """
+    token = _current_session.set(opened)
+    try:
+        yield opened
+    finally:
+        _current_session.reset(token)
+
+
+@asynccontextmanager
+async def open_session(
+    sessions: async_sessionmaker[AsyncSession], info: dict[str, object]
+) -> AsyncGenerator[AsyncSession]:
+    """Open a session from `sessions`, stamp its `info`, and bind it to the task-local context.
+
+    The shared opener `acting_as` and `bypass_rls` both compose over, differing only in the role
+    sessionmaker they hand it and whether they wrap the yield in a transaction. `events.bind_user`
+    reads `info` into the `app.uid`/`app.scopes` GUCs on the first `begin`.
+
+    sessions: the role sessionmaker to open from, `app_sessions()` or `admin_sessions()`.
+    info: the `session.info` payload naming the acting user and optional lens.
+    """
+    async with sessions(info=info) as opened, bound(opened):
+        yield opened
+
+
+@asynccontextmanager
 async def acting_as(
     user_id: uuid.UUID, scopes: tuple[uuid.UUID, ...] = ()
 ) -> AsyncGenerator[AsyncSession]:
-    """Open a session whose transaction runs as a given user under row level security.
+    """Open an `aizk_app` session whose transaction runs as a given user under row level security.
 
-    Stamps `session.info` with the acting user and optional lens, which `events.bind_user` reads
-    into the app.uid and app.scopes GUCs, and binds the open session to the task-local context so
-    `session()` reaches it without a threaded parameter.
+    The everyday building block: an app-role session, bound to the context, with its transaction
+    begun. Stamps the acting user and optional lens for `events.bind_user` to read into the GUCs.
 
     user_id: identity whose visibility the session acts under.
     scopes: group ids to narrow reads to (a claim's own set must be contained in this lens and
         non-empty), or an empty tuple for the full visible union with no lens at all.
     """
-    async with async_session()(info={"user": user_id, "lens": scopes}) as opened, opened.begin():
-        token = _current_session.set(opened)
-        try:
-            yield opened
-        finally:
-            _current_session.reset(token)
+    async with (
+        open_session(app_sessions(), {"user": user_id, "lens": scopes}) as opened,
+        opened.begin(),
+    ):
+        yield opened
 
 
-def system_session() -> AbstractAsyncContextManager[AsyncSession]:
-    """Open a session acting as `settings.system_user_id`, the background-pass shorthand.
+def as_system() -> AbstractAsyncContextManager[AsyncSession]:
+    """`acting_as` the system user, the background-pass shorthand, still `aizk_app` under RLS.
 
-    Still the app role under row level security, only the identity differs, so a background pass
-    stays inside the visibility lattice. When a structural write must reach past every claim's own
-    policy, `admin_session` on the owner role is the deliberate, quarantined break-glass instead.
+    Only the identity differs from an ordinary `acting_as`, so a background pass stays inside the
+    visibility lattice. When a structural write must reach past every claim's policy, `bypass_rls`
+    on the owner role is the deliberate, quarantined alternative instead.
     """
     return acting_as(settings.system_user_id)
 
 
 @asynccontextmanager
-async def admin_session() -> AsyncGenerator[AsyncSession]:
-    """Open a session on the owner-role admin engine, bypassing row level security entirely.
+async def bypass_rls() -> AsyncGenerator[AsyncSession]:
+    """Open an `aizk_admin` session that bypasses row level security entirely.
 
     The one place a structural write (entity-dedup merge, RAPTOR rebuild, content re-embed) reaches
-    past a claim's own policy to touch content directly. Disposes its throwaway engine on exit, and
-    binds the session to the task-local context the same way `acting_as` does so `session()`
-    resolves inside the block. The caller owns its own transaction boundaries.
+    past a claim's own policy to touch content directly, since the app role's own policies forbid
+    every UPDATE to content. No auto-`begin`, unlike `acting_as`: the caller owns its transaction
+    boundaries, since these passes commit in stages.
     """
-    engine = create_async_engine(settings.admin_database_url)
-    try:
-        sessions = async_sessionmaker(engine, expire_on_commit=False)
-        async with sessions(info={"user": settings.system_user_id}) as opened:
-            token = _current_session.set(opened)
-            try:
-                yield opened
-            finally:
-                _current_session.reset(token)
-    finally:
-        await engine.dispose()
+    async with open_session(admin_sessions(), {"user": settings.system_user_id}) as opened:
+        yield opened

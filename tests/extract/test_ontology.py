@@ -11,7 +11,7 @@ from aizk.extract import ontology
 from aizk.extract.models import ExtractedEntity, TimedFact
 from aizk.extract.ontology import cache as ontology_cache
 from aizk.graph.ontology_growth import derive_type_name, resolve_suggested_type
-from aizk.store import EntityKind, RelationKind, system_session
+from aizk.store import EntityKind, RelationKind, as_system
 from aizk.store.models.tables.entity import EntityContent
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
@@ -32,7 +32,7 @@ def clean_ontology_growth():
     dbutil.run(dbutil.admin_exec("DELETE FROM relation_kind WHERE domain = 'auto'"))
 
     async def restore() -> None:
-        async with system_session():
+        async with as_system():
             await ontology.refresh()
 
     dbutil.run(restore())
@@ -64,7 +64,7 @@ def test_extractable_names_exclude_structural_members() -> None:
     """The extraction vocabulary never includes the system-written RAPTOR/observation types."""
 
     async def body() -> tuple[list[str], list[str]]:
-        async with system_session():
+        async with as_system():
             return (
                 await EntityKind.extractable_names(),
                 await RelationKind.extractable_names(),
@@ -82,7 +82,7 @@ def test_seed_baseline_carries_domain_and_structural() -> None:
     """The seed migration lands each kind with its domain tag and structural flag intact."""
 
     async def body() -> tuple[EntityKind, EntityKind]:
-        async with system_session() as session:
+        async with as_system() as session:
             return (
                 await session.get_one(EntityKind, ontology.PROJECT),
                 await session.get_one(EntityKind, ontology.RAPTOR_SUMMARY),
@@ -98,7 +98,7 @@ def test_mint_is_idempotent_on_a_conflicting_name(clean_ontology_growth: None) -
     violation, the property that lets two concurrent extractions agree on one row."""
 
     async def body() -> tuple[int, str]:
-        async with system_session() as session:
+        async with as_system() as session:
             await EntityKind.mint(name="GrowthProbe", description="first", domain="auto")
             await EntityKind.mint(name="GrowthProbe", description="second", domain="auto")
             rows = list(
@@ -116,7 +116,7 @@ def test_entity_content_rejects_an_off_vocabulary_type() -> None:
     hardcoded `CHECK` constraint."""
 
     async def body() -> None:
-        async with system_session() as session:
+        async with as_system() as session:
             session.add(EntityContent(name="x", type="NotARealType"))
             await session.flush()
 
@@ -129,7 +129,7 @@ def test_fact_content_rejects_an_off_vocabulary_predicate() -> None:
     from aizk.store import FactContent
 
     async def body() -> None:
-        async with system_session() as session:
+        async with as_system() as session:
             session.add(
                 FactContent(subject_id=uuid.uuid4(), predicate="not_a_relation", statement="s")
             )
@@ -172,7 +172,7 @@ def test_resolve_suggested_type_folds_into_an_identical_existing_description(
     """
 
     async def body() -> tuple[str, str]:
-        async with system_session() as session:
+        async with as_system() as session:
             await ontology.refresh()
             # a non-structural kind: structural kinds (RaptorSummary, Observation) are deliberately
             # excluded from the auto-create fold pool, so a suggestion never resolves into one.
@@ -206,7 +206,7 @@ def test_resolve_suggested_type_mints_a_new_kind_for_a_novel_suggestion(
     suggested = str(uuid.uuid4())
 
     async def body() -> EntityKind:
-        async with system_session() as session:
+        async with as_system() as session:
             await ontology.refresh()
             name = await resolve_suggested_type(suggested)
             return await session.get_one(EntityKind, name)

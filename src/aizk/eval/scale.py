@@ -30,7 +30,7 @@ from ..store import (
     User,
     Watermark,
     acting_as,
-    system_session,
+    as_system,
 )
 from ..store.engine import session
 from .sweep import open_meter, percentile
@@ -673,7 +673,7 @@ async def purge_user(user_id: uuid.UUID) -> None:
         )
         for table in (FactClaim, Community, Profile, EntityClaim, Chunk, Document, Watermark):
             await session().execute(delete(table).where(table.owner_id == user_id))
-    async with system_session():
+    async with as_system():
         await session().execute(delete(FactContent).where(FactContent.id.in_(fact_content_ids)))
         await session().execute(
             delete(EntityContent).where(EntityContent.id.in_(entity_content_ids))
@@ -740,7 +740,7 @@ async def run_scale_benchmark(
     budget = budget or Budget()
     rng = np.random.default_rng(seed)
     [vector] = await Embedder().embed([query], mode="query")
-    async with system_session():
+    async with as_system():
         user_id = (await User.create("scale-benchmark")).id
     generated = Generated()
     points: list[ScalePoint] = []

@@ -4,7 +4,7 @@ from pgqueuer.models import Job
 
 from ..config import settings
 from ..extract import ontology
-from ..store import User, system_session
+from ..store import User, as_system
 from .payloads import ChunkJob, ProfileJob, TaskJob
 from .queue import (
     EXTRACT_ENTRYPOINT,
@@ -30,7 +30,7 @@ async def fan_out(task: ScheduledTask) -> None:
 
     task: the scheduled task being fanned out.
     """
-    async with system_session():
+    async with as_system():
         users = await User.list_all()
     async with queue_queries() as queries:
         queued = sum(
@@ -94,7 +94,7 @@ async def run_worker(batch_size: int = 10) -> None:
 
     batch_size: maximum number of jobs the manager dequeues per round.
     """
-    async with system_session():
+    async with as_system():
         await ontology.refresh()
     async with queue_connection() as connection:
         pg = PgQueuer.from_asyncpg_connection(connection)

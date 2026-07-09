@@ -6,7 +6,7 @@ import pytest
 
 from aizk.config import settings
 from aizk.graph.ids import entity_id, fact_id
-from aizk.store import Group, system_session
+from aizk.store import Group, as_system
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -63,7 +63,7 @@ def test_review_stamp_gates_on_curated_admin_standing(
         owner = await dbutil.seed_user(uuid.uuid4())
         group = await dbutil.seed_group(uuid.uuid4(), curated=curated)
         await dbutil.seed_membership(owner, group, "admin" if owner_is_admin else "writer")
-        async with system_session():
+        async with as_system():
             result = await Group.review_stamp((group,), owner)
         assert (result is not None) is stamped
         if result is not None:
@@ -78,7 +78,7 @@ def test_review_stamp_private_write_is_immediate() -> None:
     async def body() -> None:
         await dbutil.reset_db()
         owner = await dbutil.seed_user(uuid.uuid4())
-        async with system_session():
+        async with as_system():
             assert await Group.review_stamp((), owner) is not None
 
     dbutil.run(body())
@@ -94,7 +94,7 @@ def test_pending_facts_lists_only_unreviewed_across_authors() -> None:
         group = await dbutil.seed_group(uuid.uuid4(), curated=True)
         await seed_fact(author, [group], "pending one", reviewed=False)
         await seed_fact(author, [group], "approved already", reviewed=True)
-        async with system_session() as session:
+        async with as_system() as session:
             loaded = await session.get(Group, group)
             assert loaded is not None
             pending = await loaded.pending_facts()
@@ -113,7 +113,7 @@ def test_approve_all_stamps_every_pending_claim() -> None:
         group = await dbutil.seed_group(uuid.uuid4(), curated=True)
         await seed_fact(author, [group], "a", reviewed=False)
         await seed_fact(author, [group], "b", reviewed=False)
-        async with system_session() as session:
+        async with as_system() as session:
             loaded = await session.get(Group, group)
             assert loaded is not None
             approved = await loaded.approve_facts()
@@ -133,7 +133,7 @@ def test_approve_specific_ids_stamps_only_those_claims() -> None:
         group = await dbutil.seed_group(uuid.uuid4(), curated=True)
         chosen = await seed_fact(author, [group], "approve this", reviewed=False)
         await seed_fact(author, [group], "leave this", reviewed=False)
-        async with system_session() as session:
+        async with as_system() as session:
             loaded = await session.get(Group, group)
             assert loaded is not None
             approved = await loaded.approve_facts([chosen])
@@ -154,7 +154,7 @@ def test_reject_deletes_named_pending_claims() -> None:
         group = await dbutil.seed_group(uuid.uuid4(), curated=True)
         doomed = await seed_fact(author, [group], "reject me", reviewed=False)
         await seed_fact(author, [group], "keep me", reviewed=False)
-        async with system_session() as session:
+        async with as_system() as session:
             loaded = await session.get(Group, group)
             assert loaded is not None
             removed = await loaded.reject_facts([doomed])

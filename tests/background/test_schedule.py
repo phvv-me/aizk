@@ -56,7 +56,7 @@ def test_fan_out_enqueues_one_deduped_job_per_user(
         async def __aexit__(self, *exc: object) -> bool:
             return False
 
-    monkeypatch.setattr(schedule_mod, "system_session", lambda: FakeSystemSession())
+    monkeypatch.setattr(schedule_mod, "as_system", lambda: FakeSystemSession())
     monkeypatch.setattr(schedule_mod.User, "list_all", fake_list_all)
     task = task_cls()
 

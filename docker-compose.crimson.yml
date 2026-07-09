@@ -104,7 +104,7 @@ services:
     entrypoint: ["sh", "-c", "npm run cli db seed -- --swe || true; exec npm start"]
     environment:
       - TRUST_PROXY_HEADER=1
-      - DB_URL=postgres://aizk:${AIZK_ADMIN_PASSWORD:-aizk}@db:5432/logto
+      - DB_URL=postgres://aizk_admin:${AIZK_ADMIN_PASSWORD:-aizk}@db:5432/logto
       - ENDPOINT=${AIZK_LOGTO_ENDPOINT:-http://localhost:3001}
       - ADMIN_ENDPOINT=${AIZK_LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
     ports:

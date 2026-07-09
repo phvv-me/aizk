@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from ..config import settings
 from ..extract.llm import structured
-from ..store import Group, LiveFact, Membership, Watermark, acting_as, system_session
+from ..store import Group, LiveFact, Membership, Watermark, acting_as, as_system
 from ..store.engine import session
 from .models import CurationReview
 
@@ -125,7 +125,7 @@ async def apply_verdicts(
     approved: claim ids the judge approved.
     rejected: claim ids the judge rejected.
     """
-    async with system_session():
+    async with as_system():
         group_row = await session().get(Group, group_id)
         assert group_row is not None  # vetted moments ago by curated_groups_administered
         if approved:
@@ -143,14 +143,14 @@ async def review_group(user_id: uuid.UUID, group: Group) -> tuple[int, int]:
     user_id: the admin member this pass reviews on behalf of, the watermark's own owner.
     group: the curated group to review.
     """
-    async with system_session():
+    async with as_system():
         pending = await group.pending_facts()
     if await debounced(user_id, group, len(pending)):
         logger.info(
             "curation review skipped for group {}, {} still pending", group.id, len(pending)
         )
         return 0, 0
-    async with system_session():
+    async with as_system():
         canon = await visible_canon(group)
     approved, rejected = sort_verdicts(pending, await judge_pending(canon, pending))
     await apply_verdicts(group.id, approved, rejected)

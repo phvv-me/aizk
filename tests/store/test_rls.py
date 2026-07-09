@@ -9,7 +9,7 @@ from hypothesis import strategies as st
 from sqlalchemy import select
 
 from aizk.config import settings
-from aizk.store import Document, NoTenantContext, acting_as, async_session
+from aizk.store import Document, NoTenantContext, acting_as, app_sessions
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -214,7 +214,7 @@ def test_scoped_orm_query_without_acting_as_raises() -> None:
     """A scoped ORM read opened outside `acting_as` fails loud rather than returning nothing."""
 
     async def body() -> None:
-        async with async_session()() as session, session.begin():
+        async with app_sessions()() as session, session.begin():
             with pytest.raises(NoTenantContext):
                 await session.execute(select(Document))
 
@@ -226,7 +226,7 @@ def test_non_scoped_query_without_acting_as_is_allowed() -> None:
     from aizk.store import User
 
     async def body() -> None:
-        async with async_session()() as session, session.begin():
+        async with app_sessions()() as session, session.begin():
             # user carries no row level security, so the tenant guard lets this pass
             await session.execute(select(User).limit(1))
 

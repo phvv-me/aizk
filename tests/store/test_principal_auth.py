@@ -134,7 +134,7 @@ def test_from_token_syncs_group_memberships_from_the_configured_claim(
 ) -> None:
     """A token carrying the configured groups claim reconciles membership after resolving the user.
 
-    The claim, `system_session`, and `Group.sync_user_groups` are all stubbed, so the sync branch
+    The claim, `as_system`, and `Group.sync_user_groups` are all stubbed, so the sync branch
     runs and forwards the verified membership list without a database.
     """
     resolved = uuid.uuid4()
@@ -160,7 +160,7 @@ def test_from_token_syncs_group_memberships_from_the_configured_claim(
     monkeypatch.setattr(
         User, "for_subject", classmethod(lambda cls, subject: stub_for_subject(subject))
     )
-    monkeypatch.setattr("aizk.store.models.tables.user.system_session", lambda: _Session())
+    monkeypatch.setattr("aizk.store.models.tables.user.as_system", lambda: _Session())
     monkeypatch.setattr(
         "aizk.store.models.tables.group.Group.sync_user_groups",
         classmethod(lambda cls, u, m: stub_sync(u, m)),

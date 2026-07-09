@@ -76,7 +76,7 @@ class FakeSession:
 
 
 class FakeSystemSession:
-    """An async context manager standing in for `system_session()`, no real database touched.
+    """An async context manager standing in for `as_system()`, no real database touched.
 
     session: the `FakeSession` the block acts under, a fresh `FakeTarget`-carrying one by default.
     """
@@ -92,5 +92,5 @@ class FakeSystemSession:
 
 
 def fake_system_session() -> FakeSystemSession:
-    """Zero-arg stand-in for `system_session`, the shape an operator operation calls it in."""
+    """Zero-arg stand-in for `as_system`, the shape an operator operation calls it in."""
     return FakeSystemSession()

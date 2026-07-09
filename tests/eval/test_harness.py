@@ -29,7 +29,7 @@ from aizk.eval import (
 )
 from aizk.eval.scale import CorpusScale, Generated, grow_corpus, purge_user
 from aizk.retrieval import RecallResult
-from aizk.store import User, system_session
+from aizk.store import User, as_system
 
 
 class RanxCase(NamedTuple):
@@ -301,7 +301,7 @@ def test_sample_facts_returns_latest_statements_in_a_stable_id_order(migrated_db
 
     async def body() -> None:
         await dbutil.reset_db()
-        async with system_session():
+        async with as_system():
             user_id = (await User.create("eval-sample")).id
         try:
             await grow_corpus(

@@ -17,7 +17,7 @@ from aizk.graph.curation_review import (
     visible_canon,
 )
 from aizk.graph.models import CurationReview, CurationVerdict
-from aizk.store import Group, Watermark, acting_as, system_session
+from aizk.store import Group, Watermark, acting_as, as_system
 
 
 class Brain(NamedTuple):
@@ -132,7 +132,7 @@ def test_visible_canon_returns_only_reviewed_claims_newest_first(brain: Brain) -
         await plant_claim(brain.writer, brain.group, "still pending", None)
         await plant_claim(brain.writer, brain.group, "older approved", datetime.now(UTC))
         await plant_claim(brain.writer, brain.group, "newer approved", datetime.now(UTC))
-        async with system_session() as session:
+        async with as_system() as session:
             group = await session.get(Group, brain.group)
             assert group is not None
             return await visible_canon(group)

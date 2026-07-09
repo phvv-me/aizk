@@ -18,7 +18,7 @@ from aizk.store.engine import _current_session
 async def use_session(fake: object) -> AsyncGenerator[AsyncSession]:
     """Bind a fake session to the task-local context so `session()` resolves to it in a unit test.
 
-    Production `acting_as`/`admin_session` bind their real session inline; a faking test binds its
+    Production `acting_as`/`bypass_rls` bind their real session inline; a faking test binds its
     stand-in the same way here, reaching the store's context var directly.
     """
     bound = cast(AsyncSession, fake)

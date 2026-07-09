@@ -17,7 +17,7 @@ from ..store import (
     FactContent,
     acting_as,
 )
-from ..store.engine import admin_session, session
+from ..store.engine import bypass_rls, session
 from .models import Node, RaptorReport
 from .tier_builder import TierBuilder
 
@@ -396,7 +396,7 @@ async def clear_stale_tree(user_id: uuid.UUID) -> None:
     stale = await stale_tree_content(user_id)
     if not stale:
         return
-    async with admin_session() as session:
+    async with bypass_rls() as session:
         await session.execute(delete(EntityContent).where(EntityContent.id.in_(stale)))
         await session.commit()
 

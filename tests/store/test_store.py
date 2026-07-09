@@ -13,14 +13,14 @@ from aizk.store import (
     User,
     Watermark,
     acting_as,
-    system_session,
+    as_system,
 )
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 
 def test_session_outside_a_block_fails_fast() -> None:
-    """session() raises NoTenantContext when read outside any acting_as/admin_session block."""
+    """session() raises NoTenantContext when read outside any acting_as/bypass_rls block."""
     from aizk.exceptions import NoTenantContext
     from aizk.store.engine import session
 
@@ -40,7 +40,7 @@ def test_sync_user_groups_skips_malformed_claim_entries() -> None:
             {"name": "no-id"},  # missing id, the KeyError branch skips it
             {"id": 123, "role": "reader"},  # non-string id, the isinstance branch skips it
         ]
-        async with system_session():
+        async with as_system():
             await Group.sync_user_groups(user, cast(list[dict[str, str]], memberships))
             rows = await Group.list_all()
         return any(row["name"] == "Alpha" for row in rows)
@@ -58,7 +58,7 @@ def test_user_lifecycle_create_link_and_list() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        async with system_session():
+        async with as_system():
             first = await User.create("alice")
             second = await User.create("bob")
             assert not await User.administers(first.id)
@@ -67,7 +67,7 @@ def test_user_lifecycle_create_link_and_list() -> None:
             assert not await User.administers(linked.id)  # a linked user is not admin
             again = await User.link_oidc("gh|alice", "ignored")
             assert again.id == linked.id  # idempotent over the same subject
-        async with system_session():
+        async with as_system():
             ordered = await User.list_all()
             names = [p.display_name for p in ordered]
             assert {"alice", "bob"} <= set(names)
@@ -81,7 +81,7 @@ def test_unknown_user_administers_reads_false() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        async with system_session():
+        async with as_system():
             assert not await User.administers(uuid.uuid4())
 
     dbutil.run(body())
@@ -93,7 +93,7 @@ def test_group_creation_enrolls_creator_as_admin() -> None:
     async def body() -> None:
         await dbutil.reset_db()
         creator = await dbutil.seed_user(uuid.uuid4())
-        async with system_session():
+        async with as_system():
             group = await Group.create("team", creator=creator)
             assert await group.admin(creator)
             await group.require_admin(creator)
@@ -106,7 +106,7 @@ def test_named_resolves_or_raises() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        async with system_session():
+        async with as_system():
             made = await Group.create("known")
             found = await Group.named("known")
             assert found.id == made.id
@@ -122,7 +122,7 @@ def test_membership_add_remove_and_admin_gate() -> None:
     async def body() -> None:
         await dbutil.reset_db()
         member = await dbutil.seed_user(uuid.uuid4())
-        async with system_session():
+        async with as_system():
             group = await Group.create("g")
             await group.add_member(member, role="reader")
             assert not await group.admin(member)
@@ -140,7 +140,7 @@ def test_server_admin_passes_group_admin_gate() -> None:
     async def body() -> None:
         await dbutil.reset_db()
         root = await dbutil.seed_user(uuid.uuid4(), is_admin=True)
-        async with system_session():
+        async with as_system():
             group = await Group.create("g")
             await group.require_admin(root)
 
@@ -152,7 +152,7 @@ def test_publish_and_curate_flip_flags() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        async with system_session() as session:
+        async with as_system() as session:
             group = await Group.create("g")
             await group.publish(public=True)
             await group.curate(curated=True)
@@ -170,10 +170,10 @@ def test_list_all_counts_members() -> None:
         await dbutil.reset_db()
         a = await dbutil.seed_user(uuid.uuid4())
         b = await dbutil.seed_user(uuid.uuid4())
-        async with system_session():
+        async with as_system():
             group = await Group.create("team", public=True, creator=a)
             await group.add_member(b, role="writer")
-        async with system_session():
+        async with as_system():
             rows = await Group.list_all()
             team = next(row for row in rows if row["name"] == "team")
             assert team["public"] is True and team["members"] == 2
@@ -303,7 +303,7 @@ def test_for_oidc_org_mints_once_then_reuses_the_mirror() -> None:
 
     async def body() -> tuple[uuid.UUID, uuid.UUID, str | None]:
         await dbutil.reset_db()
-        async with system_session():
+        async with as_system():
             first = await Group.for_oidc_org("org-abc", "Finance")
             again = await Group.for_oidc_org("org-abc", "ignored-second-time")
             return first.id, again.id, first.oidc_org_id
@@ -318,7 +318,7 @@ def test_for_oidc_org_disambiguates_a_taken_label() -> None:
 
     async def body() -> str:
         await dbutil.reset_db()
-        async with system_session():
+        async with as_system():
             await Group.create("Finance")
             mirror = await Group.for_oidc_org("org-xyz", "Finance")
             return mirror.name
@@ -332,7 +332,7 @@ def test_sync_user_groups_reconciles_membership_to_the_claim() -> None:
     async def body() -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
         await dbutil.reset_db()
         user = await dbutil.seed_user(uuid.uuid4())
-        async with system_session() as session:
+        async with as_system() as session:
             await Group.sync_user_groups(
                 user,
                 [
@@ -341,7 +341,7 @@ def test_sync_user_groups_reconciles_membership_to_the_claim() -> None:
                 ],
             )
             before = await group_roles(session, user)
-        async with system_session() as session:
+        async with as_system() as session:
             # user leaves A, is promoted in B, and joins C
             await Group.sync_user_groups(
                 user,
@@ -364,7 +364,7 @@ def test_sync_user_groups_empty_claim_drops_all_memberships() -> None:
     async def body() -> set[tuple[str, str]]:
         await dbutil.reset_db()
         user = await dbutil.seed_user(uuid.uuid4())
-        async with system_session() as session:
+        async with as_system() as session:
             await Group.sync_user_groups(user, [{"id": "A", "name": "Alpha"}])
             await Group.sync_user_groups(user, [])
             return await group_roles(session, user)

@@ -125,7 +125,7 @@ def test_link_user_binds_a_subject_without_granting_admin(migrated_db: None) -> 
         await dbutil.seed_user(settings.system_user_id, is_admin=True)
         first = await admin.link_user("gh|7", "Ada")
         again = await admin.link_user("gh|7", "ignored")
-        async with admin.system_session():
+        async with admin.as_system():
             is_admin = await admin.UserRow.administers(first.id)
         return first.id, again.id, is_admin
 

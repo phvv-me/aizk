@@ -14,7 +14,7 @@ from . import rls as rls
 from . import events as events
 
 # isort: on
-from .engine import acting_as, async_session, system_session
+from .engine import acting_as, app_sessions, as_system
 from .mixins import TableBase
 from .models import (
     Chunk,
@@ -56,7 +56,7 @@ __all__ = [
     "TableBase",
     "Watermark",
     "acting_as",
-    "async_session",
-    "system_session",
+    "app_sessions",
+    "as_system",
     "verify_scoped_rls",
 ]

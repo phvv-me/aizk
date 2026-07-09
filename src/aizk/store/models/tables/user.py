@@ -10,7 +10,7 @@ from sqlalchemy import Text, select
 from sqlmodel import Field, Relationship
 
 from ....config import settings
-from ...engine import acting_as, session, system_session
+from ...engine import acting_as, as_system, session
 from ...mixins import Id, TableBase, Timestamped
 from .document import Document
 
@@ -130,7 +130,7 @@ class User(Id, Timestamped, TableBase, table=True):
 
         subject: the OIDC subject claim naming the external user.
         """
-        async with system_session():
+        async with as_system():
             user_id = await session().scalar(select(cls.id).where(cls.oidc_subject == subject))
             if user_id is not None:
                 return user_id
@@ -258,6 +258,6 @@ class User(Id, Timestamped, TableBase, table=True):
         if settings.oidc_groups_claim and isinstance(claim, list):
             from .group import Group  # local import breaks the User<->Group definition cycle
 
-            async with system_session():
+            async with as_system():
                 await Group.sync_user_groups(user_id, claim)
         return user_id

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Mounted at /docker-entrypoint-initdb.d/ in docker-compose.yml, so Postgres runs this once
 # against a genuinely fresh volume, before any alembic migration ever connects. It runs as the
-# POSTGRES_USER superuser (docker-compose's `aizk`), the same role every migration runs as, so the
+# POSTGRES_USER superuser (docker-compose's `aizk_admin`), the same role every migration runs as, so the
 # default privileges below apply automatically to every table and sequence a migration creates
 # from here on; 0001_init's own per-table GRANT in `apply_scoped_rls` stays a harmless belt over
 # this suspenders. No IF NOT EXISTS guard: Postgres only ever runs

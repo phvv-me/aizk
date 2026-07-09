@@ -13,7 +13,7 @@ from ..exceptions import NotGroupAdminError
 from ..extract import ingest as extract_ingest
 from ..retrieval import ContextPack
 from ..scopes import resolve_scopes
-from ..store import Document, Group, Membership, acting_as, system_session
+from ..store import Document, Group, Membership, acting_as, as_system
 from ..store import User as UserRow
 from ..store.engine import session
 from .middleware import AnonymousRateLimit, IdentityMiddleware
@@ -198,7 +198,7 @@ async def pending(group: str) -> list[PendingFact]:
 
     group: name of the curated group whose pending facts are listed.
     """
-    async with system_session():
+    async with as_system():
         group_row = await resolve_group_admin(group)
         facts = await group_row.pending_facts()
     return [
@@ -217,7 +217,7 @@ async def approve(group: str, facts: str = "all") -> ReviewResult:
     group: name of the curated group the facts belong to.
     facts: comma-separated fact ids to approve, or "all" for every still-pending fact.
     """
-    async with system_session():
+    async with as_system():
         group_row = await resolve_group_admin(group)
         ids = None if facts == "all" else parse_ids(facts)
         count = await group_row.approve_facts(ids)
@@ -231,7 +231,7 @@ async def reject(group: str, facts: str) -> ReviewResult:
     group: name of the curated group the facts belong to.
     facts: comma-separated fact ids to reject.
     """
-    async with system_session():
+    async with as_system():
         group_row = await resolve_group_admin(group)
         count = await group_row.reject_facts(parse_ids(facts))
     return ReviewResult(group=group, count=count)

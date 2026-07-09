@@ -117,13 +117,13 @@ RAPTOR_ROLLUP_SYSTEM_PROMPT = (
 class Settings(BaseSettings):
     """Runtime configuration read from AIZK_-prefixed environment variables.
 
-    admin_database_url: async DSN for the owning role `aizk`, migrations only. Defaults from
-        host/port/db/`admin_password`. Override wholesale for a deployment shape the template
-        can't express.
-    admin_password: password for the owning role `aizk`, folded into `admin_database_url`'s
-        default. The role name itself is not a setting, `initdb/roles.sh`'s `CREATE ROLE` and the
-        `APP_ROLE` constants in `store/rls/ops.py` and the initial migration hardcode the role
-        names both DSNs connect as, so only the password varies deployment to deployment.
+    admin_database_url: async DSN for the owning role `aizk_admin`, migrations and the cross-tenant
+        maintenance passes. Defaults from host/port/db/`admin_password`. Override wholesale for a
+        deployment shape the template can't express.
+    admin_password: password for the owning role `aizk_admin`, folded into `admin_database_url`'s
+        default. The role name itself is not a setting, `docker-compose`'s `POSTGRES_USER` and the
+        `APP_ROLE` constant in `store/rls/ops.py` hardcode the role names both DSNs connect as, so
+        only the password varies deployment to deployment.
     anon_rate_per_second: token-bucket rate anonymous HTTP callers may call tools at. Authenticated
         users pass unthrottled.
     backup_cron: crontab the scheduled `BackupTask` dumps the whole database on, daily before dawn
@@ -632,7 +632,7 @@ class Settings(BaseSettings):
             )
         if not self.admin_database_url:
             self.admin_database_url = (
-                f"postgresql+asyncpg://aizk:{self.admin_password}@{self.db_host}:{self.db_port}"
+                f"postgresql+asyncpg://aizk_admin:{self.admin_password}@{self.db_host}:{self.db_port}"
                 f"/{self.db_name}"
             )
         return self
