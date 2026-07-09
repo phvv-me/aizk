@@ -87,13 +87,6 @@ class ScopeLattice:
             .scalar_subquery()
         )
 
-    @classmethod
-    def admin_group_ids(cls) -> ColumnElement:
-        """Coalesced array of group ids the acting user holds the admin membership role in."""
-        return cls._group_array(
-            cls._membership.c.user_id == cls._uid, cls._membership.c.role == "admin"
-        )
-
     def read(self) -> ColumnElement[bool]:
         """A row is readable when its scope set clears the reading lens and the reader has
         standing.
