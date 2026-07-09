@@ -1,7 +1,10 @@
-# squashed initial schema at head: extensions, the memory tables, the scope-set visibility
-# lattice, the restricted app role, the bi-temporal content/claim graph, communities, profiles,
-# api keys, admin flag, and watermarks, all with forced row level security on every tenant-scoped
-# table and every content table's own visible-through-a-claim policy
+# squashed initial schema at head: extensions, the live ontology catalog, the memory tables, the
+# bi-temporal content/claim knowledge graph, communities, profiles, session working memory, and
+# watermarks, every tenant-scoped table forced under the GUC-based scope-set visibility lattice and
+# every content table under its own visible-through-a-claim policy. Identity lives in Logto: there
+# is no local user, group, or membership table, a row's owner_id and scopes are uuid5 values
+# derived from the verified token, and the row level security policies read the caller's standing
+# from per-transaction GUCs rather than a membership join.
 #
 # Revision ID: 0001_init
 # Revises:
@@ -9,13 +12,14 @@
 import importlib.resources
 from collections.abc import Sequence
 
+import inflection
 import sqlalchemy as sa
 from jinja2 import Environment
 from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSTZRANGE, TSVECTOR
 
 from aizk.config import settings
-from aizk.store.mixins.view import create_view_ddl, drop_view_ddl
+from aizk.store.mixins.view import create_view_ddl
 from aizk.store.models.views.live_fact import LiveFact
 from alembic import op
 
@@ -23,7 +27,10 @@ from alembic import op
 # predicate foreign-key against, (name, description, domain, structural). Frozen here rather
 # than read from aizk.extract.ontology (which no longer even defines a fixed vocabulary), a
 # migration is a historical record of what a fresh database looked like at this revision, never a
-# view onto code that keeps evolving out from under it.
+# view onto code that keeps evolving out from under it. Each name is stored in its canonical
+# snake_case form (`canonical` below, the same fold `OntologyKind.canonical` applies to every
+# write), so the human-readable PascalCase entity labels here land as `raptor_summary`,
+# `code_artifact`, and so on, exactly the strings a content row's `type`/`predicate` stores.
 ENTITY_KINDS: tuple[tuple[str, str, str, bool], ...] = (
     # core, structural, system-written, never extractor-emitted or deactivatable
     ("RaptorSummary", "A recursive summary tree node built above entity clusters.", "core", True),
@@ -174,6 +181,20 @@ RELATION_KINDS: tuple[tuple[str, str, str, bool], ...] = (
     ("motivated_by", "A goal or habit is driven by a reason.", "personal", False),
 )
 
+
+def canonical(name: str) -> str:
+    """Fold an ontology name to snake_case, the same rule `OntologyKind.canonical` applies.
+
+    Inlined rather than imported from the app so this migration stays a frozen record of the seed
+    it writes, immune to a later change in the model's own helper. `underscore` breaks CamelCase
+    apart and `parameterize` folds spacing and punctuation into single underscores, idempotent on
+    an already-canonical name so the snake_case relation predicates pass through unchanged.
+
+    name: a raw catalog name, PascalCase, spaced, or already canonical.
+    """
+    return inflection.parameterize(inflection.underscore(name), separator="_")
+
+
 # the big, backend-branching or fully static DDL this migration executes lives as .sql/.sql.j2
 # files shipped inside the package (the migrations dir already ships in the wheel) rather than
 # inline Python string-building, read back relative to this migrations package so the source stays
@@ -219,11 +240,6 @@ BM25_INDEX = "ix_chunk_bm25"
 # the extension schemas the app role needs USAGE and read on so it can call tokenize and rank with
 # the bm25_query operator, granted only when the vchord_bm25 lane is built
 BM25_SCHEMAS = ("tokenizer_catalog", "bm25_catalog")
-
-# hybrid_recall()'s DROP FUNCTION spelling: an overload is identified by its bare parameter types
-# alone, unlike CREATE FUNCTION (named and typed in full inside hybrid_recall.sql.j2), so the drop
-# in `downgrade` needs this separate, type-only rendering of the same five parameters.
-HYBRID_RECALL_TYPES = "halfvec, text, int, int, int"
 
 # the chunk-lane fusion's trusted-first floor, baked into the function body as a literal the way
 # BM25_BACKEND already branches the lexical lane DDL, since a SQL-language function takes no
@@ -311,69 +327,10 @@ CONTENT_TABLES = ("entity_content", "fact_content")
 # per-table grants and bm25-schema grants this migration still makes directly.
 APP_ROLE = "aizk_app"
 
-# the well-known identity that owns any pre-lattice row and always administers the engine, so a
-# fresh single-user stack self-administers from the first migration
-SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000001"
-
 
 def upgrade() -> None:
     for extension in required_extensions(INDEX_BACKEND, BM25_BACKEND):
         op.execute(f"CREATE EXTENSION IF NOT EXISTS {extension}")
-
-    # the visibility lattice the scope policies read: users own rows, group_ gathers them, and
-    # memberships bridge a user into a group's shared scope. group_ carries the trailing
-    # underscore `TableBase.__tablename__` appends on any reserved-word collision, since GROUP is a
-    # reserved SQL keyword.
-    op.create_table(
-        "users",
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
-        ),
-        sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("display_name", sa.Text(), nullable=True),
-        sa.Column("oidc_subject", sa.Text(), nullable=True),
-        sa.Column("is_admin", sa.Boolean(), server_default=sa.false(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("oidc_subject"),
-    )
-    op.create_table(
-        "group_",
-        sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("name", sa.Text(), nullable=False),
-        sa.Column("public", sa.Boolean(), server_default=sa.false(), nullable=False),
-        sa.Column("curated", sa.Boolean(), server_default=sa.false(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("name"),
-    )
-    op.create_table(
-        "membership",
-        sa.Column("user_id", sa.Uuid(), nullable=False),
-        sa.Column("group_id", sa.Uuid(), nullable=False),
-        sa.Column(
-            "role", sa.Enum("viewer", "editor", "admin", name="membership_role"), nullable=False
-        ),
-        sa.ForeignKeyConstraint(["group_id"], ["group_.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("user_id", "group_id"),
-    )
-
-    # the system user owns any row ingested before a caller is known and is an admin from the
-    # start, so the auth layer and the pre-lattice backfill both have an identity to point at.
-    # bulk_insert over a literal INSERT so the seeded value is parameter-bound rather than
-    # string-formatted into the statement text.
-    user_table = sa.table(
-        "users",
-        sa.column("id", sa.Uuid()),
-        sa.column("display_name", sa.Text()),
-        sa.column("is_admin", sa.Boolean()),
-    )
-    op.bulk_insert(
-        user_table,
-        [{"id": SYSTEM_USER_ID, "display_name": "system", "is_admin": True}],
-    )
 
     # documents and their chunks, each scoped by owner_id and a shared group scope-set; chunk text
     # carries both a halfvec embedding for dense search and a generated tsvector for lexical search
@@ -393,7 +350,6 @@ def upgrade() -> None:
         sa.Column("source_uri", sa.String(), nullable=True),
         sa.Column("content_hash", sa.String(), nullable=False),
         sa.Column("promoted_from", sa.Uuid(), nullable=True),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["promoted_from"], ["document.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("source_uri"),
@@ -428,7 +384,6 @@ def upgrade() -> None:
             nullable=True,
         ),
         sa.ForeignKeyConstraint(["document_id"], ["document.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     # indexed: promote's document-ordered rebuild and build_graph's source-title filter both
@@ -491,7 +446,12 @@ def upgrade() -> None:
     op.bulk_insert(
         entity_kind_table,
         [
-            {"name": name, "description": description, "domain": domain, "structural": structural}
+            {
+                "name": canonical(name),
+                "description": description,
+                "domain": domain,
+                "structural": structural,
+            }
             for name, description, domain, structural in ENTITY_KINDS
         ],
     )
@@ -505,7 +465,12 @@ def upgrade() -> None:
     op.bulk_insert(
         relation_kind_table,
         [
-            {"name": name, "description": description, "domain": domain, "structural": structural}
+            {
+                "name": canonical(name),
+                "description": description,
+                "domain": domain,
+                "structural": structural,
+            }
             for name, description, domain, structural in RELATION_KINDS
         ],
     )
@@ -540,7 +505,6 @@ def upgrade() -> None:
         sa.Column("content_id", sa.Uuid(), nullable=False),
         sa.Column("attributes", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
         sa.ForeignKeyConstraint(["content_id"], ["entity_content.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "content_id", "owner_id", "scopes", name="uq_entity_claim_content_owner_scope"
@@ -585,14 +549,12 @@ def upgrade() -> None:
             server_default=sa.text("tstzrange(now(), NULL, '[)')"),
             nullable=False,
         ),
-        sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_accessed", sa.DateTime(timezone=True), nullable=True),
         sa.Column("access_count", sa.Integer(), server_default="0", nullable=False),
         sa.Column("attributes", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
         sa.Column("source_chunk_id", sa.Uuid(), nullable=True),
         sa.Column("promoted_from", sa.Uuid(), nullable=True),
         sa.ForeignKeyConstraint(["content_id"], ["fact_content.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["promoted_from"], ["fact_claim.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["source_chunk_id"], ["chunk.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
@@ -649,7 +611,6 @@ def upgrade() -> None:
         sa.Column(
             "member_ids", ARRAY(sa.Uuid()), server_default=sa.text("'{}'::uuid[]"), nullable=False
         ),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.execute(vector_index_ddl("ix_community_embedding", "community", INDEX_BACKEND))
@@ -670,7 +631,6 @@ def upgrade() -> None:
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("subject_id", sa.Uuid(), nullable=False),
         sa.Column("summary", sa.Text(), nullable=False),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.ForeignKeyConstraint(["subject_id"], ["entity_content.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("owner_id", "subject_id", name="uq_profile_owner_subject"),
@@ -697,7 +657,6 @@ def upgrade() -> None:
         sa.Column("kind", sa.String(), nullable=False),
         sa.Column("text", sa.Text(), nullable=False),
         sa.Column("promoted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.execute(vector_index_ddl("ix_session_item_embedding", "session_item", INDEX_BACKEND))
@@ -733,7 +692,6 @@ def upgrade() -> None:
         sa.Column("ref", sa.Text(), server_default="global", nullable=False),
         sa.Column("counter", sa.BigInteger(), server_default="0", nullable=False),
         sa.Column("payload", JSONB(), server_default=sa.text("'{}'::jsonb"), nullable=False),
-        sa.ForeignKeyConstraint(["owner_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("owner_id", "kind", "ref", name="uq_watermark_owner_kind_ref"),
     )
@@ -777,63 +735,13 @@ def upgrade() -> None:
     )
 
     # force every declared policy on each tenant-scoped table, so even the table owner is subject
-    # to them and no row leaks across users; `fact_claim`'s own curation-admin escape rides
-    # along automatically here, declared on the model itself rather than applied as a separate
-    # step. The content tables carry no owner_id/scope of their own, so `apply_scoped_rls` never
-    # runs against them; their custom visible-through-a-claim policy set is applied the identical
-    # way through the same op, which reads whatever `__rls_policies__` the table's model declared
-    # rather than assuming the four default scope policies.
+    # to them and no row leaks across users. The content tables carry no owner_id/scope of their
+    # own, so their custom visible-through-a-claim policy set is applied the identical way through
+    # the same op, which reads whatever `__rls_policies__` the table's model declared rather than
+    # assuming the four default scope policies.
     for table in (*SCOPED_TABLES, *CONTENT_TABLES):
         op.apply_scoped_rls(table)
 
 
 def downgrade() -> None:
-    # dropped first, mirroring how each was created last to first: hybrid_recall reads both
-    # live_fact and, on the vchord_bm25 backend, the tokenizer and index the lane below tears
-    # down, so it must be gone before either of them and before anything else touches fact_claim
-    op.execute(f"DROP FUNCTION IF EXISTS hybrid_recall({HYBRID_RECALL_TYPES})")
-    op.execute(drop_view_ddl(LiveFact.__tablename__))
-
-    # drop the vchord_bm25 lane's standalone objects the table drop below does not reach, the
-    # tokenizer catalog entry and the trigger function the dropped chunk trigger left behind, and
-    # revoke the bm25 schema grants first so the app role carries no dependent privilege when it is
-    # dropped below, the mirror of the grants bm25_lexical_statements handed it on the way up
-    if BM25_BACKEND == "vchord_bm25":
-        op.execute("DROP FUNCTION IF EXISTS chunk_bm25_sync() CASCADE")
-        op.execute(f"SELECT tokenizer_catalog.drop_tokenizer('{BM25_TOKENIZER}')")
-        for schema in BM25_SCHEMAS:
-            op.execute(f"REVOKE ALL ON ALL TABLES IN SCHEMA {schema} FROM {APP_ROLE}")
-        op.execute(f"REVOKE USAGE ON SCHEMA {', '.join(BM25_SCHEMAS)} FROM {APP_ROLE}")
-
-    # each protected table's declared policies, `fact_claim`'s curation-admin escape and every
-    # content table's custom set included, since each rides along inside its own model's declared
-    # set rather than a separate apply step
-    for table in (*SCOPED_TABLES, *CONTENT_TABLES):
-        op.drop_scoped_rls(table)
-
-    # the app role itself, its schema usage, and its default privileges are `initdb/roles.sql`'s
-    # responsibility, provisioned once against a fresh volume rather than by this migration, so
-    # nothing here reverses them; only `docker compose down -v` tears the role down.
-
-    op.drop_table("watermark")
-    op.drop_table("session_item")
-    op.drop_table("profile")
-    op.drop_table("community")
-    op.drop_table("fact_claim")
-    op.drop_table("fact_content")
-    op.drop_table("entity_claim")
-    op.drop_table("entity_content")
-    # the live ontology catalog, droppable only once fact_content/entity_content, its own
-    # foreign-key referrers, are already gone
-    op.drop_table("relation_kind")
-    op.drop_table("entity_kind")
-    op.drop_table("chunk")
-    op.drop_table("document")
-    op.drop_table("membership")
-    op.drop_table("group_")
-    op.drop_table("users")
-
-    # native enum types outlive the table whose column referenced them, so each is dropped
-    # explicitly once the last column using it is gone
-    op.execute("DROP TYPE watermark_kind")
-    op.execute("DROP TYPE membership_role")
+    raise NotImplementedError("the squashed initial schema has no faithful reverse")
