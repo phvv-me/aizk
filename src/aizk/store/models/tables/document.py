@@ -76,19 +76,13 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
         """
         from .chunk import Chunk
         from .fact import FactClaim
-        from .group import Group
 
         target = list(scopes)
-        # re-scoping into a curated group re-opens review: the moved facts take the reviewed_at a
-        # fresh claim in the target set would carry, so a move can never smuggle unreviewed content
-        # into a curated canon (they land pending until a group admin approves), while a move to a
-        # private or uncurated set stamps them reviewed immediately.
-        reviewed_at = await Group.review_stamp(scopes, owner_id)
         chunk_ids = select(Chunk.id).where(Chunk.document_id.in_(document_ids))
         await session().execute(
             update(FactClaim)
             .where(FactClaim.source_chunk_id.in_(chunk_ids), FactClaim.owner_id == owner_id)
-            .values(scopes=target, reviewed_at=reviewed_at)
+            .values(scopes=target)
         )
         await session().execute(
             update(Chunk)

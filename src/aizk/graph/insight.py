@@ -1,5 +1,4 @@
 import uuid
-from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func, select
@@ -78,14 +77,12 @@ async def write_observation(
             embedding=vector,
         ),
     )
-    # an observation carries no scope of its own, always private to the user reflected on,
-    # so it stamps reviewed immediately like any other private write.
+    # an observation carries no scope of its own, always private to the user reflected on.
     await claim_fact(
         identity,
         user_id,
         [],
         attributes={"significance": obs.significance},
-        reviewed_at=datetime.now(UTC),
     )
     return True
 

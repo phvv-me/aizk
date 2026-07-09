@@ -14,7 +14,6 @@ from ..config import settings
 from ..eval import EvalReport, run_eval
 from ..graph.build import dedup_entities
 from ..graph.communities import build_communities
-from ..graph.curation_review import review_curated_groups
 from ..graph.decay import decay
 from ..graph.insight import derive_insights
 from ..graph.profiles import refresh_profiles
@@ -319,21 +318,6 @@ class InsightTask(ScheduledTask):
 
     async def run(self, user_id: uuid.UUID) -> None:
         await derive_insights(user_id=user_id)
-
-
-class CurationReviewTask(ScheduledTask):
-    """Judge every curated group a user administers, the weekly standing-reviewer pass.
-
-    A user earns this pass's attention purely by holding the admin membership role in a
-    curated group, human or a dedicated agent identity added as an admin member for exactly this
-    purpose, the fan-out's own per-user scoping already the only "which identity reviews
-    this group" signal the system needs.
-    """
-
-    name = "curation_review"
-
-    async def run(self, user_id: uuid.UUID) -> None:
-        await review_curated_groups(user_id=user_id)
 
 
 class BackupTask(ScheduledTask):

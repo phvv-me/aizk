@@ -8,7 +8,6 @@ from sqlalchemy import (
     ColumnElement,
     DateTime,
     Index,
-    Table,
     Text,
     and_,
     func,
@@ -23,43 +22,7 @@ from sqlmodel import Field
 
 from ...engine import session
 from ...mixins import Embedded, Id, Scoped, TableBase
-from ...mixins.scoped import ScopeLattice
 from .entity import content_policies
-
-
-def _curation_admin_policies(table: Table) -> list[rls.Policy]:
-    """Supplemental SELECT, UPDATE, and DELETE policies letting an admin govern `fact_claim`'s
-    curated rows, `FactClaim`'s own addition to `Scoped`'s default set.
-
-    Postgres combines multiple PERMISSIVE policies for one command with OR, so these ride alongside
-    `Scoped`'s ordinary scope policies as an additive escape rather than replacing them. A curated
-    group's own admin member keeps reaching its rows through the ordinary scope policies, and a
-    server admin, or a user separately administering every group a row's set names, reaches it
-    through these instead. A curated group's canon is centrally governed, so a server admin may
-    read and review its rows even without a membership row anywhere in the set, the standing
-    `auth.groups.require_group_admin` already vouches for at the application layer before any of
-    these rows are ever touched. INSERT carries no admin policy, since review only approves or
-    rejects a claim a member already wrote, never mints one. Lives beside `FactClaim`, its only
-    caller, rather than on `ScopeLattice` itself, since no other table in the schema needs this
-    escape.
-
-    table: `FactClaim.__table__`, read for its own `owner_id`/`scopes` columns through
-        `ScopeLattice`.
-    """
-    lattice = ScopeLattice(table)
-    admin = and_(
-        func.cardinality(lattice.scopes) > 0,
-        lattice.scopes.contained_by(ScopeLattice.curated_group_ids()),
-        or_(lattice.scopes.contained_by(ScopeLattice.admin_group_ids()), ScopeLattice.is_admin()),
-    )
-    return [
-        rls.Policy(name="curation_admin_read", command=rls.Command.select, using=admin),
-        rls.Policy(
-            name="curation_admin_update", command=rls.Command.update, using=admin, check=admin
-        ),
-        rls.Policy(name="curation_admin_delete", command=rls.Command.delete, using=admin),
-    ]
-
 
 # bumps recency and frequency on every latest claim whose fact content's statement recall just
 # surfaced, scoped to the caller by the row level security app.uid already on the session. Raw
@@ -127,7 +90,7 @@ class upper_inf(GenericFunction):
 class FactClaim(Id, Scoped, TableBase, table=True):
     """A container's bi-temporal stake in an edge, the union that lets a fact belong to A or B.
 
-    World-time validity, review state, and access recency live here rather than on `FactContent`,
+    World-time validity and access recency live here rather than on `FactContent`,
     since they are inherently a container's own claim on the shared structure, never the structure
     itself. Consolidation supersedes an old claim by closing its `recorded` upper bound and
     inserting a new one with a fresh open `recorded`, so history is never overwritten, and the
@@ -150,10 +113,6 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     recorded: transaction-time range this container has known this version under, lower is the
         write time and an open upper bound means this is the live version. Consolidation closes it
         to retire a version rather than deleting the row.
-    reviewed_at: when this claim cleared curated-group review and joined the visible canon, stamped
-        immediately on write for a private scope or an uncurated group, null while it sits pending
-        in a curated group's review queue, invisible to everyone but its author until a group
-        admin approves it through `approve_facts`.
     last_accessed: transaction time recall last surfaced this claim, null until first recalled, the
         recency half of the decay relevance score.
     access_count: how many times recall has surfaced this claim, the frequency half of decay.
@@ -174,7 +133,6 @@ class FactClaim(Id, Scoped, TableBase, table=True):
             TSTZRANGE, nullable=False, server_default=text("tstzrange(now(), NULL, '[)')")
         ),
     )
-    reviewed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     last_accessed: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     access_count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     attributes: dict = Field(
@@ -192,15 +150,8 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 
     @classmethod
     def __rls_policies__(cls) -> list[rls.Policy]:
-        """`Scoped`'s default policies plus the curation-admin escape, `fact_claim`'s own set.
-
-        Only a curated group's canon needs a server-wide admin's cross-tenant reach, so
-        `_curation_admin_policies` rides alongside the ordinary scope policies as additive
-        PERMISSIVE policies Postgres already ORs together per command. Composes on top of
-        `Scoped`'s own default set (`super().__rls_policies__()`) rather than rebuilding it, the
-        same `*super().__table_args__` composition every `__table_args__` override already uses.
-        """
-        return [*super().__rls_policies__(), *_curation_admin_policies(cls.__table__)]
+        """`Scoped`'s default scope policies, `fact_claim`'s own set."""
+        return super().__rls_policies__()
 
     @declared_attr.directive
     def __table_args__(cls) -> tuple[Index, ...]:
@@ -404,7 +355,7 @@ class FactContent(Id, Embedded, TableBase, table=True):
     The triple, its statement, and its embedding are the structural knowledge two containers share
     when they independently extract the identical fact. Two owners writing the same subject,
     predicate, object, and statement land one content row, each holding their own bi-temporal
-    `FactClaim` on it. All curation, decay, and access-tracking state lives on the claim instead,
+    `FactClaim` on it. All decay and access-tracking state lives on the claim instead,
     since it is inherently per-container, never structural.
 
     id: content-addressed identity from uuid5 over the normalized triple and statement.
@@ -429,5 +380,5 @@ class FactContent(Id, Embedded, TableBase, table=True):
 
     @classmethod
     def __rls_policies__(cls) -> list[rls.Policy]:
-        """Visible through a `fact_claim`, freely mintable, immutable, admin-only to delete."""
+        """Visible through a `fact_claim`, freely mintable, and otherwise immutable."""
         return content_policies(FactClaim)

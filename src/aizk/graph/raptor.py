@@ -1,6 +1,5 @@
 import math
 import uuid
-from datetime import UTC, datetime
 
 import networkx as nx
 from loguru import logger
@@ -239,8 +238,7 @@ def part_of_claim(user_id: uuid.UUID, content_id: uuid.UUID) -> FactClaim:
     The default open `recorded` keeps it inside the same bi-temporal shape every claim has, so the
     read-path validity gate treats it like any current edge while it lives, and a rebuild clears
     the whole tree before writing a new one. The tree carries no scope of its own, always private
-    to the user that built it, so it stamps reviewed immediately the same as any other private
-    write, never a curated group's pending queue.
+    to the user that built it.
 
     user_id: identity that owns the edge.
     content_id: the part_of fact content this claim stakes.
@@ -248,7 +246,6 @@ def part_of_claim(user_id: uuid.UUID, content_id: uuid.UUID) -> FactClaim:
     return FactClaim(
         content_id=content_id,
         owner_id=user_id,
-        reviewed_at=datetime.now(UTC),
     )
 
 

@@ -12,32 +12,6 @@ class WriteResult(FrozenModel):
     id: uuid.UUID
 
 
-class PendingFact(FrozenModel):
-    """One curated group's unreviewed fact awaiting a group admin's approval.
-
-    id: identity of the pending claim.
-    owner_id: user that authored the claim.
-    predicate: ontology relation type the fact asserts.
-    statement: self-contained natural-language rendering of the fact.
-    """
-
-    id: uuid.UUID
-    owner_id: uuid.UUID
-    predicate: str
-    statement: str
-
-
-class ReviewResult(FrozenModel):
-    """How many of a curated group's pending facts one approve or reject call changed.
-
-    group: name of the curated group the facts belong to.
-    count: pending facts approved or rejected.
-    """
-
-    group: str
-    count: int
-
-
 class MoveResult(FrozenModel):
     """How many documents one move call re-scoped, and where they now live.
 

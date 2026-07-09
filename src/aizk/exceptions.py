@@ -28,10 +28,6 @@ class OntologyNotReadyError(RuntimeError):
     """
 
 
-class NotGroupAdminError(PermissionError):
-    """A user with neither group-admin nor server-admin standing tried a curation tool."""
-
-
 class ExtractionUnreachableError(RuntimeError):
     """The graph-extraction chat endpoint refused the connection, not merely one slow call.
 

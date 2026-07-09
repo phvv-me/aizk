@@ -90,9 +90,9 @@ async def worker(batch_size: int = settings.queue_batch_size) -> None:
     """Run the autonomous engine, the queue and the scheduler together, until interrupted.
 
     Drains the on-write extraction and profile jobs and fires the scheduled maintenance passes,
-    decay, dedup, communities, RAPTOR, profile refresh, self-improve, session promotion, insight,
-    and curation review, each fanning out one job per user under its own row level security
-    scope, so a single `aizk worker` self-maintains.
+    decay, dedup, communities, RAPTOR, profile refresh, self-improve, session promotion, and
+    insight, each fanning out one job per user under its own row level security scope, so a single
+    `aizk worker` self-maintains.
 
     batch_size: maximum number of jobs dequeued per round, settings.queue_batch_size by default,
         sized above settings.graph_build_concurrency so the queue path actually keeps enough
@@ -277,29 +277,27 @@ async def link_user(oidc_subject: str, name: str = "") -> None:
 async def list_users() -> None:
     """List every user known to the engine, id and display name."""
     for user in await admin.list_users():
-        star = " (admin)" if user.is_admin else ""
-        print(f"{user.id}  {user.display_name or '-'}{star}")
+        print(f"{user.id}  {user.display_name or '-'}")
 
 
 @group.command(name="create")
-async def create_group(name: str, public: bool = False, curated: bool = False) -> None:
+async def create_group(name: str, public: bool = False) -> None:
     """Create a sharing group and print its id, the scope memberships and promotions target.
 
     name: unique human-readable label for the group.
     public: whether the group's rows are readable by anyone from the start, else members-only.
-    curated: whether writes into the group's canon must clear group-admin review before visible.
     """
-    group = await admin.create_group(name, public=public, curated=curated)
+    group = await admin.create_group(name, public=public)
     print(group.id)
 
 
 @group.command(name="add-member")
-async def add_member(user: str, group: str, role: str = "writer") -> None:
+async def add_member(user: str, group: str, role: str = "editor") -> None:
     """Add a user to a group so that group's scope becomes visible to it under RLS.
 
     user: id of the user joining the group.
     group: name of the group the user joins.
-    role: standing within the group, reader for read-only, writer or admin to also write.
+    role: standing within the group, viewer for read-only, editor or admin to also write.
     """
     await admin.add_member(user, group, role=role)
     print(f"{user} joined {group} as {role}")
@@ -325,17 +323,6 @@ async def publish_group(group: str, public: bool = True) -> None:
     """
     await admin.publish_group(group, public=public)
     print(f"{group} public={public}")
-
-
-@group.command(name="curate")
-async def curate_group(group: str, curated: bool = True) -> None:
-    """Curate or uncurate a group, flipping whether its writes must clear group-admin review.
-
-    group: name of the group to curate or uncurate.
-    curated: true to require review, false to write straight through.
-    """
-    await admin.curate_group(group, curated=curated)
-    print(f"{group} curated={curated}")
 
 
 @group.command(name="delete")

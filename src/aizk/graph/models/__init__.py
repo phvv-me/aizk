@@ -1,5 +1,4 @@
 from .community_summary import CommunitySummary
-from .curation_verdict import CurationReview, CurationVerdict
 from .insight_report import InsightReport
 from .observation import Observation
 from .profile_report import ProfileReport
@@ -8,8 +7,6 @@ from .raptor_report import RaptorReport
 
 __all__ = [
     "CommunitySummary",
-    "CurationReview",
-    "CurationVerdict",
     "InsightReport",
     "Node",
     "Observation",

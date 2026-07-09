@@ -29,7 +29,6 @@ from ..store import (
     EntityContent,
     FactClaim,
     FactContent,
-    Group,
     LiveFact,
     Membership,
     acting_as,
@@ -108,23 +107,6 @@ class GraphWriter:
     def __init__(self, owner_id: uuid.UUID, scopes: tuple[uuid.UUID, ...]) -> None:
         self.owner_id = owner_id
         self.scopes = list(scopes)
-        self._reviewed_at: datetime | None = None
-        self._reviewed_at_cached = False
-
-    async def reviewed_at(self) -> datetime | None:
-        """The reviewed_at stamp a claim newly written by this writer should carry, resolved once.
-
-        A private scope set and a set naming no curated group always resolve to now, unchanged
-        single-user and ordinary-sharing behavior. A set naming a curated group resolves to now
-        only when the owner already holds its admin membership role in every curated group named,
-        otherwise to null, landing the claim pending review. Reads the group and membership rows
-        once per writer and caches the answer, since every claim this writer consolidates shares
-        the same scope set and owner.
-        """
-        if not self._reviewed_at_cached:
-            self._reviewed_at = await Group.review_stamp(tuple(self.scopes), self.owner_id)
-            self._reviewed_at_cached = True
-        return self._reviewed_at
 
     async def already_claims_entity(self, content_id: uuid.UUID) -> bool:
         """Whether this container already stakes its own claim on this entity content id."""
@@ -393,7 +375,6 @@ class GraphWriter:
             if fact.valid_from or fact.valid_to
             else None,
             source_chunk_id=source_chunk_id,
-            reviewed_at=await self.reviewed_at(),
         )
 
 
@@ -776,7 +757,6 @@ def claim_row(claim: FactClaim, content_id: uuid.UUID) -> dict:
         "scopes": claim.scopes,
         "valid": claim.valid,
         "recorded": claim.recorded,
-        "reviewed_at": claim.reviewed_at,
         "last_accessed": claim.last_accessed,
         "access_count": claim.access_count,
         "attributes": claim.attributes,

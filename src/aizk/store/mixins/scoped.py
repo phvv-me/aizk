@@ -11,11 +11,10 @@ from sqlmodel import Field
 from .base import TableBase
 
 # `Scoped` and the visibility lattice its default policies compile from live in the same file:
-# `Scoped` is the only mixin that reaches for `ScopeLattice` at all (the curated-canon escape
-# `FactClaim` layers on top lives beside `FactClaim` itself in `models.tables.fact`, and content
-# visibility lives beside its consumers in `models.tables.entity`), so nothing else in the package
-# imports `ScopeLattice` by name; a reader of this one file sees the whole story, the scopes
-# column, the lens, the membership containment, and the policies built from them, together.
+# `Scoped` is the only mixin that reaches for `ScopeLattice` at all (content visibility lives
+# beside its consumers in `models.tables.entity`), so nothing else in the package imports
+# `ScopeLattice` by name; a reader of this one file sees the whole story, the scopes column, the
+# lens, the membership containment, and the policies built from them, together.
 
 
 class ScopeLattice:
@@ -46,8 +45,7 @@ class ScopeLattice:
     _membership = sa.table(
         "membership", sa.column("user_id"), sa.column("group_id"), sa.column("role")
     )
-    _groups = sa.table("group_", sa.column("id"), sa.column("public"), sa.column("curated"))
-    _users = sa.table("users", sa.column("id"), sa.column("is_admin"))
+    _groups = sa.table("group_", sa.column("id"), sa.column("public"))
 
     def __init__(self, table: Table) -> None:
         self.owner_id = table.c.owner_id
@@ -62,13 +60,6 @@ class ScopeLattice:
         the only thing a drift check or a query plan ever compares.
         """
         return sa.cast(sa.literal("{}"), ARRAY(sa.Uuid()))
-
-    @classmethod
-    def is_admin(cls) -> ColumnElement[bool]:
-        """Whether the acting user carries the server-wide admin flag."""
-        return sa.exists(
-            sa.select(sa.literal(1)).where(cls._users.c.id == cls._uid, cls._users.c.is_admin)
-        )
 
     @classmethod
     def _group_array(
@@ -93,20 +84,6 @@ class ScopeLattice:
                 sa.func.coalesce(sa.func.array_agg(cls._membership.c.group_id), cls.empty_scopes())
             )
             .where(where)
-            .scalar_subquery()
-        )
-
-    @classmethod
-    def curated_group_ids(cls) -> ColumnElement:
-        """Coalesced array of every group id currently marked curated.
-
-        A generally useful lattice fact on its own, not only the curation-admin escape's own
-        gadget: any policy or query that needs "which groups govern their canon by review" reads
-        it from here rather than re-deriving the same `curated` filter.
-        """
-        return (
-            sa.select(sa.func.coalesce(sa.func.array_agg(cls._groups.c.id), cls.empty_scopes()))
-            .where(cls._groups.c.curated)
             .scalar_subquery()
         )
 
@@ -163,7 +140,7 @@ class ScopeLattice:
         """
         writer_groups = self._group_array(
             self._membership.c.user_id == self._uid,
-            self._membership.c.role.in_(("writer", "admin")),
+            self._membership.c.role.in_(("editor", "admin")),
         )
         return sa.or_(
             sa.and_(sa.func.cardinality(self.scopes) == 0, self.owner_id == self._uid),
@@ -198,9 +175,8 @@ class Scoped:
     table forces the per-command scope policies and a new scoped model can never ship without them,
     and declares `__rls_policies__`, the default read/write scope policies every scoped table
     carries, read by `store.rls.register`'s mapper-construction hook once the table exists. A
-    model with additional policies of its own, `FactClaim`'s curation-admin escape, overrides
-    `__rls_policies__` to extend this default set (`*super().__rls_policies__()`) rather than
-    editing it here.
+    model with additional policies of its own may override `__rls_policies__` to extend this
+    default set (`*super().__rls_policies__()`) rather than editing it here.
 
     owner_id: user that owns the row, enforced by row level security.
     scopes: the groups this row is shared with, an implicit intersection container rather than one

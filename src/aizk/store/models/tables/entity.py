@@ -9,7 +9,6 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Field
 
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
-from ...mixins.scoped import ScopeLattice
 
 
 class ContentVisibility:
@@ -18,9 +17,9 @@ class ContentVisibility:
     Content carries no owner or scope of its own, so visibility derives through the claim table
     rather than a duplicated predicate here, since the claim table is itself forced under row
     level security, so Postgres applies whichever policies it declares to this subquery's read.
-    Deliberate, not incidental. A claim table's visible set is not always just `ScopeLattice.read`
-    (`FactClaim` widens it with its own curation-admin escape), so hand-rebuilding only the default
-    predicate here would silently drop that wider reach. Lives beside `EntityContent`, its first
+    Deliberate, not incidental. Reading through the claim's own policies rather than a copy of them
+    rebuilt here means a content row is visible exactly when one of its claims is, and can never
+    drift from what the claim table itself admits. Lives beside `EntityContent`, its first
     consumer, rather than in `store.rls`, since `FactContent` (`models.tables.fact`) imports
     `content_policies` from here, the one sensible home for a piece two content tables share.
 
@@ -37,20 +36,20 @@ class ContentVisibility:
         return self._id_column.in_(sa.select(self._claim_table.c.content_id))
 
     def policies(self) -> list[rls.Policy]:
-        """The three policies a content table carries, visible through a claim, freely mintable,
-        immutable, and deletable only by a system admin.
+        """The two policies a content table carries, visible through a claim, freely mintable, and
+        otherwise immutable.
 
-        A content row carries no UPDATE policy at all, so any UPDATE is denied outright under
-        FORCE ROW LEVEL SECURITY, the database's own enforcement that content, once minted, never
-        changes. INSERT is WITH CHECK true since minting content is harmless on its own, real
-        access is gated at the claim a caller must separately hold to ever see it again.
+        A content row carries neither an UPDATE nor a DELETE policy, so both are denied outright
+        under FORCE ROW LEVEL SECURITY, the database's own enforcement that content, once minted,
+        never changes through the app role. The system merge's own cleanup that reaps an orphaned
+        content row runs as the owner role, which bypasses row level security entirely, so the last
+        claim's removal is still what makes a content row eligible for it. INSERT is WITH CHECK
+        true since minting content is harmless on its own, real access is gated at the claim a
+        caller must separately hold to ever see it again.
         """
         return [
             rls.Policy(name="content_read", command=rls.Command.select, using=self.read()),
             rls.Policy(name="content_insert", command=rls.Command.insert, check=sa.true()),
-            rls.Policy(
-                name="content_delete", command=rls.Command.delete, using=ScopeLattice.is_admin()
-            ),
         ]
 
 
@@ -139,5 +138,5 @@ class EntityContent(Id, Embedded, TableBase, table=True):
 
     @classmethod
     def __rls_policies__(cls) -> list[rls.Policy]:
-        """Visible through an `entity_claim`, freely mintable, immutable, admin-only to delete."""
+        """Visible through an `entity_claim`, freely mintable, and otherwise immutable."""
         return content_policies(EntityClaim)

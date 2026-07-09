@@ -10,12 +10,11 @@ from ..store.engine import session
 from ..store.mixins import TableBase
 
 # the value types a caller stakes an optional `FactClaim` column with (`valid`, `source_chunk_id`,
-# `reviewed_at`, `attributes`, `promoted_from`); `dict` bare mirrors `FactClaim.attributes`'s own
-# field type, the JSONB column's genuinely heterogeneous value shape. `| None` covers a column
-# a caller resolved to explicitly null (`valid`, `reviewed_at`), as opposed to one it never
-# passes at all, which claim_fact's **kwargs simply omits from the insert so the column's own
-# server_default, not an explicit NULL, applies.
-type ClaimField = Range[datetime] | datetime | uuid.UUID | dict | None
+# `attributes`, `promoted_from`); `dict` bare mirrors `FactClaim.attributes`'s own field type, the
+# JSONB column's genuinely heterogeneous value shape. `| None` covers a column a caller resolved to
+# explicitly null (`valid`), as opposed to one it never passes at all, which claim_fact's **kwargs
+# simply omits from the insert so the column's own server_default, not an explicit NULL, applies.
+type ClaimField = Range[datetime] | uuid.UUID | dict | None
 
 # the partial live-uniqueness `fact_claim` carries, one open-`recorded` claim per (content, owner,
 # scopes); ON CONFLICT DO NOTHING against it is what makes `claim_fact`'s insert idempotent under
@@ -79,7 +78,7 @@ async def claim_fact(
     owner_id: user the new claim is staked under.
     scopes: group set the new claim is shared with, private when empty.
     claim_fields: further `FactClaim` columns the caller already resolved (`valid`,
-        `source_chunk_id`, `reviewed_at`, `attributes`, `promoted_from`, ...).
+        `source_chunk_id`, `attributes`, `promoted_from`, ...).
     """
     await session().execute(
         insert(FactClaim)

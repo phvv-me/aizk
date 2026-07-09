@@ -23,9 +23,7 @@ class User(FrozenModel):
 
     Carries only the id a verb ever acts under, deliberately not the `store.User` table row
     itself, so a verb never re-queries the database for it. The server-wide admin standing that
-    once gated an operational surface here is gone with that surface, moved to the CLI, and the
-    group-admin standing the curation verbs still check is read from the database inside
-    `Group.require_admin`, not carried on this identity.
+    once gated an operational surface here is gone with that surface, moved to the CLI.
 
     id: the aizk user id the caller acts as.
     """
@@ -67,8 +65,8 @@ async def resolve_user() -> User:
 def current_user() -> User:
     """Read the `User` `IdentityMiddleware` already resolved for this call.
 
-    Every tool calls this instead of resolving its own caller, so the one bearer-token check and
-    the one is_admin read `IdentityMiddleware.on_call_tool` already ran cover the whole call.
+    Every tool calls this instead of resolving its own caller, so the one bearer-token check
+    `IdentityMiddleware.on_call_tool` already ran covers the whole call.
     """
     user = get_context().get_state(USER_STATE_KEY)
     if not isinstance(user, User):

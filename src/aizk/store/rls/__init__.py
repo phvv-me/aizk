@@ -40,8 +40,7 @@ from .ops import (
 # committed `0001_init.py` migration already calls them rather than switching to the library's own
 # `apply_rls`/`drop_rls` (which carry their policies inline, a call shape that migration
 # predates). The actual visibility lattice, `ScopeLattice`, lives beside `Scoped`, the one mixin
-# that builds policies from it (`store.mixins.scoped`); the curated-canon escape lives beside
-# `FactClaim`, its only user (`store.models.tables.fact`); and content-table visibility lives
+# that builds policies from it (`store.mixins.scoped`), and content-table visibility lives
 # beside its two consumers (`store.models.tables.entity`'s `content_policies`). Nothing in this
 # package is aizk-domain-specific.
 #

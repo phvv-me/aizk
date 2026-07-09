@@ -9,15 +9,14 @@ from mainboard.profiling import enable_spans
 
 from .. import ops, retrieval
 from ..config import settings
-from ..exceptions import NotGroupAdminError
 from ..extract import ingest as extract_ingest
 from ..retrieval import ContextPack
 from ..scopes import resolve_scopes
-from ..store import Document, Group, Membership, acting_as, as_system
+from ..store import Document, Membership, acting_as
 from ..store import User as UserRow
 from ..store.engine import session
 from .middleware import AnonymousRateLimit, IdentityMiddleware
-from .models import MoveResult, PendingFact, ReviewResult, WriteResult
+from .models import MoveResult, WriteResult
 from .user import current_user, require_identified
 
 
@@ -47,8 +46,7 @@ class AizkMCP(FastMCP):
 
     The operational surface, every maintenance, governance, and eval operation, lives in the
     `aizk` CLI, reached by ssh rather than over the network, so a leaked key can never drive it.
-    This server keeps only the client verbs, recall, remember, reference, and the group-curation
-    trio, the last three gated on group-admin membership in-body rather than a server-wide role.
+    This server keeps only the client verbs, recall, remember, reference, and move.
     `__init__` wires the user-resolving middleware, the startup health-and-auto-setup
     lifespan, the anonymous rate limit on a shared HTTP transport, and a token verifier when one
     is configured.
@@ -158,26 +156,6 @@ async def move(documents: str, scopes: str) -> MoveResult:
     return MoveResult(moved=moved, scopes=scopes or "")
 
 
-async def resolve_group_admin(group: str) -> Group:
-    """Resolve a group name and refuse the call unless the caller administers it, group back.
-
-    Shared by the curation verbs, it resolves the scope name, then checks the caller holds the
-    group's own admin membership role or the server-wide admin flag, raising a `ToolError` a
-    non-admin caller reads plainly rather than the domain `NotGroupAdminError` it wraps. `Group`
-    and `Membership` carry no row level security of their own, so reading and checking them
-    through the system-acting session is exactly as visible as through the caller's own.
-
-    group: name of the curated group the call would administer.
-    """
-    user = current_user()
-    group_row = await Group.named(group)
-    try:
-        await group_row.require_admin(user.id)
-    except NotGroupAdminError as error:
-        raise ToolError(str(error)) from error
-    return group_row
-
-
 def parse_ids(raw: str) -> list[uuid.UUID]:
     """Parse a comma-separated id list into uuids, a malformed id a clean ToolError not a 500.
 
@@ -187,51 +165,3 @@ def parse_ids(raw: str) -> list[uuid.UUID]:
         return [uuid.UUID(part.strip()) for part in raw.split(",") if part.strip()]
     except ValueError as error:
         raise ToolError(f"malformed id in {raw!r}") from error
-
-
-@server.tool
-async def pending(group: str) -> list[PendingFact]:
-    """List a curated group's unreviewed facts awaiting a group admin's approval.
-
-    A pending fact is invisible to everyone but its own author until it is approved or rejected,
-    so this is the one place a group admin sees the whole review queue at once.
-
-    group: name of the curated group whose pending facts are listed.
-    """
-    async with as_system():
-        group_row = await resolve_group_admin(group)
-        facts = await group_row.pending_facts()
-    return [
-        PendingFact(id=f.id, owner_id=f.owner_id, predicate=f.predicate, statement=f.statement)
-        for f in facts
-    ]
-
-
-@server.tool
-async def approve(group: str, facts: str = "all") -> ReviewResult:
-    """Approve a curated group's pending facts, the review that grows its verified canon.
-
-    An approved fact joins the group's visible floor for every member and public reader at once,
-    the moment a pending write becomes canonical knowledge rather than one author's claim.
-
-    group: name of the curated group the facts belong to.
-    facts: comma-separated fact ids to approve, or "all" for every still-pending fact.
-    """
-    async with as_system():
-        group_row = await resolve_group_admin(group)
-        ids = None if facts == "all" else parse_ids(facts)
-        count = await group_row.approve_facts(ids)
-    return ReviewResult(group=group, count=count)
-
-
-@server.tool
-async def reject(group: str, facts: str) -> ReviewResult:
-    """Reject a curated group's pending facts, discarding them before they ever became canonical.
-
-    group: name of the curated group the facts belong to.
-    facts: comma-separated fact ids to reject.
-    """
-    async with as_system():
-        group_row = await resolve_group_admin(group)
-        count = await group_row.reject_facts(parse_ids(facts))
-    return ReviewResult(group=group, count=count)

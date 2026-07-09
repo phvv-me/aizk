@@ -1,4 +1,4 @@
-from sqlalchemy import and_, event, or_, text
+from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import ORMExecuteState, Session, SessionTransaction, with_loader_criteria
 
@@ -60,32 +60,21 @@ def require_tenant_context(state: ORMExecuteState) -> None:
 
 @event.listens_for(Session, "do_orm_execute")
 def apply_live_temporal_gate(state: ORMExecuteState) -> None:
-    """Gate every live-graph claim read to the current, reviewed version, one loader criteria.
+    """Gate every live-graph claim read to the current version, one loader criteria.
 
-    `with_loader_criteria` registers one combined predicate on each top-level select, the temporal
-    `FactClaim.is_current` gate together with the curation gate that hides a claim still pending
-    review from everyone but its author, `FactClaim.reviewed_at IS NOT NULL OR
-    FactClaim.owner_id == <acting user>`. Both live in the one lambda closing over the acting
-    user, so every fact lane, and any future relationship load of claims, shares one criteria
-    application rather than two listeners layering separately. This is temporal and curation
-    correctness in the ORM, never the security boundary, which stays in Postgres row level
-    security. A read that must see history or every pending row regardless of author opts out with
-    `settings.skip_live_gate` and lists its own predicates, namely the as_of replay, the raw count,
-    existence, and promote-copy reads, the export dump, and the curation review queue. Column and
-    relationship loads inherit the parent statement's criteria, so they are skipped here to avoid
-    applying it a redundant second time.
+    `with_loader_criteria` registers the temporal `FactClaim.is_current` gate on each top-level
+    select, so every fact lane, and any future relationship load of claims, shares one criteria
+    application rather than each re-deriving the predicate by hand. This is temporal correctness in
+    the ORM, never the security boundary, which stays in Postgres row level security. A read that
+    must see history opts out with `settings.skip_live_gate` and lists its own predicates, namely
+    the as_of replay, the raw count, existence, and promote-copy reads, and the export dump. Column
+    and relationship loads inherit the parent statement's criteria, so they are skipped here to
+    avoid applying it a redundant second time.
     """
     if not state.is_select or state.is_column_load or state.is_relationship_load:
         return
     if state.execution_options.get(settings.skip_live_gate):
         return
-    acting = state.session.info.get("user")
     state.statement = state.statement.options(
-        with_loader_criteria(
-            FactClaim,
-            lambda cls: and_(
-                cls.is_current, or_(cls.reviewed_at.is_not(None), cls.owner_id == acting)
-            ),
-            include_aliases=True,
-        )
+        with_loader_criteria(FactClaim, lambda cls: cls.is_current, include_aliases=True)
     )

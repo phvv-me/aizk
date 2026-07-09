@@ -37,15 +37,6 @@ CONSOLIDATION_PROMPT = (
     "NOOP when one of its own existing facts already states the same thing.\n"
     "Return exactly one verdict per numbered item shown, in the same order."
 )
-CURATION_REVIEW_SYSTEM_PROMPT = (
-    "You are the standing reviewer for one curated group's shared memory. Given the group's\n"
-    "already-approved canon and a queue of pending claims awaiting review, judge each pending\n"
-    "claim on its own. Approve a claim that is consistent with the canon, adds real\n"
-    "information, and reads as a well-formed fact. Reject a claim that contradicts the canon\n"
-    "without evidence, restates something the canon already states, or reads as malformed or\n"
-    "unsupported. Return exactly one verdict per pending claim shown, in the same order, each\n"
-    "naming the claim id it judges and a one-sentence reason grounded only in the canon shown."
-)
 EXTRACT_PREFERENCES_PROMPT = (
     "Extract the durable preferences, decisions, and habits the text reveals about a person or a\n"
     "project, never the transient facts. Prefer Decision, Pattern, and Gotcha entities and the\n"
@@ -177,13 +168,6 @@ class Settings(BaseSettings):
     contextual_bm25: whether an ingested chunk prepends its document title to the text the lexical
         bm25/tsvector lanes index (the Anthropic contextual-retrieval lever). Only the lexical
         column carries the preamble. The dense embedding and displayed text stay the raw span.
-    curation_review_canon_k: how many of a curated group's approved claims ground the review
-        pass's judgment of its pending queue, the only material the judge may reason over.
-    curation_review_cron: crontab the curation-review fan-out fires on, weekly after insight.
-    curation_review_enabled: whether the scheduler fans the curation-review pass out across
-        users.
-    curation_review_system: system prompt the curation-review pass uses to approve or reject each
-        pending claim against a curated group's visible canon.
     database_url: async DSN for the restricted app role row level security is enforced under.
         Defaults to the host/port/db/credentials template. Override wholesale
         (`AIZK_DATABASE_URL`) for a deployment shape the template can't express.
@@ -429,7 +413,7 @@ class Settings(BaseSettings):
     oidc_algorithm: JWS signing algorithm the offline JWKS path verifies against, `RS256` for
         most providers, `ES384` for Logto. A mismatch fails every signature with no error.
     oidc_groups_claim: access-token claim carrying the user's identity-provider organization
-        memberships and roles, which `Group.sync_user_groups` reconciles the membership table to on
+        memberships and roles, which `User.sync_groups` reconciles the membership table to on
         each authenticated request. Empty leaves membership hand-managed, the default until the
         provider is configured to emit the claim.
     mcp_resource_url: this server's own public base URL, advertised in the RFC 9728 protected
@@ -485,10 +469,6 @@ class Settings(BaseSettings):
     consolidation_prompt: str = CONSOLIDATION_PROMPT
     context_token_budget: int = 2048
     contextual_bm25: bool = False
-    curation_review_canon_k: int = 40
-    curation_review_cron: str = "0 8 * * 0"
-    curation_review_enabled: bool = True
-    curation_review_system: str = CURATION_REVIEW_SYSTEM_PROMPT
     database_url: str = ""
     db_host: str = "localhost"
     db_name: str = "aizk"

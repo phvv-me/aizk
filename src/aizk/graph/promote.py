@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime
 
 from loguru import logger
 from sqlalchemy import select
@@ -46,10 +45,7 @@ async def source_live_facts(chunks: list[Chunk]) -> list[LiveFact]:
     """The live facts sourced from a document's own chunks, the only facts a promotion carries.
 
     Only the live facts travel, since promotion publishes current knowledge, not superseded
-    history, and a source_chunk_id in this set excludes any claim whose chunk is gone. Reading
-    `LiveFact` also skips the `do_orm_execute` listener's `FactClaim`-keyed curation gate (a
-    distinct mapped class never picks it up), so a still-pending source claim travels too,
-    re-stamped fresh for the target scope set below like any other curated write.
+    history, and a source_chunk_id in this set excludes any claim whose chunk is gone.
 
     chunks: the source document's own chunks, whose ids scope the read.
     """
@@ -109,7 +105,6 @@ async def claim_promoted_facts(
     copies: dict[uuid.UUID, Chunk],
     user_id: uuid.UUID,
     target: list[uuid.UUID],
-    stamp: datetime | None,
 ) -> None:
     """Claim every promoted fact's already-global content in the target scope set.
 
@@ -121,7 +116,6 @@ async def claim_promoted_facts(
     copies: source chunk id to its fresh copy, from copied_chunks.
     user_id: the promoter, owner of the new claims.
     target: the target group set the claims are published into.
-    stamp: this promotion's own reviewed_at stamp, from Group.review_stamp.
     """
     for fact in facts:
         origin = copies[fact.source_chunk_id] if fact.source_chunk_id else None
@@ -134,7 +128,6 @@ async def claim_promoted_facts(
             valid=fact.valid,
             source_chunk_id=origin.id,
             attributes=dict(fact.attributes),
-            reviewed_at=stamp,
             promoted_from=fact.id,
         )
 
@@ -149,9 +142,7 @@ async def promote(
     References flow one way up the lattice, private to team to org and never down. Promotion reads
     the source under the promoter's visibility and writes a fresh copy owned by the promoter into
     the target group set, never mutating the source. The document copy carries promoted_from
-    pointing back to the original for provenance. A curated target reviews the claimed facts
-    immediately only when the promoter already holds admin standing in every curated group the
-    target set names, otherwise they land pending like any other curated write.
+    pointing back to the original for provenance.
 
     document_id: source document to promote, read under the promoter's visibility.
     to_scopes: comma-separated names of the target groups the copy is published into, one step
@@ -163,9 +154,6 @@ async def promote(
     async with acting_as(user_id):
         target = await target_groups(user_id, to_scopes)
         source = await source_document(document_id)
-        # resolved once for the whole copy, since every promoted claim shares the same target
-        # scope set and promoter.
-        stamp = await Group.review_stamp(tuple(target), user_id)
         chunks = source.chunks
         facts = await source_live_facts(chunks)
         copies = copied_chunks(chunks, user_id, target)
@@ -182,7 +170,7 @@ async def promote(
         )
         await session().flush()
         await claim_promoted_entities(facts, user_id, target)
-        await claim_promoted_facts(facts, copies, user_id, target, stamp)
+        await claim_promoted_facts(facts, copies, user_id, target)
     promoted = 1 + len(chunks) + len(facts)
     logger.info("promoted document {} into {} as {} rows", document_id, to_scopes, promoted)
     return promoted

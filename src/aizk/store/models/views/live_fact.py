@@ -32,7 +32,6 @@ class LiveFact(ViewBase):
     scopes: group set this claim is shared with, empty when private to the owner.
     valid: world-time range when the statement holds.
     recorded: transaction-time range, always open on every row this view admits.
-    reviewed_at: when this claim cleared curated-group review, null while still pending.
     last_accessed: transaction time recall last surfaced this claim.
     access_count: how many times recall has surfaced this claim.
     attributes: free-form structured detail extracted alongside this claim.
@@ -51,7 +50,6 @@ class LiveFact(ViewBase):
     scopes: list[uuid.UUID]
     valid: Range[datetime] | None
     recorded: Range[datetime]
-    reviewed_at: datetime | None
     last_accessed: datetime | None
     access_count: int
     attributes: dict
@@ -63,10 +61,10 @@ class LiveFact(ViewBase):
         """`fact_claim` joined to its `fact_content`, narrowed to `FactClaim.is_current`.
 
         `fc.id`/`fc.content_id` name both halves of the join explicitly (the "expose both"
-        contract `promote`, `curation`, and the recall lanes all read), the structural columns
+        contract `promote` and the recall lanes both read), the structural columns
         (subject_id, object_id, predicate, statement, embedding) come from the deduplicated
-        content, and every bi-temporal, curation, and decay column (owner_id, scopes, valid,
-        recorded, reviewed_at, last_accessed, access_count, attributes, source_chunk_id,
+        content, and every bi-temporal and decay column (owner_id, scopes, valid,
+        recorded, last_accessed, access_count, attributes, source_chunk_id,
         promoted_from) comes from the claim. `FactClaim.is_current` is the identical hybrid
         predicate `is_current_expression`, the do_orm_execute loader-criteria listener, and
         `visible_at`'s live branch all share, so this view can never drift from what "current"
@@ -87,7 +85,6 @@ class LiveFact(ViewBase):
                 claim.c.scopes.label("scopes"),
                 claim.c.valid.label("valid"),
                 claim.c.recorded.label("recorded"),
-                claim.c.reviewed_at.label("reviewed_at"),
                 claim.c.last_accessed.label("last_accessed"),
                 claim.c.access_count.label("access_count"),
                 claim.c.attributes.label("attributes"),

@@ -5,8 +5,10 @@ from typing import TYPE_CHECKING, Self
 from fastmcp.server.auth import AuthProvider, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.introspection import IntrospectionTokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
+from loguru import logger
 from pydantic import AnyHttpUrl
-from sqlalchemy import Text, select
+from sqlalchemy import Text, delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import Field, Relationship
 
 from ....config import settings
@@ -24,20 +26,11 @@ class User(Id, Timestamped, TableBase, table=True):
     id: stable identity, generated client-side on insert.
     display_name: human-readable label when one is known.
     oidc_subject: unique subject claim from the identity provider, null until linked.
-    is_admin: whether this user is the engine admin. It is set only on the seeded system user
-        and never granted to a client, since the operator is the Postgres owner role the CLI acts
-        as, not an app user promoted through a verb. Its one live use is `Group.require_admin`
-        letting that system user clear any group's curation without a membership row.
     created_at: first-seen timestamp.
     """
 
-    # `user` is a reserved SQL word, so the physical table keeps its original name rather than the
-    # class-derived `user` an unquoted CREATE TABLE would choke on
-    __tablename__ = "users"
-
     display_name: str | None = Field(default=None, sa_type=Text)
     oidc_subject: str | None = Field(default=None, unique=True, sa_type=Text)
-    is_admin: bool = Field(default=False, sa_column_kwargs={"server_default": "false"})
 
     # no back_populates: Membership carries no `user` relationship of its own, every read
     # site already id-keyed rather than navigating from a loaded Membership. No `groups`
@@ -62,10 +55,9 @@ class User(Id, Timestamped, TableBase, table=True):
         """Bind an OIDC subject to a user, minting one on first sight, the row back.
 
         Provisions the user the human or machine presenting that subject's token acts as, so a
-        named user exists before its first login rather than waiting to be auto-created. A regular
-        user, never an admin: engine admin standing is the seeded system user alone. Idempotent, a
-        second call over the same subject just returns the existing row. Runs under a system
-        session since it is a pre-auth bootstrap no user is resolved through yet.
+        named user exists before its first login rather than waiting to be auto-created.
+        Idempotent, a second call over the same subject just returns the existing row. Runs under a
+        system session since it is a pre-auth bootstrap no user is resolved through yet.
 
         oidc_subject: the subject claim the provider mints this identity's tokens against.
         display_name: human-readable label for a freshly minted user.
@@ -76,22 +68,6 @@ class User(Id, Timestamped, TableBase, table=True):
             session().add(user)
             await session().flush()
         return user
-
-    @classmethod
-    async def administers(cls, user_id: uuid.UUID) -> bool:
-        """Whether a user holds engine admin standing, the group-curation override.
-
-        Read by `Group.require_admin` so the engine admin clears any group's review without a
-        membership row of its own. Only the seeded system user carries the flag, since engine
-        admin is the Postgres owner the CLI acts as rather than an app user promoted through a
-        verb, so this reads true for that one identity and false for every other, including an
-        unknown one. Reads the is_admin column off the caller's own already-open session; User
-        carries no row level security of its own, so any open session reads every row regardless
-        of its acting user, and a caller passes in the session it already holds.
-
-        user_id: identity whose admin standing is resolved.
-        """
-        return bool(await session().scalar(select(cls.is_admin).where(cls.id == user_id)))
 
     @classmethod
     async def list_all(cls) -> list[Self]:
@@ -244,9 +220,8 @@ class User(Id, Timestamped, TableBase, table=True):
         Verifies the token through the configured verifier, introspection or the offline JWKS
         check, and on a valid token maps its `sub` claim to a user, provisioning one on first
         sight. An invalid, unverifiable, or unauthenticated (no verifier configured) token resolves
-        to null so it authenticates no one and the caller falls through to the next auth source,
-        and `is_admin` stays governed by the user row aizk owns rather than any claim the
-        token carries. When the provider injects the configured `oidc_groups_claim`, its list of
+        to null so it authenticates no one and the caller falls through to the next auth source.
+        When the provider injects the configured `oidc_groups_claim`, its list of
         `{id, role, name}` organizations drives `Group.sync_user_groups`, so the caller's group
         memberships follow the identity provider on every authenticated request rather than a
         hand-run `add-member`. The token verification runs outside any session, and `for_subject`
@@ -267,8 +242,82 @@ class User(Id, Timestamped, TableBase, table=True):
         user_id = await cls.for_subject(subject)
         claim = access_token.claims.get(settings.oidc_groups_claim)
         if settings.oidc_groups_claim and isinstance(claim, list):
-            from .group import Group  # local import breaks the User<->Group definition cycle
-
             async with as_system():
-                await Group.sync_user_groups(user_id, claim)
+                await cls.sync_groups(user_id, claim)
         return user_id
+
+    @classmethod
+    async def sync_groups(cls, user_id: uuid.UUID, memberships: list[dict[str, str]]) -> None:
+        """Reconcile a user's Logto-backed group memberships to exactly what the verified token
+        claims.
+
+        The token is the source of truth for who belongs where. The claimed role is Logto's own
+        `viewer`/`editor`/`admin`, folded straight into `Membership.Role` with no translation. Each
+        named organization is mirrored to a local group, minted on first sight with the org id its
+        stable key and appended to the label so a display-name clash across organizations never
+        trips group-name uniqueness. The membership is upserted to the claimed role and any
+        Logto-backed membership no longer claimed is dropped, so a user removed from an org loses
+        that scope on their next authenticated request. A hand-managed local group carries no
+        `oidc_org_id` and is never touched. Stays a handful of statements whatever the org count:
+        one read of the existing mirrors, a mint only for the genuinely new ones, then a single
+        bulk upsert and a single delete over the memberships.
+
+        user_id: the aizk user the token resolved to.
+        memberships: the token's org claim, each `{"id", "role", "name"}`; an empty list drops
+            every Logto-backed membership the user held.
+        """
+        from .group import Group
+        from .membership import Membership
+
+        wanted: dict[str, Membership.Role] = {}
+        labels: dict[str, str] = {}
+        for entry in memberships:
+            # a hostile or drifted claim must never crash auth: skip the bad entry, keep the rest
+            try:
+                org_id = entry["id"]
+                role = Membership.Role(entry.get("role", Membership.Role.viewer))
+            except TypeError, KeyError, ValueError, AttributeError:
+                logger.warning("skipping malformed group claim entry {!r}", entry)
+                continue
+            if not isinstance(org_id, str):
+                logger.warning("skipping group claim entry with non-string id {!r}", entry)
+                continue
+            wanted[org_id], labels[org_id] = role, entry.get("name", org_id)
+
+        oidc_backed = select(Group.id).where(Group.oidc_org_id.is_not(None))
+        if not wanted:
+            await session().execute(
+                delete(Membership).where(
+                    Membership.user_id == user_id, Membership.group_id.in_(oidc_backed)
+                )
+            )
+            return
+
+        mirror = {
+            org: gid
+            for org, gid in await session().execute(
+                select(Group.oidc_org_id, Group.id).where(Group.oidc_org_id.in_(wanted))
+            )
+        }
+        for org in wanted.keys() - mirror.keys():
+            group = Group(name=f"{labels[org]} ({org})", oidc_org_id=org)
+            session().add(group)
+            await session().flush()
+            mirror[org] = group.id
+
+        desired = {mirror[org]: role for org, role in wanted.items()}
+        await session().execute(
+            delete(Membership).where(
+                Membership.user_id == user_id,
+                Membership.group_id.in_(oidc_backed),
+                Membership.group_id.not_in(desired),
+            )
+        )
+        upsert = pg_insert(Membership).values(
+            [{"user_id": user_id, "group_id": gid, "role": role} for gid, role in desired.items()]
+        )
+        await session().execute(
+            upsert.on_conflict_do_update(
+                index_elements=["user_id", "group_id"], set_={"role": upsert.excluded.role}
+            )
+        )

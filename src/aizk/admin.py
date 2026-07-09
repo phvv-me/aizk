@@ -5,8 +5,8 @@ half of the surface that never belongs on the network-reachable MCP server. Each
 function over the existing `graph`/`ops`/`export`/`eval`/`store` layers, returning a scalar, a
 store row, or a small local result, so the CLI stays thin presentation and the logic is tested
 here directly rather than through a tool wrapper. The MCP server keeps only the client verbs
-(recall, remember, reference, and the group-curation trio); everything in this module is reached
-through the CLI, so a leaked API key can never drive a rebuild, a promotion, or a grant.
+(recall, remember, and reference), and everything in this module is reached through the CLI, so a
+leaked API key can never drive a rebuild, a promotion, or a grant.
 
 Operator functions act as the system user by default (the owner role, past row level
 security), the identity an ssh operator legitimately is, and take an explicit `user_id`
@@ -263,29 +263,23 @@ async def list_users() -> list[UserRow]:
         return await UserRow.list_all()
 
 
-async def create_group(
-    name: str, public: bool = False, curated: bool = False, creator: uuid.UUID | None = None
-) -> Group:
+async def create_group(name: str, public: bool = False, creator: uuid.UUID | None = None) -> Group:
     """Create a sharing group, the scope memberships and promotions target, the row back.
 
     name: unique human-readable label for the group.
     public: whether the group's rows are readable by anyone from the start, else members-only.
-    curated: whether a write into this group's canon must clear group-admin review before it is
-        visible to the rest of the group, immediate when false.
     creator: the user founded as the group's admin member, the system user when null.
     """
     async with as_system():
-        return await Group.create(
-            name, public=public, curated=curated, creator=creator or system()
-        )
+        return await Group.create(name, public=public, creator=creator or system())
 
 
-async def add_member(user: str, group: str, role: str = "writer") -> None:
+async def add_member(user: str, group: str, role: str = "editor") -> None:
     """Add a user to a group so that group's scope becomes visible to it under RLS.
 
     user: id of the user joining the group.
     group: name of the group the user joins.
-    role: standing within the group, reader for read-only, writer or admin to also write.
+    role: standing within the group, viewer for read-only, editor or admin to also write.
     """
     async with as_system():
         group_row = await Group.named(group)
@@ -314,17 +308,6 @@ async def publish_group(group: str, public: bool = True) -> None:
         await group_row.publish(public=public)
 
 
-async def curate_group(group: str, curated: bool = True) -> None:
-    """Curate or uncurate a group, flipping whether its writes must clear group-admin review.
-
-    group: name of the group to curate or uncurate.
-    curated: true to require review, false to write straight through.
-    """
-    async with as_system():
-        group_row = await Group.named(group)
-        await group_row.curate(curated=curated)
-
-
 async def delete_group(group: str) -> None:
     """Delete a group, memberships cascading and its rows falling back to their owners.
 
@@ -338,7 +321,11 @@ async def delete_group(group: str) -> None:
 async def list_groups() -> list[dict]:
     """Every group with its visibility and member count, the sharing roster."""
     async with as_system():
-        return await Group.list_all()
+        groups = await Group.list_all()
+        return [
+            {"name": group.name, "public": group.public, "members": await group.count_members()}
+            for group in groups
+        ]
 
 
 async def define_entity_kind(name: str, description: str, domain: str = "general") -> None:

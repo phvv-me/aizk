@@ -16,8 +16,10 @@ class Membership(TableBase, table=True):
 
     user_id: member user, cascading on delete.
     group_id: group joined, cascading on delete.
-    role: standing within the group. Any role grants read visibility, while writing into the
-        group's scope requires writer or admin, the read/write split the write policies enforce.
+    role: standing within the group, named to match Logto's organization roles verbatim so a
+        token's role folds straight into this enum with no translation. Any role grants read
+        visibility, while writing into the group's scope requires editor or admin, the read/write
+        split the write policies enforce.
 
     Carries no `user` or `group` relationship of its own, since every read site already holds
     the id and looks the row up directly rather than navigating from a loaded `Membership`, so the
@@ -25,23 +27,26 @@ class Membership(TableBase, table=True):
     """
 
     class Role(StrEnum):
-        """A user's standing within a group, read-only, writing, or administering it."""
+        """A user's standing within a group, read-only, writing, or administering it, the same
+        `viewer`/`editor`/`admin` names Logto's organization roles carry so no mapping sits
+        between the token and this enum.
+        """
 
-        reader = auto()
-        writer = auto()
+        viewer = auto()
+        editor = auto()
         admin = auto()
 
     user_id: uuid.UUID = Field(foreign_key="users.id", ondelete="CASCADE", primary_key=True)
     group_id: uuid.UUID = Field(foreign_key="group_.id", ondelete="CASCADE", primary_key=True)
     role: Role = Field(
-        default=Role.writer,
+        default=Role.editor,
         nullable=False,
         sa_type=cast(type[Role], SAEnum(Role, name="membership_role")),
     )
 
     @classmethod
     def writable_group_ids(cls, user_id: uuid.UUID) -> Select[tuple[uuid.UUID]]:
-        """Selectable of the group ids a user holds a writer or admin role in.
+        """Selectable of the group ids a user holds an editor or admin role in.
 
         The application-side mirror of the write policies' role subquery, for the passes that must
         target only rows they may write.
@@ -49,7 +54,7 @@ class Membership(TableBase, table=True):
         user_id: user whose writable groups are selected.
         """
         return (
-            select(cls.group_id).where(cls.user_id == user_id).where(cls.role != cls.Role.reader)
+            select(cls.group_id).where(cls.user_id == user_id).where(cls.role != cls.Role.viewer)
         )
 
     @classmethod
@@ -76,7 +81,7 @@ class Membership(TableBase, table=True):
         """
         writable = select(
             func.coalesce(func.array_agg(cls.group_id), ScopeLattice.empty_scopes())
-        ).where(cls.user_id == user_id, cls.role != cls.Role.reader)
+        ).where(cls.user_id == user_id, cls.role != cls.Role.viewer)
         return ((func.cardinality(scopes) == 0) & (owner == user_id)) | (
             (func.cardinality(scopes) > 0) & scopes.contained_by(writable.scalar_subquery())
         )
