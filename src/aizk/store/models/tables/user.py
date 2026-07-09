@@ -150,6 +150,7 @@ class User(Id, Timestamped, TableBase, table=True):
         client_secret: str,
         algorithm: str,
         required_scopes: str,
+        audience: str,
     ) -> TokenVerifier | None:
         """Build the verifier for one set of OIDC settings, memoized so repeat settings reuse
         it.
@@ -173,11 +174,16 @@ class User(Id, Timestamped, TableBase, table=True):
         required_scopes: comma-separated scopes a token must carry, also the `scopes_supported`
             the resource metadata advertises so a client requests exactly them, empty to accept
             any and advertise none.
+        audience: the RFC 8707 resource indicator a token's `aud` must equal, so a token the same
+            issuer signed for a different resource is rejected here. Empty leaves `aud` unchecked,
+            the single-user path where the caller mints a token for this server alone.
         """
         if not issuer:
             return None
         scopes = [scope.strip() for scope in required_scopes.split(",") if scope.strip()] or None
         if introspect_url:
+            # the introspection verifier takes no audience, so aud goes unchecked on this path;
+            # the live deployment uses the JWKS path below, where audience is enforced.
             return IntrospectionTokenVerifier(
                 introspection_url=introspect_url,
                 client_id=client_id,
@@ -185,7 +191,11 @@ class User(Id, Timestamped, TableBase, table=True):
                 required_scopes=scopes,
             )
         return JWTVerifier(
-            jwks_uri=jwks_uri, issuer=issuer, algorithm=algorithm, required_scopes=scopes
+            jwks_uri=jwks_uri,
+            issuer=issuer,
+            algorithm=algorithm,
+            required_scopes=scopes,
+            audience=audience or None,
         )
 
     @classmethod
@@ -203,6 +213,7 @@ class User(Id, Timestamped, TableBase, table=True):
             settings.oidc_client_secret,
             settings.oidc_algorithm,
             settings.oidc_required_scopes,
+            settings.mcp_resource_id,
         )
 
     @classmethod

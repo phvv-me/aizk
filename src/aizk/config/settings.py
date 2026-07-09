@@ -436,6 +436,11 @@ class Settings(BaseSettings):
         resource metadata so a client discovers the OIDC issuer and logs in through it, getting
         and refreshing its own tokens. Empty serves the bare token verifier with no advertising,
         the single-user default where the caller already holds a token.
+    oidc_audience: the exact `aud` claim a token must carry to be accepted, the RFC 8707 resource
+        indicator this server is. Empty derives it from `mcp_resource_url` (the advertised `/mcp`
+        resource), so the public path validates audience by default and only an unusual provider
+        whose `aud` differs from the resource url needs to set this. Without it, any token the same
+        issuer signed for a different resource would be accepted here.
     oidc_required_scopes: comma-separated access-token scopes the resource both requires and
         advertises as `scopes_supported`, so a client requests exactly them and the provider mints
         a resource-audience token carrying them. A resource-indicator login grants only scopes the
@@ -612,6 +617,7 @@ class Settings(BaseSettings):
     oidc_algorithm: str = "RS256"
     oidc_groups_claim: str = ""
     mcp_resource_url: str = ""
+    oidc_audience: str = ""
     oidc_required_scopes: str = ""
 
     @model_validator(mode="after")
@@ -659,6 +665,18 @@ class Settings(BaseSettings):
     def app_role(self) -> str:
         """Name of the restricted role the app connects under, read from `database_url`."""
         return urlsplit(self.database_url).username or "aizk_app"
+
+    @property
+    def mcp_resource_id(self) -> str:
+        """The RFC 8707 resource indicator this server is, the `aud` a valid token must carry.
+
+        The `RemoteAuthProvider` advertises the protected resource at the `/mcp` mount under
+        `mcp_resource_url`, and a resource-indicator login echoes exactly that into the token's
+        `aud`, so the two must agree byte for byte. `oidc_audience` overrides it, empty when no
+        public url is advertised and the single-user path presents a pre-issued token instead.
+        """
+        base = self.mcp_resource_url.rstrip("/")
+        return self.oidc_audience or (f"{base}/mcp" if base else "")
 
     @property
     def chunk_denylist_languages(self) -> frozenset[str]:
