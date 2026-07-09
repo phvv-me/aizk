@@ -284,26 +284,22 @@ class User(Id, Timestamped, TableBase, table=True):
                 continue
             wanted[org_id], labels[org_id] = role, entry.get("name", org_id)
 
-        # what this user's Logto-backed memberships already are, keyed by org id; when the token
-        # claims exactly this, there is nothing to write, the no-op path almost every request takes
+        # what this user's memberships already are, keyed by org id; when the token claims exactly
+        # this, there is nothing to write, the no-op path almost every request takes. Every group
+        # mirrors an org, so a user's memberships are all Logto-backed and none is exempt here.
         current = {
             org: role
             for org, role in await session().execute(
                 select(Group.oidc_org_id, Membership.role)
                 .join(Membership, Membership.group_id == Group.id)
-                .where(Membership.user_id == user_id, Group.oidc_org_id.is_not(None))
+                .where(Membership.user_id == user_id)
             )
         }
         if wanted == current:
             return
 
-        oidc_backed = select(Group.id).where(Group.oidc_org_id.is_not(None))
         if not wanted:
-            await session().execute(
-                delete(Membership).where(
-                    Membership.user_id == user_id, Membership.group_id.in_(oidc_backed)
-                )
-            )
+            await session().execute(delete(Membership).where(Membership.user_id == user_id))
             return
 
         mirror = {
@@ -322,7 +318,6 @@ class User(Id, Timestamped, TableBase, table=True):
         await session().execute(
             delete(Membership).where(
                 Membership.user_id == user_id,
-                Membership.group_id.in_(oidc_backed),
                 Membership.group_id.not_in(desired),
             )
         )
