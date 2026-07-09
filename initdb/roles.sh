@@ -16,6 +16,10 @@
 # with the bash "${VAR:-default}" fallback docker-compose.yml's own interpolations use, rather
 # than a literal baked into a committed file. docker-compose.yml's `env_file:` on the db service
 # is what makes AIZK_APP_PASSWORD visible to this shell in the first place.
+#
+# The statement shape below is the same one `rls.app_role_statements(role, password)` builds; this
+# script inlines it as SQL rather than calling the helper because initdb runs before any Python
+# interpreter exists in the container. Keep the two in sync when the moat's role attributes change.
 set -euo pipefail
 
 psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-SQL

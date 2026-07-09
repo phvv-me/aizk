@@ -20,8 +20,9 @@ class ContentVisibility:
     Deliberate, not incidental. Reading through the claim's own policies rather than a copy of them
     rebuilt here means a content row is visible exactly when one of its claims is, and can never
     drift from what the claim table itself admits. Lives beside `EntityContent`, its first
-    consumer, rather than in `store.rls`, since `FactContent` (`models.tables.fact`) imports
-    `content_policies` from here, the one sensible home for a piece two content tables share.
+    consumer, rather than in the generic `rls` library, since `FactContent` (`models.tables.fact`)
+    imports `content_policies` from here, the one sensible home for a piece two content tables
+    share.
 
     claim: the claim class this content is visible through, `EntityClaim` or `FactClaim`.
     """
@@ -70,11 +71,11 @@ class EntityClaim(Id, Scoped, Timestamped, TableBase, table=True):
     the other's claim. Row level security on this table is `Scoped`'s ordinary default, since a
     claim is exactly the kind of per-tenant row that default already governs.
 
-    Declared before `EntityContent` in this file, not just after, since `store.rls.register`'s
-    mapper-construction hook calls `EntityContent.__rls_policies__` synchronously the moment
-    `EntityContent`'s own class statement finishes, before the rest of the module runs, so it can
-    only resolve a bare `EntityClaim` name already bound in module globals by then, not one defined
-    later in the same file.
+    Declared before `EntityContent` in this file so the bare `EntityClaim` name its
+    read-through-claim policy references is bound in module globals when `rls.register` reads
+    `EntityContent.__rls_policies__`. That read is a backfill `rls.register` runs after
+    `aizk.store` has imported every model, so any in-file order would in fact resolve, but keeping
+    the claim first states the dependency plainly.
 
     id: uuid7 claim identity.
     content_id: the entity content this claim stakes, cascading on delete so the last claim's

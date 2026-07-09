@@ -119,8 +119,8 @@ class Scoped:
     `TableBase.metadata.info['rls']` so the Alembic autogenerate comparator can prove every scoped
     table forces the per-command scope policies and a new scoped model can never ship without them,
     and declares `__rls_policies__`, the default read/write scope policies every scoped table
-    carries, read by `store.rls.register`'s mapper-construction hook once the table exists. A
-    model with additional policies of its own may override `__rls_policies__` to extend this
+    carries, read by `rls.register` when it backfills the shared registry from every mapped model.
+    A model with additional policies of its own may override `__rls_policies__` to extend this
     default set (`*super().__rls_policies__()`) rather than editing it here.
 
     owner_id: user that owns the row, enforced by row level security.

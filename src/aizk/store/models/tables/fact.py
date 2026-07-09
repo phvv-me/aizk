@@ -96,11 +96,11 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     inserting a new one with a fresh open `recorded`, so history is never overwritten, and the
     partial unique index below enforces at most one *live* claim per container per content.
 
-    Declared before `FactContent` in this file, not just after, since `store.rls.register`'s
-    mapper-construction hook calls `FactContent.__rls_policies__` synchronously the moment
-    `FactContent`'s own class statement finishes, before the rest of the module runs, so it can
-    only resolve a bare `FactClaim` name already bound in module globals by then, not one defined
-    later in the same file.
+    Declared before `FactContent` in this file so the bare `FactClaim` name its read-through-claim
+    policy references is bound in module globals when `rls.register` reads
+    `FactContent.__rls_policies__`. That read is a backfill `rls.register` runs after `aizk.store`
+    has imported every model, so any in-file order would in fact resolve, but keeping the claim
+    first states the dependency plainly.
 
     id: uuid7 claim identity.
     content_id: the fact content this claim stakes, cascading on delete.

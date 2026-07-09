@@ -1,27 +1,27 @@
 import dbutil
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from aizk.config import settings
-from aizk.store import Document, FactClaim, TableBase
-from aizk.store.mixins.scoped import ScopeLattice
-from aizk.store.models.tables.entity import ContentVisibility, content_policies
-from aizk.store.rls import (
+from rls import (
     ApplyScopedRlsOp,
     Command,
     CompiledPolicy,
     CreatePolicyOp,
     DropPolicyOp,
     DropScopedRlsOp,
-    apply_statements,
     compile_policy,
-    drop_statements,
     render_apply_scoped_rls,
     render_create_policy,
     render_drop_policy,
     render_drop_scoped_rls,
+    scoped_apply_statements,
+    scoped_drop_statements,
     verify_scoped_rls,
 )
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from aizk.config import settings
+from aizk.store import Document, FactClaim, TableBase
+from aizk.store.mixins.scoped import ScopeLattice
+from aizk.store.models.tables.entity import ContentVisibility, content_policies
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -79,9 +79,9 @@ def test_content_visibility_carries_only_read_and_insert() -> None:
 
 
 def test_apply_and_drop_statements_bracket_the_policies() -> None:
-    """`apply_statements` forces RLS and grants the app role; `drop_statements` reverses it."""
-    applied = apply_statements("document")
-    dropped = drop_statements("document")
+    """Applying forces RLS and grants the app role; dropping reverses it, from the registry."""
+    applied = scoped_apply_statements("document")
+    dropped = scoped_drop_statements("document")
     joined = " ".join(applied).lower()
     assert "row level security" in joined and "aizk_app" in joined
     assert any("policy" in statement.lower() for statement in applied)
@@ -110,9 +110,9 @@ def test_policy_ops_compile_render_and_reverse() -> None:
     create = CreatePolicyOp("document", compiled)
     assert isinstance(create.reverse(), DropPolicyOp)
     rendered = render_create_policy(None, create)
-    assert rendered.startswith("op.create_scope_policy('document', rls.CompiledPolicy(")
+    assert rendered.startswith("op.create_rls_policy('document', rls.CompiledPolicy(")
     assert "name='scope_read'" in rendered
 
     drop = DropPolicyOp("document", compiled)
     assert isinstance(drop.reverse(), CreatePolicyOp)
-    assert render_drop_policy(None, drop).startswith("op.drop_scope_policy('document'")
+    assert render_drop_policy(None, drop).startswith("op.drop_rls_policy('document'")

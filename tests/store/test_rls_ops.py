@@ -3,25 +3,25 @@ from types import SimpleNamespace
 
 import dbutil
 import pytest
+from rls import (
+    ApplyScopedRlsOp,
+    CreatePolicyOp,
+    DropPolicyOp,
+    DropScopedRlsOp,
+    compare_scoped_rls,
+    compile_policy,
+    run_apply_scoped_rls,
+    run_create_policy,
+    run_drop_policy,
+    run_drop_scoped_rls,
+    scoped_apply_statements,
+    scoped_drop_statements,
+)
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from aizk.config import settings
 from aizk.store import Document, TableBase
 from aizk.store.mixins.scoped import ScopeLattice
-from aizk.store.rls import (
-    ApplyScopedRlsOp,
-    CreatePolicyOp,
-    DropPolicyOp,
-    DropScopedRlsOp,
-    apply_statements,
-    compare_scoped_rls,
-    compile_policy,
-    drop_statements,
-    run_apply_scoped_rls,
-    run_create_policy,
-    run_drop_policy,
-    run_drop_scoped_rls,
-)
 from alembic.operations.ops import UpgradeOps
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
@@ -50,10 +50,10 @@ def compiled_read_policy() -> object:
 
 def test_apply_and_drop_statements_honor_the_grant_flag() -> None:
     """The grant flag toggles whether the app-role CRUD grant rides alongside the RLS DDL."""
-    with_grant = " ".join(apply_statements("document", grant=True)).lower()
-    without_grant = " ".join(apply_statements("document", grant=False)).lower()
+    with_grant = " ".join(scoped_apply_statements("document", grant=True)).lower()
+    without_grant = " ".join(scoped_apply_statements("document", grant=False)).lower()
     assert "aizk_app" in with_grant and "aizk_app" not in without_grant
-    assert len(drop_statements("document", grant=False)) >= 1
+    assert len(scoped_drop_statements("document", grant=False)) >= 1
 
 
 def test_run_apply_and_drop_scoped_rls_emit_their_ddl() -> None:
@@ -81,19 +81,19 @@ def test_op_classmethods_invoke_their_operation() -> None:
     ops = RecordingOps()
     ApplyScopedRlsOp.apply_scoped_rls(ops, "document")
     DropScopedRlsOp.drop_scoped_rls(ops, "document")
-    CreatePolicyOp.create_scope_policy(ops, "document", compiled_read_policy())
-    DropPolicyOp.drop_scope_policy(ops, "document", compiled_read_policy())
+    CreatePolicyOp.create_rls_policy(ops, "document", compiled_read_policy())
+    DropPolicyOp.drop_rls_policy(ops, "document", compiled_read_policy())
     kinds = [type(op) for op in ops.invoked]
     assert kinds == [ApplyScopedRlsOp, DropScopedRlsOp, CreatePolicyOp, DropPolicyOp]
 
 
 def test_render_adds_the_rls_import_to_a_real_autogen_context() -> None:
     """Rendering a policy op into migration source records the `rls` import the migration needs."""
-    from aizk.store.rls import render_create_policy
+    from rls import render_create_policy
 
     context = SimpleNamespace(imports=set())
     render_create_policy(context, CreatePolicyOp("document", compiled_read_policy()))
-    assert "from aizk.store import rls" in context.imports
+    assert "import rls" in context.imports
 
 
 def test_compare_returns_early_when_no_policies_are_declared() -> None:

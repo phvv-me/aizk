@@ -113,8 +113,8 @@ class Settings(BaseSettings):
         deployment shape the template can't express.
     admin_password: password for the owning role `aizk_admin`, folded into `admin_database_url`'s
         default. The role name itself is not a setting, `docker-compose`'s `POSTGRES_USER` and the
-        `APP_ROLE` constant in `store/rls/ops.py` hardcode the role names both DSNs connect as, so
-        only the password varies deployment to deployment.
+        `grant_role="aizk_app"` passed to `rls.register` in `store/__init__.py` hardcode the role
+        names both DSNs connect as, so only the password varies deployment to deployment.
     anon_rate_per_second: token-bucket rate anonymous HTTP callers may call tools at. Authenticated
         users pass unthrottled.
     backup_cron: crontab the scheduled `BackupTask` dumps the whole database on, daily before dawn

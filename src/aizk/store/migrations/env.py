@@ -1,14 +1,15 @@
 import asyncio
 
+import rls as rls
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# importing the rls module registers the apply_scoped_rls/drop_scoped_rls alembic operations the
-# migrations call and the autogenerate comparator that guards every Scoped table, so the import has
-# to run before any migration or autogenerate pass executes.
+# importing `rls` registers the apply_scoped_rls/drop_scoped_rls alembic operations the migrations
+# call plus the autogenerate comparator that guards every scoped table, and importing `aizk.store`
+# runs `rls.register(TableBase)` so `metadata.info["rls_policies"]`/`["rls_grant_role"]` are
+# populated; both have to happen before any migration or autogenerate pass reads them.
 from aizk.store import TableBase
-from aizk.store import rls as rls
 from alembic import context
 
 config = context.config

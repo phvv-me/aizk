@@ -1208,8 +1208,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.run_apply_scoped_rls`",
-      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.run_apply_scoped_rls`",
+      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.scoped.run_apply_scoped_rls`",
+      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.scoped.run_apply_scoped_rls`",
       "severity": "error"
     },
     {
@@ -1220,8 +1220,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.run_drop_scoped_rls`",
-      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.run_drop_scoped_rls`",
+      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.scoped.run_drop_scoped_rls`",
+      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.scoped.run_drop_scoped_rls`",
       "severity": "error"
     },
     {
@@ -1232,8 +1232,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.run_create_policy`",
-      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.run_create_policy`",
+      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.implementations.run_create_policy`",
+      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.implementations.run_create_policy`",
       "severity": "error"
     },
     {
@@ -1244,8 +1244,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.CreatePolicyOp.__init__`",
-      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.CreatePolicyOp.__init__`",
+      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.CreatePolicyOp.__init__`",
+      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.CreatePolicyOp.__init__`",
       "severity": "error"
     },
     {
@@ -1256,8 +1256,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.run_drop_policy`",
-      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.run_drop_policy`",
+      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.implementations.run_drop_policy`",
+      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.implementations.run_drop_policy`",
       "severity": "error"
     },
     {
@@ -1268,8 +1268,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.DropPolicyOp.__init__`",
-      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.DropPolicyOp.__init__`",
+      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.DropPolicyOp.__init__`",
+      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.DropPolicyOp.__init__`",
       "severity": "error"
     },
     {
@@ -1280,8 +1280,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.ApplyScopedRlsOp.apply_scoped_rls`",
-      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.ApplyScopedRlsOp.apply_scoped_rls`",
+      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.scoped.ApplyScopedRlsOp.apply_scoped_rls`",
+      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.scoped.ApplyScopedRlsOp.apply_scoped_rls`",
       "severity": "error"
     },
     {
@@ -1292,56 +1292,56 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.DropScopedRlsOp.drop_scoped_rls`",
-      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.DropScopedRlsOp.drop_scoped_rls`",
+      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.scoped.DropScopedRlsOp.drop_scoped_rls`",
+      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.scoped.DropScopedRlsOp.drop_scoped_rls`",
       "severity": "error"
     },
     {
       "line": 84,
-      "column": 40,
+      "column": 38,
       "stop_line": 84,
-      "stop_column": 43,
+      "stop_column": 41,
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.CreatePolicyOp.create_scope_policy`",
-      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.CreatePolicyOp.create_scope_policy`",
+      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.operations.CreatePolicyOp.create_rls_policy`",
+      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.operations.CreatePolicyOp.create_rls_policy`",
       "severity": "error"
     },
     {
       "line": 84,
-      "column": 57,
+      "column": 55,
       "stop_line": 84,
-      "stop_column": 79,
+      "stop_column": 77,
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.CreatePolicyOp.create_scope_policy`",
-      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.CreatePolicyOp.create_scope_policy`",
+      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.CreatePolicyOp.create_rls_policy`",
+      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.CreatePolicyOp.create_rls_policy`",
       "severity": "error"
     },
     {
       "line": 85,
-      "column": 36,
+      "column": 34,
       "stop_line": 85,
-      "stop_column": 39,
+      "stop_column": 37,
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.DropPolicyOp.drop_scope_policy`",
-      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `aizk.store.rls.ops.DropPolicyOp.drop_scope_policy`",
+      "description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.operations.DropPolicyOp.drop_rls_policy`",
+      "concise_description": "Argument `RecordingOps` is not assignable to parameter `operations` with type `Operations` in function `rls.ops.operations.DropPolicyOp.drop_rls_policy`",
       "severity": "error"
     },
     {
       "line": 85,
-      "column": 53,
+      "column": 51,
       "stop_line": 85,
-      "stop_column": 75,
+      "stop_column": 73,
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.DropPolicyOp.drop_scope_policy`",
-      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.DropPolicyOp.drop_scope_policy`",
+      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.DropPolicyOp.drop_rls_policy`",
+      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.DropPolicyOp.drop_rls_policy`",
       "severity": "error"
     },
     {
@@ -1352,8 +1352,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext | None` in function `aizk.store.rls.ops.render_create_policy`",
-      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext | None` in function `aizk.store.rls.ops.render_create_policy`",
+      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext | None` in function `rls.ops.renderer.render_create_policy`",
+      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext | None` in function `rls.ops.renderer.render_create_policy`",
       "severity": "error"
     },
     {
@@ -1364,8 +1364,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.CreatePolicyOp.__init__`",
-      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `aizk.store.rls.ops.CreatePolicyOp.__init__`",
+      "description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.CreatePolicyOp.__init__`",
+      "concise_description": "Argument `object` is not assignable to parameter `policy` with type `CompiledPolicy` in function `rls.ops.operations.CreatePolicyOp.__init__`",
       "severity": "error"
     },
     {
@@ -1376,8 +1376,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `aizk.store.rls.ops.compare_scoped_rls`",
-      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `aizk.store.rls.ops.compare_scoped_rls`",
+      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `rls.ops.scoped.compare_scoped_rls`",
+      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `rls.ops.scoped.compare_scoped_rls`",
       "severity": "error"
     },
     {
@@ -1388,8 +1388,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `aizk.store.rls.ops.compare_scoped_rls`",
-      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `aizk.store.rls.ops.compare_scoped_rls`",
+      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `rls.ops.scoped.compare_scoped_rls`",
+      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `rls.ops.scoped.compare_scoped_rls`",
       "severity": "error"
     },
     {
@@ -1412,8 +1412,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `aizk.store.rls.ops.compare_scoped_rls`",
-      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `aizk.store.rls.ops.compare_scoped_rls`",
+      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `rls.ops.scoped.compare_scoped_rls`",
+      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `rls.ops.scoped.compare_scoped_rls`",
       "severity": "error"
     },
     {
@@ -1424,8 +1424,8 @@
       "path": "tests/store/test_rls_ops.py",
       "code": -2,
       "name": "bad-argument-type",
-      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `aizk.store.rls.ops.compare_scoped_rls`",
-      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `aizk.store.rls.ops.compare_scoped_rls`",
+      "description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `rls.ops.scoped.compare_scoped_rls`",
+      "concise_description": "Argument `SimpleNamespace` is not assignable to parameter `autogen_context` with type `AutogenContext` in function `rls.ops.scoped.compare_scoped_rls`",
       "severity": "error"
     },
     {
