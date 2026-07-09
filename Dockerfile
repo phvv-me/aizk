@@ -11,11 +11,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential git \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# the dependency layer first for build caching: sync the manifest, then overlay the rls fork the
-# same way CI does, since the bare `rls` PyPI name is the upstream base the fork reworked. Both the
-# overlay and the sqlalchemy 2.1 override (carried in pyproject's [tool.uv]) disappear once the
-# fork ships under its own PyPI name.
+# dependency layer, cached across source edits: install everything the manifest names but not the
+# project itself, so touching src never re-resolves torch and the rest.
 COPY pyproject.toml README.md ./
+RUN uv sync --no-dev --no-install-project
+# the project over the cached deps, then the rls fork overlay last so the sync never reverts it,
+# since the bare `rls` PyPI name is the upstream base the fork reworked. Both the overlay and the
+# sqlalchemy 2.1 override (pyproject's [tool.uv]) disappear once the fork ships as `rlsalchemy`.
 COPY src ./src
 RUN uv sync --no-dev \
     && uv pip install --python .venv --reinstall "rls @ git+https://github.com/phvv-me/rls"
