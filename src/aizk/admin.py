@@ -167,7 +167,7 @@ async def promote(document: str, to_scopes: str, user_id: uuid.UUID | None = Non
     passes through the operator.
 
     document: id of the source document to promote.
-    to_scopes: comma-separated names of the target groups the copy is published into.
+    to_scopes: comma-separated names of the target orgs the copy is published into.
     user_id: identity the promotion acts under, the system user when null.
     """
     return await graph.promote(uuid.UUID(document), to_scopes, user_id=user_id or system())
@@ -180,7 +180,7 @@ async def ingest(path: str, scopes: str | None = None, user_id: uuid.UUID | None
     splitter, and a file whose content hash already exists is skipped.
 
     path: file or directory to ingest.
-    scopes: comma-separated group names to share it with, private to the owner when null.
+    scopes: comma-separated org names to share it with, private to the owner when null.
     user_id: identity that owns the stored rows, the system user when null.
     """
     owner = user_id or system()
@@ -202,7 +202,7 @@ async def ingest_image(
 
     path: image file to ingest.
     caption: text stored on the chunk and shown in recall, the file name when null.
-    scopes: comma-separated group names to share it with, private to the owner when null.
+    scopes: comma-separated org names to share it with, private to the owner when null.
     user_id: identity that owns the stored row, the system user when null.
     """
     owner = user_id or system()

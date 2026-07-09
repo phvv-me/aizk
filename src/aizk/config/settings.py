@@ -412,10 +412,10 @@ class Settings(BaseSettings):
     oidc_jwks_url: JWKS endpoint the issuer publishes its signing keys at, to verify tokens.
     oidc_algorithm: JWS signing algorithm the offline JWKS path verifies against, `RS256` for
         most providers, `ES384` for Logto. A mismatch fails every signature with no error.
-    oidc_groups_claim: access-token claim carrying the user's identity-provider organization
-        memberships and roles, which `User.sync_groups` reconciles the membership table to on
-        each authenticated request. Empty leaves membership hand-managed, the default until the
-        provider is configured to emit the claim.
+    oidc_groups_claim: access-token claim carrying the caller's identity-provider organization
+        memberships and roles, which `mcp.user.standing_from_claim` derives the caller's org
+        standing from on each authenticated request. Empty leaves the caller with no org standing,
+        the default until the provider is configured to emit the claim.
     mcp_resource_url: this server's own public base URL, advertised in the RFC 9728 protected
         resource metadata so a client discovers the OIDC issuer and logs in through it, getting
         and refreshing its own tokens. Empty serves the bare token verifier with no advertising,

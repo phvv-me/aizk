@@ -18,7 +18,7 @@ class Community(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
 
     id: stable identity, generated client-side on insert.
     owner_id: user that owns the row, enforced by row level security.
-    scopes: group set the row is shared with, empty when private to the owner.
+    scopes: org set the row is shared with, empty when private to the owner.
     label: short human-readable name for the cluster.
     summary: paragraph describing what the cluster's entities and facts are about.
     embedding: halfvec dense vector of the summary, what community search ranks.

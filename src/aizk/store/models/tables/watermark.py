@@ -26,7 +26,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
 
     id: stable identity, generated client-side on insert.
     owner_id: user that owns the row, enforced by row level security.
-    scopes: group set the row is shared with, always empty since a watermark is private
+    scopes: org set the row is shared with, always empty since a watermark is private
         bookkeeping.
     kind: discriminator naming what the row tracks, such as entity_dirty, fact_count, or scorecard.
     ref: the subject the counter is keyed to, an entity id for entity_dirty or global otherwise.

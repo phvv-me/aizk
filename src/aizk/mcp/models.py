@@ -16,7 +16,7 @@ class MoveResult(FrozenModel):
     """How many documents one move call re-scoped, and where they now live.
 
     moved: documents re-scoped, each carrying its chunks and derived facts with it.
-    scopes: comma-separated group names they now live under, empty when moved back to private.
+    scopes: comma-separated org names they now live under, empty when moved back to private.
     """
 
     moved: int

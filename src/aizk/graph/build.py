@@ -98,7 +98,7 @@ class GraphWriter:
     whether the other's private content already existed.
 
     owner_id: user that owns a newly created claim.
-    scopes: group set a newly created claim is shared with, private when empty. Always the
+    scopes: org set a newly created claim is shared with, private when empty. Always the
         already-canonicalized (sorted) tuple a chunk's own `scopes` carries, so every claim this
         writer mints compares equal to any other write of the identical set.
     """

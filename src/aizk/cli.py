@@ -253,7 +253,7 @@ async def ingest(path: str, scopes: str | None = None, user: uuid.UUID | None = 
     """Ingest a file or directory of notes and code into memory, the document count back.
 
     path: file or directory to ingest.
-    scopes: comma-separated group names to share it with, private to the owner when null.
+    scopes: comma-separated org names to share it with, private to the owner when null.
     user: identity that owns the stored rows, the system user when null.
     """
     count = await admin.ingest(path, scopes=scopes, user_id=user)
@@ -271,7 +271,7 @@ async def ingest_image(
 
     path: image file to ingest.
     caption: text stored on the chunk and shown in recall, the file name when null.
-    scopes: comma-separated group names to share it with, private to the owner when null.
+    scopes: comma-separated org names to share it with, private to the owner when null.
     user: identity that owns the stored row, the system user when null.
     """
     document_id = await admin.ingest_image(path, caption=caption, scopes=scopes, user_id=user)
@@ -342,7 +342,7 @@ async def promote(document: str, to_scopes: str, user: uuid.UUID | None = None) 
     """Promote a document and its chunks and facts into a wider scope-set as a new audited copy.
 
     document: id of the source document to promote.
-    to_scopes: comma-separated names of the target groups the copy is published into.
+    to_scopes: comma-separated names of the target orgs the copy is published into.
     user: identity the promotion acts under, the system user when null.
     """
     count = await admin.promote(document, to_scopes, user_id=user)

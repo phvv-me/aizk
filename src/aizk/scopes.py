@@ -9,7 +9,7 @@ def scopes_from_org_ids(scopes: str | None) -> tuple[uuid.UUID, ...]:
     The operator-side scope resolver, counterpart to the MCP caller's `mcp.user.User.scope_ids`
     which resolves org names out of the caller's own token. An operator on the box carries no
     token, so it names the target organizations by their stable Logto ids, each mapped to its
-    `uuid5` scope with no local group table to look a name up in. A null or blank string means
+    `uuid5` scope with no local org table to look a name up in. A null or blank string means
     private to the owner, an empty tuple. The ids sort so `a,b` and `b,a` land on the identical
     canonical array every uniqueness and containment check depends on.
 

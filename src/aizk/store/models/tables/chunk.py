@@ -29,7 +29,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
         own column, not an anti-join against `fact_claim`, is what `pending_chunks` reads. A chunk
         whose prose asserts nothing worth keeping still finished a real pass and stays finished.
     owner_id: user that owns the row, enforced by row level security.
-    scopes: group set the row is shared with, an implicit intersection when it names more than
+    scopes: org set the row is shared with, an implicit intersection when it names more than
         one, empty when private to the owner.
 
     Carries no `document` relationship of its own, since every read site already holds the

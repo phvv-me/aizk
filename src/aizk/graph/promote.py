@@ -48,7 +48,7 @@ def copied_chunks(
 
     chunks: the source document's own chunks, in document order.
     user_id: the promoter, owner of every copy.
-    target: the target group set every copy is published into.
+    target: the target org set every copy is published into.
     """
     return {
         chunk.id: Chunk(
@@ -73,7 +73,7 @@ async def claim_promoted_entities(
 
     facts: the live facts being promoted.
     user_id: the promoter, owner of the new claims.
-    target: the target group set the claims are published into.
+    target: the target org set the claims are published into.
     """
     entity_ids = {fact.subject_id for fact in facts} | {
         fact.object_id for fact in facts if fact.object_id is not None
@@ -97,7 +97,7 @@ async def claim_promoted_facts(
     facts: the live facts being promoted.
     copies: source chunk id to its fresh copy, from copied_chunks.
     user_id: the promoter, owner of the new claims.
-    target: the target group set the claims are published into.
+    target: the target org set the claims are published into.
     """
     for fact in facts:
         origin = copies[fact.source_chunk_id] if fact.source_chunk_id else None
@@ -123,11 +123,11 @@ async def promote(
 
     References flow one way up the lattice, private to team to org and never down. Promotion reads
     the source under the promoter's visibility and writes a fresh copy owned by the promoter into
-    the target group set, never mutating the source. The document copy carries promoted_from
+    the target org set, never mutating the source. The document copy carries promoted_from
     pointing back to the original for provenance.
 
     document_id: source document to promote, read under the promoter's visibility.
-    to_scopes: comma-separated names of the target groups the copy is published into, one step
+    to_scopes: comma-separated names of the target orgs the copy is published into, one step
         wider than the source.
     user_id: the promoter, owner of the new copy and the user the writes act as, the
         system user when null.

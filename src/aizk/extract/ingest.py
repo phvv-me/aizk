@@ -121,7 +121,7 @@ async def ingest_image(
     title: human-readable label, defaulted from the file stem when null.
     caption: text stored on the chunk, defaulted to the file name when null.
     owner_id: user that owns the stored rows, the system user when null.
-    scopes: group set the stored rows are shared with, private to the owner when empty.
+    scopes: org set the stored rows are shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -173,7 +173,7 @@ async def ingest_file(
 
     file: source file to ingest.
     owner_id: user that owns the stored rows.
-    scopes: group set the stored rows are shared with.
+    scopes: org set the stored rows are shared with.
     embedder: the shared embedder every file in the walk reuses.
     """
     content = file.read_text(encoding="utf-8", errors="replace")
@@ -219,7 +219,7 @@ async def ingest_path(
 
     path: file or directory to ingest.
     owner_id: user that owns the stored rows, the system user when null.
-    scopes: group set the stored rows are shared with, private to the owner when empty.
+    scopes: org set the stored rows are shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
     logger.info("ingest start path={}", path)
@@ -250,7 +250,7 @@ async def ingest_text(
     title: human-readable label, defaulted from the leading words when null.
     kind: coarse type tag stamped on the document, such as note or code.
     owner_id: user that owns the stored rows, the system user when null.
-    scopes: group set the stored rows are shared with, private to the owner when empty.
+    scopes: org set the stored rows are shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
     digest = content_hash(text)
@@ -300,7 +300,7 @@ async def record_reference(
     uri: locator of the paper, url, or file to reference.
     title: human-readable label, defaulted to the uri when null.
     owner_id: user that owns the stored row, the system user when null.
-    scopes: group set the row is shared with, private to the owner when empty.
+    scopes: org set the row is shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
     document = Document(
@@ -333,7 +333,7 @@ async def remember_session(
     text: the content to remember.
     kind: coarse type tag carried through to the promoted document.
     owner_id: user that owns the stored item, the system user when null.
-    scopes: group set the item is shared with, private to the owner when empty.
+    scopes: org set the item is shared with, private to the owner when empty.
     """
     owner_id = owner_id or settings.system_user_id
     [embedding] = await Embedder().embed([text], mode="document")

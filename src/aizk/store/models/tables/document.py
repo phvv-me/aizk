@@ -20,7 +20,7 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
     source_uri: unique origin locator used to dedupe re-ingestion.
     content_hash: digest of the source content for change detection.
     owner_id: user that owns the row, enforced by row level security.
-    scopes: group set the row is shared with, an implicit intersection when it names more than
+    scopes: org set the row is shared with, an implicit intersection when it names more than
         one, empty when private to the owner.
     promoted_from: source document this row was copied from when it was promoted to a wider scope,
         null for an original, the provenance link that keeps a promotion auditable and one-way.
@@ -65,14 +65,14 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
         them all follow it, walking `fact_claim.source_chunk_id -> chunk.document_id`, the same
         provenance chain `forget` uses. Only rows the caller owns move, an explicit `owner_id`
         filter beneath whatever the caller's own session already permits, so a writer in a shared
-        group cannot re-scope another member's contribution. Scope is an access label rather than a
+        org cannot re-scope another member's contribution. Scope is an access label rather than a
         bi-temporal fact, so this is an in-place re-scope, not a supersession. Runs on the caller's
         own session, so row level security also refuses any source row they may not write, and the
         target set is validated by the caller before the call. Returns how many documents moved.
 
         owner_id: the caller, whose rows alone move.
         document_ids: the documents to move.
-        scopes: the sorted target group-id set, empty to make them private again.
+        scopes: the sorted target org-id set, empty to make them private again.
         """
         from .chunk import Chunk
         from .fact import FactClaim

@@ -124,13 +124,12 @@ class Scoped:
     default set (`*super().__rls_policies__()`) rather than editing it here.
 
     owner_id: user that owns the row, enforced by row level security.
-    scopes: the groups this row is shared with, an implicit intersection container rather than one
-        administered group. Empty is private to the owner, a singleton is the familiar one-group
-        share, and a larger set is the composed graph of every group named, visible only to a
-        caller standing in every one of them. `uuid[]` carries no foreign key of its own, Postgres
-        has no such constraint on an array element, so a deleted group demotes every row whose set
-        contains it back to private explicitly (`Group.delete`) rather than through an `ON DELETE`
-        cascade.
+    scopes: the orgs this row is shared with, an implicit intersection container rather than one
+        administered org. Empty is private to the owner, a singleton is the familiar one-org share,
+        and a larger set is the composed graph of every org named, visible only to a caller
+        standing in every one of them. Each element is `uuid5(oidc_org_id)` derived from the token,
+        so the array carries no foreign key and an org that vanishes from Logto simply stops
+        appearing in any caller's standing rather than needing a cascade.
     """
 
     # `uuid5(oidc_subject)`, no foreign key: identity lives in Logto, not a local user table.

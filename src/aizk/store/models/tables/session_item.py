@@ -19,7 +19,7 @@ class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
 
     id: stable identity, generated client-side on insert.
     owner_id: user that owns the row, enforced by row level security.
-    scopes: group set the row is shared with, empty when private to the owner.
+    scopes: org set the row is shared with, empty when private to the owner.
     kind: coarse type tag carried through to the promoted document, such as note or code.
     text: the remembered content, ranked by its embedding and fed whole to promotion.
     embedding: halfvec dense vector of the text, what the session recall lane ranks.

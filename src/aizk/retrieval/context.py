@@ -121,7 +121,7 @@ async def assemble_context_pack(
         user when null.
     token_budget: the token ceiling, the configured default when null.
     k: how many hits and seed facts the underlying recall surfaces.
-    scopes: group ids narrowing the read to that combination's composed graph, the whole visible
+    scopes: org ids narrowing the read to that combination's composed graph, the whole visible
         union when empty.
     """
     user_id = user_id or settings.system_user_id

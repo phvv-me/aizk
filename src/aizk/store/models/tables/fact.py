@@ -62,7 +62,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     id: uuid7 claim identity.
     content_id: the fact content this claim stakes, cascading on delete.
     owner_id: user that holds this claim, enforced by row level security.
-    scopes: group set this claim is shared with, an implicit intersection when it names more than
+    scopes: org set this claim is shared with, an implicit intersection when it names more than
         one, empty when private to the owner.
     valid: world-time range when the statement holds, null when undated. An open upper bound means
         the statement still holds, and a null range means no claim is made about its world-time

@@ -57,7 +57,7 @@ async def claim_entity(
 
     content_id: entity content this claim stakes.
     owner_id: user the new claim is staked under.
-    scopes: group set the new claim is shared with, private when empty.
+    scopes: org set the new claim is shared with, private when empty.
     """
     await session().execute(
         insert(EntityClaim)
@@ -76,7 +76,7 @@ async def claim_fact(
 
     content_id: fact content this claim stakes.
     owner_id: user the new claim is staked under.
-    scopes: group set the new claim is shared with, private when empty.
+    scopes: org set the new claim is shared with, private when empty.
     claim_fields: further `FactClaim` columns the caller already resolved (`valid`,
         `source_chunk_id`, `attributes`, `promoted_from`, ...).
     """

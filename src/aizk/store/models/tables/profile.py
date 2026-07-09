@@ -17,7 +17,7 @@ class Profile(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
 
     id: stable identity, generated client-side on insert.
     owner_id: user that owns the row, enforced by row level security.
-    scopes: group set the row is shared with, empty when private to the owner.
+    scopes: org set the row is shared with, empty when private to the owner.
     subject_id: entity content the profile portrays, cascading on delete.
     summary: short static-plus-dynamic paragraph rolled up from the entity's latest facts.
     embedding: halfvec dense vector of the summary, what profile lookup ranks.
