@@ -257,10 +257,10 @@ class User(Id, Timestamped, TableBase, table=True):
         stable key and appended to the label so a display-name clash across organizations never
         trips group-name uniqueness. The membership is upserted to the claimed role and any
         Logto-backed membership no longer claimed is dropped, so a user removed from an org loses
-        that scope on their next authenticated request. A hand-managed local group carries no
-        `oidc_org_id` and is never touched. Stays a handful of statements whatever the org count:
-        one read of the existing mirrors, a mint only for the genuinely new ones, then a single
-        bulk upsert and a single delete over the memberships.
+        that scope on their next authenticated request. This runs on every authenticated request,
+        so it reconciles nothing but the token itself, no Logto round trip, and writes nothing at
+        all when the claim already matches the stored memberships, the path almost every request
+        takes; only a genuine membership change mints a new mirror or rewrites the membership rows.
 
         user_id: the aizk user the token resolved to.
         memberships: the token's org claim, each `{"id", "role", "name"}`; an empty list drops
@@ -283,6 +283,19 @@ class User(Id, Timestamped, TableBase, table=True):
                 logger.warning("skipping group claim entry with non-string id {!r}", entry)
                 continue
             wanted[org_id], labels[org_id] = role, entry.get("name", org_id)
+
+        # what this user's Logto-backed memberships already are, keyed by org id; when the token
+        # claims exactly this, there is nothing to write, the no-op path almost every request takes
+        current = {
+            org: role
+            for org, role in await session().execute(
+                select(Group.oidc_org_id, Membership.role)
+                .join(Membership, Membership.group_id == Group.id)
+                .where(Membership.user_id == user_id, Group.oidc_org_id.is_not(None))
+            )
+        }
+        if wanted == current:
+            return
 
         oidc_backed = select(Group.id).where(Group.oidc_org_id.is_not(None))
         if not wanted:

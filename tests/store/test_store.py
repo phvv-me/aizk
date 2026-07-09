@@ -63,6 +63,23 @@ def test_sync_groups_skips_malformed_claim_entries() -> None:
     assert dbutil.run(body())  # the valid entry synced; the malformed ones skipped without a crash
 
 
+def test_sync_groups_is_a_no_op_when_the_claim_is_unchanged() -> None:
+    """Re-syncing the same token claim writes nothing and mints no duplicate mirror group, the
+    write-free path almost every authenticated request takes."""
+
+    async def body() -> int:
+        await dbutil.reset_db()
+        user = await dbutil.seed_user(uuid.uuid4())
+        claim = [{"id": "org-x", "name": "X", "role": "editor"}]
+        async with as_system():
+            await User.sync_groups(user, claim)
+            await User.sync_groups(user, claim)  # unchanged: the write-free early return
+            rows = await Group.list_all()
+        return sum(1 for row in rows if row.oidc_org_id == "org-x")
+
+    assert dbutil.run(body()) == 1
+
+
 def test_user_lifecycle_create_link_and_list() -> None:
     """A created user reads back, `link_oidc` binds a subject idempotently, listing is by age."""
 
