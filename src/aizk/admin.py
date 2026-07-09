@@ -286,15 +286,18 @@ async def remove_member(user: str, group: str) -> None:
         await group_row.remove_member(uuid.UUID(user))
 
 
-async def publish_group(group: str, public: bool = True) -> None:
-    """Publish a group so anyone can read its rows, or unpublish it back to members-only.
+async def publish_group(group: str) -> bool:
+    """Flip a group's public read flag, returning its new state.
 
-    group: name of the group to publish or unpublish.
-    public: true to publish, false to make members-only again.
+    A public group's rows are readable by any caller, member or not; flipping it back makes it
+    members-only again. Writing stays gated on editor-or-admin membership either way.
+
+    group: name of the group to flip.
     """
     async with as_system():
         group_row = await Group.named(group)
-        await group_row.publish(public=public)
+        await group_row.toggle_public()
+        return group_row.public
 
 
 async def delete_group(group: str) -> None:

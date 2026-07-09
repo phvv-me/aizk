@@ -206,10 +206,10 @@ omit = ["*/store/migrations/*"]
 
 [tool.coverage.report]
 show_missing = true
-# temporarily 97 (was 99): the operator surface moved to admin.py/cli.py in the two-plane-auth
-# work landed undertested, dropping coverage below 99. Restore to 99 once those commands are
-# covered, see ROADMAP.md "test the operator surface".
-fail_under = 97
+# restored to 99: the operator surface (admin.py/cli.py) is now covered directly, admin verbs
+# against the live schema and their delegate seams, cli routes through the command-routing table,
+# so both files are back at 100% and the whole suite clears 99.
+fail_under = 99
 exclude_lines = [
   "pragma: no cover",
   "raise NotImplementedError",

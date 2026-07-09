@@ -304,13 +304,12 @@ async def remove_member(user: str, group: str) -> None:
 
 
 @group.command(name="publish")
-async def publish_group(group: str, public: bool = True) -> None:
-    """Publish a group so anyone can read its rows, or unpublish it back to members-only.
+async def publish_group(group: str) -> None:
+    """Flip a group's public read flag and print its new state.
 
-    group: name of the group to publish or unpublish.
-    public: true to publish, false to make members-only again.
+    group: name of the group to flip public or members-only.
     """
-    await admin.publish_group(group, public=public)
+    public = await admin.publish_group(group)
     print(f"{group} public={public}")
 
 

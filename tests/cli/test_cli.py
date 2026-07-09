@@ -361,13 +361,36 @@ OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
         str(USER_ID),
     ),
     (["group", "add-member", str(USER_ID), "team"], "add_member", None, "joined team"),
-    (["group", "publish", "team"], "publish_group", None, "public=True"),
+    (["group", "remove-member", str(USER_ID), "team"], "remove_member", None, "removed from team"),
+    (["group", "publish", "team"], "publish_group", True, "public=True"),
     (["group", "delete", "team"], "delete_group", None, "team deleted"),
+    (["data", "ingest-image", "pic.png"], "ingest_image", DOC_ID, str(DOC_ID)),
+    (["data", "export", "dump.jsonl"], "export_scope", Rendered("EXPORT-DUMP"), "EXPORT-DUMP"),
     (
         ["ontology", "define-entity", "Area", "a domain"],
         "define_entity_kind",
         None,
         "entity kind Area defined",
+    ),
+    (
+        ["ontology", "define-relation", "funds", "x funds y"],
+        "define_relation_kind",
+        None,
+        "relation kind funds defined",
+    ),
+    (
+        ["db", "setup"],
+        "setup",
+        SimpleNamespace(migrated_from="abc123", migrated_to="def456"),
+        "migrated abc123 -> def456",
+    ),
+    (["eval", "bench"], "bench", Rendered("BENCH-REPORT"), "BENCH-REPORT"),
+    (["eval", "sweep"], "sweep", Rendered("SWEEP-REPORT"), "SWEEP-REPORT"),
+    (
+        ["eval", "benchmark", "evermembench", "ds.jsonl"],
+        "benchmark",
+        Rendered("BENCHMARK-REPORT"),
+        "BENCHMARK-REPORT",
     ),
 ]
 
@@ -420,3 +443,108 @@ def test_list_groups_renders_each_group_row(
     out = capsys.readouterr().out
     assert "team  public  3 members" in out
     assert "vault  members-only  1 members" in out
+
+
+def test_list_users_renders_id_and_display_name(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The roster prints one line per user, a dash standing in for a user with no display name."""
+    users = [
+        SimpleNamespace(id=USER_ID, display_name="Ada"),
+        SimpleNamespace(id=OTHER_USER_ID, display_name=None),
+    ]
+    monkeypatch.setattr(cli.admin, "list_users", Recorder(ret=users, is_async=True))
+
+    dispatch(["user", "list"])
+
+    out = capsys.readouterr().out
+    assert f"{USER_ID}  Ada" in out
+    assert f"{OTHER_USER_ID}  -" in out
+
+
+def test_audit_renders_each_write_with_scopes(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The audit log prints each write's id, kind, scope-set, and title, private when unscoped."""
+    scope = uuid.UUID("44444444-4444-4444-4444-444444444444")
+    docs = [
+        SimpleNamespace(id=DOC_ID, kind="note", scopes=[scope], title="Shared note"),
+        SimpleNamespace(id=USER_ID, kind="code", scopes=[], title=None),
+    ]
+    monkeypatch.setattr(cli.admin, "audit", Recorder(ret=docs, is_async=True))
+
+    dispatch(["data", "audit", "--limit", "5"])
+
+    out = capsys.readouterr().out
+    assert f"{DOC_ID}  note  [{scope}]  Shared note" in out
+    assert f"{USER_ID}  code  [private]  -" in out
+
+
+def test_list_ontology_marks_structural_kinds(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The catalog surface stars a system-written kind and leaves an extractable one unmarked."""
+    rows = [
+        SimpleNamespace(kind="entity", name="Concept", domain="general", uses=3, structural=False),
+        SimpleNamespace(
+            kind="entity", name="RaptorSummary", domain="core", uses=1, structural=True
+        ),
+    ]
+    monkeypatch.setattr(cli.admin, "list_ontology", Recorder(ret=rows, is_async=True))
+
+    dispatch(["ontology", "list"])
+
+    out = capsys.readouterr().out.splitlines()
+    concept = next(line for line in out if "Concept" in line)
+    raptor = next(line for line in out if "RaptorSummary" in line)
+    assert concept.startswith("  ") and "uses=3" in concept  # unmarked, extractable
+    assert raptor.startswith("* ") and "uses=1" in raptor  # starred, structural
+
+
+def test_profile_report_lists_spans_or_reports_none(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """With spans the report lists them, with none it prints the how-to-enable placeholder."""
+    monkeypatch.setattr(cli.admin, "profile_report", Recorder(ret=["span-one"]))
+    dispatch(["profile-report"])
+    assert "span-one" in capsys.readouterr().out
+
+    monkeypatch.setattr(cli.admin, "profile_report", Recorder(ret=[]))
+    dispatch(["profile-report"])
+    assert "no spans recorded" in capsys.readouterr().out
+
+
+class Jsonable:
+    """A stand-in report whose `model_dump_json` is the one text the JSON commands print.
+
+    payload: fixed JSON string returned regardless of the requested indent.
+    """
+
+    def __init__(self, payload: str) -> None:
+        self.payload = payload
+
+    def model_dump_json(self, indent: int | None = None) -> str:
+        return self.payload
+
+
+@pytest.mark.parametrize(
+    ("tokens", "fn_name"),
+    [(["db", "tasks-status"], "tasks_status"), (["db", "health"], "health")],
+    ids=["tasks-status", "health"],
+)
+def test_json_command_prints_the_model_dump(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tokens: list[str],
+    fn_name: str,
+) -> None:
+    """The status and health commands serialize their report to indented JSON on stdout.
+
+    tokens: the argv the command dispatches.
+    fn_name: the `admin` function the command reports from.
+    """
+    monkeypatch.setattr(cli.admin, fn_name, Recorder(ret=Jsonable('{"ok": true}'), is_async=True))
+
+    dispatch(tokens)
+
+    assert '{"ok": true}' in capsys.readouterr().out
