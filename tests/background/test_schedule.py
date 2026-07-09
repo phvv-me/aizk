@@ -3,6 +3,7 @@ import uuid
 from collections.abc import Callable
 from types import SimpleNamespace
 
+import dbutil
 import pytest
 from bg_doubles import FakeJob, RecordingPg, RecordingQueue
 from hypothesis import given
@@ -12,9 +13,10 @@ import aizk.background.queue as queue_mod
 import aizk.background.schedule as schedule_mod
 from aizk.background.payloads import ChunkJob, ProfileJob, TaskJob
 from aizk.background.queue import EXTRACT_ENTRYPOINT, PROFILE_ENTRYPOINT
-from aizk.background.schedule import fan_out, run_worker
+from aizk.background.schedule import fan_out, owner_roster, run_worker
 from aizk.background.tasks import BackupTask, ScheduledTask
 from aizk.config import settings
+from aizk.store import SessionItem, acting_as
 
 InstallSeam = Callable[[object], RecordingQueue]
 # the per-user, fanned-out passes, excluding BackupTask, whose system-level cron-only shape
@@ -45,19 +47,13 @@ def test_fan_out_enqueues_one_deduped_job_per_user(
     recorder = queue_seam(queue_mod)
     roster_reads: list[None] = []
 
-    async def fake_list_all() -> list[SimpleNamespace]:
+    async def fake_owner_roster() -> list[uuid.UUID]:
         roster_reads.append(None)
-        return [SimpleNamespace(id=pid) for pid in users]
+        return list(users)
 
-    class FakeSystemSession:
-        async def __aenter__(self) -> None:
-            return None
-
-        async def __aexit__(self, *exc: object) -> bool:
-            return False
-
-    monkeypatch.setattr(schedule_mod, "as_system", lambda: FakeSystemSession())
-    monkeypatch.setattr(schedule_mod.User, "list_all", fake_list_all)
+    # there is no user table any more, so fan_out reads the distinct content owners through
+    # `owner_roster` (a bypass_rls union over documents and session items), the seam faked here
+    monkeypatch.setattr(schedule_mod, "owner_roster", fake_owner_roster)
     task = task_cls()
 
     asyncio.run(fan_out(task))
@@ -189,3 +185,24 @@ def test_run_worker_registers_every_entrypoint_and_chains_profiles_only_when_on(
     profile_job = job_factory(ProfileJob(entity_id=entity, user_id=user).encode())
     asyncio.run(pg.entrypoints[PROFILE_ENTRYPOINT](profile_job))
     assert profile_calls == [(entity, user)]
+
+
+def test_owner_roster_unions_document_and_session_owners(migrated_db: None) -> None:
+    """The roster is the distinct owners across documents and un-promoted session items.
+
+    There is no user table to read a roster from, so a scheduled pass enumerates exactly the owners
+    that hold stored memory: an owner with only a document, and one with only a captured session,
+    both surface so each gets fanned a per-owner job.
+    """
+
+    doc_owner, session_owner = uuid.uuid4(), uuid.uuid4()
+
+    async def body() -> set[uuid.UUID]:
+        await dbutil.reset_db()
+        await dbutil.seed_document(doc_owner, [])
+        async with acting_as(session_owner) as session:
+            session.add(SessionItem(text="a decision", owner_id=session_owner))
+        return set(await owner_roster())
+
+    roster = dbutil.run(body())
+    assert {doc_owner, session_owner} <= roster

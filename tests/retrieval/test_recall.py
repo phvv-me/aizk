@@ -343,7 +343,6 @@ def test_hybrid_recall_recalls_the_matching_chunk_and_caps_at_k(
     async def flow() -> list[Row]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         doc = await seed_doc(owner, title="src")
         await seed_chunk(doc, owner, f"exact {query}", qvec(query), ord=0)
         await seed_chunk(doc, owner, "far one", other_vec("a"), ord=1)
@@ -366,8 +365,6 @@ def test_hybrid_recall_hides_another_owners_private_chunk(
         await dbutil.reset_db()
         owner = uuid.uuid4()
         stranger = uuid.uuid4()
-        await dbutil.seed_user(owner)
-        await dbutil.seed_user(stranger)
         mine = await seed_doc(owner, title="mine")
         theirs = await seed_doc(stranger, title="theirs")
         await seed_chunk(mine, owner, "my chunk", qvec(query))
@@ -389,12 +386,9 @@ def test_hybrid_recall_lens_narrows_to_the_named_group(
     async def flow() -> tuple[list[str], list[str]]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
+        # a group is just a bare org scope uuid now, and the owner reads its own scoped rows with
+        # no membership seeding, so the lens alone narrows the two owned, group-scoped documents
         group_a, group_b = uuid.uuid4(), uuid.uuid4()
-        await dbutil.seed_group(group_a)
-        await dbutil.seed_group(group_b)
-        await dbutil.seed_membership(owner, group_a, "viewer")
-        await dbutil.seed_membership(owner, group_b, "viewer")
         doc_a = await seed_doc(owner, title="a", scopes=[group_a])
         doc_b = await seed_doc(owner, title="b", scopes=[group_b])
         await seed_chunk(doc_a, owner, "in group a", qvec(query), scopes=[group_a])
@@ -423,7 +417,6 @@ def test_hybrid_recall_promoted_bonus_lifts_a_promoted_chunk(
     async def flow() -> dict[str, float]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         plain = await seed_doc(owner, title="plain")
         origin = await seed_doc(owner, title="origin")
         promoted = await seed_doc(owner, title="promoted", promoted_from=origin)
@@ -446,7 +439,6 @@ def test_latest_facts_ranks_visible_current_facts(
     async def flow() -> list[FactHit]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         subject = await seed_entity("Alice")
         await seed_fact(owner, "alice wrote the paper", qvec(query), subject, recorded_from=PAST)
         await seed_fact(owner, "unrelated fact", other_vec("z"), subject, recorded_from=PAST)
@@ -466,7 +458,6 @@ def test_session_hits_only_ranks_unpromoted_items(
     async def flow() -> list[SessionNote]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         await seed_session(owner, "still working", qvec(query), kind="note")
         await seed_session(owner, "already promoted", qvec(query), promoted=True)
         return await in_session(owner, lambda s: session_hits(qvec(query), 5))
@@ -486,7 +477,6 @@ def test_top_profile_returns_the_closest_portrait_or_none(
     async def flow() -> tuple[str | None, str | None]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         empty = await in_session(owner, lambda s: top_profile(qvec(query)))
         subject = await seed_entity("Alice", qvec(query), owner=owner)
         await seed_profile(owner, subject, "Alice is a mathematician.")
@@ -507,7 +497,6 @@ def test_graph_search_embeds_the_query_and_ranks_facts(
     async def flow() -> list[FactHit]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         subject = await seed_entity("Node")
         await seed_fact(owner, "the ranked fact", qvec(query), subject)
         return await graph_search(query, k=5, user_id=owner)
@@ -532,7 +521,6 @@ def test_search_returns_hits_reranked_only_when_enabled(
     async def flow() -> list[Hit]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         doc = await seed_doc(owner, title="src")
         await seed_chunk(doc, owner, f"the passage for {query}", qvec(query))
         return await search(query, k=4, user_id=owner)
@@ -562,7 +550,6 @@ def test_recall_bundles_every_lane_over_the_seeded_graph(
     async def flow() -> tuple[RecallResult, int]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         doc = await seed_doc(owner, title="src")
         for index in range(4):
             await seed_chunk(doc, owner, f"packing chunk {index}", qvec(query), ord=index)
@@ -595,7 +582,6 @@ def test_recall_replays_the_graph_at_a_past_world_time(
     async def flow() -> RecallResult:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         alice = await seed_entity("Alice")
         bob = await seed_entity("Bob")
         await seed_fact(
@@ -626,7 +612,6 @@ def test_recall_fills_a_thin_recall_with_one_extra_round(
     async def flow() -> RecallResult:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         if seed_evidence:
             doc = await seed_doc(owner, title="src")
             await seed_chunk(doc, owner, "lone chunk", qvec(query))
@@ -666,7 +651,6 @@ def test_recall_lane_toggles_leave_their_slice_empty(
     async def flow() -> RecallResult:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         subject = await seed_entity("Alice", qvec(query), owner=owner)
         await seed_profile(owner, subject, "a portrait")
         await seed_community(owner, "c", "a cluster", qvec(query))
@@ -687,7 +671,6 @@ def test_neighbor_facts_widens_from_the_closest_seed(
     async def flow() -> list[FactHit]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         alice = await seed_entity("Alice")
         bob = await seed_entity("Bob")
         await seed_fact(owner, "closest seed", qvec(query), alice, object_id=bob)
@@ -716,7 +699,6 @@ def test_ppr_facts_reaches_the_multi_hop_neighborhood(
     async def flow() -> list[FactHit]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         alice = await seed_entity("Alice")
         bob = await seed_entity("Bob")
         carol = await seed_entity("Carol")
@@ -744,7 +726,6 @@ def test_recall_round_wrappers_and_seedless_lanes(
     async def flow() -> tuple[str | None, list[SessionNote], list[FactHit], list[FactHit]]:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         subject = await seed_entity("Subject", qvec(query), owner=owner)
         await seed_profile(owner, subject, "the bound portrait")
         await seed_session(owner, "a working item", qvec(query))
@@ -777,7 +758,6 @@ def test_assemble_context_pack_recalls_and_packs_the_seeded_graph(
     async def flow() -> ContextPack:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        await dbutil.seed_user(owner)
         doc = await seed_doc(owner, title="src")
         await seed_chunk(doc, owner, f"packable passage for {query}", qvec(query))
         return await assemble_context_pack(query, user_id=owner, token_budget=4000, k=4)

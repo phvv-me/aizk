@@ -10,6 +10,7 @@ import aizk.mcp.middleware as middleware_module
 from aizk.config import settings
 from aizk.mcp.middleware import AnonymousRateLimit, IdentityMiddleware
 from aizk.mcp.user import USER_STATE_KEY, User
+from aizk.store.engine import current_standing
 
 
 class FakeFastmcpContext:
@@ -43,23 +44,32 @@ def test_anonymous_bucket_is_sized_to_a_five_second_burst_never_below_one(rate: 
     assert limiter.refill_rate == rate
 
 
-def test_user_middleware_resolves_once_and_stashes_it_for_the_call(
+def test_user_middleware_resolves_once_stashes_it_and_binds_its_standing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`on_call_tool` resolves the caller once and stashes it in Context state, then delegates."""
-    resolved = User(id=uuid.uuid4())
+    """`on_call_tool` resolves the caller once, stashes it, and binds its standing for the call.
+
+    The wrapped handler runs under exactly the token's `(orgs, writable_orgs)`, so an `acting_as`
+    a verb opens inside the call reads the caller's own standing rather than the empty default.
+    """
+    org = uuid.uuid4()
+    resolved = User(id=uuid.uuid4(), orgs=(org,), writable_orgs=(org,))
     monkeypatch.setattr(middleware_module, "resolve_user", lambda: _async_return(resolved))
     context = FakeContext()
     reached: list[object] = []
+    standing_inside: list[tuple[tuple[uuid.UUID, ...], tuple[uuid.UUID, ...]]] = []
 
     async def call_next(ctx: object) -> str:
         reached.append(ctx)
+        standing_inside.append(current_standing())
         return "ok"
 
     result = dbutil.run(IdentityMiddleware().on_call_tool(context, call_next))
     assert result == "ok"
     assert reached == [context]  # the wrapped handler ran once, after the stash
     assert context.fastmcp_context.get_state(USER_STATE_KEY) == resolved
+    assert standing_inside == [((org,), (org,))]  # the token's standing bound for the call
+    assert current_standing() == ((), ())  # and reset once the call unwound
 
 
 @pytest.mark.parametrize(

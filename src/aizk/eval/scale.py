@@ -27,7 +27,6 @@ from ..store import (
     LiveFact,
     Profile,
     TableBase,
-    User,
     Watermark,
     acting_as,
     as_system,
@@ -678,7 +677,6 @@ async def purge_user(user_id: uuid.UUID) -> None:
         await session().execute(
             delete(EntityContent).where(EntityContent.id.in_(entity_content_ids))
         )
-        await session().execute(text("DELETE FROM user_ WHERE id = :id"), {"id": user_id})
 
 
 async def measure_size(
@@ -740,8 +738,9 @@ async def run_scale_benchmark(
     budget = budget or Budget()
     rng = np.random.default_rng(seed)
     [vector] = await Embedder().embed([query], mode="query")
-    async with as_system():
-        user_id = (await User.create("scale-benchmark")).id
+    # a throwaway owner for the synthetic corpus; there is no user table to mint one in, and a
+    # fresh uuid7 is all a per-owner benchmark run needs to scope its own rows
+    user_id = uuid.uuid7()
     generated = Generated()
     points: list[ScalePoint] = []
     try:

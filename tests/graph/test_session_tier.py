@@ -49,8 +49,9 @@ def test_promote_moves_due_items_into_the_graph_and_skips_unwritable_scopes(
 
     async def body() -> tuple[int, int, bool, bool]:
         owner = await seedgraph.fresh_owner()
-        readonly = await dbutil.seed_group(uuid.uuid4())
-        await dbutil.seed_membership(owner, readonly, "viewer")
+        # a background pass carries no writable standing, so an org scope is one the owner reads
+        # but never writes, exactly the read-only-scope item the promotion must leave working
+        readonly = uuid.uuid4()
         private = await seed_item(owner, f"a decision about {marker} worth keeping")
         blocked = await seed_item(owner, f"team note {marker}", scopes=(readonly,))
         promoted = await promote_sessions(owner)

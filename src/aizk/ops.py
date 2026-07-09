@@ -34,8 +34,6 @@ MAIN_TABLES = (
     "community",
     "profile",
     "session_item",
-    "user_",
-    "group_",
 )
 
 # the OpenAI-compatible endpoints a health read probes for reachability, named for the lane each

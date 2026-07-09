@@ -11,12 +11,10 @@ from mcp_probe import USER_TOOLS, const
 
 import aizk.mcp.server as server_module
 from aizk.config import settings
-from aizk.exceptions import ScopeNotFoundError
 from aizk.mcp.models import MoveResult, WriteResult
 from aizk.mcp.server import (
     AizkMCP,
     parse_ids,
-    resolve_scopes,
     server,
     startup_check,
 )
@@ -101,33 +99,6 @@ def test_startup_check_enables_spans_and_auto_setups_only_when_behind(
     assert spans_enabled == ([True] if profiling else [])
     # setup runs exactly when auto-setup is on and the health read finds the schema behind head
     assert setups == ([True] if (auto_setup and not up_to_date) else [])
-
-
-@pytest.mark.parametrize(
-    "blank", [None, "", "   ", " , ,"], ids=["null", "empty", "spaces", "commas"]
-)
-def test_resolve_scopes_maps_a_blank_string_to_the_private_lens(blank: str | None) -> None:
-    """A null or blank scope string means private, the empty tuple, never a database lookup."""
-    assert dbutil.run(resolve_scopes(blank, uuid.uuid4())) == ()
-
-
-def test_resolve_scopes_canonicalizes_names_to_a_sorted_id_tuple_and_fails_on_an_unknown() -> None:
-    """Any order of known names resolves to one sorted id tuple; an unknown name fails fast."""
-
-    async def probe() -> None:
-        await dbutil.reset_db()
-        user_id = await dbutil.seed_user(uuid.uuid4())
-        ids = {
-            name: await dbutil.seed_group(uuid.uuid4(), name=name)
-            for name in ("alpha", "beta", "gamma")
-        }
-        canonical = tuple(sorted(ids.values()))
-        assert await resolve_scopes("beta,alpha,gamma", user_id) == canonical
-        assert await resolve_scopes("gamma, beta ,alpha", user_id) == canonical
-        with pytest.raises(ScopeNotFoundError, match="no scope"):
-            await resolve_scopes("ghost", user_id)
-
-    dbutil.run(probe())
 
 
 @given(ids=st.lists(st.uuids(), max_size=6))
@@ -263,8 +234,6 @@ def test_end_to_end_a_non_admin_client_lists_and_calls_the_whole_visible_surface
     monkeypatch.setattr(settings, "auto_setup", False)  # skip the queue-schema health probe
 
     async def drive() -> None:
-        await dbutil.reset_db()
-        await dbutil.seed_user(settings.default_user_id)
         async with Client(server) as client:
             names = {t.name for t in await client.list_tools()}
             assert names == USER_TOOLS
@@ -314,37 +283,17 @@ def test_no_operational_tool_leaks_onto_the_server(tools: dict[str, FunctionTool
     assert not (operational & set(tools))
 
 
-class _MoveScalars:
-    """A `scalars` result whose `.all()` is a fixed writable-group list, no database touched."""
+class NullActing:
+    """An `acting_as` stand-in yielding nothing, since the move body's session is never touched.
 
-    def __init__(self, groups: list[uuid.UUID]) -> None:
-        self.groups = groups
+    `Document.move_to_scope` is faked in the move tests, so the block only needs a valid async
+    context manager, not a bound session.
+    """
 
-    def all(self) -> list[uuid.UUID]:
-        return self.groups
-
-
-class _MoveSession:
-    """A session stand-in exposing only the `scalars` the move body runs for writable groups."""
-
-    def __init__(self, writable: list[uuid.UUID]) -> None:
-        self.writable = writable
-
-    async def scalars(self, *args: object) -> _MoveScalars:
-        return _MoveScalars(self.writable)
-
-
-class _MoveActing:
-    """An `acting_as` stand-in binding a `_MoveSession` to the context for the move body."""
-
-    def __init__(self, writable: list[uuid.UUID]) -> None:
-        self.binding = dbutil.use_session(_MoveSession(writable))
-
-    async def __aenter__(self) -> object:
-        return await self.binding.__aenter__()
+    async def __aenter__(self) -> None:
+        return None
 
     async def __aexit__(self, *exc: object) -> bool:
-        await self.binding.__aexit__(None, None, None)
         return False
 
 
@@ -363,7 +312,7 @@ def test_move_rescopes_the_callers_own_documents_and_reports_the_count(
         return 3
 
     doc = uuid.uuid4()
-    monkeypatch.setattr(server_module, "acting_as", lambda user_id: _MoveActing([]))
+    monkeypatch.setattr(server_module, "acting_as", lambda user_id: NullActing())
     monkeypatch.setattr(
         server_module.Document,
         "move_to_scope",
@@ -375,10 +324,15 @@ def test_move_rescopes_the_callers_own_documents_and_reports_the_count(
 
 
 def test_move_refuses_a_target_group_the_caller_cannot_write(
-    monkeypatch: pytest.MonkeyPatch, as_caller: User, tools: dict[str, FunctionTool]
+    monkeypatch: pytest.MonkeyPatch, tools: dict[str, FunctionTool]
 ) -> None:
-    """move refuses a target group outside the caller's writable set, no document touched."""
-    monkeypatch.setattr(server_module, "acting_as", lambda user_id: _MoveActing([]))
-    monkeypatch.setattr(server_module, "resolve_scopes", const((uuid.uuid4(),)))
-    with pytest.raises(ToolError):
+    """move refuses a named target org outside the caller's writable set, no document touched.
+
+    The caller stands in the org as a reader (its name resolves) but not a writer, exactly the
+    viewer-in-a-shared-org case the Python writer gate turns into a clean ToolError before any RLS.
+    """
+    locked = uuid.uuid4()
+    caller = User(id=settings.default_user_id, names={"locked": locked}, writable_orgs=())
+    monkeypatch.setattr(server_module, "current_user", lambda: caller)
+    with pytest.raises(ToolError, match="editor or admin"):
         dbutil.run(tools["move"].fn(documents=str(uuid.uuid4()), scopes="locked"))

@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from ..config import settings
 from ..exceptions import NotVisibleError
-from ..store import EntityClaim, EntityContent, LiveFact, Membership, Profile, acting_as
+from ..store import EntityClaim, EntityContent, LiveFact, Profile, acting_as
 from ..store.engine import session
 from .models import ProfileReport
 from .tier_builder import TierBuilder
@@ -159,10 +159,7 @@ async def refresh_profiles(
         subject_ids = list(
             await session().scalars(
                 select(EntityClaim.content_id)
-                .where(
-                    EntityClaim.owner_id == user_id,
-                    Membership.writable_scopes(EntityClaim.scopes, EntityClaim.owner_id, user_id),
-                )
+                .where(EntityClaim.owner_id == user_id)
                 .distinct()
                 .order_by(EntityClaim.content_id)
             )

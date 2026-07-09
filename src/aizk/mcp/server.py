@@ -11,13 +11,10 @@ from .. import ops, retrieval
 from ..config import settings
 from ..extract import ingest as extract_ingest
 from ..retrieval import ContextPack
-from ..scopes import resolve_scopes
-from ..store import Document, Membership, acting_as
-from ..store import User as UserRow
-from ..store.engine import session
+from ..store import Document, acting_as
 from .middleware import AnonymousRateLimit, IdentityMiddleware
 from .models import MoveResult, WriteResult
-from .user import current_user, require_identified
+from .user import auth_provider, current_user, require_identified
 
 
 @asynccontextmanager
@@ -53,7 +50,7 @@ class AizkMCP(FastMCP):
     """
 
     def __init__(self, name: str) -> None:
-        auth = UserRow.auth_provider()
+        auth = auth_provider()
         if auth:
             super().__init__(name, auth=auth, lifespan=startup_check)
         else:
@@ -83,14 +80,14 @@ async def recall(query: str, scopes: str | None = None, budget: int | None = Non
     to choose and no follow-up read. Ask a sharper question rather than a second call.
 
     query: the question to pull context for, natural language, as specific as you can make it.
-    scopes: comma-separated group names narrowing the read to that combination's composed graph
+    scopes: comma-separated org names narrowing the read to that combination's composed graph
         (`"finance,business"` reads only what is scoped to exactly that pair together), the whole
         visible union of private and every member and public scope otherwise. Naming any scopes
         excludes the caller's own private notes, which surface only when scopes is left null.
     budget: token ceiling the pack fits within, the configured default when null.
     """
     user = current_user()
-    lens = await resolve_scopes(scopes, user.id)
+    lens = user.scope_ids(scopes)
     return await retrieval.assemble_context_pack(
         query, user_id=user.id, token_budget=budget, scopes=lens
     )
@@ -106,13 +103,13 @@ async def remember(text: str, scopes: str | None = None, kind: str = "note") -> 
     the long-term graph through the extract-and-consolidate pipeline.
 
     text: the content to remember.
-    scopes: comma-separated group names to share it with (`"finance,business"` lands one claim
-        visible only to a caller standing in every one of those groups), private to the caller
+    scopes: comma-separated org names to share it with (`"finance,business"` lands one claim
+        visible only to a caller standing in every one of those orgs), private to the caller
         when null.
     kind: coarse type tag, such as note or code.
     """
     user = require_identified(current_user())
-    target = await resolve_scopes(scopes, user.id)
+    target = user.scope_ids(scopes)
     item_id = await extract_ingest.remember_session(
         text, kind=kind, owner_id=user.id, scopes=target
     )
@@ -124,34 +121,33 @@ async def reference(uri: str, scopes: str | None = None) -> WriteResult:
     """Record a reference to a paper, url, or file so it is recallable later.
 
     uri: locator of the paper, url, or file.
-    scopes: comma-separated group names to share it with, private to the caller when null.
+    scopes: comma-separated org names to share it with, private to the caller when null.
     """
     user = require_identified(current_user())
-    target = await resolve_scopes(scopes, user.id)
+    target = user.scope_ids(scopes)
     document_id = await extract_ingest.record_reference(uri, owner_id=user.id, scopes=target)
     return WriteResult(id=document_id)
 
 
 @server.tool
 async def move(documents: str, scopes: str) -> MoveResult:
-    """Move your own notes into a group scope, carrying each document's chunks and facts with it.
+    """Move your own notes into an org scope, carrying each document's chunks and facts with it.
 
     Re-scopes whole documents you own, the source rows and the claims mined from them travelling
-    together, so a note recalled after the move reads only under its new scope. Moving into a group
-    needs writer or admin standing in every named group, and only documents you own move, so
-    another member's contribution is never re-scoped from under them. Naming no scopes moves the
-    documents back to private to you.
+    together, so a note recalled after the move reads only under its new scope. Moving into an org
+    needs editor or admin standing in every named org, and only documents you own move, so another
+    member's contribution is never re-scoped from under them. Naming no scopes moves the documents
+    back to private to you.
 
     documents: comma-separated document ids to move, as recall reports them in its source blocks.
-    scopes: comma-separated group names to move them into, blank to make them private again.
+    scopes: comma-separated org names to move them into, blank to make them private again.
     """
     user = require_identified(current_user())
-    target = await resolve_scopes(scopes, user.id)
+    target = user.scope_ids(scopes)
+    if not set(target) <= set(user.writable_orgs):
+        raise ToolError("move needs editor or admin standing in every target org")
     document_ids = parse_ids(documents)
     async with acting_as(user.id):
-        writable = set((await session().scalars(Membership.writable_group_ids(user.id))).all())
-        if not set(target) <= writable:
-            raise ToolError("move needs writer or admin standing in every target group")
         moved = await Document.move_to_scope(user.id, document_ids, target)
     return MoveResult(moved=moved, scopes=scopes or "")
 

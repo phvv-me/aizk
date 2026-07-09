@@ -1,7 +1,7 @@
 import functools
 import uuid
-from collections.abc import AsyncGenerator
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import AsyncGenerator, Iterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, contextmanager
 from contextvars import ContextVar
 
 from sqlalchemy import NullPool
@@ -16,6 +16,44 @@ from ..config import settings
 from ..exceptions import NoTenantContext
 
 _current_session: ContextVar[AsyncSession] = ContextVar("aizk_session")
+
+# the caller's org standing for the enclosing request or operator operation, the orgs it belongs
+# to and the subset it may write, read by every `acting_as` the block opens. A request-constant,
+# so it rides task-local context set once at a boundary (the MCP identity middleware, an operator
+# op that grants itself standing) rather than threading through every internal signature down to a
+# retrieval lane's own `acting_as`. The default is empty standing, the fail-safe: a call outside
+# any boundary sees only what it owns plus the public scope, never more, so a forgotten
+# `caller_standing` narrows visibility rather than widening it.
+_caller_standing: ContextVar[tuple[tuple[uuid.UUID, ...], tuple[uuid.UUID, ...]]] = ContextVar(
+    "aizk_standing", default=((), ())
+)
+
+
+def current_standing() -> tuple[tuple[uuid.UUID, ...], tuple[uuid.UUID, ...]]:
+    """The `(orgs, writable_orgs)` the enclosing `caller_standing` block set, empty by default."""
+    return _caller_standing.get()
+
+
+@contextmanager
+def caller_standing(
+    orgs: tuple[uuid.UUID, ...], writable_orgs: tuple[uuid.UUID, ...]
+) -> Iterator[None]:
+    """Bind the caller's org standing for the block so every `acting_as` inside it reads the orgs.
+
+    The one place standing enters: the MCP identity middleware wraps a tool call in the verified
+    token's orgs, and an operator op that legitimately publishes (promote, an operator ingest into
+    a shared scope) grants itself exactly the target orgs the same way. `acting_as` reads it back
+    through `current_standing`, so a lane's own `acting_as(user_id, lens)` deep in a recall picks
+    up the request's standing with nothing threaded through the call tree to carry it.
+
+    orgs: every org the caller reads under for the block.
+    writable_orgs: the subset the caller may write into for the block.
+    """
+    token = _caller_standing.set((orgs, writable_orgs))
+    try:
+        yield
+    finally:
+        _caller_standing.reset(token)
 
 
 def build_engine() -> AsyncEngine:
@@ -97,7 +135,7 @@ async def open_session(
     reads `info` into the `app.uid`/`app.scopes` GUCs on the first `begin`.
 
     sessions: the role sessionmaker to open from, `app_sessions()` or `admin_sessions()`.
-    info: the `session.info` payload naming the acting user and optional lens.
+    info: the `session.info` payload naming the acting user, its org standing, and optional lens.
     """
     async with sessions(info=info) as opened, bound(opened):
         yield opened
@@ -105,19 +143,27 @@ async def open_session(
 
 @asynccontextmanager
 async def acting_as(
-    user_id: uuid.UUID, scopes: tuple[uuid.UUID, ...] = ()
+    user_id: uuid.UUID, lens: tuple[uuid.UUID, ...] = ()
 ) -> AsyncGenerator[AsyncSession]:
     """Open an `aizk_app` session whose transaction runs as a given user under row level security.
 
     The everyday building block: an app-role session, bound to the context, with its transaction
-    begun. Stamps the acting user and optional lens for `events.bind_user` to read into the GUCs.
+    begun. Stamps the acting user, an optional lens, and the caller's org standing for
+    `events.bind_user` to read into the GUCs. The standing is not a parameter: it rides the
+    task-local `caller_standing` the enclosing boundary set (empty for a background pass, the
+    verified token's orgs for a request), so the same `acting_as(user_id)` a background pass and a
+    recall lane both call carries exactly the standing its context established.
 
     user_id: identity whose visibility the session acts under.
-    scopes: group ids to narrow reads to (a claim's own set must be contained in this lens and
+    lens: org ids to narrow reads to (a claim's own set must be contained in this lens and
         non-empty), or an empty tuple for the full visible union with no lens at all.
     """
+    orgs, writable_orgs = current_standing()
     async with (
-        open_session(app_sessions(), {"user": user_id, "lens": scopes}) as opened,
+        open_session(
+            app_sessions(),
+            {"user": user_id, "lens": lens, "orgs": orgs, "writable_orgs": writable_orgs},
+        ) as opened,
         opened.begin(),
     ):
         yield opened

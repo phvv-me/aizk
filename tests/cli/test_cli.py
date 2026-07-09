@@ -88,7 +88,6 @@ class Seams:
         self.ingest = Recorder(ret=DOC_ID, is_async=True)
         self.enqueue = Recorder(is_async=True)
         self.run_scale = Recorder(ret=Rendered("SCALE-CURVE"), is_async=True)
-        self.create_user = Recorder(ret=SimpleNamespace(id=USER_ID), is_async=True)
         self.backup = Recorder(ret=SimpleNamespace(bytes=7, path="/tmp/x.dump"), is_async=True)
         self.restore = Recorder(
             ret=SimpleNamespace(path="/tmp/x.dump", database="aizk"), is_async=True
@@ -114,7 +113,6 @@ def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
     monkeypatch.setattr(cli, "assemble_context_pack", seams.recall)
     monkeypatch.setattr(cli, "ingest_text", seams.ingest)
     monkeypatch.setattr(cli, "enqueue_pending", seams.enqueue)
-    monkeypatch.setattr(cli.admin, "create_user", seams.create_user)
     monkeypatch.setattr(cli.backup_ops, "backup_database", seams.backup)
     monkeypatch.setattr(cli.backup_ops, "restore_database", seams.restore)
     monkeypatch.setattr(mcp_server.server, "run_http_async", seams.serve_http)
@@ -151,11 +149,6 @@ def check_scale(seams: Seams, out: str) -> None:
     assert "SCALE-CURVE" in out
 
 
-def check_create_user(seams: Seams, out: str) -> None:
-    assert seams.create_user.args[0] == "alice"
-    assert str(USER_ID) in out
-
-
 def check_backup(seams: Seams, out: str) -> None:
     assert seams.backup.args == ("/tmp/x.dump",)
     assert "backed up 7 bytes to /tmp/x.dump" in out
@@ -175,7 +168,6 @@ COMMANDS: list[tuple[str, list[str], Callable[[Seams, str], None]]] = [
         ["eval", "scale", "--sizes", "1,2", "--k", "4", "--recall-p95-ms", "50"],
         check_scale,
     ),
-    ("user create", ["user", "create", "alice"], check_create_user),
     ("db backup", ["db", "backup", "/tmp/x.dump"], check_backup),
     ("db restore", ["db", "restore", "/tmp/x.dump"], check_restore),
 ]
@@ -354,16 +346,6 @@ OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
     ),
     (["data", "promote", str(DOC_ID), "team"], "promote", 5, "promoted 5 rows into team"),
     (["data", "ingest", "notes/"], "ingest", 4, "ingested 4 documents"),
-    (
-        ["user", "link", "gh|42", "--name", "Al"],
-        "link_user",
-        SimpleNamespace(id=USER_ID),
-        str(USER_ID),
-    ),
-    (["group", "add-member", str(USER_ID), "team"], "add_member", None, "joined team"),
-    (["group", "remove-member", str(USER_ID), "team"], "remove_member", None, "removed from team"),
-    (["group", "publish", "team"], "publish_group", True, "public=True"),
-    (["group", "delete", "team"], "delete_group", None, "team deleted"),
     (["data", "ingest-image", "pic.png"], "ingest_image", DOC_ID, str(DOC_ID)),
     (["data", "export", "dump.jsonl"], "export_scope", Rendered("EXPORT-DUMP"), "EXPORT-DUMP"),
     (
@@ -426,40 +408,6 @@ def test_operator_command_routes_to_admin_and_prints(
 
     assert recorder.count == 1
     assert expected in capsys.readouterr().out
-
-
-def test_list_groups_renders_each_group_row(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The roster command prints one line per group with its visibility and member count."""
-    rows = [
-        {"name": "team", "public": True, "members": 3},
-        {"name": "vault", "public": False, "members": 1},
-    ]
-    monkeypatch.setattr(cli.admin, "list_groups", Recorder(ret=rows, is_async=True))
-
-    dispatch(["group", "list"])
-
-    out = capsys.readouterr().out
-    assert "team  public  3 members" in out
-    assert "vault  members-only  1 members" in out
-
-
-def test_list_users_renders_id_and_display_name(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The roster prints one line per user, a dash standing in for a user with no display name."""
-    users = [
-        SimpleNamespace(id=USER_ID, display_name="Ada"),
-        SimpleNamespace(id=OTHER_USER_ID, display_name=None),
-    ]
-    monkeypatch.setattr(cli.admin, "list_users", Recorder(ret=users, is_async=True))
-
-    dispatch(["user", "list"])
-
-    out = capsys.readouterr().out
-    assert f"{USER_ID}  Ada" in out
-    assert f"{OTHER_USER_ID}  -" in out
 
 
 def test_audit_renders_each_write_with_scopes(

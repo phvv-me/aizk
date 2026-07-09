@@ -19,9 +19,13 @@ from aizk.store import (
 
 
 async def fresh_owner() -> uuid.UUID:
-    """Wipe every app table and seed one user, the isolated start of a graph DB test."""
+    """Wipe every app table and mint one owner id, the isolated start of a graph DB test.
+
+    There is no user table to seed a row in, so an owner is just a fresh uuid the seeded rows
+    carry, exactly as a token-derived `owner_id` would.
+    """
     await dbutil.reset_db()
-    return await dbutil.seed_user(uuid.uuid4())
+    return uuid.uuid4()
 
 
 async def add_entity(

@@ -145,7 +145,7 @@ def test_record_access_bumps_count_for_surfaced_statements() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_user(uuid.uuid4())
+        owner = uuid.uuid4()
         await seed_live_claim(owner, "surfaced", days_old=1)
         async with acting_as(owner):
             await FactClaim.record_access(["surfaced"])
@@ -168,7 +168,7 @@ def test_archive_stale_closes_forgotten_claims_only() -> None:
 
     async def body() -> None:
         await dbutil.reset_db()
-        owner = await dbutil.seed_user(uuid.uuid4())
+        owner = uuid.uuid4()
         await seed_live_claim(owner, "ancient", days_old=400)
         await seed_live_claim(owner, "recent", days_old=1)
         async with acting_as(owner):

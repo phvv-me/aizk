@@ -35,6 +35,18 @@ class Recorder:
         return self.ret
 
 
+class SyncRecorder:
+    """A synchronous call double, for a plain function seam like `scopes_from_org_ids`."""
+
+    def __init__(self, ret: object = None) -> None:
+        self.ret = ret
+        self.args: tuple[object, ...] = ()
+
+    def __call__(self, *args: object) -> object:
+        self.args = args
+        return self.ret
+
+
 def test_system_is_the_configured_system_user() -> None:
     """An operator call acts as the system user by default, past row level security."""
     assert admin.system() == settings.system_user_id
@@ -123,20 +135,6 @@ def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
     assert result.documents == ["Note A"]  # the null title dropped, the real one kept
 
 
-def test_link_user_binds_a_subject_and_is_idempotent(migrated_db: None) -> None:
-    """Linking an OIDC subject mints a user, and a second link over the same subject reuses it."""
-
-    async def run() -> tuple[uuid.UUID, uuid.UUID]:
-        await dbutil.reset_db()
-        await dbutil.seed_user(settings.system_user_id)
-        first = await admin.link_user("gh|7", "Ada")
-        again = await admin.link_user("gh|7", "ignored")
-        return first.id, again.id
-
-    first_id, again_id = dbutil.run(run())
-    assert first_id == again_id  # idempotent over the same subject
-
-
 def test_benchmark_refuses_when_the_engine_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """The benchmark op is gated off by default, an explicit opt-in the datasets need."""
     monkeypatch.setattr(settings, "benchmarks_enabled", False)
@@ -151,27 +149,23 @@ def test_benchmark_rejects_an_unknown_dataset_name(monkeypatch: pytest.MonkeyPat
         dbutil.run(admin.benchmark("nope", "x.jsonl"))
 
 
-def test_add_member_runs_against_the_live_schema(migrated_db: None) -> None:
-    """`add_member` mints a real membership on a Logto-mirrored group under one system session.
+def test_audit_lists_the_recent_visible_writes(migrated_db: None) -> None:
+    """`audit` reads the operator's most recent visible document writes under its own RLS.
 
-    Groups come only from the identity provider, so the group is seeded as its mirror would be,
-    then the actual `add_member` commit runs so the row-level-security grants land for real, and
-    the roster read back proves the member joined.
+    Audit is inline now rather than a `UserRow.recent_writes` delegate, so it is driven against the
+    live schema: two system-owned private documents are seeded and both read back through the
+    system user's own visibility.
     """
 
-    async def run() -> list[dict]:
+    async def run() -> tuple[set[uuid.UUID], set[uuid.UUID]]:
         await dbutil.reset_db()
-        await dbutil.seed_user(settings.system_user_id)
-        member = await dbutil.seed_user(uuid.uuid4())
-        await dbutil.seed_group(uuid.uuid4(), name="team", public=True)
-        await admin.add_member(str(member), "team", role="editor")
-        return await admin.list_groups()
+        first = await dbutil.seed_document(SYSTEM, [])
+        second = await dbutil.seed_document(SYSTEM, [])
+        docs = await admin.audit(limit=10)
+        return {doc.id for doc in docs}, {first, second}
 
-    roster = dbutil.run(run())
-
-    team = next(row for row in roster if row["name"] == "team")
-    assert team["public"] is True and team["members"] == 1
-    assert team["members"] >= 1  # the creator-admin plus the added editor
+    seen, expected = dbutil.run(run())
+    assert seen == expected
 
 
 @dataclass
@@ -217,15 +211,6 @@ SEAMS = [
         lambda: admin.export_scope("dump.jsonl"),
         (Path("dump.jsonl"),),
         {"user_id": SYSTEM},
-    ),
-    Seam(
-        "audit",
-        admin.UserRow,
-        "recent_writes",
-        [],
-        lambda: admin.audit(limit=7),
-        (SYSTEM,),
-        {"limit": 7},
     ),
     Seam("tasks_status", admin, "tasks_overview", SENTINEL, admin.tasks_status, (), {}),
     Seam("setup", admin.ops, "setup", SENTINEL, admin.setup, (), {}),
@@ -280,31 +265,35 @@ def test_profile_report_reads_the_span_collector(monkeypatch: pytest.MonkeyPatch
 
 
 def test_ingest_resolves_scopes_then_owns_the_rows(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ingest resolves the group names to a scope set, then owns the walk under the system user."""
-    resolved = Recorder(ret=("SCOPE-SET",))
+    """Ingest maps the org ids to a scope set, then owns the walk under the system user.
+
+    The operator names its target orgs by Logto id, so `scopes_from_org_ids` (not the caller-side
+    name resolver) turns them into the scope set the walk is stamped with.
+    """
+    resolved = SyncRecorder(ret=("SCOPE-SET",))
     ingest = Recorder(ret=4)
-    monkeypatch.setattr(admin, "resolve_scopes", resolved)
+    monkeypatch.setattr(admin, "scopes_from_org_ids", resolved)
     monkeypatch.setattr(admin.extract_ingest, "ingest_path", ingest)
 
-    out = dbutil.run(admin.ingest("notes/dir", scopes="team"))
+    out = dbutil.run(admin.ingest("notes/dir", scopes="org_team"))
 
     assert out == 4
-    assert resolved.args == ("team", SYSTEM)
+    assert resolved.args == ("org_team",)
     assert ingest.args == (Path("notes/dir"),)
     assert ingest.kwargs == {"owner_id": SYSTEM, "scopes": ("SCOPE-SET",)}
 
 
 def test_ingest_image_resolves_scopes_then_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ingest-image resolves scopes and hands the path, caption, and owner to the image lane."""
-    resolved = Recorder(ret=("SCOPE-SET",))
+    """Ingest-image maps the org ids and hands the path, caption, and owner to the image lane."""
+    resolved = SyncRecorder(ret=("SCOPE-SET",))
     ingest = Recorder(ret=DOC_A)
-    monkeypatch.setattr(admin, "resolve_scopes", resolved)
+    monkeypatch.setattr(admin, "scopes_from_org_ids", resolved)
     monkeypatch.setattr(admin.extract_ingest, "ingest_image", ingest)
 
-    out = dbutil.run(admin.ingest_image("pic.png", caption="a cat", scopes="team"))
+    out = dbutil.run(admin.ingest_image("pic.png", caption="a cat", scopes="org_team"))
 
     assert out == DOC_A
-    assert resolved.args == ("team", SYSTEM)
+    assert resolved.args == ("org_team",)
     assert ingest.args == (Path("pic.png"),)
     assert ingest.kwargs == {"caption": "a cat", "owner_id": SYSTEM, "scopes": ("SCOPE-SET",)}
 
@@ -384,73 +373,6 @@ def test_benchmark_loads_the_gold_then_sweeps_when_enabled(
     assert sweep.kwargs == {"k": 6, "user_id": SYSTEM, "gold": "GOLD"}
 
 
-def test_create_user_then_list_users_against_the_live_schema(migrated_db: None) -> None:
-    """`create_user` mints real rows the roster reads back, both under one system session."""
-
-    async def run() -> tuple[uuid.UUID, uuid.UUID, list[tuple[uuid.UUID, str | None]]]:
-        await dbutil.reset_db()
-        await dbutil.seed_user(SYSTEM)
-        ada = await admin.create_user("Ada")
-        bob = await admin.create_user("Bob")
-        roster = await admin.list_users()
-        return ada.id, bob.id, [(u.id, u.display_name) for u in roster]
-
-    ada_id, bob_id, roster = dbutil.run(run())
-
-    assert {"Ada", "Bob"} <= {name for _, name in roster}
-    assert {ada_id, bob_id} <= {uid for uid, _ in roster}
-
-
-def test_remove_member_revokes_the_membership(migrated_db: None) -> None:
-    """A removed member drops off the group's roster, the RLS grant revoked for real."""
-
-    async def run() -> tuple[int, int]:
-        await dbutil.reset_db()
-        await dbutil.seed_user(SYSTEM)
-        member = await dbutil.seed_user(uuid.uuid4())
-        await dbutil.seed_group(uuid.uuid4(), name="team")
-        await admin.add_member(str(member), "team", role="editor")
-        before = next(r for r in await admin.list_groups() if r["name"] == "team")["members"]
-        await admin.remove_member(str(member), "team")
-        after = next(r for r in await admin.list_groups() if r["name"] == "team")["members"]
-        return before, after
-
-    before, after = dbutil.run(run())
-
-    assert before == 1 and after == 0
-
-
-def test_delete_group_drops_it_from_the_roster(migrated_db: None) -> None:
-    """Deleting a group removes it from the roster while its peers stay put."""
-
-    async def run() -> list[str]:
-        await dbutil.reset_db()
-        await dbutil.seed_user(SYSTEM)
-        await dbutil.seed_group(uuid.uuid4(), name="team")
-        await dbutil.seed_group(uuid.uuid4(), name="vault")
-        await admin.delete_group("team")
-        return [row["name"] for row in await admin.list_groups()]
-
-    names = dbutil.run(run())
-
-    assert "team" not in names and "vault" in names
-
-
-def test_publish_group_flips_visibility(migrated_db: None) -> None:
-    """`publish_group` flips a group's public flag each call, returning its new state."""
-
-    async def run() -> tuple[bool, bool]:
-        await dbutil.reset_db()
-        await dbutil.seed_user(SYSTEM)
-        await dbutil.seed_group(uuid.uuid4(), name="team", public=False)
-        first = await admin.publish_group("team")  # members-only -> public
-        second = await admin.publish_group("team")  # public -> members-only
-        return first, second
-
-    first, second = dbutil.run(run())
-    assert first is True and second is False
-
-
 async def _catalog_row(sql: str, name: str) -> tuple[str, str] | None:
     """The (description, domain) of one ontology catalog row read past row level security."""
     async with dbutil.admin_engine().begin() as connection:
@@ -472,7 +394,6 @@ def test_define_entity_and_relation_kind_write_the_catalog(
         tuple[str, str] | None, tuple[str, str] | None, tuple[str, str] | None
     ]:
         await dbutil.reset_db()
-        await dbutil.seed_user(SYSTEM)
         try:
             await admin.define_entity_kind("TestWidget", "a widget gloss", "coding")
             await admin.define_relation_kind("test_powers", "x powers y", "research")
@@ -509,7 +430,6 @@ def test_list_ontology_reports_kinds_with_live_use_counts(migrated_db: None) -> 
 
     async def run() -> list[admin.OntologyKindRow]:
         await dbutil.reset_db()
-        await dbutil.seed_user(SYSTEM)
         async with acting_as(SYSTEM) as session:
             subject = await seedgraph.add_entity(session, SYSTEM, "Widget", type="concept")
             await seedgraph.add_fact(session, SYSTEM, subject, "widget relates to gadget")

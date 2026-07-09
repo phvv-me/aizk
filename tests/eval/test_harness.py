@@ -29,7 +29,6 @@ from aizk.eval import (
 )
 from aizk.eval.scale import CorpusScale, Generated, grow_corpus, purge_user
 from aizk.retrieval import RecallResult
-from aizk.store import User, as_system
 
 
 class RanxCase(NamedTuple):
@@ -301,8 +300,7 @@ def test_sample_facts_returns_latest_statements_in_a_stable_id_order(migrated_db
 
     async def body() -> None:
         await dbutil.reset_db()
-        async with as_system():
-            user_id = (await User.create("eval-sample")).id
+        user_id = uuid.uuid7()  # no user table, a throwaway owner is just a fresh id
         try:
             await grow_corpus(
                 user_id, Generated(), CorpusScale.for_size(20), np.random.default_rng(0)

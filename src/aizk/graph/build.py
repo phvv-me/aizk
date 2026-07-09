@@ -30,7 +30,6 @@ from ..store import (
     FactClaim,
     FactContent,
     LiveFact,
-    Membership,
     acting_as,
 )
 from ..store.engine import bypass_rls, session
@@ -415,7 +414,9 @@ async def pending_chunks(
     selection = (
         select(Chunk)
         .where(Chunk.processed_at.is_(None))
-        .where(Membership.writable_scopes(Chunk.scopes, Chunk.owner_id, user_id))
+        # a per-owner pass builds each owner's own chunks; RLS already gates visibility, and
+        # ownership is the writable set for a session that carries no token org standing.
+        .where(Chunk.owner_id == user_id)
         .order_by(Chunk.id)
         .limit(limit)
     )

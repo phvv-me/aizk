@@ -14,12 +14,11 @@ from aizk.store import EntityClaim, EntityContent, FactClaim, FactContent, LiveF
 
 @pytest.fixture
 def owner(migrated_db: None) -> Iterator[uuid.UUID]:
-    """A freshly reset schema seeding one user, the graph the reflective pass reads."""
+    """A freshly reset schema minting one owner id, the graph the reflective pass reads."""
     pid = uuid.uuid4()
 
     async def setup() -> None:
         await dbutil.reset_db()
-        await dbutil.seed_user(pid)
 
     dbutil.run(setup())
     yield pid

@@ -1,12 +1,12 @@
-import uuid
-
 import dbutil
 import pytest
 from fastmcp.server.auth.providers.introspection import IntrospectionTokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 
+import aizk.mcp.user as user_mod
 from aizk.config import settings
-from aizk.store import User
+from aizk.mcp.user import cached_verifier, from_token, standing_from_claim, verifier
+from aizk.store.identity import org_uuid, user_uuid
 
 
 @pytest.mark.parametrize(
@@ -18,7 +18,7 @@ from aizk.store import User
     ],
     ids=["auth-off", "introspection", "jwks"],
 )
-def test_cached_verifier_selects_the_verifier_class_from_the_zitadel_settings(
+def test_cached_verifier_selects_the_verifier_class_from_the_oidc_settings(
     issuer: str, introspect: str, expected: type
 ) -> None:
     """cached_verifier builds the introspection or JWKS verifier, or none when the issuer is empty.
@@ -26,7 +26,7 @@ def test_cached_verifier_selects_the_verifier_class_from_the_zitadel_settings(
     The issuer values differ per case so `functools.cache` never returns another case's verifier,
     and no network is touched: the branch is asserted by the verifier class the settings select.
     """
-    verifier = User.cached_verifier(
+    built = cached_verifier(
         issuer=issuer,
         jwks_uri="https://iss/jwks",
         introspect_url=introspect,
@@ -36,7 +36,7 @@ def test_cached_verifier_selects_the_verifier_class_from_the_zitadel_settings(
         required_scopes="",
         audience="",
     )
-    assert isinstance(verifier, expected)
+    assert isinstance(built, expected)
 
 
 @pytest.mark.parametrize(
@@ -53,7 +53,7 @@ def test_verifier_forwards_the_live_settings_to_cached_verifier(
     monkeypatch.setattr(settings, "oidc_introspect_url", "")
     monkeypatch.setattr(settings, "oidc_client_id", "cid")
     monkeypatch.setattr(settings, "oidc_client_secret", "secret")
-    assert isinstance(User.verifier(), expected)
+    assert isinstance(verifier(), expected)
 
 
 class FakeVerifier:
@@ -69,99 +69,79 @@ class FakeVerifier:
         return self.access_token
 
 
+def token_with(claims: dict[str, object]) -> object:
+    """A verified access-token stand-in carrying a fixed `claims` mapping."""
+    return type("Tok", (), {"claims": claims})()
+
+
 @pytest.mark.parametrize(
-    "verifier",
+    "active",
     [
         None,  # no verifier configured, an unauthenticated token resolves no one
         FakeVerifier(None),  # an invalid, unverifiable token
-        FakeVerifier(type("Tok", (), {"claims": {}})()),  # verified but carries no `sub` claim
-        FakeVerifier(type("Tok", (), {"claims": {"sub": 123}})()),  # a non-string subject
+        FakeVerifier(token_with({})),  # verified but carries no `sub` claim
+        FakeVerifier(token_with({"sub": 123})),  # a non-string subject
     ],
     ids=["no-verifier", "invalid", "no-subject", "non-string-subject"],
 )
 def test_from_token_resolves_no_one_when_the_token_never_yields_a_string_subject(
-    monkeypatch: pytest.MonkeyPatch, verifier: object
+    monkeypatch: pytest.MonkeyPatch, active: object
 ) -> None:
-    """from_token returns null for an unconfigured, invalid, or subject-less token.
-
-    `for_subject` is stubbed to fail loudly so a wrongly-taken provisioning path would surface
-    rather than silently minting a user on a token that should authenticate no one.
-    """
-
-    async def forbidden(subject: str) -> uuid.UUID:
-        raise AssertionError("for_subject must not run on a subject-less token")
-
-    monkeypatch.setattr(User, "verifier", classmethod(lambda cls: verifier))
-    monkeypatch.setattr(User, "for_subject", classmethod(lambda cls, subject: forbidden(subject)))
-    assert dbutil.run(User.from_token("tok")) is None
+    """from_token returns null for an unconfigured, invalid, or subject-less token."""
+    monkeypatch.setattr(user_mod, "verifier", lambda: active)
+    assert dbutil.run(from_token("tok")) is None
 
 
-def test_from_token_maps_a_verified_subject_to_its_provisioned_user(
+def test_from_token_derives_the_user_and_its_org_standing_from_the_claim(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A verified token maps its `sub` claim to the user `for_subject` resolves for it."""
-    resolved = uuid.uuid4()
-    seen: dict[str, str] = {}
-
-    async def stub_for_subject(subject: str) -> uuid.UUID:
-        seen["subject"] = subject
-        return resolved
-
-    token = type("Tok", (), {"claims": {"sub": "zitadel|42"}})()
-    monkeypatch.setattr(User, "verifier", classmethod(lambda cls: FakeVerifier(token)))
-    monkeypatch.setattr(
-        User, "for_subject", classmethod(lambda cls, subject: stub_for_subject(subject))
-    )
-    assert dbutil.run(User.from_token("tok")) == resolved
-    assert seen == {"subject": "zitadel|42"}
-
-
-def test_for_subject_provisions_on_first_sight_then_reuses_the_same_user(
-    migrated_db: None,
-) -> None:
-    """for_subject mints a user for an unseen subject and returns the same one thereafter."""
-
-    async def probe() -> None:
-        await dbutil.reset_db()
-        first = await User.for_subject("sub-A")
-        assert await User.for_subject("sub-A") == first  # stable across calls
-        assert await User.for_subject("sub-B") != first  # a new subject, a new user
-
-    dbutil.run(probe())
-
-
-def test_from_token_syncs_group_memberships_from_the_configured_claim(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A token carrying the configured groups claim reconciles membership after resolving the user.
-
-    The claim, `as_system`, and `User.sync_groups` are all stubbed, so the sync branch runs and
-    forwards the verified membership list without a database.
-    """
-    resolved = uuid.uuid4()
-    synced: dict[str, object] = {}
-    claim = [{"id": "org_a", "name": "Alpha", "role": "editor"}]
-
-    async def stub_for_subject(subject: str) -> uuid.UUID:
-        return resolved
-
-    async def stub_sync(user_id: uuid.UUID, memberships: object) -> None:
-        synced.update(user_id=user_id, memberships=memberships)
-
-    class _Session:
-        async def __aenter__(self) -> object:
-            return object()
-
-        async def __aexit__(self, *exc: object) -> bool:
-            return False
-
-    token = type("Tok", (), {"claims": {"sub": "u|9", "aizk_groups": claim}})()
+    """A verified token derives `uuid5(sub)` and reads its org standing off the claim."""
+    claim = [
+        {"id": "org_a", "name": "Alpha", "role": "editor"},  # writable
+        {"id": "org_b", "name": "Beta", "role": "viewer"},  # read-only
+    ]
+    token = token_with({"sub": "logto|42", "aizk_groups": claim})
     monkeypatch.setattr(settings, "oidc_groups_claim", "aizk_groups")
-    monkeypatch.setattr(User, "verifier", classmethod(lambda cls: FakeVerifier(token)))
-    monkeypatch.setattr(
-        User, "for_subject", classmethod(lambda cls, subject: stub_for_subject(subject))
-    )
-    monkeypatch.setattr("aizk.store.models.tables.user.as_system", lambda: _Session())
-    monkeypatch.setattr(User, "sync_groups", classmethod(lambda cls, u, m: stub_sync(u, m)))
-    assert dbutil.run(User.from_token("tok")) == resolved
-    assert synced == {"user_id": resolved, "memberships": claim}
+    monkeypatch.setattr(user_mod, "verifier", lambda: FakeVerifier(token))
+
+    user = dbutil.run(from_token("tok"))
+
+    assert user is not None
+    assert user.id == user_uuid("logto|42")
+    assert set(user.orgs) == {org_uuid("org_a"), org_uuid("org_b")}
+    assert user.writable_orgs == (org_uuid("org_a"),)  # only the editor role writes
+    assert user.names == {"Alpha": org_uuid("org_a"), "Beta": org_uuid("org_b")}
+
+
+@pytest.mark.parametrize(
+    "role, writable",
+    [("editor", True), ("admin", True), ("viewer", False), ("member", False)],
+)
+def test_standing_from_claim_writes_only_editor_and_admin_roles(role: str, writable: bool) -> None:
+    """Editor and admin roles land in the writable subset, any other role only reads."""
+    orgs, writers, names = standing_from_claim([{"id": "org_x", "name": "X", "role": role}])
+
+    assert orgs == (org_uuid("org_x"),)
+    assert names == {"X": org_uuid("org_x")}
+    assert (writers == (org_uuid("org_x"),)) is writable
+
+
+def test_standing_from_claim_skips_malformed_entries_without_crashing() -> None:
+    """A malformed entry is logged and skipped while a valid one still resolves, never a crash."""
+    claim = [
+        {"id": "org_ok", "name": "Ok", "role": "editor"},  # valid
+        {"name": "no-id"},  # missing id, skipped
+        {"id": 123, "role": "viewer"},  # non-string id, skipped
+        "not-a-mapping",  # not a mapping at all, skipped
+    ]
+    orgs, writers, names = standing_from_claim(claim)
+
+    assert orgs == (org_uuid("org_ok"),)
+    assert writers == (org_uuid("org_ok"),)
+    assert names == {"Ok": org_uuid("org_ok")}
+
+
+@pytest.mark.parametrize("claim", [None, "a string", 42], ids=["none", "string", "int"])
+def test_standing_from_claim_reads_a_non_list_claim_as_empty_standing(claim: object) -> None:
+    """A claim that is not a list of org dicts yields empty standing rather than raising."""
+    assert standing_from_claim(claim) == ((), (), {})

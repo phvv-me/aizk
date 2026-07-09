@@ -18,92 +18,49 @@ from .base import TableBase
 
 
 class ScopeLattice:
-    """The owner/scope visibility lattice every `Scoped` table's row level security compiles from.
+    """The owner/org visibility lattice every `Scoped` table's row level security compiles from.
 
-    A scoped table builds an instance from its own mapped table (`ScopeLattice(cls.__table__)`),
-    so every predicate compiles against the real `owner_id`/`scopes` columns rather than a bare
-    cross-file stand-in a caller had to import back. That self-table qualification is harmless
-    since the `rls` library's own catalog comparator (`rls.normalize._unqualify`) already strips a
-    policy's own-table column qualification before ever comparing compiled text to the live
-    catalog, so a drift check never sees it.
+    Identity is Logto's: there is no local user, org, or membership table. Every scoped row's
+    `owner_id` is `uuid5(oidc_subject)` and its `scopes` are `uuid5(oidc_org_id)` values, and the
+    caller's own identity and org standing arrive per transaction in GUCs `store.events.bind_user`
+    sets straight from the verified token, never a table join. `app.orgs` carries every org the
+    caller belongs to (plus the reserved public org), `app.writable_orgs` the subset they may write
+    into, so the whole lattice is array containment against a session variable.
+
+    A scoped table builds an instance from its own mapped table (`ScopeLattice(cls.__table__)`), so
+    every predicate compiles against the real `owner_id`/`scopes` columns. That self-table
+    qualification is harmless since the `rls` catalog comparator strips a policy's own-table column
+    qualification before comparing compiled text to the live catalog.
 
     owner_id: the table's own owner column, read from `table.c` at construction.
     scopes: the table's own scope-set column, read from `table.c` at construction.
     """
 
-    # the acting user and the optional scope-set reading lens, GUCs
-    # `store.events.bind_user` binds per transaction; read once per lattice class rather than
-    # per predicate call.
+    # bound per transaction by `store.events.bind_user`, read once per lattice class: the acting
+    # user's uuid, the orgs it belongs to (public org folded in), the orgs it may write, and the
+    # optional narrowing lens.
     _uid = rls.current_setting("uid", sa.Uuid(), prefix="app")
+    _orgs = rls.current_setting("orgs", ARRAY(sa.Uuid()), prefix="app")
+    _writable_orgs = rls.current_setting("writable_orgs", ARRAY(sa.Uuid()), prefix="app")
     _lens = rls.current_setting("scopes", ARRAY(sa.Uuid()), prefix="app")
-
-    # Core table stand-ins for the visibility lattice, columns named but untyped, so a predicate
-    # can join against membership, groups, and user without importing their mapped ORM
-    # classes: a mixin's predicates are built before its own concrete subclasses exist, and
-    # importing the model modules here would cycle back through `mixins`, which every model itself
-    # imports.
-    _membership = sa.table(
-        "membership", sa.column("user_id"), sa.column("group_id"), sa.column("role")
-    )
-    _groups = sa.table("group_", sa.column("id"), sa.column("public"))
 
     def __init__(self, table: Table) -> None:
         self.owner_id = table.c.owner_id
         self.scopes = table.c.scopes
 
-    @classmethod
-    def empty_scopes(cls) -> ColumnElement:
-        """The empty-array literal every "private" comparison and coalesce fallback shares.
-
-        A fresh cast each call, not a shared instance, since SQLAlchemy expressions are cheap,
-        immutable value objects, and every call site compiles to the identical text either way,
-        the only thing a drift check or a query plan ever compares.
-        """
-        return sa.cast(sa.literal("{}"), ARRAY(sa.Uuid()))
-
-    @classmethod
-    def _group_array(
-        cls, condition: ColumnElement[bool], role_filter: ColumnElement[bool] | None = None
-    ) -> ColumnElement:
-        """A `coalesce(array_agg(group_id), '{}')` scalar subquery of the acting user's own
-        groups.
-
-        Every containment check below (`scopes <@ ...`) needs an array on both sides, but
-        `membership` is a row-per-group table, so its matching group ids are aggregated into one
-        array here rather than at each call site. `coalesce` turns "no membership rows at all"
-        into the empty array, never a SQL `NULL` a `<@` comparison would otherwise silently fail
-        against.
-
-        condition: the membership predicate selecting this user's own rows, `user_id =
-            uid` further narrowed by the caller (e.g. only admin-role rows).
-        role_filter: an additional predicate on `role`, folded into `condition` when given.
-        """
-        where = sa.and_(condition, role_filter) if role_filter is not None else condition
-        return (
-            sa.select(
-                sa.func.coalesce(sa.func.array_agg(cls._membership.c.group_id), cls.empty_scopes())
-            )
-            .where(where)
-            .scalar_subquery()
-        )
-
     def read(self) -> ColumnElement[bool]:
-        """A row is readable when its scope set clears the reading lens and the reader has
-        standing.
+        """A row is readable when its scope set clears the reading lens and the reader has standing
+        to see it.
 
-        The lens narrows rather than widens. With `app.scopes` unset every row standing already
-        reaches is visible, and with it set only a row whose own scope set is fully contained by
-        the lens and is not itself the empty private set passes, the composed-graph projection of
-        one subset out of the caller's whole visible union. A private row (`cardinality(scopes) =
-        0`) is excluded once a lens is set. It stays reachable only with no lens at all, since a
-        lens is "a different space" for that combination of groups, not a wider window onto the
-        owner's own private layer. Standing itself is ownership, a scope set the reader stands in
-        every member of (shared membership), or a scope set that is exactly one public group's
-        singleton (the narrower, single-group shape a public share is kept to, never an implicit
-        multi-group intersection).
+        The lens narrows rather than widens. With `app.scopes` unset every row the caller's
+        standing reaches is visible; with it set, only a row whose own scope set is fully contained
+        by the lens and is not the empty private set passes, the composed-graph projection of one
+        subset out of the whole visible union. Standing is ownership, or a shared scope set the
+        caller belongs to every org of (`scopes <@ app.orgs`). The public org lives in every
+        session's `app.orgs`, so a row scoped to it alone is world-readable with no special branch.
+        The `cardinality > 0` guard is load-bearing: `'{}' <@ anything` is trivially true, so
+        without it a private (empty-scope) row would be readable by anyone.
         """
-        member_groups = self._group_array(self._membership.c.user_id == self._uid)
-        public_groups = sa.select(self._groups.c.id).where(self._groups.c.public)
         return sa.and_(
             sa.or_(
                 self._lens.is_(None),
@@ -115,31 +72,26 @@ class ScopeLattice:
                 self.owner_id == self._uid,
                 sa.and_(
                     sa.func.cardinality(self.scopes) > 0,
-                    self.scopes.contained_by(member_groups),
+                    self.scopes.contained_by(self._orgs),
                 ),
-                sa.and_(sa.func.cardinality(self.scopes) == 1, self.scopes[1].in_(public_groups)),
             ),
         )
 
     def write(self) -> ColumnElement[bool]:
         """A row is writable when it is the actor's own private row or a scope set they write into.
 
-        Visibility never implies write access. A reader member and a public-group visitor read the
-        shared graph but cannot touch it, and ownership alone cannot publish into a scope, the moat
-        the promote path relies on. Writing a multi-group row needs writer-or-admin standing in
-        *every* group the set names, the same containment shape `read`'s member branch uses, so a
-        bridge claim spanning two groups can never be written by someone who only writes one of
-        them.
+        Visibility never implies write access. A reader who belongs to an org, or a public-org
+        visitor, reads the shared graph but cannot touch it, and ownership alone cannot publish
+        into a scope. A multi-org row needs editor-or-admin standing in *every* org it names
+        (`scopes <@ app.writable_orgs`), so a bridge claim across two orgs is unwritable by someone
+        who writes only one. The same empty-scope `cardinality` guard as `read` keeps a private row
+        owner-only.
         """
-        writer_groups = self._group_array(
-            self._membership.c.user_id == self._uid,
-            self._membership.c.role.in_(("editor", "admin")),
-        )
         return sa.or_(
             sa.and_(sa.func.cardinality(self.scopes) == 0, self.owner_id == self._uid),
             sa.and_(
                 sa.func.cardinality(self.scopes) > 0,
-                self.scopes.contained_by(writer_groups),
+                self.scopes.contained_by(self._writable_orgs),
             ),
         )
 
@@ -181,7 +133,8 @@ class Scoped:
         cascade.
     """
 
-    owner_id: uuid.UUID = Field(foreign_key="user_.id", nullable=False, index=True)
+    # `uuid5(oidc_subject)`, no foreign key: identity lives in Logto, not a local user table.
+    owner_id: uuid.UUID = Field(nullable=False, index=True)
     # `sa_type=`/`sa_column_kwargs=` rather than a literal `sa_column=Column(...)`: a mixin's own
     # class body runs once, so a fully constructed `Column` object assigned there would be the
     # exact same instance every subclass inherits, and SQLAlchemy refuses to attach one physical

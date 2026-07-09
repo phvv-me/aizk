@@ -32,16 +32,16 @@ app = App(
 )
 
 # operator commands are grouped by noun into sub-apps, so `aizk <noun> <verb>` reads as the shape
-# it is: `aizk user create`, `aizk group add-member`, `aizk graph rebuild`. The hook and serve
-# entrypoints (worker, serve-mcp, recall-context, capture-session, profile-report) stay top-level.
-user = App(name="user", help="Users: the actors, human or agent, that own and read memory.")
-group = App(name="group", help="Groups: the sharing scopes memberships and promotions target.")
+# it is: `aizk graph rebuild`, `aizk data ingest`. The hook and serve entrypoints (worker,
+# serve-mcp, recall-context, capture-session, profile-report) stay top-level. There is no `user`
+# or `group` noun: identity and org membership live in Logto, so onboarding a user or publishing an
+# org happens through Logto's own admin, and aizk derives every id from the verified token.
 graph = App(name="graph", help="Graph maintenance: rebuild, decay, reembed, raptor, forget.")
 ontology = App(name="ontology", help="Ontology: the entity types and relation predicates.")
 data = App(name="data", help="Data: ingest, export, audit, and promote documents.")
 db = App(name="db", help="Database and engine ops: setup, health, migrations, backup, restore.")
 eval = App(name="eval", help="Evaluation: bench, sweep, benchmark, and scale the retrieval.")
-for _sub in (user, group, graph, ontology, data, db, eval):
+for _sub in (graph, ontology, data, db, eval):
     app.command(_sub)
 
 
@@ -246,89 +246,6 @@ async def scale(
         recall_p95_ms=recall_p95_ms,
     )
     print(report.render())
-
-
-@user.command(name="create")
-async def create_user(name: str) -> None:
-    """Create a user and print its id, the multi-user onboarding op.
-
-    name: human-readable display name for the new actor.
-    """
-    user = await admin.create_user(name)
-    print(user.id)
-
-
-@user.command(name="link")
-async def link_user(oidc_subject: str, name: str = "") -> None:
-    """Bind an OIDC subject to a user and print its id, the identity-provider bridge.
-
-    Provisions the user the human or machine presenting that subject's token acts as, so a named
-    user exists before its first login. A regular user, never an admin, since engine admin is the
-    Postgres owner the CLI runs as, not an app user. Idempotent over the same subject.
-
-    oidc_subject: the subject claim the provider mints this identity's tokens against.
-    name: display name for a freshly minted user.
-    """
-    user = await admin.link_user(oidc_subject, name)
-    print(user.id)
-
-
-@user.command(name="list")
-async def list_users() -> None:
-    """List every user known to the engine, id and display name."""
-    for user in await admin.list_users():
-        print(f"{user.id}  {user.display_name or '-'}")
-
-
-@group.command(name="add-member")
-async def add_member(user: str, group: str, role: str = "editor") -> None:
-    """Add a user to a group so that group's scope becomes visible to it under RLS.
-
-    user: id of the user joining the group.
-    group: name of the group the user joins.
-    role: standing within the group, viewer for read-only, editor or admin to also write.
-    """
-    await admin.add_member(user, group, role=role)
-    print(f"{user} joined {group} as {role}")
-
-
-@group.command(name="remove-member")
-async def remove_member(user: str, group: str) -> None:
-    """Remove a user from a group, its scope no longer visible to them.
-
-    user: id of the user leaving the group.
-    group: name of the group the user leaves.
-    """
-    await admin.remove_member(user, group)
-    print(f"{user} removed from {group}")
-
-
-@group.command(name="publish")
-async def publish_group(group: str) -> None:
-    """Flip a group's public read flag and print its new state.
-
-    group: name of the group to flip public or members-only.
-    """
-    public = await admin.publish_group(group)
-    print(f"{group} public={public}")
-
-
-@group.command(name="delete")
-async def delete_group(group: str) -> None:
-    """Delete a group, memberships cascading and its rows falling back to their owners.
-
-    group: name of the group to delete.
-    """
-    await admin.delete_group(group)
-    print(f"{group} deleted")
-
-
-@group.command(name="list")
-async def list_groups() -> None:
-    """List every group with its visibility and member count, the sharing roster."""
-    for row in await admin.list_groups():
-        flags = "public" if row["public"] else "members-only"
-        print(f"{row['name']}  {flags}  {row['members']} members")
 
 
 @data.command(name="ingest")

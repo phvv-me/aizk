@@ -4,6 +4,7 @@ from fastmcp.server.middleware.rate_limiting import RateLimitError, TokenBucketR
 from fastmcp.tools.tool import ToolResult
 
 from ..config import settings
+from ..store.engine import caller_standing
 from .user import USER_STATE_KEY, User, resolve_user
 
 
@@ -25,7 +26,10 @@ class IdentityMiddleware(Middleware):
         user = await resolve_user()
         assert context.fastmcp_context is not None  # every tool call carries a request context
         context.fastmcp_context.set_state(USER_STATE_KEY, user)
-        return await call_next(context)
+        # bind the token's org standing for the whole call so every `acting_as` a verb opens, down
+        # to a recall lane's own, reads under exactly the orgs the token vouches for
+        with caller_standing(user.orgs, user.writable_orgs):
+            return await call_next(context)
 
 
 class AnonymousRateLimit(Middleware):

@@ -7,15 +7,19 @@ from sqlalchemy import select, update
 from ..background.queue import enqueue_pending
 from ..config import settings
 from ..extract.ingest import ingest_text
-from ..store import Membership, SessionItem, acting_as
+from ..store import SessionItem, acting_as
 from ..store.engine import session
+from ..store.mixins.scoped import ScopeLattice
 
 
 async def writable_working_items(user_id: uuid.UUID) -> list[SessionItem]:
-    """This user's still-working items, oldest first, in scope sets it may currently write.
+    """This user's still-working items, oldest first, in scope sets the pass may currently write.
 
-    Promotion reingests each item into its own scope set, so items in scope sets the user
-    can no longer write, a role demoted since the remember, stay working rather than failing.
+    Promotion reingests each item into its own scope set, a write the RLS write policy admits only
+    for the acting session's own standing, so the filter mirrors that policy through
+    `ScopeLattice.write`: an item in a scope set the pass carries no writer standing in stays
+    working rather than failing its reingest. A background pass carries no org standing, so only
+    the owner's own private items promote, exactly the write the policy would let through.
 
     user_id: identity whose working memory is read.
     """
@@ -24,9 +28,7 @@ async def writable_working_items(user_id: uuid.UUID) -> list[SessionItem]:
             await session().scalars(
                 select(SessionItem)
                 .where(SessionItem.promoted_at.is_(None))
-                .where(
-                    Membership.writable_scopes(SessionItem.scopes, SessionItem.owner_id, user_id)
-                )
+                .where(ScopeLattice(SessionItem.__table__).write())
                 .order_by(SessionItem.created_at)
             )
         )

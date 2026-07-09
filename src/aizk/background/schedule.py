@@ -1,10 +1,14 @@
+import uuid
+
 from loguru import logger
 from pgqueuer import PgQueuer
 from pgqueuer.models import Job
+from sqlalchemy import select
 
 from ..config import settings
 from ..extract import ontology
-from ..store import User, as_system
+from ..store import Document, SessionItem, as_system
+from ..store.engine import bypass_rls
 from .payloads import ChunkJob, ProfileJob, TaskJob
 from .queue import (
     EXTRACT_ENTRYPOINT,
@@ -20,31 +24,47 @@ from .tasks import ScheduledTask
 
 
 async def fan_out(task: ScheduledTask) -> None:
-    """Read the user roster as the system user and enqueue one task job per user.
+    """Read the distinct owner roster past row security and enqueue one task job per owner.
 
-    The load-bearing no-leak boundary. A scheduled pass fires outside any user scope, so it
-    reads every user once as the system identity, then enqueues a separate job carrying each
-    user id whose body runs inside acting_as that user. No pass ever reads the roster and
-    writes another user's rows in the same transaction. Each job is deduplicated on the task
-    and user so a pass that fires while the last one is still draining never piles up.
+    The load-bearing no-leak boundary. A scheduled pass fires outside any user scope, so it reads
+    every owner that holds stored memory once under the owner role (past row level security, the
+    one cross-tenant read a fan-out legitimately makes), then enqueues a separate job carrying each
+    owner id whose body runs inside acting_as that owner. There is no user table to read a roster
+    from any more, so the roster is exactly the owners that appear in the content itself, distinct
+    owner ids across documents and un-promoted session items, the tables the per-owner passes
+    build over. No pass ever reads the roster and writes another owner's rows in the same
+    transaction, and each job is deduplicated on the task and owner so a pass that fires while the
+    last one is still draining never piles up.
 
     task: the scheduled task being fanned out.
     """
-    async with as_system():
-        users = await User.list_all()
+    owners = await owner_roster()
     async with queue_queries() as queries:
         queued = sum(
             [
                 await enqueue_deduped(
                     queries,
                     task.queue_entrypoint,
-                    TaskJob(user_id=user.id),
-                    f"{task.name}:{user.id}",
+                    TaskJob(user_id=owner),
+                    f"{task.name}:{owner}",
                 )
-                for user in users
+                for owner in owners
             ]
         )
-    logger.info("fan-out {} enqueued {} user jobs", task.name, queued)
+    logger.info("fan-out {} enqueued {} owner jobs", task.name, queued)
+
+
+async def owner_roster() -> list[uuid.UUID]:
+    """Every distinct owner that holds stored memory, read once under the owner role.
+
+    Unions the distinct owner ids across documents and un-promoted session items, the seeds every
+    per-owner pass builds from, so an owner with only a captured session still gets fanned out.
+    Runs under `bypass_rls` because a scheduled pass belongs to no one tenant and must see across
+    all of them to enumerate the roster, the same cross-tenant reach the old user-table read had.
+    """
+    async with bypass_rls() as db:
+        rows = await db.scalars(select(Document.owner_id).union(select(SessionItem.owner_id)))
+        return list(rows)
 
 
 async def handle_chunk_job(job: Job) -> None:

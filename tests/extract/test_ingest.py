@@ -49,7 +49,6 @@ def test_ingest_text_dedupes_on_content_hash(settings: Settings) -> None:
 
     async def body() -> tuple[uuid.UUID | None, uuid.UUID | None, int]:
         await dbutil.reset_db()
-        await dbutil.seed_user(settings.system_user_id)
         note = "a remembered note about the bi-temporal memory spine across time"
         first = await ingest_text(note, title=title)
         second = await ingest_text(note, title=title)
@@ -85,7 +84,6 @@ def test_ingest_path_routes_each_lane_dedupes_and_skips_the_rest(
 
     async def body() -> tuple[int, int, list[str]]:
         await dbutil.reset_db()
-        await dbutil.seed_user(settings.system_user_id)
         first = await ingest_path(tmp_path)
         again = await ingest_path(tmp_path)
         async with acting_as(settings.system_user_id) as session:
@@ -120,7 +118,6 @@ def test_reingesting_a_changed_file_refreshes_its_standing_document(
 
     async def body() -> tuple[int, int, int, list, list]:
         await dbutil.reset_db()
-        await dbutil.seed_user(settings.system_user_id)
         first = await ingest_path(tmp_path)
         note.write_text("# note\n\nthe REWRITTEN status line after the edit.\n", encoding="utf-8")
         changed = await ingest_path(tmp_path)

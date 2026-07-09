@@ -7,12 +7,9 @@ from .tables import (
     EntityKind,
     FactClaim,
     FactContent,
-    Group,
-    Membership,
     Profile,
     RelationKind,
     SessionItem,
-    User,
     Watermark,
 )
 from .views import LiveFact
@@ -26,10 +23,7 @@ __all__ = [
     "EntityKind",
     "FactClaim",
     "FactContent",
-    "Group",
     "LiveFact",
-    "Membership",
-    "User",
     "Profile",
     "RelationKind",
     "SessionItem",

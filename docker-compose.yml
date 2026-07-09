@@ -24,18 +24,20 @@ services:
       - "${AIZK_DB_PORT:-5433}:5432"
     # the image's own CMD (`docker inspect tensorchord/vchord-suite:pg18-latest`) already carries
     # shared_preload_libraries and search_path, and a compose `command:` replaces CMD outright
-    # rather than appending to it, so both are repeated here verbatim alongside the two declared
-    # GUC defaults this stack adds: app.uid and app.scopes, the identity and reading-lens settings
-    # `store/events.py`'s bind_principal sets per transaction. A custom "class.name" GUC needs no
-    # extension or placeholder to declare it, a bare `-c app.uid=...` is enough, and with a real
-    # default in place an untouched session already reads the anonymous principal and the
-    # unnarrowed lens rather than the empty-string placeholder an undeclared custom GUC reverts to.
-    # Deliberately left out of .env: `Settings.anonymous_principal_id`'s own docstring calls this
-    # exact zero uuid "fixed, not configurable", since the RLS moat predicate's `::uuid` cast
-    # depends on every unscoped session binding it, so making it an env knob would dress an
-    # invariant up as a choice. app.scopes has no settings counterpart at all, an unnarrowed
-    # session is simply Postgres's own empty-string GUC default, which `current_setting`'s own
-    # `nullif(..., '')` reads back as null rather than an empty-array cast.
+    # rather than appending to it, so both are repeated here verbatim alongside the four declared
+    # GUC defaults this stack adds: app.uid, app.orgs, app.writable_orgs, and app.scopes, the
+    # identity, org standing, and reading-lens settings `store/events.py`'s bind_user sets per
+    # transaction. A custom "class.name" GUC needs no extension or placeholder to declare it, a bare
+    # `-c app.uid=...` is enough, and with a real default in place an untouched session already
+    # reads the anonymous user and empty standing rather than the empty-string placeholder an
+    # undeclared custom GUC reverts to. Deliberately left out of .env: `Settings.anonymous_user_id`'s
+    # own docstring calls this exact zero uuid "fixed, not configurable", since the RLS moat
+    # predicate's `::uuid` cast depends on every unscoped session binding it, so making it an env
+    # knob would dress an invariant up as a choice. The three array GUCs have no settings
+    # counterpart, an untouched session is simply Postgres's own empty-string default, which
+    # `current_setting`'s own `nullif(..., '')` reads back as null rather than an empty-array cast.
+    # bind_user still folds the public org into every session's app.orgs, so an untouched session
+    # left at the empty default reads public-scoped rows the moment it opens a transaction.
     command:
       - postgres
       - -c
@@ -50,6 +52,10 @@ services:
       - search_path="$$user", public, bm25_catalog, tokenizer_catalog
       - -c
       - app.uid=00000000-0000-0000-0000-000000000000
+      - -c
+      - app.orgs=
+      - -c
+      - app.writable_orgs=
       - -c
       - app.scopes=
     volumes:

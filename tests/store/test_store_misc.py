@@ -6,7 +6,6 @@ from aizk.config import settings
 from aizk.store import Document, LiveFact
 from aizk.store.engine import build_engine
 from aizk.store.mixins.view import ViewBase, create_view_ddl, drop_view_ddl
-from aizk.store.models.tables.membership import Membership
 
 # entity_content.type/fact_content.predicate no longer validate off-ontology values in memory,
 # that wall moved to a real foreign key against the live entity_kind/relation_kind catalog, see
@@ -57,13 +56,6 @@ def test_intermediate_scoped_mixin_registers_no_table() -> None:
         """An abstract intermediate carrying the scope columns but no concrete table name."""
 
     assert set(TableBase.metadata.info.get("rls", set())) == before  # nothing registered
-
-
-def test_writable_group_ids_selects_non_viewer_roles() -> None:
-    """`writable_group_ids` compiles to a select over the user's editor/admin memberships."""
-    statement = Membership.writable_group_ids(uuid.uuid4())
-    compiled = str(statement.compile(compile_kwargs={"literal_binds": True})).lower()
-    assert "membership" in compiled and "role" in compiled
 
 
 def test_build_engine_uses_a_real_pool_when_not_null_pooled(

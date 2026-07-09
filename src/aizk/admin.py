@@ -29,7 +29,7 @@ from .eval.scale import ScaleReport, run_scale_benchmark
 from .eval.sweep import SweepReport
 from .extract import ingest as extract_ingest
 from .extract import ontology
-from .scopes import resolve_scopes
+from .scopes import scopes_from_org_ids
 from .serving import Embedder
 from .store import (
     Chunk,
@@ -38,13 +38,11 @@ from .store import (
     EntityKind,
     FactClaim,
     FactContent,
-    Group,
     RelationKind,
     acting_as,
     as_system,
 )
-from .store import User as UserRow
-from .store.engine import session
+from .store.engine import caller_standing, session
 
 
 class ForgetResult(FrozenModel):
@@ -186,8 +184,9 @@ async def ingest(path: str, scopes: str | None = None, user_id: uuid.UUID | None
     user_id: identity that owns the stored rows, the system user when null.
     """
     owner = user_id or system()
-    target = await resolve_scopes(scopes, owner)
-    return await extract_ingest.ingest_path(Path(path), owner_id=owner, scopes=target)
+    target = scopes_from_org_ids(scopes)
+    with caller_standing(target, target):
+        return await extract_ingest.ingest_path(Path(path), owner_id=owner, scopes=target)
 
 
 async def ingest_image(
@@ -207,10 +206,11 @@ async def ingest_image(
     user_id: identity that owns the stored row, the system user when null.
     """
     owner = user_id or system()
-    target = await resolve_scopes(scopes, owner)
-    return await extract_ingest.ingest_image(
-        Path(path), caption=caption, owner_id=owner, scopes=target
-    )
+    target = scopes_from_org_ids(scopes)
+    with caller_standing(target, target):
+        return await extract_ingest.ingest_image(
+            Path(path), caption=caption, owner_id=owner, scopes=target
+        )
 
 
 async def export_scope(path: str, user_id: uuid.UUID | None = None) -> export.ExportReport:
@@ -232,92 +232,19 @@ async def audit(limit: int = 20, user_id: uuid.UUID | None = None) -> list[Docum
     limit: maximum number of writes to return.
     user_id: identity whose visible writes are listed, the system user when null.
     """
-    return await UserRow.recent_writes(user_id or system(), limit=limit)
+    async with acting_as(user_id or system()):
+        return list(
+            await session().scalars(
+                select(Document).order_by(Document.created_at.desc()).limit(limit)
+            )
+        )
 
 
-async def create_user(name: str) -> UserRow:
-    """Create a user, the multi-user onboarding op, and return the row.
-
-    name: human-readable display name for the new actor.
-    """
-    async with as_system():
-        return await UserRow.create(name)
-
-
-async def link_user(oidc_subject: str, name: str = "") -> UserRow:
-    """Bind an OIDC subject to a user, minting one on first sight, the row back.
-
-    The bridge from an external identity provider (Logto, a customer's IdP) to an aizk user, so a
-    named user exists before its first login. A regular user, never an admin.
-
-    oidc_subject: the subject claim the provider mints this identity's tokens against.
-    name: human-readable display name for a freshly minted user.
-    """
-    async with as_system():
-        return await UserRow.link_oidc(oidc_subject, name)
-
-
-async def list_users() -> list[UserRow]:
-    """Every user known to the engine, the roster."""
-    async with as_system():
-        return await UserRow.list_all()
-
-
-async def add_member(user: str, group: str, role: str = "editor") -> None:
-    """Add a user to a group so that group's scope becomes visible to it under RLS.
-
-    user: id of the user joining the group.
-    group: name of the group the user joins.
-    role: standing within the group, viewer for read-only, editor or admin to also write.
-    """
-    async with as_system():
-        group_row = await Group.named(group)
-        await group_row.add_member(uuid.UUID(user), role=role)
-
-
-async def remove_member(user: str, group: str) -> None:
-    """Remove a user from a group, its scope no longer visible to them.
-
-    user: id of the user leaving the group.
-    group: name of the group the user leaves.
-    """
-    async with as_system():
-        group_row = await Group.named(group)
-        await group_row.remove_member(uuid.UUID(user))
-
-
-async def publish_group(group: str) -> bool:
-    """Flip a group's public read flag, returning its new state.
-
-    A public group's rows are readable by any caller, member or not; flipping it back makes it
-    members-only again. Writing stays gated on editor-or-admin membership either way.
-
-    group: name of the group to flip.
-    """
-    async with as_system():
-        group_row = await Group.named(group)
-        await group_row.toggle_public()
-        return group_row.public
-
-
-async def delete_group(group: str) -> None:
-    """Delete a group, memberships cascading and its rows falling back to their owners.
-
-    group: name of the group to delete.
-    """
-    async with as_system():
-        group_row = await Group.named(group)
-        await group_row.delete()
-
-
-async def list_groups() -> list[dict]:
-    """Every group with its visibility and member count, the sharing roster."""
-    async with as_system():
-        groups = await Group.list_all()
-        return [
-            {"name": group.name, "public": group.public, "members": await group.count_members()}
-            for group in groups
-        ]
+# There is no user, org, or membership operator surface: identity and org standing live entirely
+# in Logto now, so a user is onboarded, an org created, a member added, and an org published
+# through Logto's own admin rather than an `aizk` verb. aizk derives every id from the verified
+# token, so nothing here mirrors that state. The remaining operator surface is graph maintenance,
+# ontology, ingest, eval, and database ops, none of which touch identity.
 
 
 async def define_entity_kind(name: str, description: str, domain: str = "general") -> None:

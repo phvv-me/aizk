@@ -8,7 +8,7 @@ class NoTenantContext(RuntimeError):
 
 
 class ScopeNotFoundError(ValueError):
-    """No group is visible under the given name."""
+    """No org is visible under the given name."""
 
 
 class NotVisibleError(ValueError):

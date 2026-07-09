@@ -6,28 +6,10 @@ from sqlalchemy.orm import selectinload
 
 from ..config import settings
 from ..exceptions import NotVisibleError
-from ..store import Chunk, Document, Group, LiveFact, Membership, acting_as
-from ..store.engine import session
+from ..scopes import scopes_from_org_ids
+from ..store import Chunk, Document, LiveFact, acting_as
+from ..store.engine import caller_standing, session
 from .dedupe import claim_entity, claim_fact
-
-
-async def target_groups(user_id: uuid.UUID, to_scopes: str) -> list[uuid.UUID]:
-    """The target group ids named by a comma-separated scope list, vetted as writable.
-
-    Fails fast with a clear error before any row is written. The write policies would otherwise
-    refuse a copy into a scope set the promoter holds no writer role in every group of, but the
-    error that surfaces from a refused write is far less legible than this early, explicit check.
-
-    user_id: the promoter, whose writable groups gate the target set.
-    to_scopes: comma-separated names of the target groups the copy is published into.
-    """
-    names = [name.strip() for name in to_scopes.split(",") if name.strip()]
-    groups = [await Group.named(name) for name in names]
-    target = sorted(group.id for group in groups)
-    writable = set(await session().scalars(Membership.writable_group_ids(user_id)))
-    if not set(target) <= writable:
-        raise ValueError(f"user {user_id} may not publish into {to_scopes!r}")
-    return target
 
 
 async def source_document(document_id: uuid.UUID) -> Document:
@@ -151,26 +133,30 @@ async def promote(
         system user when null.
     """
     user_id = user_id or settings.system_user_id
-    async with acting_as(user_id):
-        target = await target_groups(user_id, to_scopes)
-        source = await source_document(document_id)
-        chunks = source.chunks
-        facts = await source_live_facts(chunks)
-        copies = copied_chunks(chunks, user_id, target)
-        session().add(
-            Document(
-                kind=source.kind,
-                title=source.title,
-                content_hash=source.content_hash,
-                owner_id=user_id,
-                scopes=target,
-                promoted_from=source.id,
-                chunks=list(copies.values()),
+    standing = scopes_from_org_ids(to_scopes)
+    target = list(standing)
+    # a promotion is a deliberate operator publish, so it grants itself reader and writer standing
+    # in exactly the target orgs, the standing the RLS write policy checks the copy's scopes by
+    with caller_standing(standing, standing):
+        async with acting_as(user_id):
+            source = await source_document(document_id)
+            chunks = source.chunks
+            facts = await source_live_facts(chunks)
+            copies = copied_chunks(chunks, user_id, target)
+            session().add(
+                Document(
+                    kind=source.kind,
+                    title=source.title,
+                    content_hash=source.content_hash,
+                    owner_id=user_id,
+                    scopes=target,
+                    promoted_from=source.id,
+                    chunks=list(copies.values()),
+                )
             )
-        )
-        await session().flush()
-        await claim_promoted_entities(facts, user_id, target)
-        await claim_promoted_facts(facts, copies, user_id, target)
+            await session().flush()
+            await claim_promoted_entities(facts, user_id, target)
+            await claim_promoted_facts(facts, copies, user_id, target)
     promoted = 1 + len(chunks) + len(facts)
     logger.info("promoted document {} into {} as {} rows", document_id, to_scopes, promoted)
     return promoted

@@ -1,9 +1,9 @@
 {
   "errors": [
     {
-      "line": 151,
+      "line": 149,
       "column": 27,
-      "stop_line": 151,
+      "stop_line": 149,
       "stop_column": 58,
       "path": "src/aizk/admin.py",
       "code": -2,
@@ -13,15 +13,27 @@
       "severity": "error"
     },
     {
-      "line": 158,
+      "line": 156,
       "column": 70,
-      "stop_line": 158,
+      "stop_line": 156,
       "stop_column": 85,
       "path": "src/aizk/admin.py",
       "code": -2,
       "name": "missing-attribute",
       "description": "Object of class `UUID` has no attribute `in_`\n  Did you mean `int`?",
       "concise_description": "Object of class `UUID` has no attribute `in_`",
+      "severity": "error"
+    },
+    {
+      "line": 238,
+      "column": 43,
+      "stop_line": 238,
+      "stop_column": 67,
+      "path": "src/aizk/admin.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "Object of class `datetime` has no attribute `desc`",
+      "concise_description": "Object of class `datetime` has no attribute `desc`",
       "severity": "error"
     },
     {
@@ -49,9 +61,9 @@
       "severity": "error"
     },
     {
-      "line": 517,
+      "line": 516,
       "column": 20,
-      "stop_line": 517,
+      "stop_line": 516,
       "stop_column": 55,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -61,9 +73,9 @@
       "severity": "error"
     },
     {
-      "line": 518,
+      "line": 517,
       "column": 49,
-      "stop_line": 518,
+      "stop_line": 517,
       "stop_column": 75,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -73,9 +85,9 @@
       "severity": "error"
     },
     {
-      "line": 544,
+      "line": 543,
       "column": 16,
-      "stop_line": 544,
+      "stop_line": 543,
       "stop_column": 50,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -85,9 +97,9 @@
       "severity": "error"
     },
     {
-      "line": 547,
+      "line": 546,
       "column": 16,
-      "stop_line": 547,
+      "stop_line": 546,
       "stop_column": 41,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -97,9 +109,9 @@
       "severity": "error"
     },
     {
-      "line": 557,
+      "line": 556,
       "column": 65,
-      "stop_line": 557,
+      "stop_line": 556,
       "stop_column": 90,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -109,9 +121,9 @@
       "severity": "error"
     },
     {
-      "line": 677,
+      "line": 676,
       "column": 59,
-      "stop_line": 677,
+      "stop_line": 676,
       "stop_column": 77,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -121,9 +133,9 @@
       "severity": "error"
     },
     {
-      "line": 679,
+      "line": 678,
       "column": 41,
-      "stop_line": 679,
+      "stop_line": 678,
       "stop_column": 61,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -205,9 +217,9 @@
       "severity": "error"
     },
     {
-      "line": 131,
+      "line": 130,
       "column": 20,
-      "stop_line": 131,
+      "stop_line": 130,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -217,9 +229,9 @@
       "severity": "error"
     },
     {
-      "line": 239,
+      "line": 238,
       "column": 36,
-      "stop_line": 239,
+      "stop_line": 238,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -229,9 +241,9 @@
       "severity": "error"
     },
     {
-      "line": 417,
+      "line": 416,
       "column": 16,
-      "stop_line": 417,
+      "stop_line": 416,
       "stop_column": 38,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -241,9 +253,9 @@
       "severity": "error"
     },
     {
-      "line": 423,
+      "line": 424,
       "column": 44,
-      "stop_line": 423,
+      "stop_line": 424,
       "stop_column": 64,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -253,9 +265,9 @@
       "severity": "error"
     },
     {
-      "line": 424,
+      "line": 425,
       "column": 37,
-      "stop_line": 424,
+      "stop_line": 425,
       "stop_column": 58,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -265,9 +277,9 @@
       "severity": "error"
     },
     {
-      "line": 882,
+      "line": 883,
       "column": 21,
-      "stop_line": 882,
+      "stop_line": 883,
       "stop_column": 47,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -277,9 +289,9 @@
       "severity": "error"
     },
     {
-      "line": 882,
+      "line": 883,
       "column": 59,
-      "stop_line": 882,
+      "stop_line": 883,
       "stop_column": 84,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -349,9 +361,9 @@
       "severity": "error"
     },
     {
-      "line": 54,
+      "line": 36,
       "column": 36,
-      "stop_line": 54,
+      "stop_line": 36,
       "stop_column": 64,
       "path": "src/aizk/graph/promote.py",
       "code": -2,
@@ -409,9 +421,9 @@
       "severity": "error"
     },
     {
-      "line": 26,
+      "line": 30,
       "column": 24,
-      "stop_line": 26,
+      "stop_line": 30,
       "stop_column": 51,
       "path": "src/aizk/graph/session_tier.py",
       "code": -2,
@@ -421,9 +433,9 @@
       "severity": "error"
     },
     {
-      "line": 45,
+      "line": 47,
       "column": 20,
-      "stop_line": 45,
+      "stop_line": 47,
       "stop_column": 38,
       "path": "src/aizk/graph/session_tier.py",
       "code": -2,
@@ -673,9 +685,33 @@
       "severity": "error"
     },
     {
-      "line": 217,
+      "line": 93,
+      "column": 9,
+      "stop_line": 93,
+      "stop_column": 27,
+      "path": "src/aizk/store/migrations/versions/0007_derive_identity_from_logto.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "No attribute `drop_scoped_rls` in module `alembic.op`",
+      "concise_description": "No attribute `drop_scoped_rls` in module `alembic.op`",
+      "severity": "error"
+    },
+    {
+      "line": 104,
+      "column": 9,
+      "stop_line": 104,
+      "stop_column": 28,
+      "path": "src/aizk/store/migrations/versions/0007_derive_identity_from_logto.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "No attribute `apply_scoped_rls` in module `alembic.op`",
+      "concise_description": "No attribute `apply_scoped_rls` in module `alembic.op`",
+      "severity": "error"
+    },
+    {
+      "line": 163,
       "column": 29,
-      "stop_line": 217,
+      "stop_line": 163,
       "stop_column": 42,
       "path": "src/aizk/store/mixins/scoped.py",
       "code": -2,
@@ -733,45 +769,9 @@
       "severity": "error"
     },
     {
-      "line": 93,
-      "column": 47,
-      "stop_line": 93,
-      "stop_column": 71,
-      "path": "src/aizk/store/models/tables/user.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `datetime` has no attribute `desc`",
-      "concise_description": "Object of class `datetime` has no attribute `desc`",
-      "severity": "error"
-    },
-    {
-      "line": 308,
-      "column": 59,
-      "stop_line": 308,
-      "stop_column": 80,
-      "path": "src/aizk/store/models/tables/user.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `str` has no attribute `in_`",
-      "concise_description": "Object of class `str` has no attribute `in_`",
-      "severity": "error"
-    },
-    {
-      "line": 321,
-      "column": 17,
-      "stop_line": 321,
-      "stop_column": 43,
-      "path": "src/aizk/store/models/tables/user.py",
-      "code": -2,
-      "name": "missing-attribute",
-      "description": "Object of class `UUID` has no attribute `not_in`",
-      "concise_description": "Object of class `UUID` has no attribute `not_in`",
-      "severity": "error"
-    },
-    {
-      "line": 105,
+      "line": 101,
       "column": 19,
-      "stop_line": 105,
+      "stop_line": 101,
       "stop_column": 21,
       "path": "tests/background/test_schedule.py",
       "code": -2,
@@ -985,9 +985,9 @@
       "severity": "error"
     },
     {
-      "line": 83,
+      "line": 82,
       "column": 5,
-      "stop_line": 83,
+      "stop_line": 82,
       "stop_column": 22,
       "path": "tests/graph/test_insight.py",
       "code": -2,
@@ -997,9 +997,9 @@
       "severity": "error"
     },
     {
-      "line": 116,
+      "line": 115,
       "column": 5,
-      "stop_line": 116,
+      "stop_line": 115,
       "stop_column": 22,
       "path": "tests/graph/test_insight.py",
       "code": -2,
@@ -1009,9 +1009,9 @@
       "severity": "error"
     },
     {
-      "line": 59,
+      "line": 60,
       "column": 63,
-      "stop_line": 59,
+      "stop_line": 60,
       "stop_column": 79,
       "path": "tests/graph/test_session_tier.py",
       "code": -2,
@@ -1033,9 +1033,9 @@
       "severity": "error"
     },
     {
-      "line": 59,
+      "line": 67,
       "column": 59,
-      "stop_line": 59,
+      "stop_line": 67,
       "stop_column": 66,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1045,9 +1045,9 @@
       "severity": "error"
     },
     {
-      "line": 59,
+      "line": 67,
       "column": 68,
-      "stop_line": 59,
+      "stop_line": 67,
       "stop_column": 77,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1057,9 +1057,9 @@
       "severity": "error"
     },
     {
-      "line": 80,
+      "line": 90,
       "column": 46,
-      "stop_line": 80,
+      "stop_line": 90,
       "stop_column": 53,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1069,9 +1069,9 @@
       "severity": "error"
     },
     {
-      "line": 80,
+      "line": 90,
       "column": 55,
-      "stop_line": 80,
+      "stop_line": 90,
       "stop_column": 64,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1081,9 +1081,9 @@
       "severity": "error"
     },
     {
-      "line": 94,
+      "line": 104,
       "column": 42,
-      "stop_line": 94,
+      "stop_line": 104,
       "stop_column": 49,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1093,9 +1093,9 @@
       "severity": "error"
     },
     {
-      "line": 94,
+      "line": 104,
       "column": 51,
-      "stop_line": 94,
+      "stop_line": 104,
       "stop_column": 60,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1105,9 +1105,9 @@
       "severity": "error"
     },
     {
-      "line": 96,
+      "line": 106,
       "column": 39,
-      "stop_line": 96,
+      "stop_line": 106,
       "stop_column": 46,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1117,9 +1117,9 @@
       "severity": "error"
     },
     {
-      "line": 96,
+      "line": 106,
       "column": 48,
-      "stop_line": 96,
+      "stop_line": 106,
       "stop_column": 57,
       "path": "tests/mcp/test_middleware.py",
       "code": -2,
@@ -1129,9 +1129,9 @@
       "severity": "error"
     },
     {
-      "line": 351,
+      "line": 350,
       "column": 16,
-      "stop_line": 351,
+      "stop_line": 350,
       "stop_column": 92,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
@@ -1141,9 +1141,9 @@
       "severity": "error"
     },
     {
-      "line": 375,
+      "line": 372,
       "column": 16,
-      "stop_line": 375,
+      "stop_line": 372,
       "stop_column": 92,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
@@ -1153,9 +1153,9 @@
       "severity": "error"
     },
     {
-      "line": 410,
+      "line": 404,
       "column": 22,
-      "stop_line": 410,
+      "stop_line": 404,
       "stop_column": 28,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
@@ -1165,9 +1165,9 @@
       "severity": "error"
     },
     {
-      "line": 410,
+      "line": 404,
       "column": 37,
-      "stop_line": 410,
+      "stop_line": 404,
       "stop_column": 42,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
