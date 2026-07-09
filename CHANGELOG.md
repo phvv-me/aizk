@@ -10,12 +10,37 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 - Closed an RLS write-policy bypass: an empty scope set made `scopes <@ writer_groups` trivially
   true, so any authenticated caller could write into another user's private space. The empty-scope
-  write branch is now guarded on ownership, re-applied to the live schema by migration `0003`.
-- Gated curated-group pending facts out of the default recall SQL and re-stamped `reviewed_at` on
-  document moves, so a member never recalls another's unreviewed facts and a move cannot smuggle
-  unreviewed content into a curated canon.
+  write branch is now guarded on ownership.
+- The MCP server validates a token's `aud` against its RFC 8707 resource id, so a token the issuer
+  signed for another resource in the same tenant is rejected rather than accepted.
 - A malformed identity-provider groups claim is skipped rather than crashing every authenticated
   request the token makes.
+
+### Changed
+
+- The session engine is reworked into composable building blocks and renamed for the row-level
+  distinction it encodes: `acting_as`/`as_system` run as the RLS-enforced app role `aizk_app`,
+  while `bypass_rls` runs as the owner role `aizk_admin` (formerly `aizk`) for the few cross-tenant
+  content writes the app role's policies forbid.
+- Membership roles adopt Logto's own `viewer`/`editor`/`admin` names, so a token's org role folds
+  in with no translation; `editor` or `admin` may write, `viewer` only reads.
+- Groups are Logto-only: every group is the local projection of a Logto organization
+  (`oidc_org_id` required and unique), minted by `User.sync_groups`, which now writes only when the
+  token's memberships actually changed rather than on every request. Hand-created groups and the
+  `aizk group create` verb are gone.
+- The `users` table is renamed `user_` (USER is a reserved word, matching `group_`).
+- Ontology names are canonicalized to snake_case at write time, deduping the case and spacing
+  variants a case-sensitive name key used to fork into separate rows.
+- Store operations read the open session from a task-local `session()` accessor, ids use uuid7,
+  and a deleted group's scoped rows fall back to private through a `BEFORE DELETE` trigger so the
+  demotion fires on every delete path.
+
+### Removed
+
+- The curation-review loop in full: the `reviewed_at` gate, the `curated` group flag, the
+  `pending`/`approve`/`reject` MCP verbs, the standing-reviewer background pass, and the
+  server-wide `is_admin` flag that existed only for its cross-tenant reach. A write is canon the
+  moment it lands.
 
 ### Fixed
 
@@ -25,13 +50,15 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   directory ingest, and the community/RAPTOR growth watermark stays monotonic under decay.
 - The GLiNER2 relevance gate is re-enabled on the classification head with a `Person` floor and
   loads offline from a persistent cache; structural kinds no longer leak into the auto-create pool.
+- `admin.publish_group` called a since-removed `Group.publish`; it now flips visibility through
+  `toggle_public`.
 
-### Changed
+### Migrations
 
-- Store operations read the open session from a task-local `session()` accessor bound by
-  `acting_as`/`admin_session`, rather than threading a `session` parameter through every call.
-- Client-generated ids use uuid7 for index locality, and the server image caches its dependency
-  layer so a source edit rebuilds in seconds instead of re-resolving every wheel.
+- `0003` re-applies the corrected scoped RLS. `0004` canonicalizes ontology names to snake_case.
+  `0005` drops the curation and server-admin columns and policies, renames the role enum values
+  and the user table, recreates the recall view and function without the review gate, and installs
+  the group-delete trigger. `0006` makes `oidc_org_id` required.
 
 ## 0.0.1 - 2026-07-04
 
