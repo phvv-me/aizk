@@ -7,12 +7,17 @@ from sqlalchemy import (
     Column,
     ColumnElement,
     DateTime,
+    Float,
     Index,
     Text,
     and_,
+    cast,
+    extract,
     func,
     or_,
+    select,
     text,
+    update,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSTZRANGE, Range
 from sqlalchemy.ext.hybrid import hybrid_property
@@ -22,56 +27,8 @@ from sqlmodel import Field
 
 from ...engine import session
 from ...mixins import Embedded, Id, Scoped, TableBase
+from .chunk import Chunk
 from .entity import content_policies
-
-# bumps recency and frequency on every latest claim whose fact content's statement recall just
-# surfaced, scoped to the caller by the row level security app.uid already on the session. Raw
-# text() UPDATE rather than Core update(), since the match needs a subquery onto fact_content
-# (statement lives on the content the claim stakes, not on the claim), and that subquery reads
-# through content's own visible-through-a-claim policy so it never widens what the session may see.
-RECORD_ACCESS_STATEMENT = text("""
-UPDATE fact_claim
-SET last_accessed = now(), access_count = access_count + 1
-WHERE upper_inf(recorded)
-  AND content_id IN (
-      SELECT id FROM fact_content
-      WHERE statement = ANY(CAST(:statements AS text[]))
-  )
-""")
-
-# archives every visible latest claim whose exponential-decay relevance falls under the floor, a
-# set-based UPDATE rather than scoring each claim in Python. The live predicate is hand-listed
-# (open `recorded`, open `valid`) since a raw UPDATE sits outside the do_orm_execute listener, and
-# the power/extract expression mirrors `FactClaim.relevance`. Closes `recorded`'s upper bound
-# rather than an is_latest flag, so a decayed claim's history reads like a superseded one.
-DECAY_SQL = text("""
-UPDATE fact_claim
-SET recorded = tstzrange(lower(recorded), CAST(:now AS timestamptz)),
-    attributes = attributes || jsonb_build_object('decayed', CAST(:now_iso AS text))
-WHERE upper_inf(recorded)
-  AND (valid IS NULL OR valid @> CAST(:now AS timestamptz))
-  AND power(0.5::float8, extract(epoch FROM
-        (CAST(:now AS timestamptz) - coalesce(last_accessed, lower(recorded))))
-        / 86400.0 / :half_life_days
-     ) * (1 + access_count) < :floor
-RETURNING id
-""")
-
-
-# retracts every live claim derived from a given set of documents, closing `recorded`'s upper
-# bound exactly as DECAY_SQL does, so a forgotten claim reads like a superseded one in history and
-# an as-of query still sees it. Marks the row forgotten rather than decayed. This is the provenance
-# sweep the roadmap's `forget` describes, source_chunk_id back to the documents whose facts should
-# never have been mined, run without deleting anything so an over-eager forget is undoable and the
-# documents themselves stay indexable for retrieval.
-FORGET_SQL = text("""
-UPDATE fact_claim
-SET recorded = tstzrange(lower(recorded), CAST(:now AS timestamptz)),
-    attributes = attributes || jsonb_build_object('forgotten', CAST(:now_iso AS text))
-WHERE upper_inf(recorded)
-  AND source_chunk_id IN (SELECT id FROM chunk WHERE document_id = ANY(:document_ids))
-RETURNING id
-""")
 
 
 class upper_inf(GenericFunction):
@@ -272,8 +229,8 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         claim fades while a recently surfaced one stays near full relevance, then lifts the score
         by how often recall has returned it so a used claim resists forgetting. A claim never
         accessed is scored from when it entered memory, the lower bound of `recorded`. This is the
-        Python-side mirror of the `power`/`extract` expression `graph.decay.DECAY_SQL` scores the
-        same way in one UPDATE.
+        Python-side mirror of the `power`/`extract` expression `archive_stale` scores the same way
+        in one set-based UPDATE.
 
         now: the moment decay runs, the reference the age is measured against.
         half_life_days: age in days at which an unaccessed claim's relevance halves.
@@ -302,7 +259,23 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         """
         if not statements:
             return
-        await session().execute(RECORD_ACCESS_STATEMENT, {"statements": statements})
+        columns = cls.__table__.c
+        content = FactContent.__table__.c
+        # the match needs a subquery onto `fact_content`, since `statement` lives on the content
+        # the claim stakes, not on the claim, and that subquery reads through content's own
+        # visible-through-a-claim policy so it never widens what this user-scoped session may see.
+        # `synchronize_session=False` keeps this a single set-based UPDATE with no ORM fetch-back.
+        await session().execute(
+            update(cls)
+            .where(
+                func.upper_inf(columns.recorded),
+                columns.content_id.in_(
+                    select(content.id).where(content.statement.in_(statements))
+                ),
+            )
+            .values(last_accessed=func.now(), access_count=columns.access_count + 1)
+            .execution_options(synchronize_session=False)
+        )
 
     @classmethod
     async def archive_stale(cls, half_life_days: float, floor: float) -> list[uuid.UUID]:
@@ -319,14 +292,36 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         floor: relevance floor a claim must clear to stay in the live graph.
         """
         now = datetime.now(UTC)
+        now_ts = cast(now, DateTime(timezone=True))
+        columns = cls.__table__.c
+        # the `power`/`extract` relevance mirrors `relevance`, scored set-based here: half-lives
+        # elapsed since the last touch (or the write time for an untouched claim), lifted by the
+        # access count. The live gate is hand-listed since an ORM UPDATE sits outside the
+        # do_orm_execute select listener, and `0.5` is cast to float8 to score in double precision.
+        half_lives = (
+            extract(
+                "epoch",
+                now_ts - func.coalesce(columns.last_accessed, func.lower(columns.recorded)),
+            )
+            / 86400.0
+            / half_life_days
+        )
+        relevance = func.power(cast(0.5, Float), half_lives) * (1 + columns.access_count)
         result = await session().execute(
-            DECAY_SQL,
-            {
-                "now": now,
-                "now_iso": now.isoformat(),
-                "half_life_days": half_life_days,
-                "floor": floor,
-            },
+            update(cls)
+            .where(
+                func.upper_inf(columns.recorded),
+                or_(columns.valid.is_(None), columns.valid.contains(now_ts)),
+                relevance < floor,
+            )
+            .values(
+                recorded=func.tstzrange(func.lower(columns.recorded), now_ts),
+                attributes=columns.attributes.op("||")(
+                    func.jsonb_build_object("decayed", cast(now.isoformat(), Text))
+                ),
+            )
+            .returning(columns.id)
+            .execution_options(synchronize_session=False)
         )
         return list(result.scalars().all())
 
@@ -343,8 +338,28 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         document_ids: the source documents whose derived claims are retracted.
         """
         now = datetime.now(UTC)
+        now_ts = cast(now, DateTime(timezone=True))
+        columns = cls.__table__.c
+        chunks = Chunk.__table__.c
+        # closes `recorded` exactly as `archive_stale` does, walking `source_chunk_id` back to the
+        # forgotten documents. Marks the row forgotten rather than decayed, and deletes nothing so
+        # an over-eager forget stays undoable through an as-of read.
         result = await session().execute(
-            FORGET_SQL, {"now": now, "now_iso": now.isoformat(), "document_ids": document_ids}
+            update(cls)
+            .where(
+                func.upper_inf(columns.recorded),
+                columns.source_chunk_id.in_(
+                    select(chunks.id).where(chunks.document_id.in_(document_ids))
+                ),
+            )
+            .values(
+                recorded=func.tstzrange(func.lower(columns.recorded), now_ts),
+                attributes=columns.attributes.op("||")(
+                    func.jsonb_build_object("forgotten", cast(now.isoformat(), Text))
+                ),
+            )
+            .returning(columns.id)
+            .execution_options(synchronize_session=False)
         )
         return list(result.scalars().all())
 
