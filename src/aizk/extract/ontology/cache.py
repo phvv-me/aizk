@@ -6,10 +6,10 @@ from openai import APIConnectionError
 from patos import FrozenModel
 from pydantic import BaseModel, Field, create_model
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config import settings
 from ...exceptions import OntologyNotReadyError
+from ...store.context import session
 from ...store.models.tables.ontology import EntityKind, RelationKind
 from .constants import CONCEPT
 
@@ -96,7 +96,7 @@ def _wire_schema(
     return llm_entity, llm_fact, llm_extraction
 
 
-async def build_snapshot(session: AsyncSession) -> OntologySnapshot:
+async def build_snapshot() -> OntologySnapshot:
     """Read the current catalog and build a fresh `OntologySnapshot` from it.
 
     Embeds every entity description in one batched call here, once per refresh rather than once
@@ -105,16 +105,14 @@ async def build_snapshot(session: AsyncSession) -> OntologySnapshot:
     gracefully: the structure still refreshes and only the description vectors are left empty, so a
     transient serving outage cannot block every `ops.setup` the way a hard failure here would.
 
-    session: open session the catalog is read through, `entity_kind`/`relation_kind` carry no
-        row level security so any session works.
     """
     from ...serving import Embedder
 
-    entity_names = await EntityKind.extractable_names(session)
-    relation_names = await RelationKind.extractable_names(session)
+    entity_names = await EntityKind.extractable_names()
+    relation_names = await RelationKind.extractable_names()
     entity_descriptions = dict(
         (
-            await session.execute(
+            await session().execute(
                 select(EntityKind.name, EntityKind.description).where(~EntityKind.structural)
             )
         ).all()
@@ -153,13 +151,10 @@ async def build_snapshot(session: AsyncSession) -> OntologySnapshot:
 _snapshot: OntologySnapshot | None = None
 
 
-async def refresh(session: AsyncSession) -> OntologySnapshot:
-    """Rebuild and cache the ontology snapshot, the call every ontology write makes afterward.
-
-    session: open session the catalog is read through.
-    """
+async def refresh() -> OntologySnapshot:
+    """Rebuild and cache the ontology snapshot, the call every ontology write makes afterward."""
     global _snapshot
-    _snapshot = await build_snapshot(session)
+    _snapshot = await build_snapshot()
     return _snapshot
 
 

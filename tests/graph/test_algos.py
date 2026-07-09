@@ -72,10 +72,10 @@ def test_ppr_short_circuits_on_empty_and_isolated_seeds() -> None:
         owner = await seedgraph.fresh_owner()
         async with acting_as(owner) as session:
             lonely = await seedgraph.add_entity(session, owner, "Lonely")
-        async with acting_as(owner) as session:
+        async with acting_as(owner):
             return (
-                await ppr_expand(session, [], top_n=20),
-                await ppr_expand(session, [lonely], top_n=20),
+                await ppr_expand([], top_n=20),
+                await ppr_expand([lonely], top_n=20),
             )
 
     empty, alone = dbutil.run(body())
@@ -94,8 +94,8 @@ def test_ppr_reaches_a_two_hop_neighbor_and_matches_the_unbounded_walk() -> None
     async def body() -> tuple[set[uuid.UUID], set[uuid.UUID], uuid.UUID, uuid.UUID]:
         owner = await seedgraph.fresh_owner()
         nodes = await plant_graph(owner, 3, [(0, 1), (1, 2)])
-        async with acting_as(owner) as session:
-            bounded = await ppr_expand(session, [nodes[0]], top_n=20)
+        async with acting_as(owner):
+            bounded = await ppr_expand([nodes[0]], top_n=20)
         reference = reference_expansion(
             [(nodes[0], nodes[1]), (nodes[1], nodes[2])], [nodes[0]], 20
         )
@@ -116,8 +116,8 @@ def test_ppr_caps_depth_beyond_the_hop_bound(monkeypatch: pytest.MonkeyPatch) ->
     async def body() -> tuple[set[uuid.UUID], uuid.UUID, uuid.UUID]:
         owner = await seedgraph.fresh_owner()
         nodes = await plant_graph(owner, 4, [(0, 1), (1, 2), (2, 3)])
-        async with acting_as(owner) as session:
-            expanded = set(await ppr_expand(session, [nodes[0]], top_n=20))
+        async with acting_as(owner):
+            expanded = set(await ppr_expand([nodes[0]], top_n=20))
         return expanded, nodes[2], nodes[3]
 
     expanded, mid, beyond = dbutil.run(body())
@@ -146,7 +146,7 @@ def test_ppr_skips_a_superseded_edge() -> None:
             )
         async with acting_as(owner) as session:
             live = list(await session.scalars(select(LiveFact)))
-            expanded = await ppr_expand(session, [seed], top_n=20)
+            expanded = await ppr_expand([seed], top_n=20)
         return expanded, len(live)
 
     expanded, live_count = dbutil.run(body())

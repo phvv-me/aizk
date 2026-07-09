@@ -2,9 +2,9 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Index, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import Field, Relationship
 
+from ...context import session
 from ...mixins import Id, Scoped, TableBase, Timestamped
 
 if TYPE_CHECKING:
@@ -55,7 +55,6 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
     @classmethod
     async def move_to_scope(
         cls,
-        session: AsyncSession,
         owner_id: uuid.UUID,
         document_ids: list[uuid.UUID],
         scopes: tuple[uuid.UUID, ...],
@@ -71,7 +70,6 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
         own session, so row level security also refuses any source row they may not write, and the
         target set is validated by the caller before the call. Returns how many documents moved.
 
-        session: the caller's own acting session.
         owner_id: the caller, whose rows alone move.
         document_ids: the documents to move.
         scopes: the sorted target group-id set, empty to make them private again.
@@ -85,19 +83,19 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
         # fresh claim in the target set would carry, so a move can never smuggle unreviewed content
         # into a curated canon (they land pending until a group admin approves), while a move to a
         # private or uncurated set stamps them reviewed immediately.
-        reviewed_at = await Group.review_stamp(session, scopes, owner_id)
+        reviewed_at = await Group.review_stamp(scopes, owner_id)
         chunk_ids = select(Chunk.id).where(Chunk.document_id.in_(document_ids))
-        await session.execute(
+        await session().execute(
             update(FactClaim)
             .where(FactClaim.source_chunk_id.in_(chunk_ids), FactClaim.owner_id == owner_id)
             .values(scopes=target, reviewed_at=reviewed_at)
         )
-        await session.execute(
+        await session().execute(
             update(Chunk)
             .where(Chunk.document_id.in_(document_ids), Chunk.owner_id == owner_id)
             .values(scopes=target)
         )
-        moved = await session.execute(
+        moved = await session().execute(
             update(cls)
             .where(cls.id.in_(document_ids), cls.owner_id == owner_id)
             .values(scopes=target)

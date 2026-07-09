@@ -147,9 +147,9 @@ def test_record_access_bumps_count_for_surfaced_statements() -> None:
         await dbutil.reset_db()
         owner = await dbutil.seed_user(uuid.uuid4())
         await seed_live_claim(owner, "surfaced", days_old=1)
-        async with acting_as(owner) as session:
-            await FactClaim.record_access(session, ["surfaced"])
-            await FactClaim.record_access(session, [])  # empty is a no-op
+        async with acting_as(owner):
+            await FactClaim.record_access(["surfaced"])
+            await FactClaim.record_access([])  # empty is a no-op
         async with dbutil.admin_engine().connect() as connection:
             row = await connection.execute(
                 text(
@@ -171,8 +171,8 @@ def test_archive_stale_closes_forgotten_claims_only() -> None:
         owner = await dbutil.seed_user(uuid.uuid4())
         await seed_live_claim(owner, "ancient", days_old=400)
         await seed_live_claim(owner, "recent", days_old=1)
-        async with acting_as(owner) as session:
-            archived = await FactClaim.archive_stale(session, half_life_days=90.0, floor=0.25)
+        async with acting_as(owner):
+            archived = await FactClaim.archive_stale(half_life_days=90.0, floor=0.25)
         assert len(archived) == 1
         async with acting_as(owner) as session:
             live = set(

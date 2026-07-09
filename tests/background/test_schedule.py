@@ -45,7 +45,7 @@ def test_fan_out_enqueues_one_deduped_job_per_user(
     recorder = queue_seam(queue_mod)
     roster_reads: list[None] = []
 
-    async def fake_list_all(session: object) -> list[SimpleNamespace]:
+    async def fake_list_all() -> list[SimpleNamespace]:
         roster_reads.append(None)
         return [SimpleNamespace(id=pid) for pid in users]
 

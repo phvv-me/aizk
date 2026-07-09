@@ -3,11 +3,11 @@ from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..extract import ontology
 from ..store import EntityContent, FactClaim, FactContent, LiveFact, acting_as
+from ..store.context import session
 from .dedupe import claim_entity, claim_fact, mint_content
 from .ids import entity_id, fact_id
 from .models import InsightReport, Observation
@@ -34,16 +34,13 @@ def kept_observations(report: InsightReport) -> list[Observation]:
     return significant[: settings.insight_max]
 
 
-async def observation_already_claimed(
-    session: AsyncSession, user_id: uuid.UUID, identity: uuid.UUID
-) -> bool:
+async def observation_already_claimed(user_id: uuid.UUID, identity: uuid.UUID) -> bool:
     """Whether this user already stakes an observes claim on this exact content id, ever.
 
-    session: open session already acting as user_id.
     user_id: identity the observation would be claimed under.
     identity: content-addressed id for the observation's statement.
     """
-    claimed = await session.scalar(
+    claimed = await session().scalar(
         select(FactClaim.id)
         .where(
             FactClaim.content_id == identity,
@@ -56,7 +53,6 @@ async def observation_already_claimed(
 
 
 async def write_observation(
-    session: AsyncSession,
     user_id: uuid.UUID,
     node_id: uuid.UUID,
     obs: Observation,
@@ -64,17 +60,15 @@ async def write_observation(
 ) -> bool:
     """Idempotently write one gated observation as an observes fact, returning whether it was new.
 
-    session: open session already acting as user_id.
     user_id: identity the observation is claimed under, always privately (empty scopes).
     node_id: the OBSERVATION_NODE entity content id every observation hangs off.
     obs: the gated observation to write.
     vector: the observation's own statement, already embedded.
     """
     identity = fact_id(OBSERVATION_NODE, ontology.OBSERVES, "", obs.statement)
-    if await observation_already_claimed(session, user_id, identity):
+    if await observation_already_claimed(user_id, identity):
         return False
     await mint_content(
-        session,
         FactContent(
             id=identity,
             subject_id=node_id,
@@ -87,7 +81,6 @@ async def write_observation(
     # an observation carries no scope of its own, always private to the user reflected on,
     # so it stamps reviewed immediately like any other private write.
     await claim_fact(
-        session,
         identity,
         user_id,
         [],
@@ -112,9 +105,9 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
 
     async def gather(self) -> list[str] | None:
         """The latest fact statements to reflect on, null when too few exist to ground on."""
-        async with acting_as(self.user_id) as session:
+        async with acting_as(self.user_id):
             statements = list(
-                await session.scalars(
+                await session().scalars(
                     select(LiveFact.statement)
                     .where(LiveFact.predicate != ontology.OBSERVES)
                     .order_by(func.lower(LiveFact.recorded).desc())
@@ -146,15 +139,14 @@ class InsightTierBuilder(TierBuilder[list[str], InsightReport]):
         """Write each gated observation as its own content-addressed, idempotent observes claim."""
         kept = kept_observations(report)
         node_id = entity_id(OBSERVATION_NODE, ontology.OBSERVATION)
-        async with acting_as(self.user_id) as session:
+        async with acting_as(self.user_id):
             await mint_content(
-                session,
                 EntityContent(id=node_id, name=OBSERVATION_NODE, type=ontology.OBSERVATION),
             )
-            await claim_entity(session, node_id, self.user_id, [])
+            await claim_entity(node_id, self.user_id, [])
             written = sum(
                 [
-                    await write_observation(session, self.user_id, node_id, obs, vector)
+                    await write_observation(self.user_id, node_id, obs, vector)
                     for obs, vector in zip(kept, vectors, strict=True)
                 ]
             )

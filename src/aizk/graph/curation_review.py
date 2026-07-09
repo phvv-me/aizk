@@ -2,11 +2,11 @@ import uuid
 
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..extract.llm import structured
 from ..store import Group, LiveFact, Membership, Watermark, acting_as, system_session
+from ..store.context import session
 from .models import CurationReview
 
 
@@ -21,9 +21,9 @@ async def curated_groups_administered(user_id: uuid.UUID) -> list[Group]:
 
     user_id: identity whose admin memberships are read.
     """
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         group_ids = list(
-            await session.scalars(
+            await session().scalars(
                 select(Membership.group_id).where(
                     Membership.user_id == user_id,
                     Membership.role == Membership.Role.admin,
@@ -32,24 +32,23 @@ async def curated_groups_administered(user_id: uuid.UUID) -> list[Group]:
         )
         groups: list[Group] = []
         for group_id in group_ids:
-            group = await session.get(Group, group_id)
+            group = await session().get(Group, group_id)
             if group is not None and group.curated:
                 groups.append(group)
     return groups
 
 
-async def visible_canon(session: AsyncSession, group: Group) -> list[str]:
+async def visible_canon(group: Group) -> list[str]:
     """The group's already-approved claim statements, the only material a verdict may ground in.
 
     `LiveFact` reads bypass the ordinary pending-claim gate entirely, so the reviewed_at filter is
     listed explicitly here rather than relied on, the mirror image of `Group.pending_facts`'s own
     explicit null filter for the opposite half of the queue.
 
-    session: open session, already acting as the system user.
     group: the curated group whose canon grounds the judgment.
     """
     return list(
-        await session.scalars(
+        await session().scalars(
             select(LiveFact.statement)
             .where(LiveFact.scopes.contains([group.id]), LiveFact.reviewed_at.is_not(None))
             .order_by(LiveFact.recorded.desc())
@@ -107,10 +106,8 @@ async def debounced(user_id: uuid.UUID, group: Group, pending_count: int) -> boo
     group: the curated group being reviewed.
     pending_count: how many claims are pending right now.
     """
-    async with acting_as(user_id) as session:
-        last = await Watermark.read(
-            session, user_id, Watermark.Kind.curation_pending, ref=str(group.id)
-        )
+    async with acting_as(user_id):
+        last = await Watermark.read(user_id, Watermark.Kind.curation_pending, ref=str(group.id))
     return pending_count == 0 or pending_count == last
 
 
@@ -128,13 +125,13 @@ async def apply_verdicts(
     approved: claim ids the judge approved.
     rejected: claim ids the judge rejected.
     """
-    async with system_session() as session:
-        group_row = await session.get(Group, group_id)
+    async with system_session():
+        group_row = await session().get(Group, group_id)
         assert group_row is not None  # vetted moments ago by curated_groups_administered
         if approved:
-            await group_row.approve_facts(session, approved)
+            await group_row.approve_facts(approved)
         if rejected:
-            await group_row.reject_facts(session, rejected)
+            await group_row.reject_facts(rejected)
 
 
 async def review_group(user_id: uuid.UUID, group: Group) -> tuple[int, int]:
@@ -146,20 +143,19 @@ async def review_group(user_id: uuid.UUID, group: Group) -> tuple[int, int]:
     user_id: the admin member this pass reviews on behalf of, the watermark's own owner.
     group: the curated group to review.
     """
-    async with system_session() as session:
-        pending = await group.pending_facts(session)
+    async with system_session():
+        pending = await group.pending_facts()
     if await debounced(user_id, group, len(pending)):
         logger.info(
             "curation review skipped for group {}, {} still pending", group.id, len(pending)
         )
         return 0, 0
-    async with system_session() as session:
-        canon = await visible_canon(session, group)
+    async with system_session():
+        canon = await visible_canon(group)
     approved, rejected = sort_verdicts(pending, await judge_pending(canon, pending))
     await apply_verdicts(group.id, approved, rejected)
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         await Watermark.set_value(
-            session,
             user_id,
             Watermark.Kind.curation_pending,
             counter=len(pending),

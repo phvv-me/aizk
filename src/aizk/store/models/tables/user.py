@@ -7,11 +7,10 @@ from fastmcp.server.auth.providers.introspection import IntrospectionTokenVerifi
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from pydantic import AnyHttpUrl
 from sqlalchemy import Text, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import Field, Relationship
 
 from ....config import settings
-from ...context import acting_as, system_session
+from ...context import acting_as, session, system_session
 from ...mixins import Id, TableBase, Timestamped
 from .document import Document
 
@@ -48,19 +47,18 @@ class User(Id, Timestamped, TableBase, table=True):
     memberships: list[Membership] = Relationship(cascade_delete=True, passive_deletes=True)
 
     @classmethod
-    async def create(cls, session: AsyncSession, display_name: str) -> Self:
+    async def create(cls, display_name: str) -> Self:
         """Create a user row, the multi-user onboarding seam.
 
-        session: open session the row is minted through.
         display_name: human-readable label for the new actor.
         """
         user = cls(display_name=display_name)
-        session.add(user)
-        await session.flush()
+        session().add(user)
+        await session().flush()
         return user
 
     @classmethod
-    async def link_oidc(cls, session: AsyncSession, oidc_subject: str, display_name: str) -> Self:
+    async def link_oidc(cls, oidc_subject: str, display_name: str) -> Self:
         """Bind an OIDC subject to a user, minting one on first sight, the row back.
 
         Provisions the user the human or machine presenting that subject's token acts as, so a
@@ -69,19 +67,18 @@ class User(Id, Timestamped, TableBase, table=True):
         second call over the same subject just returns the existing row. Runs under a system
         session since it is a pre-auth bootstrap no user is resolved through yet.
 
-        session: open system session the row is minted through.
         oidc_subject: the subject claim the provider mints this identity's tokens against.
         display_name: human-readable label for a freshly minted user.
         """
-        user = await session.scalar(select(cls).where(cls.oidc_subject == oidc_subject))
+        user = await session().scalar(select(cls).where(cls.oidc_subject == oidc_subject))
         if user is None:
             user = cls(display_name=display_name, oidc_subject=oidc_subject)
-            session.add(user)
-            await session.flush()
+            session().add(user)
+            await session().flush()
         return user
 
     @classmethod
-    async def administers(cls, session: AsyncSession, user_id: uuid.UUID) -> bool:
+    async def administers(cls, user_id: uuid.UUID) -> bool:
         """Whether a user holds engine admin standing, the group-curation override.
 
         Read by `Group.require_admin` so the engine admin clears any group's review without a
@@ -92,18 +89,14 @@ class User(Id, Timestamped, TableBase, table=True):
         carries no row level security of its own, so any open session reads every row regardless
         of its acting user, and a caller passes in the session it already holds.
 
-        session: open session the flag is read through.
         user_id: identity whose admin standing is resolved.
         """
-        return bool(await session.scalar(select(cls.is_admin).where(cls.id == user_id)))
+        return bool(await session().scalar(select(cls.is_admin).where(cls.id == user_id)))
 
     @classmethod
-    async def list_all(cls, session: AsyncSession) -> list[Self]:
-        """List every user known to the engine in first-seen order, the roster.
-
-        session: open session the roster is read through.
-        """
-        return list(await session.scalars(select(cls).order_by(cls.created_at)))
+    async def list_all(cls) -> list[Self]:
+        """List every user known to the engine in first-seen order, the roster."""
+        return list(await session().scalars(select(cls).order_by(cls.created_at)))
 
     @classmethod
     async def recent_writes(cls, user_id: uuid.UUID, limit: int = 20) -> list[Document]:
@@ -118,9 +111,9 @@ class User(Id, Timestamped, TableBase, table=True):
         user_id: identity whose visibility scopes the audit listing.
         limit: maximum number of documents to return.
         """
-        async with acting_as(user_id) as session:
+        async with acting_as(user_id):
             return list(
-                await session.scalars(
+                await session().scalars(
                     select(Document).order_by(Document.created_at.desc()).limit(limit)
                 )
             )
@@ -137,13 +130,13 @@ class User(Id, Timestamped, TableBase, table=True):
 
         subject: the OIDC subject claim naming the external user.
         """
-        async with system_session() as session:
-            user_id = await session.scalar(select(cls.id).where(cls.oidc_subject == subject))
+        async with system_session():
+            user_id = await session().scalar(select(cls.id).where(cls.oidc_subject == subject))
             if user_id is not None:
                 return user_id
             user = cls(oidc_subject=subject)
-            session.add(user)
-            await session.flush()
+            session().add(user)
+            await session().flush()
             return user.id
 
     @classmethod
@@ -265,6 +258,6 @@ class User(Id, Timestamped, TableBase, table=True):
         if settings.oidc_groups_claim and isinstance(claim, list):
             from .group import Group  # local import breaks the User<->Group definition cycle
 
-            async with system_session() as session:
-                await Group.sync_user_groups(session, user_id, claim)
+            async with system_session():
+                await Group.sync_user_groups(user_id, claim)
         return user_id

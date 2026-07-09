@@ -121,8 +121,8 @@ def test_build_then_search_lands_a_searchable_community(
                 FactClaim(content_id=content.id, owner_id=owner) for content in contents
             )
         written = await build_communities(user_id=owner)
-        async with acting_as(owner) as session:
-            found = await community_search(session, UNIT_VECTOR, k=3)
+        async with acting_as(owner):
+            found = await community_search(UNIT_VECTOR, k=3)
         return written, found
 
     written, found = dbutil.run(probe())

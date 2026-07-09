@@ -3,11 +3,11 @@ import uuid
 from loguru import logger
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..exceptions import NotVisibleError
 from ..store import EntityClaim, EntityContent, LiveFact, Membership, Profile, acting_as
+from ..store.context import session
 from .models import ProfileReport
 from .tier_builder import TierBuilder
 
@@ -25,14 +25,14 @@ class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
         self.subject_id = subject_id
         self.profile_id: uuid.UUID | None = None
 
-    async def subject_entity(self, session: AsyncSession) -> EntityContent:
+    async def subject_entity(self) -> EntityContent:
         """This profile's subject content, raising when it is not visible to this user."""
-        entity = await session.get(EntityContent, self.subject_id)
+        entity = await session().get(EntityContent, self.subject_id)
         if entity is None:
             raise NotVisibleError(f"entity {self.subject_id} is not visible to build a profile")
         return entity
 
-    async def representative_scopes(self, session: AsyncSession) -> list[uuid.UUID]:
+    async def representative_scopes(self) -> list[uuid.UUID]:
         """A display-only scope set for this subject, never part of Profile's own uniqueness.
 
         This user's own private claim on the content when one exists, else whichever of its
@@ -41,7 +41,7 @@ class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
         content can carry several of this user's claims across different scope sets while it
         still gets exactly one rolled-up profile, keyed only on (owner_id, subject_id).
         """
-        scopes = await session.scalar(
+        scopes = await session().scalar(
             select(EntityClaim.scopes)
             .where(
                 EntityClaim.content_id == self.subject_id,
@@ -52,10 +52,10 @@ class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
         )
         return list(scopes or [])
 
-    async def subject_statements(self, session: AsyncSession) -> list[str]:
+    async def subject_statements(self) -> list[str]:
         """This subject's visible latest fact statements, oldest first."""
         return list(
-            await session.scalars(
+            await session().scalars(
                 # `live_fact` already carries the current-and-reviewed gate
                 select(LiveFact.statement)
                 .where(
@@ -70,10 +70,10 @@ class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
 
     async def gather(self) -> Grounding:
         """The subject's name, a representative scope set, and its latest facts."""
-        async with acting_as(self.user_id) as session:
-            entity = await self.subject_entity(session)
-            scopes = await self.representative_scopes(session)
-            statements = await self.subject_statements(session)
+        async with acting_as(self.user_id):
+            entity = await self.subject_entity()
+            scopes = await self.representative_scopes()
+            statements = await self.subject_statements()
             return entity.name, scopes, statements
 
     def body(self, grounding: Grounding) -> str:
@@ -111,8 +111,8 @@ class ProfileTierBuilder(TierBuilder[Grounding, ProfileReport]):
             )
             .returning(Profile.id)
         )
-        async with acting_as(self.user_id) as session:
-            self.profile_id = await session.scalar(statement)
+        async with acting_as(self.user_id):
+            self.profile_id = await session().scalar(statement)
         logger.info("built profile for entity {!r} from {} facts", name, len(statements))
         return 1
 
@@ -155,9 +155,9 @@ async def refresh_profiles(
         system user when null.
     """
     user_id = user_id or settings.system_user_id
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         subject_ids = list(
-            await session.scalars(
+            await session().scalars(
                 select(EntityClaim.content_id)
                 .where(
                     EntityClaim.owner_id == user_id,

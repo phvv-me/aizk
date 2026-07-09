@@ -32,8 +32,8 @@ def clean_ontology_growth():
     dbutil.run(dbutil.admin_exec("DELETE FROM relation_kind WHERE domain = 'auto'"))
 
     async def restore() -> None:
-        async with system_session() as session:
-            await ontology.refresh(session)
+        async with system_session():
+            await ontology.refresh()
 
     dbutil.run(restore())
 
@@ -64,10 +64,10 @@ def test_extractable_names_exclude_structural_members() -> None:
     """The extraction vocabulary never includes the system-written RAPTOR/observation types."""
 
     async def body() -> tuple[list[str], list[str]]:
-        async with system_session() as session:
+        async with system_session():
             return (
-                await EntityKind.extractable_names(session),
-                await RelationKind.extractable_names(session),
+                await EntityKind.extractable_names(),
+                await RelationKind.extractable_names(),
             )
 
     entities, relations = dbutil.run(body())
@@ -99,8 +99,8 @@ def test_mint_is_idempotent_on_a_conflicting_name(clean_ontology_growth: None) -
 
     async def body() -> tuple[int, str]:
         async with system_session() as session:
-            await EntityKind.mint(session, name="GrowthProbe", description="first", domain="auto")
-            await EntityKind.mint(session, name="GrowthProbe", description="second", domain="auto")
+            await EntityKind.mint(name="GrowthProbe", description="first", domain="auto")
+            await EntityKind.mint(name="GrowthProbe", description="second", domain="auto")
             rows = list(
                 await session.scalars(select(EntityKind).where(EntityKind.name == "GrowthProbe"))
             )
@@ -173,7 +173,7 @@ def test_resolve_suggested_type_folds_into_an_identical_existing_description(
 
     async def body() -> tuple[str, str]:
         async with system_session() as session:
-            await ontology.refresh(session)
+            await ontology.refresh()
             # a non-structural kind: structural kinds (RaptorSummary, Observation) are deliberately
             # excluded from the auto-create fold pool, so a suggestion never resolves into one.
             name, description = (
@@ -183,7 +183,7 @@ def test_resolve_suggested_type_folds_into_an_identical_existing_description(
                     .limit(1)
                 )
             ).one()
-            resolved = await resolve_suggested_type(session, description)
+            resolved = await resolve_suggested_type(description)
         return resolved, name
 
     resolved_name, existing_name = dbutil.run(body())
@@ -207,8 +207,8 @@ def test_resolve_suggested_type_mints_a_new_kind_for_a_novel_suggestion(
 
     async def body() -> EntityKind:
         async with system_session() as session:
-            await ontology.refresh(session)
-            name = await resolve_suggested_type(session, suggested)
+            await ontology.refresh()
+            name = await resolve_suggested_type(suggested)
             return await session.get_one(EntityKind, name)
 
     row = dbutil.run(body())

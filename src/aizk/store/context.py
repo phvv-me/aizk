@@ -15,15 +15,29 @@ _current_session: ContextVar[AsyncSession] = ContextVar("aizk_session")
 def session() -> AsyncSession:
     """The open session the enclosing `acting_as` block bound to the task-local context.
 
-    Store operations run inside an `acting_as` (or `system_session`) block that opens the
-    transaction and binds the acting identity; reading the session from context here lets them drop
-    the `session` parameter they once threaded through every call. Raises `NoTenantContext` when no
-    block is active, the same fail-fast a forgotten `acting_as` already earns.
+    Store operations run inside an `acting_as` (or `admin_session`) block that binds the open
+    transaction; reading the session from context here lets them drop the `session` parameter they
+    once threaded through every call. Raises `NoTenantContext` when no block is active.
     """
     try:
         return _current_session.get()
     except LookupError:
         raise NoTenantContext("no acting_as session in the current context") from None
+
+
+@asynccontextmanager
+async def bound_session(active: AsyncSession) -> AsyncGenerator[AsyncSession]:
+    """Bind an already-open session to the task-local context so `session()` reaches it.
+
+    `acting_as` binds its app-engine session through here; `admin_session` (a separate owner-role
+    engine that bypasses row level security) binds its own the same way, so `session()` resolves
+    inside an admin block too.
+    """
+    token = _current_session.set(active)
+    try:
+        yield active
+    finally:
+        _current_session.reset(token)
 
 
 @asynccontextmanager
@@ -33,7 +47,7 @@ async def acting_as(
     """Open a session whose transaction runs as a given user under row level security.
 
     Stamps `session.info` with the acting user and optional lens, which `events.bind_user` reads
-    into the app.uid and app.scopes GUCs, and binds the session to the task-local context so
+    into the app.uid and app.scopes GUCs, and binds the open session to the task-local context so
     `session()` reaches it without a threaded parameter.
 
     user_id: identity whose visibility the session acts under.
@@ -43,12 +57,9 @@ async def acting_as(
     async with (
         async_session()(info={"user": user_id, "lens": scopes}) as opened,
         opened.begin(),
+        bound_session(opened),
     ):
-        token = _current_session.set(opened)
-        try:
-            yield opened
-        finally:
-            _current_session.reset(token)
+        yield opened
 
 
 def system_session() -> AbstractAsyncContextManager[AsyncSession]:

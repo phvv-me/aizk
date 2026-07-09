@@ -230,12 +230,12 @@ def test_raptor_search_picks_the_level_by_query_breadth(owner: uuid.UUID) -> Non
 
     async def probe() -> tuple[list[int], list[int], list[int]]:
         await seed_two_levels(owner)
-        async with acting_as(owner) as session:
-            levels = await raptor_levels(session)
+        async with acting_as(owner):
+            levels = await raptor_levels()
             broad = await raptor_search(
-                session, "an overview of the whole area", basis(0), thematic=True
+                "an overview of the whole area", basis(0), thematic=True
             )
-            pointed = await raptor_search(session, "one specific detail", basis(0), thematic=False)
+            pointed = await raptor_search("one specific detail", basis(0), thematic=False)
         return levels, [lvl for _, _, lvl, _ in broad], [lvl for _, _, lvl, _ in pointed]
 
     levels, broad_levels, pointed_levels = dbutil.run(probe())
@@ -248,7 +248,7 @@ def test_raptor_search_on_an_unbuilt_tree_returns_nothing(owner: uuid.UUID) -> N
     """With no summary levels yet a query short-circuits to an empty result, never ranking."""
 
     async def probe() -> list[tuple[str, str, int, float]]:
-        async with acting_as(owner) as session:
-            return await raptor_search(session, "anything", basis(0))
+        async with acting_as(owner):
+            return await raptor_search("anything", basis(0))
 
     assert dbutil.run(probe()) == []

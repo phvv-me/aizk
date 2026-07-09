@@ -277,7 +277,7 @@ def make_round(
     async def body(session: AsyncSession) -> Recall:
         embedder = Embedder()
         [vector] = await embedder.embed([query], mode="query")
-        return Recall(session, embedder, query, vector, k, as_of, ppr)
+        return Recall(embedder, query, vector, k, as_of, ppr)
 
     return body
 
@@ -349,7 +349,7 @@ def test_hybrid_recall_recalls_the_matching_chunk_and_caps_at_k(
         await seed_chunk(doc, owner, f"exact {query}", qvec(query), ord=0)
         await seed_chunk(doc, owner, "far one", other_vec("a"), ord=1)
         await seed_chunk(doc, owner, "far two", other_vec("b"), ord=2)
-        return await in_session(owner, lambda s: hybrid_recall_rows(s, qvec(query), query, k))
+        return await in_session(owner, lambda s: hybrid_recall_rows(qvec(query), query, k))
 
     rows = dbutil.run(flow())
     chunk_texts = [row.text for row in rows if row.kind == "chunk"]
@@ -373,7 +373,7 @@ def test_hybrid_recall_hides_another_owners_private_chunk(
         theirs = await seed_doc(stranger, title="theirs")
         await seed_chunk(mine, owner, "my chunk", qvec(query))
         await seed_chunk(theirs, stranger, "secret chunk", qvec(query))
-        return await in_session(owner, lambda s: hybrid_recall_rows(s, qvec(query), query, 8))
+        return await in_session(owner, lambda s: hybrid_recall_rows(qvec(query), query, 8))
 
     rows = dbutil.run(flow())
     texts = [row.text for row in rows if row.kind == "chunk"]
@@ -401,9 +401,9 @@ def test_hybrid_recall_lens_narrows_to_the_named_group(
         await seed_chunk(doc_a, owner, "in group a", qvec(query), scopes=[group_a])
         await seed_chunk(doc_b, owner, "in group b", qvec(query), scopes=[group_b])
         lensed = await in_session(
-            owner, lambda s: hybrid_recall_rows(s, qvec(query), query, 8), scopes=(group_a,)
+            owner, lambda s: hybrid_recall_rows(qvec(query), query, 8), scopes=(group_a,)
         )
-        whole = await in_session(owner, lambda s: hybrid_recall_rows(s, qvec(query), query, 8))
+        whole = await in_session(owner, lambda s: hybrid_recall_rows(qvec(query), query, 8))
 
         def chunk(rows: list[Row]) -> list[str]:
             return [r.text for r in rows if r.kind == "chunk"]
@@ -430,7 +430,7 @@ def test_hybrid_recall_promoted_bonus_lifts_a_promoted_chunk(
         promoted = await seed_doc(owner, title="promoted", promoted_from=origin)
         await seed_chunk(plain, owner, "plain chunk", qvec(query))
         await seed_chunk(promoted, owner, "promoted chunk", qvec(query))
-        rows = await in_session(owner, lambda s: hybrid_recall_rows(s, qvec(query), query, 8))
+        rows = await in_session(owner, lambda s: hybrid_recall_rows(qvec(query), query, 8))
         return {row.text: row.score for row in rows if row.kind == "chunk"}
 
     scores = dbutil.run(flow())
@@ -451,7 +451,7 @@ def test_latest_facts_ranks_visible_current_facts(
         subject = await seed_entity("Alice")
         await seed_fact(owner, "alice wrote the paper", qvec(query), subject, recorded_from=PAST)
         await seed_fact(owner, "unrelated fact", other_vec("z"), subject, recorded_from=PAST)
-        return await in_session(owner, lambda s: latest_facts(s, qvec(query), 5, as_of))
+        return await in_session(owner, lambda s: latest_facts(qvec(query), 5, as_of))
 
     facts = dbutil.run(flow())
     assert facts
@@ -470,7 +470,7 @@ def test_session_hits_only_ranks_unpromoted_items(
         await dbutil.seed_user(owner)
         await seed_session(owner, "still working", qvec(query), kind="note")
         await seed_session(owner, "already promoted", qvec(query), promoted=True)
-        return await in_session(owner, lambda s: session_hits(s, qvec(query), 5))
+        return await in_session(owner, lambda s: session_hits(qvec(query), 5))
 
     notes = dbutil.run(flow())
     texts = [note.text for note in notes]
@@ -488,10 +488,10 @@ def test_top_profile_returns_the_closest_portrait_or_none(
         await dbutil.reset_db()
         owner = uuid.uuid4()
         await dbutil.seed_user(owner)
-        empty = await in_session(owner, lambda s: top_profile(s, qvec(query)))
+        empty = await in_session(owner, lambda s: top_profile(qvec(query)))
         subject = await seed_entity("Alice", qvec(query), owner=owner)
         await seed_profile(owner, subject, "Alice is a mathematician.")
-        filled = await in_session(owner, lambda s: top_profile(s, qvec(query)))
+        filled = await in_session(owner, lambda s: top_profile(qvec(query)))
         return empty, filled
 
     empty, filled = dbutil.run(flow())

@@ -23,8 +23,8 @@ async def decay(
     half_life_days: age in days at which an unaccessed claim's relevance halves.
     """
     user_id = user_id or settings.system_user_id
-    async with acting_as(user_id) as session:
-        archived = await FactClaim.archive_stale(session, half_life_days, settings.decay_floor)
+    async with acting_as(user_id):
+        archived = await FactClaim.archive_stale(half_life_days, settings.decay_floor)
     logger.info(
         "decay archived {count} stale claims below relevance {floor}",
         count=len(archived),

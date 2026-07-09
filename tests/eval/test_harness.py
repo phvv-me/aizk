@@ -301,8 +301,8 @@ def test_sample_facts_returns_latest_statements_in_a_stable_id_order(migrated_db
 
     async def body() -> None:
         await dbutil.reset_db()
-        async with system_session() as session:
-            user_id = (await User.create(session, "eval-sample")).id
+        async with system_session():
+            user_id = (await User.create("eval-sample")).id
         try:
             await grow_corpus(
                 user_id, Generated(), CorpusScale.for_size(20), np.random.default_rng(0)

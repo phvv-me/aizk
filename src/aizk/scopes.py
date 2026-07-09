@@ -20,6 +20,6 @@ async def resolve_scopes(scopes: str | None, user_id: uuid.UUID) -> tuple[uuid.U
     names = [name.strip() for name in (scopes or "").split(",") if name.strip()]
     if not names:
         return ()
-    async with acting_as(user_id) as session:
-        ids = [(await Group.named(session, name)).id for name in names]
+    async with acting_as(user_id):
+        ids = [(await Group.named(name)).id for name in names]
     return tuple(sorted(ids))

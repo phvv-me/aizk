@@ -5,11 +5,12 @@ from typing import Self
 from loguru import logger
 from sqlalchemy import Text, delete, false, func, select, text, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import Field
 
 from ....config import settings
 from ....exceptions import NotGroupAdminError, ScopeNotFoundError
+from ...context import session
 from ...mixins import Id, TableBase
 from ..views.live_fact import LiveFact
 from .fact import FactClaim
@@ -79,7 +80,6 @@ class Group(Id, TableBase, table=True):
     @classmethod
     async def create(
         cls,
-        session: AsyncSession,
         name: str,
         public: bool = False,
         curated: bool = False,
@@ -91,7 +91,6 @@ class Group(Id, TableBase, table=True):
         whoever mints a group can immediately write into it and review its pending canon rather
         than being locked out of their own scope until a separate `add_member` call.
 
-        session: open session the group and its founding membership are written through.
         name: unique human-readable label for the group.
         public: whether the group's rows are readable by anyone from the start.
         curated: whether a write into this group's canon must clear group-admin review before it
@@ -100,26 +99,27 @@ class Group(Id, TableBase, table=True):
             ownerless group whose members are all added explicitly.
         """
         group = cls(name=name, public=public, curated=curated)
-        session.add(group)
-        await session.flush()
+        session().add(group)
+        await session().flush()
         if creator is not None:
-            session.add(Membership(user_id=creator, group_id=group.id, role=Membership.Role.admin))
+            session().add(
+                Membership(user_id=creator, group_id=group.id, role=Membership.Role.admin)
+            )
         return group
 
     @classmethod
-    async def named(cls, session: AsyncSession, name: str) -> Self:
+    async def named(cls, name: str) -> Self:
         """Resolve a group by name, raising when no such group exists.
 
-        session: open session the group is read through.
         name: unique group name to resolve.
         """
-        group = await session.scalar(select(cls).where(cls.name == name))
+        group = await session().scalar(select(cls).where(cls.name == name))
         if group is None:
             raise ScopeNotFoundError(f"no scope named {name!r}")
         return group
 
     @classmethod
-    async def for_oidc_org(cls, session: AsyncSession, oidc_org_id: str, name: str) -> Self:
+    async def for_oidc_org(cls, oidc_org_id: str, name: str) -> Self:
         """Resolve the local group mirroring a Logto organization, minting it on first sight.
 
         The bridge that lets Logto own membership while aizk keeps the scope lattice: a row's
@@ -127,25 +127,22 @@ class Group(Id, TableBase, table=True):
         organization id onto the one local group that stands for it, creating it the first time a
         member of that organization is seen. Idempotent on the organization id's unique constraint.
 
-        session: open session the group is read or minted through.
         oidc_org_id: the Logto organization id this group is the local projection of.
         name: label to give the group when first minted, ignored once the mirror exists. The
             organization id itself is appended when the bare label is already taken, since a group
             name is unique but two organizations may share a display name.
         """
-        group = await session.scalar(select(cls).where(cls.oidc_org_id == oidc_org_id))
+        group = await session().scalar(select(cls).where(cls.oidc_org_id == oidc_org_id))
         if group is not None:
             return group
-        taken = await session.scalar(select(cls.id).where(cls.name == name))
+        taken = await session().scalar(select(cls.id).where(cls.name == name))
         group = cls(name=f"{name} ({oidc_org_id})" if taken else name, oidc_org_id=oidc_org_id)
-        session.add(group)
-        await session.flush()
+        session().add(group)
+        await session().flush()
         return group
 
     @classmethod
-    async def sync_user_groups(
-        cls, session: AsyncSession, user_id: uuid.UUID, memberships: list[dict[str, str]]
-    ) -> None:
+    async def sync_user_groups(cls, user_id: uuid.UUID, memberships: list[dict[str, str]]) -> None:
         """Reconcile a user's group memberships to exactly what a verified token claims.
 
         The token is the source of truth for who belongs where. Each entry names a Logto
@@ -157,7 +154,6 @@ class Group(Id, TableBase, table=True):
         rather than a hand-run `add_member`. Runs under the system role, since it writes the
         non-scoped `membership` table on the caller's behalf.
 
-        session: open system-role session the memberships are reconciled through.
         user_id: the aizk user the token resolved to.
         memberships: the token's claim, each entry `{"id": <logto org id>, "role": <role>,
             "name": <label>}`; an empty list drops every membership the user held.
@@ -177,12 +173,12 @@ class Group(Id, TableBase, table=True):
             if not isinstance(org_id, str):
                 logger.warning("skipping group claim entry with non-string id {!r}", entry)
                 continue
-            group = await cls.for_oidc_org(session, org_id, name)
+            group = await cls.for_oidc_org(org_id, name)
             desired[group.id] = role
         # reconcile only the Logto-backed memberships; a hand-managed local group carries no
         # oidc_org_id and is never dropped just because a token happens not to mention it
         oidc_backed = select(cls.id).where(cls.oidc_org_id.is_not(None))
-        await session.execute(
+        await session().execute(
             delete(Membership).where(
                 Membership.user_id == user_id,
                 Membership.group_id.in_(oidc_backed),
@@ -190,70 +186,62 @@ class Group(Id, TableBase, table=True):
             )
         )
         for group_id, role in desired.items():
-            await session.execute(
+            await session().execute(
                 pg_insert(Membership)
                 .values(user_id=user_id, group_id=group_id, role=role)
                 .on_conflict_do_update(index_elements=["user_id", "group_id"], set_={"role": role})
             )
 
     @classmethod
-    async def list_all(cls, session: AsyncSession) -> list[dict[str, str | bool | int]]:
-        """List every group with its visibility and member count, the admin roster view.
-
-        session: open session the roster is read through.
-        """
+    async def list_all(cls) -> list[dict[str, str | bool | int]]:
+        """List every group with its visibility and member count, the admin roster view."""
         counted = (
             select(cls.name, cls.public, func.count(Membership.user_id).label("members"))
             .outerjoin(Membership, Membership.group_id == cls.id)
             .group_by(cls.name, cls.public)
             .order_by(cls.name)
         )
-        rows = (await session.execute(counted)).all()
+        rows = (await session().execute(counted)).all()
         return [
             {"name": name, "public": public, "members": members} for name, public, members in rows
         ]
 
-    async def add_member(
-        self, session: AsyncSession, user_id: uuid.UUID, role: str = "writer"
-    ) -> None:
+    async def add_member(self, user_id: uuid.UUID, role: str = "writer") -> None:
         """Add a user to this group so its scope becomes visible under row security.
 
-        session: open session the membership is written through.
         user_id: user joining the group.
         role: standing within the group, reader for read-only visibility, writer or admin to also
             write into the shared scope.
         """
-        session.add(Membership(user_id=user_id, group_id=self.id, role=role))
+        session().add(Membership(user_id=user_id, group_id=self.id, role=role))
 
-    async def remove_member(self, session: AsyncSession, user_id: uuid.UUID) -> None:
+    async def remove_member(self, user_id: uuid.UUID) -> None:
         """Remove a user from this group, so its scope stops being visible to them.
 
         Rows the user wrote into the scope stay with the group, owned but no longer reachable
         by the departed member, mirroring how a team keeps a leaver's contributions.
 
-        session: open session the membership is removed through.
         user_id: user leaving the group.
         """
-        await session.execute(
+        await session().execute(
             delete(Membership)
             .where(Membership.user_id == user_id)
             .where(Membership.group_id == self.id)
         )
 
-    async def admin(self, session: AsyncSession, user_id: uuid.UUID) -> bool:
+    async def admin(self, user_id: uuid.UUID) -> bool:
         """Whether a user holds the admin membership role in this group.
 
-        session: open session the membership is read through.
         user_id: identity whose standing in the group is checked.
         """
-        role = await session.scalar(
+        role = await session().scalar(
             select(Membership.role).where(
                 Membership.user_id == user_id, Membership.group_id == self.id
             )
         )
         return role == Membership.Role.admin
 
-    async def require_admin(self, session: AsyncSession, user_id: uuid.UUID) -> None:
+    async def require_admin(self, user_id: uuid.UUID) -> None:
         """Refuse a call unless the user administers this group or the whole engine.
 
         Standing comes from holding this group's own admin membership role, or from the
@@ -261,38 +249,33 @@ class Group(Id, TableBase, table=True):
         both work its curation queue, the gate every curation tool runs its body through before it
         ever reads or writes a fact.
 
-        session: open session the membership and the server-wide flag are both read through,
-            whichever user it acts as, since neither table carries row level security of
-            its own.
         user_id: caller whose standing is checked.
         """
-        if await User.administers(session, user_id) or await self.admin(session, user_id):
+        if await User.administers(user_id) or await self.admin(user_id):
             return
         raise NotGroupAdminError(f"{user_id} does not administer group {self.id}")
 
-    async def publish(self, session: AsyncSession, public: bool = True) -> None:
+    async def publish(self, public: bool = True) -> None:
         """Flip this group's public read flag, the shared-brain publishing switch.
 
         A public group's rows are readable by any caller, member or not, anonymous included, while
         writing keeps requiring an explicit writer or admin membership.
 
-        session: open session the flag is written through.
         public: the new visibility, true to publish and false to make members-only again.
         """
         self.public = public
-        session.add(self)
+        session().add(self)
 
-    async def curate(self, session: AsyncSession, curated: bool = True) -> None:
+    async def curate(self, curated: bool = True) -> None:
         """Flip this group's curation flag, the shared-brain review-gate switch.
 
         A curated group's writes land pending until a group admin approves them through
         `approve_facts`, while an uncurated group keeps writing straight into the visible canon.
 
-        session: open session the flag is written through.
         curated: the new curation state.
         """
         self.curated = curated
-        session.add(self)
+        session().add(self)
 
     async def demote_scoped_rows(self) -> None:
         """Drop colliding claims, then demote every scoped row naming this group back to private.
@@ -327,22 +310,20 @@ class Group(Id, TableBase, table=True):
         finally:
             await admin.dispose()
 
-    async def delete(self, session: AsyncSession) -> None:
+    async def delete(self) -> None:
         """Delete this group, its memberships cascading and its rows falling back to private.
 
         `demote_scoped_rows` is what makes the group's shared rows fall back to their owners'
         private scope rather than left naming a group that no longer exists, since a scope-set
         array carries no foreign key for Postgres to cascade through on its own the way a
         singleton `scope` column once did.
-
-        session: open session the group is deleted through.
         """
         await self.demote_scoped_rows()
-        await session.delete(self)
+        await session().delete(self)
 
     @classmethod
     async def review_stamp(
-        cls, session: AsyncSession, scopes: tuple[uuid.UUID, ...], owner_id: uuid.UUID
+        cls, scopes: tuple[uuid.UUID, ...], owner_id: uuid.UUID
     ) -> datetime | None:
         """The reviewed_at a new claim in this scope set, written by this owner, should carry.
 
@@ -352,20 +333,18 @@ class Group(Id, TableBase, table=True):
         group the set names, otherwise the claim lands pending, invisible to everyone but its
         author until a group admin approves it through `approve_facts`.
 
-        session: open session the groups and memberships are read from, neither table row-level
-            secured so any user-scoped session reads both regardless of the acting user.
         scopes: the group set the new claim is written into, private when empty.
         owner_id: user writing the claim, whose admin standing in every curated group decides.
         """
         if not scopes:
             return datetime.now(UTC)
         curated_ids = set(
-            await session.scalars(select(cls.id).where(cls.id.in_(scopes), cls.curated))
+            await session().scalars(select(cls.id).where(cls.id.in_(scopes), cls.curated))
         )
         if not curated_ids:
             return datetime.now(UTC)
         admin_ids = set(
-            await session.scalars(
+            await session().scalars(
                 select(Membership.group_id).where(
                     Membership.user_id == owner_id,
                     Membership.group_id.in_(curated_ids),
@@ -375,7 +354,7 @@ class Group(Id, TableBase, table=True):
         )
         return datetime.now(UTC) if curated_ids <= admin_ids else None
 
-    async def pending_facts(self, session: AsyncSession) -> list[LiveFact]:
+    async def pending_facts(self) -> list[LiveFact]:
         """The unreviewed live claims touching this curated group, the group admin's review queue.
 
         Runs under a session already acting as the system user, whose server-wide admin
@@ -388,20 +367,16 @@ class Group(Id, TableBase, table=True):
         `live_fact` view already carrying that predicate, and since it is a distinct mapped class
         the `do_orm_execute` listener's `FactClaim`-keyed loader criteria never attaches, so a
         claim still pending review from another author surfaces here too.
-
-        session: open session, already acting as the system user.
         """
         return list(
-            await session.scalars(
+            await session().scalars(
                 select(LiveFact)
                 .where(LiveFact.scopes.contains([self.id]), LiveFact.reviewed_at.is_(None))
                 .order_by(LiveFact.recorded)
             )
         )
 
-    async def approve_facts(
-        self, session: AsyncSession, fact_ids: list[uuid.UUID] | None = None
-    ) -> int:
+    async def approve_facts(self, fact_ids: list[uuid.UUID] | None = None) -> int:
         """Stamp reviewed_at=now() on this curated group's pending claims, return how many changed.
 
         Runs under a session already acting as the system user, which the curation-admin row
@@ -409,7 +384,6 @@ class Group(Id, TableBase, table=True):
         regardless of the calling group or server admin's own membership. `require_admin` is the
         gate that already vetted them before this ever runs.
 
-        session: open session, already acting as the system user.
         fact_ids: claim ids to approve, every still-pending claim touching the group when null.
         """
         statement = update(FactClaim).where(
@@ -417,10 +391,10 @@ class Group(Id, TableBase, table=True):
         )
         if fact_ids is not None:
             statement = statement.where(FactClaim.id.in_(fact_ids))
-        result = await session.execute(statement.values(reviewed_at=datetime.now(UTC)))
+        result = await session().execute(statement.values(reviewed_at=datetime.now(UTC)))
         return result.rowcount or 0
 
-    async def reject_facts(self, session: AsyncSession, fact_ids: list[uuid.UUID]) -> int:
+    async def reject_facts(self, fact_ids: list[uuid.UUID]) -> int:
         """Delete this curated group's named pending claims, return how many were removed.
 
         A rejected claim never became canonical, so it is deleted outright rather than merely
@@ -428,10 +402,9 @@ class Group(Id, TableBase, table=True):
         fact content it staked, if any other container's claim still references it, is untouched,
         immutable and shared beneath whichever claims remain.
 
-        session: open session, already acting as the system user.
         fact_ids: claim ids to reject.
         """
-        result = await session.execute(
+        result = await session().execute(
             delete(FactClaim).where(
                 FactClaim.scopes.contains([self.id]),
                 FactClaim.reviewed_at.is_(None),

@@ -8,12 +8,12 @@ from loguru import logger
 from mainboard.profiling import span
 from pgvector.sqlalchemy import HALFVEC
 from sqlalchemy import ColumnElement, Result, Row, bindparam, or_, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..graph.algos import ppr_expand
 from ..serving import Embedder, Reranker
 from ..store import EntityContent, FactClaim, FactContent, Profile, SessionItem, acting_as
+from ..store.context import session
 from .models import FactHit, Hit, SessionNote
 
 
@@ -82,22 +82,19 @@ def sql_fact_hit(row: Row) -> FactHit:
     return FactHit.model_validate(row, from_attributes=True)
 
 
-async def hybrid_recall_rows(
-    session: AsyncSession, vector: list[float], query: str, k: int
-) -> Sequence[Row]:
+async def hybrid_recall_rows(vector: list[float], query: str, k: int) -> Sequence[Row]:
     """Call the hybrid_recall SQL function, one round trip fusing chunks and live facts.
 
     Feeds rrf_k and fusion_depth from live settings at call time. The trusted-first promoted bonus
     is baked into the function body instead, since a SQL-language function takes no config of its
     own.
 
-    session: open, user-scoped session the call runs under, row level security and all.
     vector: dense query embedding.
     query: natural-language search string, the lexical lane's match text.
     k: fused chunk hits and seed facts the function returns per kind.
     """
     async with stage("hybrid_recall_sql"):
-        rows = await session.execute(
+        rows = await session().execute(
             text(
                 "SELECT * FROM hybrid_recall(:qvec, :qtext, :k, :rrf_k, :fusion_depth)"
             ).bindparams(bindparam("qvec", type_=HALFVEC(len(vector)))),
@@ -113,7 +110,6 @@ async def hybrid_recall_rows(
 
 
 async def latest_facts(
-    session: AsyncSession,
     vector: list[float],
     k: int,
     as_of: datetime | None,
@@ -125,14 +121,13 @@ async def latest_facts(
     statement, predicate, and embedding live on the deduplicated content while `valid` is the
     claim's own per-container bi-temporal state.
 
-    session: open, user-scoped session.
     vector: dense query embedding.
     k: number of facts to return.
     as_of: world-time the facts must be valid at, the live graph when null.
     """
     distance = FactContent.embedding.cosine_distance(vector)
     gate, opts = temporal_filter(as_of)
-    rows = await session.execute(
+    rows = await session().execute(
         select(
             FactContent.statement,
             FactContent.predicate,
@@ -149,7 +144,7 @@ async def latest_facts(
 
 
 async def seed_entities(
-    session: AsyncSession, vector: list[float], as_of: datetime | None
+    vector: list[float], as_of: datetime | None
 ) -> tuple[list[uuid.UUID], set[uuid.UUID]]:
     """The closest latest facts' own ids and the entity ids they touch, the multi-hop seed pool.
 
@@ -157,13 +152,12 @@ async def seed_entities(
     both start from this same closest-facts read before diverging into a one-hop join or a
     pagerank expansion.
 
-    session: open, user-scoped session.
     vector: dense query embedding.
     as_of: world-time the seed facts must be valid at, the live graph when null.
     """
     distance = FactContent.embedding.cosine_distance(vector)
     gate, opts = temporal_filter(as_of)
-    rows = await session.execute(
+    rows = await session().execute(
         select(FactContent.id, FactContent.subject_id, FactContent.object_id)
         .join(FactClaim, FactClaim.content_id == FactContent.id)
         .where(FactContent.embedding.is_not(None), *gate)
@@ -179,7 +173,6 @@ async def seed_entities(
 
 
 async def facts_near(
-    session: AsyncSession,
     entity_ids: Collection[uuid.UUID],
     vector: list[float],
     as_of: datetime | None,
@@ -193,7 +186,6 @@ async def facts_near(
     expanded entity set is ready, differing only in which entities they pass and whether they
     exclude the seed facts themselves or apply a relevance margin.
 
-    session: open, user-scoped session.
     entity_ids: entities a fact must touch as subject or object to match.
     vector: dense query embedding.
     as_of: world-time the facts must be valid at, the live graph when null.
@@ -210,7 +202,7 @@ async def facts_near(
     ]
     if exclude:
         clauses.append(FactContent.id.not_in(exclude))
-    rows = await session.execute(
+    rows = await session().execute(
         select(
             FactContent.statement,
             FactContent.predicate,
@@ -227,7 +219,6 @@ async def facts_near(
 
 
 async def session_hits(
-    session: AsyncSession,
     vector: list[float],
     k: int,
 ) -> list[SessionNote]:
@@ -243,7 +234,7 @@ async def session_hits(
     k: number of working items to return.
     """
     distance = SessionItem.embedding.cosine_distance(vector)
-    rows = await session.execute(
+    rows = await session().execute(
         select(SessionItem.text, SessionItem.kind, distance.label("distance"))
         .where(SessionItem.embedding.is_not(None), SessionItem.promoted_at.is_(None))
         .order_by(distance)
@@ -252,17 +243,16 @@ async def session_hits(
     return [SessionNote(text=row.text, kind=row.kind, score=1.0 - row.distance) for row in rows]
 
 
-async def top_profile(session: AsyncSession, vector: list[float]) -> str | None:
+async def top_profile(vector: list[float]) -> str | None:
     """The stored profile of the entity closest to the query, the portrait lane of a recall.
 
     Ranks the visible profiled entities by embedding distance to the query and returns the best
     match's rolled-up summary, so a recall about a known subject opens with its portrait rather
     than reassembling identity from individual facts. Null when nothing visible is profiled.
 
-    session: open, user-scoped session.
     vector: dense query embedding.
     """
-    return await session.scalar(
+    return await session().scalar(
         select(Profile.summary)
         .join(EntityContent, EntityContent.id == Profile.subject_id)
         .where(EntityContent.embedding.is_not(None))
@@ -291,8 +281,8 @@ async def graph_search(
     """
     user_id = user_id or settings.system_user_id
     [vector] = await Embedder().embed([query], mode="query")
-    async with acting_as(user_id) as session:
-        hits = await latest_facts(session, vector, k, as_of)
+    async with acting_as(user_id):
+        hits = await latest_facts(vector, k, as_of)
     logger.info("graph search for {query!r} returned {count} facts", query=query, count=len(hits))
     return hits
 
@@ -349,8 +339,8 @@ async def search(
     user_id = user_id or settings.system_user_id
     embedder = Embedder()
     [vector] = await embedder.embed([query], mode="query")
-    async with acting_as(user_id) as session:
-        round_ = Recall(session, embedder, query, vector, k, None, ppr=False)
+    async with acting_as(user_id):
+        round_ = Recall(embedder, query, vector, k, None, ppr=False)
         hits, _, _ = await round_.hybrid_recall()
     return await rerank_hits(query, hits, k) if settings.rerank else hits
 
@@ -445,12 +435,11 @@ def log_gap_fill(query: str, added_hits: int, added_facts: int) -> None:
 
 
 class Recall:
-    """One recall round bound to the session, query, and lane toggles its helpers otherwise repeat.
+    """One recall round bound to the query and lane toggles its helpers otherwise repeat.
 
-    Binds the shared (session, vector, k, as_of) tuple once so each method reads it off `self`
+    Binds the shared (vector, k, as_of) tuple once so each method reads it off `self`
     instead of re-threading it through every call.
 
-    session: open, user-scoped session.
     embedder: the embedder an evidence-gap round re-embeds its expanded query with.
     query: natural-language search string, also the lexical and rerank text.
     vector: dense query embedding.
@@ -461,7 +450,6 @@ class Recall:
 
     def __init__(
         self,
-        session: AsyncSession,
         embedder: Embedder,
         query: str,
         vector: list[float],
@@ -469,12 +457,12 @@ class Recall:
         as_of: datetime | None,
         ppr: bool,
     ) -> None:
-        self.session, self.embedder, self.query = session, embedder, query
+        self.embedder, self.query = embedder, query
         self.vector, self.k, self.as_of, self.ppr = vector, k, as_of, ppr
 
     async def top_profile(self) -> str | None:
         """The stored profile of the entity closest to the query, the portrait lane of a recall."""
-        return await top_profile(self.session, self.vector)
+        return await top_profile(self.vector)
 
     async def hybrid_recall(self) -> tuple[list[Hit], list[FactHit], list[FactHit]]:
         """Run the hybrid_recall SQL function once and split its rows into hits, seeds, neighbors.
@@ -484,7 +472,7 @@ class Recall:
         way, since only the chunk lane is ever reranked.
         """
         depth = settings.rerank_candidates if settings.rerank else self.k
-        rows = await hybrid_recall_rows(self.session, self.vector, self.query, depth)
+        rows = await hybrid_recall_rows(self.vector, self.query, depth)
         hits = [
             Hit.model_validate(row, from_attributes=True) for row in rows if row.kind == "chunk"
         ]
@@ -494,23 +482,21 @@ class Recall:
 
     async def latest_facts(self) -> list[FactHit]:
         """The closest latest facts visible at this round's as_of, the as_of replay's seed lane."""
-        return await latest_facts(self.session, self.vector, self.k, self.as_of)
+        return await latest_facts(self.vector, self.k, self.as_of)
 
     async def session_hits(self, k: int) -> list[SessionNote]:
         """The still-working session items ranked against this round's vector, the working lane.
 
         k: number of working items to return, independent of this round's fused-hit k.
         """
-        return await session_hits(self.session, self.vector, k)
+        return await session_hits(self.vector, k)
 
     async def neighbor_facts(self) -> list[FactHit]:
         """The one-hop neighbor facts of this round's closest latest facts, excluding the seeds."""
-        seed_ids, entity_ids = await seed_entities(self.session, self.vector, self.as_of)
+        seed_ids, entity_ids = await seed_entities(self.vector, self.as_of)
         if not entity_ids:
             return []
-        return await facts_near(
-            self.session, entity_ids, self.vector, self.as_of, self.k, exclude=seed_ids
-        )
+        return await facts_near(entity_ids, self.vector, self.as_of, self.k, exclude=seed_ids)
 
     async def ppr_facts(self) -> list[FactHit]:
         """The facts personalized pagerank reaches from this round's seed entities.
@@ -519,16 +505,14 @@ class Recall:
         returning to, then keeps only the reached facts whose own score clears ppr_margin, the
         HippoRAG lane past the one-hop neighborhood `neighbor_facts` covers.
         """
-        _, entity_ids = await seed_entities(self.session, self.vector, self.as_of)
+        _, entity_ids = await seed_entities(self.vector, self.as_of)
         expanded = (
-            await ppr_expand(self.session, list(entity_ids), top_n=settings.graph_facts_k)
-            if entity_ids
-            else []
+            await ppr_expand(list(entity_ids), top_n=settings.graph_facts_k) if entity_ids else []
         )
         if not expanded:
             return []
         return await facts_near(
-            self.session, expanded, self.vector, self.as_of, self.k, margin=settings.ppr_margin
+            expanded, self.vector, self.as_of, self.k, margin=settings.ppr_margin
         )
 
     async def replay_seeds(
@@ -600,7 +584,7 @@ class Recall:
         expanded_query = expand_query(self.query, hits, facts)
         vector = await self.expanded_vector(expanded_query)
         more_hits, more_facts = await Recall(
-            self.session, self.embedder, expanded_query, vector, self.k, self.as_of, self.ppr
+            self.embedder, expanded_query, vector, self.k, self.as_of, self.ppr
         ).assemble_context()
         # cap each merged lane at the budget the first round already surfaces, k reranked hits and
         # the seed-plus-neighbor fact pool, so one gap-fill round widens a thin recall without

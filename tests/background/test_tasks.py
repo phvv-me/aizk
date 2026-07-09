@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
 
+import dbutil
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -166,15 +167,14 @@ def test_growth_gated_passes_build_only_past_the_threshold(
 
     @asynccontextmanager
     async def fake_acting_as(user_id: uuid.UUID) -> AsyncIterator[GateSession]:
-        yield GateSession(current)
+        gate = GateSession(current)
+        async with dbutil.use_session(gate):
+            yield gate
 
-    async def fake_read(
-        session: object, owner_id: uuid.UUID, watermark_kind: Watermark.Kind, **kw: object
-    ) -> int:
+    async def fake_read(owner_id: uuid.UUID, watermark_kind: Watermark.Kind, **kw: object) -> int:
         return last
 
     async def fake_set_value(
-        session: object,
         owner_id: uuid.UUID,
         watermark_kind: Watermark.Kind,
         counter: int = 0,
@@ -260,7 +260,6 @@ def test_self_improve_stores_the_scorecard_and_flips_only_on_a_significant_win(
         yield None
 
     async def fake_set_value(
-        session: object,
         owner_id: uuid.UUID,
         kind: Watermark.Kind,
         counter: int = 0,

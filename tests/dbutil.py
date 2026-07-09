@@ -2,13 +2,26 @@ import asyncio
 import functools
 import uuid
 from collections.abc import Coroutine, Sequence
+from contextlib import AbstractAsyncContextManager
+from typing import cast
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 
 from aizk.config import settings
 from aizk.store import acting_as
+from aizk.store.context import bound_session
+
+
+def use_session(fake: object) -> AbstractAsyncContextManager[AsyncSession]:
+    """Bind a fake session to the task-local context so `session()` resolves to it in a unit test.
+
+    Production `acting_as`/`admin_session` bind their real session; a test that fakes `acting_as`
+    binds its stand-in the same way through here, so the converted `session()` reads it back.
+    """
+    return bound_session(cast(AsyncSession, fake))
+
 
 # every app-owned table, ordered so a single TRUNCATE ... CASCADE wipes the world between DB
 # examples. `live_fact` is a view over `fact_claim`/`fact_content`, so it is never truncated.

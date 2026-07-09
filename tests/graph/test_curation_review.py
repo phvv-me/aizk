@@ -135,7 +135,7 @@ def test_visible_canon_returns_only_reviewed_claims_newest_first(brain: Brain) -
         async with system_session() as session:
             group = await session.get(Group, brain.group)
             assert group is not None
-            return await visible_canon(session, group)
+            return await visible_canon(group)
 
     canon = dbutil.run(probe())
     assert "still pending" not in canon
@@ -174,9 +174,9 @@ def test_review_group_approves_rejects_and_advances_the_watermark(
         counts = await review_group(brain.reviewer, group)
         keep_exists, keep_reviewed = await claim_state(keep)
         drop_exists, _ = await claim_state(drop)
-        async with acting_as(brain.reviewer) as session:
+        async with acting_as(brain.reviewer):
             watermark = await Watermark.read(
-                session, brain.reviewer, Watermark.Kind.curation_pending, ref=str(brain.group)
+                brain.reviewer, Watermark.Kind.curation_pending, ref=str(brain.group)
             )
         return keep_exists, keep_reviewed, drop_exists, counts, watermark
 

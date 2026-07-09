@@ -1,9 +1,9 @@
 {
   "errors": [
     {
-      "line": 150,
+      "line": 151,
       "column": 27,
-      "stop_line": 150,
+      "stop_line": 151,
       "stop_column": 58,
       "path": "src/aizk/admin.py",
       "code": -2,
@@ -13,10 +13,10 @@
       "severity": "error"
     },
     {
-      "line": 157,
-      "column": 68,
-      "stop_line": 157,
-      "stop_column": 83,
+      "line": 158,
+      "column": 70,
+      "stop_line": 158,
+      "stop_column": 85,
       "path": "src/aizk/admin.py",
       "code": -2,
       "name": "missing-attribute",
@@ -25,9 +25,9 @@
       "severity": "error"
     },
     {
-      "line": 254,
+      "line": 248,
       "column": 13,
-      "stop_line": 254,
+      "stop_line": 248,
       "stop_column": 56,
       "path": "src/aizk/background/tasks.py",
       "code": -2,
@@ -37,9 +37,9 @@
       "severity": "error"
     },
     {
-      "line": 271,
+      "line": 265,
       "column": 13,
-      "stop_line": 271,
+      "stop_line": 265,
       "stop_column": 51,
       "path": "src/aizk/background/tasks.py",
       "code": -2,
@@ -49,9 +49,9 @@
       "severity": "error"
     },
     {
-      "line": 520,
+      "line": 517,
       "column": 20,
-      "stop_line": 520,
+      "stop_line": 517,
       "stop_column": 55,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -61,9 +61,9 @@
       "severity": "error"
     },
     {
-      "line": 521,
+      "line": 518,
       "column": 49,
-      "stop_line": 521,
+      "stop_line": 518,
       "stop_column": 75,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -73,9 +73,9 @@
       "severity": "error"
     },
     {
-      "line": 550,
+      "line": 544,
       "column": 16,
-      "stop_line": 550,
+      "stop_line": 544,
       "stop_column": 50,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -85,9 +85,9 @@
       "severity": "error"
     },
     {
-      "line": 553,
+      "line": 547,
       "column": 16,
-      "stop_line": 553,
+      "stop_line": 547,
       "stop_column": 41,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -97,10 +97,10 @@
       "severity": "error"
     },
     {
-      "line": 563,
-      "column": 63,
-      "stop_line": 563,
-      "stop_column": 88,
+      "line": 557,
+      "column": 65,
+      "stop_line": 557,
+      "stop_column": 90,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
       "name": "missing-attribute",
@@ -109,10 +109,10 @@
       "severity": "error"
     },
     {
-      "line": 683,
-      "column": 57,
-      "stop_line": 683,
-      "stop_column": 75,
+      "line": 677,
+      "column": 59,
+      "stop_line": 677,
+      "stop_column": 77,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
       "name": "missing-attribute",
@@ -121,9 +121,9 @@
       "severity": "error"
     },
     {
-      "line": 685,
+      "line": 679,
       "column": 41,
-      "stop_line": 685,
+      "stop_line": 679,
       "stop_column": 61,
       "path": "src/aizk/eval/scale.py",
       "code": -2,
@@ -133,9 +133,9 @@
       "severity": "error"
     },
     {
-      "line": 41,
+      "line": 39,
       "column": 13,
-      "stop_line": 41,
+      "stop_line": 39,
       "stop_column": 38,
       "path": "src/aizk/graph/algos.py",
       "code": -2,
@@ -145,9 +145,9 @@
       "severity": "error"
     },
     {
-      "line": 42,
+      "line": 40,
       "column": 13,
-      "stop_line": 42,
+      "stop_line": 40,
       "stop_column": 37,
       "path": "src/aizk/graph/algos.py",
       "code": -2,
@@ -157,9 +157,9 @@
       "severity": "error"
     },
     {
-      "line": 47,
+      "line": 45,
       "column": 16,
-      "stop_line": 47,
+      "stop_line": 45,
       "stop_column": 41,
       "path": "src/aizk/graph/algos.py",
       "code": -2,
@@ -169,9 +169,9 @@
       "severity": "error"
     },
     {
-      "line": 64,
+      "line": 62,
       "column": 13,
-      "stop_line": 64,
+      "stop_line": 62,
       "stop_column": 38,
       "path": "src/aizk/graph/algos.py",
       "code": -2,
@@ -181,9 +181,9 @@
       "severity": "error"
     },
     {
-      "line": 65,
+      "line": 63,
       "column": 13,
-      "stop_line": 65,
+      "stop_line": 63,
       "stop_column": 36,
       "path": "src/aizk/graph/algos.py",
       "code": -2,
@@ -193,9 +193,9 @@
       "severity": "error"
     },
     {
-      "line": 66,
+      "line": 64,
       "column": 13,
-      "stop_line": 66,
+      "stop_line": 64,
       "stop_column": 35,
       "path": "src/aizk/graph/algos.py",
       "code": -2,
@@ -205,9 +205,9 @@
       "severity": "error"
     },
     {
-      "line": 155,
+      "line": 150,
       "column": 20,
-      "stop_line": 155,
+      "stop_line": 150,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -217,9 +217,9 @@
       "severity": "error"
     },
     {
-      "line": 265,
+      "line": 258,
       "column": 36,
-      "stop_line": 265,
+      "stop_line": 258,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -229,9 +229,9 @@
       "severity": "error"
     },
     {
-      "line": 446,
+      "line": 437,
       "column": 16,
-      "stop_line": 446,
+      "stop_line": 437,
       "stop_column": 38,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -241,9 +241,9 @@
       "severity": "error"
     },
     {
-      "line": 452,
+      "line": 443,
       "column": 44,
-      "stop_line": 452,
+      "stop_line": 443,
       "stop_column": 64,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -253,9 +253,9 @@
       "severity": "error"
     },
     {
-      "line": 453,
+      "line": 444,
       "column": 37,
-      "stop_line": 453,
+      "stop_line": 444,
       "stop_column": 58,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -265,9 +265,9 @@
       "severity": "error"
     },
     {
-      "line": 917,
+      "line": 903,
       "column": 21,
-      "stop_line": 917,
+      "stop_line": 903,
       "stop_column": 47,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -277,9 +277,9 @@
       "severity": "error"
     },
     {
-      "line": 917,
+      "line": 903,
       "column": 59,
-      "stop_line": 917,
+      "stop_line": 903,
       "stop_column": 84,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -290,9 +290,9 @@
     },
     {
       "line": 129,
-      "column": 58,
+      "column": 60,
       "stop_line": 129,
-      "stop_column": 83,
+      "stop_column": 85,
       "path": "src/aizk/graph/communities.py",
       "code": -2,
       "name": "missing-attribute",
@@ -301,9 +301,9 @@
       "severity": "error"
     },
     {
-      "line": 156,
+      "line": 154,
       "column": 16,
-      "stop_line": 156,
+      "stop_line": 154,
       "stop_column": 51,
       "path": "src/aizk/graph/communities.py",
       "code": -2,
@@ -313,9 +313,9 @@
       "severity": "error"
     },
     {
-      "line": 159,
+      "line": 157,
       "column": 16,
-      "stop_line": 159,
+      "stop_line": 157,
       "stop_column": 42,
       "path": "src/aizk/graph/communities.py",
       "code": -2,
@@ -337,9 +337,9 @@
       "severity": "error"
     },
     {
-      "line": 54,
+      "line": 53,
       "column": 20,
-      "stop_line": 54,
+      "stop_line": 53,
       "stop_column": 44,
       "path": "src/aizk/graph/curation_review.py",
       "code": -2,
@@ -349,9 +349,9 @@
       "severity": "error"
     },
     {
-      "line": 54,
+      "line": 53,
       "column": 58,
-      "stop_line": 54,
+      "stop_line": 53,
       "stop_column": 85,
       "path": "src/aizk/graph/curation_review.py",
       "code": -2,
@@ -373,9 +373,9 @@
       "severity": "error"
     },
     {
-      "line": 63,
+      "line": 58,
       "column": 36,
-      "stop_line": 63,
+      "stop_line": 58,
       "stop_column": 64,
       "path": "src/aizk/graph/promote.py",
       "code": -2,
@@ -385,9 +385,9 @@
       "severity": "error"
     },
     {
-      "line": 399,
+      "line": 401,
       "column": 59,
-      "stop_line": 399,
+      "stop_line": 401,
       "stop_column": 79,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -397,10 +397,10 @@
       "severity": "error"
     },
     {
-      "line": 442,
-      "column": 59,
-      "stop_line": 442,
-      "stop_column": 85,
+      "line": 444,
+      "column": 61,
+      "stop_line": 444,
+      "stop_column": 87,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
       "name": "missing-attribute",
@@ -409,9 +409,9 @@
       "severity": "error"
     },
     {
-      "line": 545,
+      "line": 543,
       "column": 16,
-      "stop_line": 545,
+      "stop_line": 543,
       "stop_column": 55,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -421,9 +421,9 @@
       "severity": "error"
     },
     {
-      "line": 554,
+      "line": 552,
       "column": 13,
-      "stop_line": 554,
+      "stop_line": 552,
       "stop_column": 43,
       "path": "src/aizk/graph/raptor.py",
       "code": -2,
@@ -433,9 +433,9 @@
       "severity": "error"
     },
     {
-      "line": 25,
+      "line": 26,
       "column": 24,
-      "stop_line": 25,
+      "stop_line": 26,
       "stop_column": 51,
       "path": "src/aizk/graph/session_tier.py",
       "code": -2,
@@ -445,9 +445,9 @@
       "severity": "error"
     },
     {
-      "line": 44,
+      "line": 45,
       "column": 20,
-      "stop_line": 44,
+      "stop_line": 45,
       "stop_column": 38,
       "path": "src/aizk/graph/session_tier.py",
       "code": -2,
@@ -457,9 +457,9 @@
       "severity": "error"
     },
     {
-      "line": 133,
+      "line": 128,
       "column": 16,
-      "stop_line": 133,
+      "stop_line": 128,
       "stop_column": 53,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -469,9 +469,9 @@
       "severity": "error"
     },
     {
-      "line": 143,
+      "line": 138,
       "column": 16,
-      "stop_line": 143,
+      "stop_line": 138,
       "stop_column": 44,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -481,9 +481,9 @@
       "severity": "error"
     },
     {
-      "line": 164,
+      "line": 158,
       "column": 16,
-      "stop_line": 164,
+      "stop_line": 158,
       "stop_column": 53,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -493,9 +493,9 @@
       "severity": "error"
     },
     {
-      "line": 169,
+      "line": 163,
       "column": 16,
-      "stop_line": 169,
+      "stop_line": 163,
       "stop_column": 44,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -505,9 +505,9 @@
       "severity": "error"
     },
     {
-      "line": 204,
+      "line": 196,
       "column": 16,
-      "stop_line": 204,
+      "stop_line": 196,
       "stop_column": 53,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -517,9 +517,9 @@
       "severity": "error"
     },
     {
-      "line": 207,
+      "line": 199,
       "column": 9,
-      "stop_line": 207,
+      "stop_line": 199,
       "stop_column": 37,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -529,9 +529,9 @@
       "severity": "error"
     },
     {
-      "line": 208,
+      "line": 200,
       "column": 13,
-      "stop_line": 208,
+      "stop_line": 200,
       "stop_column": 39,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -541,9 +541,9 @@
       "severity": "error"
     },
     {
-      "line": 208,
+      "line": 200,
       "column": 53,
-      "stop_line": 208,
+      "stop_line": 200,
       "stop_column": 78,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -553,9 +553,9 @@
       "severity": "error"
     },
     {
-      "line": 212,
+      "line": 204,
       "column": 24,
-      "stop_line": 212,
+      "stop_line": 204,
       "stop_column": 45,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -565,9 +565,9 @@
       "severity": "error"
     },
     {
-      "line": 245,
+      "line": 236,
       "column": 16,
-      "stop_line": 245,
+      "stop_line": 236,
       "stop_column": 53,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -577,9 +577,9 @@
       "severity": "error"
     },
     {
-      "line": 248,
+      "line": 239,
       "column": 16,
-      "stop_line": 248,
+      "stop_line": 239,
       "stop_column": 44,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -589,9 +589,9 @@
       "severity": "error"
     },
     {
-      "line": 248,
+      "line": 239,
       "column": 52,
-      "stop_line": 248,
+      "stop_line": 239,
       "stop_column": 79,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -601,9 +601,9 @@
       "severity": "error"
     },
     {
-      "line": 268,
+      "line": 258,
       "column": 16,
-      "stop_line": 268,
+      "stop_line": 258,
       "stop_column": 46,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -613,9 +613,9 @@
       "severity": "error"
     },
     {
-      "line": 269,
+      "line": 259,
       "column": 19,
-      "stop_line": 269,
+      "stop_line": 259,
       "stop_column": 58,
       "path": "src/aizk/retrieval/recall.py",
       "code": -2,
@@ -685,9 +685,9 @@
       "severity": "error"
     },
     {
-      "line": 89,
+      "line": 87,
       "column": 44,
-      "stop_line": 89,
+      "stop_line": 87,
       "stop_column": 65,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -697,9 +697,9 @@
       "severity": "error"
     },
     {
-      "line": 92,
+      "line": 90,
       "column": 20,
-      "stop_line": 92,
+      "stop_line": 90,
       "stop_column": 49,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -709,9 +709,9 @@
       "severity": "error"
     },
     {
-      "line": 97,
+      "line": 95,
       "column": 20,
-      "stop_line": 97,
+      "stop_line": 95,
       "stop_column": 41,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -721,9 +721,9 @@
       "severity": "error"
     },
     {
-      "line": 102,
+      "line": 100,
       "column": 20,
-      "stop_line": 102,
+      "stop_line": 100,
       "stop_column": 30,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -733,9 +733,9 @@
       "severity": "error"
     },
     {
-      "line": 184,
+      "line": 180,
       "column": 44,
-      "stop_line": 184,
+      "stop_line": 180,
       "stop_column": 66,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -745,9 +745,9 @@
       "severity": "error"
     },
     {
-      "line": 188,
+      "line": 184,
       "column": 17,
-      "stop_line": 188,
+      "stop_line": 184,
       "stop_column": 40,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -757,9 +757,9 @@
       "severity": "error"
     },
     {
-      "line": 189,
+      "line": 185,
       "column": 17,
-      "stop_line": 189,
+      "stop_line": 185,
       "stop_column": 43,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -769,10 +769,10 @@
       "severity": "error"
     },
     {
-      "line": 363,
-      "column": 56,
-      "stop_line": 363,
-      "stop_column": 66,
+      "line": 342,
+      "column": 58,
+      "stop_line": 342,
+      "stop_column": 68,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
       "name": "missing-attribute",
@@ -781,9 +781,9 @@
       "severity": "error"
     },
     {
-      "line": 371,
+      "line": 350,
       "column": 21,
-      "stop_line": 371,
+      "stop_line": 350,
       "stop_column": 44,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -793,9 +793,9 @@
       "severity": "error"
     },
     {
-      "line": 397,
+      "line": 374,
       "column": 24,
-      "stop_line": 397,
+      "stop_line": 374,
       "stop_column": 48,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -805,9 +805,9 @@
       "severity": "error"
     },
     {
-      "line": 397,
+      "line": 374,
       "column": 61,
-      "stop_line": 397,
+      "stop_line": 374,
       "stop_column": 85,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -817,9 +817,9 @@
       "severity": "error"
     },
     {
-      "line": 416,
+      "line": 390,
       "column": 13,
-      "stop_line": 416,
+      "stop_line": 390,
       "stop_column": 38,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -829,9 +829,9 @@
       "severity": "error"
     },
     {
-      "line": 416,
+      "line": 390,
       "column": 51,
-      "stop_line": 416,
+      "stop_line": 390,
       "stop_column": 76,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -841,9 +841,9 @@
       "severity": "error"
     },
     {
-      "line": 419,
+      "line": 393,
       "column": 41,
-      "stop_line": 419,
+      "stop_line": 393,
       "stop_column": 57,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -853,9 +853,9 @@
       "severity": "error"
     },
     {
-      "line": 436,
+      "line": 409,
       "column": 17,
-      "stop_line": 436,
+      "stop_line": 409,
       "stop_column": 42,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -865,9 +865,9 @@
       "severity": "error"
     },
     {
-      "line": 437,
+      "line": 410,
       "column": 17,
-      "stop_line": 437,
+      "stop_line": 410,
       "stop_column": 42,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -877,9 +877,9 @@
       "severity": "error"
     },
     {
-      "line": 438,
+      "line": 411,
       "column": 17,
-      "stop_line": 438,
+      "stop_line": 411,
       "stop_column": 33,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -889,9 +889,9 @@
       "severity": "error"
     },
     {
-      "line": 124,
+      "line": 117,
       "column": 47,
-      "stop_line": 124,
+      "stop_line": 117,
       "stop_column": 71,
       "path": "src/aizk/store/models/tables/user.py",
       "code": -2,
@@ -1093,9 +1093,9 @@
       "severity": "error"
     },
     {
-      "line": 464,
+      "line": 460,
       "column": 5,
-      "stop_line": 464,
+      "stop_line": 460,
       "stop_column": 32,
       "path": "tests/graph/test_build.py",
       "code": -2,
@@ -1105,9 +1105,9 @@
       "severity": "error"
     },
     {
-      "line": 469,
+      "line": 465,
       "column": 38,
-      "stop_line": 469,
+      "stop_line": 465,
       "stop_column": 51,
       "path": "tests/graph/test_build.py",
       "code": -2,
@@ -1312,7 +1312,7 @@
       "line": 352,
       "column": 16,
       "stop_line": 352,
-      "stop_column": 95,
+      "stop_column": 92,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
       "name": "bad-return",
@@ -1324,7 +1324,7 @@
       "line": 376,
       "column": 16,
       "stop_line": 376,
-      "stop_column": 95,
+      "stop_column": 92,
       "path": "tests/retrieval/test_recall.py",
       "code": -2,
       "name": "bad-return",

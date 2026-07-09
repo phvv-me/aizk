@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from .config import settings
 from .store import Chunk, Document, EntityClaim, EntityContent, FactClaim, FactContent, acting_as
+from .store.context import session
 
 
 class ExportReport(FrozenModel):
@@ -48,16 +49,16 @@ async def export_scope(
         the system user when null.
     """
     user_id = user_id or settings.system_user_id
-    async with acting_as(user_id) as session:
-        documents = list(await session.scalars(select(Document).order_by(Document.id)))
-        chunks = list(await session.scalars(select(Chunk).order_by(Chunk.id)))
+    async with acting_as(user_id):
+        documents = list(await session().scalars(select(Document).order_by(Document.id)))
+        chunks = list(await session().scalars(select(Chunk).order_by(Chunk.id)))
         entity_content = list(
-            await session.scalars(select(EntityContent).order_by(EntityContent.id))
+            await session().scalars(select(EntityContent).order_by(EntityContent.id))
         )
-        entity_claims = list(await session.scalars(select(EntityClaim).order_by(EntityClaim.id)))
-        fact_content = list(await session.scalars(select(FactContent).order_by(FactContent.id)))
+        entity_claims = list(await session().scalars(select(EntityClaim).order_by(EntityClaim.id)))
+        fact_content = list(await session().scalars(select(FactContent).order_by(FactContent.id)))
         fact_claims = list(
-            await session.scalars(
+            await session().scalars(
                 select(FactClaim)
                 .order_by(FactClaim.id)
                 .execution_options(**{settings.skip_live_gate: True})

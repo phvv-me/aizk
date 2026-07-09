@@ -63,8 +63,8 @@ def test_review_stamp_gates_on_curated_admin_standing(
         owner = await dbutil.seed_user(uuid.uuid4())
         group = await dbutil.seed_group(uuid.uuid4(), curated=curated)
         await dbutil.seed_membership(owner, group, "admin" if owner_is_admin else "writer")
-        async with system_session() as session:
-            result = await Group.review_stamp(session, (group,), owner)
+        async with system_session():
+            result = await Group.review_stamp((group,), owner)
         assert (result is not None) is stamped
         if result is not None:
             assert isinstance(result, datetime)
@@ -78,8 +78,8 @@ def test_review_stamp_private_write_is_immediate() -> None:
     async def body() -> None:
         await dbutil.reset_db()
         owner = await dbutil.seed_user(uuid.uuid4())
-        async with system_session() as session:
-            assert await Group.review_stamp(session, (), owner) is not None
+        async with system_session():
+            assert await Group.review_stamp((), owner) is not None
 
     dbutil.run(body())
 
@@ -97,7 +97,7 @@ def test_pending_facts_lists_only_unreviewed_across_authors() -> None:
         async with system_session() as session:
             loaded = await session.get(Group, group)
             assert loaded is not None
-            pending = await loaded.pending_facts(session)
+            pending = await loaded.pending_facts()
         assert [item.statement for item in pending] == ["pending one"]
 
     dbutil.run(body())
@@ -116,9 +116,9 @@ def test_approve_all_stamps_every_pending_claim() -> None:
         async with system_session() as session:
             loaded = await session.get(Group, group)
             assert loaded is not None
-            approved = await loaded.approve_facts(session)
+            approved = await loaded.approve_facts()
             assert approved == 2
-            assert await loaded.pending_facts(session) == []
+            assert await loaded.pending_facts() == []
 
     dbutil.run(body())
 
@@ -136,9 +136,9 @@ def test_approve_specific_ids_stamps_only_those_claims() -> None:
         async with system_session() as session:
             loaded = await session.get(Group, group)
             assert loaded is not None
-            approved = await loaded.approve_facts(session, [chosen])
+            approved = await loaded.approve_facts([chosen])
             assert approved == 1
-            pending = await loaded.pending_facts(session)
+            pending = await loaded.pending_facts()
         assert [item.statement for item in pending] == ["leave this"]
 
     dbutil.run(body())
@@ -157,9 +157,9 @@ def test_reject_deletes_named_pending_claims() -> None:
         async with system_session() as session:
             loaded = await session.get(Group, group)
             assert loaded is not None
-            removed = await loaded.reject_facts(session, [doomed])
+            removed = await loaded.reject_facts([doomed])
             assert removed == 1
-            remaining = await loaded.pending_facts(session)
+            remaining = await loaded.pending_facts()
         assert [item.statement for item in remaining] == ["keep me"]
 
     dbutil.run(body())

@@ -9,7 +9,6 @@ import numpy as np
 from loguru import logger
 from patos import FrozenModel, Model
 from sqlalchemy import delete, func, insert, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..extract import ontology
@@ -33,6 +32,7 @@ from ..store import (
     acting_as,
     system_session,
 )
+from ..store.context import session
 from .sweep import open_meter, percentile
 
 # corpus sizes the scaling curve is read at; a million is opt-in since one run writes a million
@@ -438,16 +438,15 @@ def corpus_rows(
     }
 
 
-async def insert_rows(session: AsyncSession, rows: dict[type[TableBase], list[Row]]) -> None:
+async def insert_rows(rows: dict[type[TableBase], list[Row]]) -> None:
     """Insert every table's rows in bounded executemany batches, so a large delta streams in.
 
-    session: open, user-scoped session the inserts write under.
     rows: the per-table delta rows to insert, corpus_rows' own output.
     """
     for table, table_rows in rows.items():
         for offset in range(0, len(table_rows), INSERT_BATCH):
             batch = table_rows[offset : offset + INSERT_BATCH]
-            await session.execute(insert(table), batch)
+            await session().execute(insert(table), batch)
 
 
 def advance_generated(generated: Generated, target: CorpusScale) -> None:
@@ -480,8 +479,8 @@ async def grow_corpus(
     """
     rows = corpus_rows(user_id, generated, target, rng, settings.embed_dim)
     start = time.perf_counter()
-    async with acting_as(user_id) as session:
-        await insert_rows(session, rows)
+    async with acting_as(user_id):
+        await insert_rows(rows)
     elapsed = time.perf_counter() - start
     advance_generated(generated, target)
     rate = len(rows[Chunk]) / elapsed if elapsed else 0.0
@@ -495,7 +494,6 @@ async def grow_corpus(
 
 
 async def measure_lanes(
-    session: AsyncSession,
     query: str,
     vector: list[float],
     k: int,
@@ -508,21 +506,20 @@ async def measure_lanes(
     row-level-security predicate, so the curve shows which lane bends first as the corpus grows
     rather than only the end-to-end number.
 
-    session: open, user-scoped session.
     query: the lexical and embedding query text.
     vector: the query embedding.
     k: how many results each lane surfaces.
     repeats: how many times each lane is timed.
     """
-    round_ = Recall(session, Embedder(), query, vector, k, None, ppr=True)
+    round_ = Recall(Embedder(), query, vector, k, None, ppr=True)
 
     async def rank_communities() -> None:
         distance = Community.embedding.cosine_distance(vector)
         ranking = select(Community.label).where(Community.embedding.is_not(None))
-        await session.execute(ranking.order_by(distance).limit(k))
+        await session().execute(ranking.order_by(distance).limit(k))
 
     async def scoped_count() -> None:
-        await session.scalar(select(func.count()).select_from(Chunk))
+        await session().scalar(select(func.count()).select_from(Chunk))
 
     lanes: dict[str, Callable[[], Awaitable[object]]] = {
         "hybrid": round_.hybrid_recall,
@@ -533,9 +530,7 @@ async def measure_lanes(
     return [await LaneLatency.timed(name, call, repeats) for name, call in lanes.items()]
 
 
-async def measure_graph_ops(
-    session: AsyncSession, vector: list[float], repeats: int
-) -> tuple[float, float]:
+async def measure_graph_ops(vector: list[float], repeats: int) -> tuple[float, float]:
     """Time the two graph ops the curve hunts a knee in, pagerank per query and detection in batch.
 
     Pagerank is seeded from the entities the closest latest facts touch and timed per query, the
@@ -543,12 +538,11 @@ async def measure_graph_ops(
     the whole loaded graph, the batch op the weekly pass runs. Both are the networkx CPU walks the
     curve locates the breaking point of, against the Postgres-CTE and cuGraph alternatives.
 
-    session: open, user-scoped session.
     vector: the query embedding the seeds are ranked by.
     repeats: how many pagerank queries to time before the median.
     """
     distance = LiveFact.embedding.cosine_distance(vector)
-    rows = await session.execute(
+    rows = await session().execute(
         select(LiveFact.subject_id, LiveFact.object_id)
         .where(LiveFact.embedding.is_not(None))
         .order_by(distance)
@@ -558,9 +552,9 @@ async def measure_graph_ops(
         {end for row in rows for end in (row.subject_id, row.object_id) if end is not None}
     )
     ppr = await LaneLatency.timed(
-        "ppr", partial(ppr_expand, session, seeds, settings.graph_facts_k), repeats
+        "ppr", partial(ppr_expand, seeds, settings.graph_facts_k), repeats
     )
-    facts = list(await session.scalars(select(LiveFact).where(LiveFact.embedding.is_not(None))))
+    facts = list(await session().scalars(select(LiveFact).where(LiveFact.embedding.is_not(None))))
     start = time.perf_counter()
     detect(facts, settings.community_min_size)
     detect_ms = (time.perf_counter() - start) * 1000.0
@@ -594,11 +588,11 @@ async def measure_point(
     with open_meter() as meter:
         recalled = await LaneLatency.timed("recall", partial(recall, query, user_id, k), repeats)
         meter.sample()
-        async with acting_as(user_id) as session:
-            lanes = await measure_lanes(session, query, vector, k, repeats)
-            ppr_ms, detect_ms = await measure_graph_ops(session, vector, repeats)
+        async with acting_as(user_id):
+            lanes = await measure_lanes(query, vector, k, repeats)
+            ppr_ms, detect_ms = await measure_graph_ops(vector, repeats)
             footprint = (
-                await session.execute(
+                await session().execute(
                     text(
                         "SELECT coalesce(sum(pg_total_relation_size(relid)), 0) AS total_bytes, "
                         "coalesce(sum(pg_indexes_size(relid)), 0) AS index_bytes "
@@ -664,27 +658,27 @@ async def purge_user(user_id: uuid.UUID) -> None:
 
     user_id: the throwaway user to remove.
     """
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         entity_content_ids = list(
-            await session.scalars(
+            await session().scalars(
                 select(EntityClaim.content_id).where(EntityClaim.owner_id == user_id)
             )
         )
         fact_content_ids = list(
-            await session.scalars(
+            await session().scalars(
                 select(FactClaim.content_id)
                 .where(FactClaim.owner_id == user_id)
                 .execution_options(**{settings.skip_live_gate: True})
             )
         )
         for table in (FactClaim, Community, Profile, EntityClaim, Chunk, Document, Watermark):
-            await session.execute(delete(table).where(table.owner_id == user_id))
-    async with system_session() as session:
-        await session.execute(delete(FactContent).where(FactContent.id.in_(fact_content_ids)))
-        await session.execute(
+            await session().execute(delete(table).where(table.owner_id == user_id))
+    async with system_session():
+        await session().execute(delete(FactContent).where(FactContent.id.in_(fact_content_ids)))
+        await session().execute(
             delete(EntityContent).where(EntityContent.id.in_(entity_content_ids))
         )
-        await session.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
+        await session().execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
 
 
 async def measure_size(
@@ -746,8 +740,8 @@ async def run_scale_benchmark(
     budget = budget or Budget()
     rng = np.random.default_rng(seed)
     [vector] = await Embedder().embed([query], mode="query")
-    async with system_session() as session:
-        user_id = (await User.create(session, "scale-benchmark")).id
+    async with system_session():
+        user_id = (await User.create("scale-benchmark")).id
     generated = Generated()
     points: list[ScalePoint] = []
     try:

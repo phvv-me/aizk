@@ -33,7 +33,7 @@ def test_deleting_a_group_demotes_bridge_rows_fully_private() -> None:
         async with system_session() as session:
             loaded = await session.get(Group, group_a)
             assert loaded is not None
-            await loaded.delete(session)
+            await loaded.delete()
 
         assert await document_scopes(bridge) == []
         assert await document_scopes(only_b) == [group_b]
@@ -52,7 +52,7 @@ def test_group_deletion_cascades_memberships_and_removes_the_group() -> None:
         async with system_session() as session:
             loaded = await session.get(Group, group_id)
             assert loaded is not None
-            await loaded.delete(session)
+            await loaded.delete()
         async with dbutil.admin_engine().connect() as connection:
             groups = await connection.execute(
                 text("SELECT count(*) FROM group_ WHERE id = :id"), {"id": group_id}
@@ -96,7 +96,7 @@ def test_demotion_dedupes_a_colliding_private_claim() -> None:
         async with system_session() as session:
             loaded = await session.get(Group, group_id)
             assert loaded is not None
-            await loaded.delete(session)
+            await loaded.delete()
         async with dbutil.admin_engine().connect() as connection:
             remaining = await connection.execute(
                 text("SELECT count(*) FROM entity_claim WHERE content_id = :c"), {"c": content}

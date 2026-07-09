@@ -144,7 +144,7 @@ def test_from_token_syncs_group_memberships_from_the_configured_claim(
     async def stub_for_subject(subject: str) -> uuid.UUID:
         return resolved
 
-    async def stub_sync(session: object, user_id: uuid.UUID, memberships: object) -> None:
+    async def stub_sync(user_id: uuid.UUID, memberships: object) -> None:
         synced.update(user_id=user_id, memberships=memberships)
 
     class _Session:
@@ -163,7 +163,7 @@ def test_from_token_syncs_group_memberships_from_the_configured_claim(
     monkeypatch.setattr("aizk.store.models.tables.user.system_session", lambda: _Session())
     monkeypatch.setattr(
         "aizk.store.models.tables.group.Group.sync_user_groups",
-        classmethod(lambda cls, s, u, m: stub_sync(s, u, m)),
+        classmethod(lambda cls, u, m: stub_sync(u, m)),
     )
     assert dbutil.run(User.from_token("tok")) == resolved
     assert synced == {"user_id": resolved, "memberships": claim}

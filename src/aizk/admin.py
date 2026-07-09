@@ -44,6 +44,7 @@ from .store import (
     system_session,
 )
 from .store import User as UserRow
+from .store.context import session
 
 
 class ForgetResult(FrozenModel):
@@ -143,9 +144,9 @@ async def forget(query: str, k: int = 8, user_id: uuid.UUID | None = None) -> Fo
     """
     owner = user_id or system()
     [vector] = await Embedder().embed([query], mode="query")
-    async with acting_as(owner) as session:
+    async with acting_as(owner):
         ranked = (
-            await session.execute(
+            await session().execute(
                 select(Chunk.document_id)
                 .order_by(Chunk.embedding.cosine_distance(vector))
                 .limit(k * 4)
@@ -154,10 +155,10 @@ async def forget(query: str, k: int = 8, user_id: uuid.UUID | None = None) -> Fo
         doc_ids = list(dict.fromkeys(ranked))[:k]
         titles = list(
             (
-                await session.execute(select(Document.title).where(Document.id.in_(doc_ids)))
+                await session().execute(select(Document.title).where(Document.id.in_(doc_ids)))
             ).scalars()
         )
-        retracted = await FactClaim.forget_from_documents(session, doc_ids)
+        retracted = await FactClaim.forget_from_documents(doc_ids)
     return ForgetResult(documents=[t for t in titles if t], claims=len(retracted))
 
 
@@ -239,8 +240,8 @@ async def create_user(name: str) -> UserRow:
 
     name: human-readable display name for the new actor.
     """
-    async with system_session() as session:
-        return await UserRow.create(session, name)
+    async with system_session():
+        return await UserRow.create(name)
 
 
 async def link_user(oidc_subject: str, name: str = "") -> UserRow:
@@ -252,14 +253,14 @@ async def link_user(oidc_subject: str, name: str = "") -> UserRow:
     oidc_subject: the subject claim the provider mints this identity's tokens against.
     name: human-readable display name for a freshly minted user.
     """
-    async with system_session() as session:
-        return await UserRow.link_oidc(session, oidc_subject, name)
+    async with system_session():
+        return await UserRow.link_oidc(oidc_subject, name)
 
 
 async def list_users() -> list[UserRow]:
     """Every user known to the engine, the roster."""
-    async with system_session() as session:
-        return await UserRow.list_all(session)
+    async with system_session():
+        return await UserRow.list_all()
 
 
 async def create_group(
@@ -273,9 +274,9 @@ async def create_group(
         visible to the rest of the group, immediate when false.
     creator: the user founded as the group's admin member, the system user when null.
     """
-    async with system_session() as session:
+    async with system_session():
         return await Group.create(
-            session, name, public=public, curated=curated, creator=creator or system()
+            name, public=public, curated=curated, creator=creator or system()
         )
 
 
@@ -286,9 +287,9 @@ async def add_member(user: str, group: str, role: str = "writer") -> None:
     group: name of the group the user joins.
     role: standing within the group, reader for read-only, writer or admin to also write.
     """
-    async with system_session() as session:
-        group_row = await Group.named(session, group)
-        await group_row.add_member(session, uuid.UUID(user), role=role)
+    async with system_session():
+        group_row = await Group.named(group)
+        await group_row.add_member(uuid.UUID(user), role=role)
 
 
 async def remove_member(user: str, group: str) -> None:
@@ -297,9 +298,9 @@ async def remove_member(user: str, group: str) -> None:
     user: id of the user leaving the group.
     group: name of the group the user leaves.
     """
-    async with system_session() as session:
-        group_row = await Group.named(session, group)
-        await group_row.remove_member(session, uuid.UUID(user))
+    async with system_session():
+        group_row = await Group.named(group)
+        await group_row.remove_member(uuid.UUID(user))
 
 
 async def publish_group(group: str, public: bool = True) -> None:
@@ -308,9 +309,9 @@ async def publish_group(group: str, public: bool = True) -> None:
     group: name of the group to publish or unpublish.
     public: true to publish, false to make members-only again.
     """
-    async with system_session() as session:
-        group_row = await Group.named(session, group)
-        await group_row.publish(session, public=public)
+    async with system_session():
+        group_row = await Group.named(group)
+        await group_row.publish(public=public)
 
 
 async def curate_group(group: str, curated: bool = True) -> None:
@@ -319,9 +320,9 @@ async def curate_group(group: str, curated: bool = True) -> None:
     group: name of the group to curate or uncurate.
     curated: true to require review, false to write straight through.
     """
-    async with system_session() as session:
-        group_row = await Group.named(session, group)
-        await group_row.curate(session, curated=curated)
+    async with system_session():
+        group_row = await Group.named(group)
+        await group_row.curate(curated=curated)
 
 
 async def delete_group(group: str) -> None:
@@ -329,15 +330,15 @@ async def delete_group(group: str) -> None:
 
     group: name of the group to delete.
     """
-    async with system_session() as session:
-        group_row = await Group.named(session, group)
-        await group_row.delete(session)
+    async with system_session():
+        group_row = await Group.named(group)
+        await group_row.delete()
 
 
 async def list_groups() -> list[dict]:
     """Every group with its visibility and member count, the sharing roster."""
-    async with system_session() as session:
-        return await Group.list_all(session)
+    async with system_session():
+        return await Group.list_all()
 
 
 async def define_entity_kind(name: str, description: str, domain: str = "general") -> None:
@@ -350,9 +351,9 @@ async def define_entity_kind(name: str, description: str, domain: str = "general
     description: one-line gloss the extraction prompt renders and the auto-create fold matches.
     domain: grouping tag, general by default, or core, coding, research, finance, personal.
     """
-    async with system_session() as session:
-        await EntityKind.define(session, name, description, domain)
-        await ontology.refresh(session)
+    async with system_session():
+        await EntityKind.define(name, description, domain)
+        await ontology.refresh()
 
 
 async def define_relation_kind(name: str, description: str, domain: str = "general") -> None:
@@ -362,9 +363,9 @@ async def define_relation_kind(name: str, description: str, domain: str = "gener
     description: one-line gloss the extraction prompt renders and the auto-create fold matches.
     domain: grouping tag, general by default, or core, coding, research, finance, personal.
     """
-    async with system_session() as session:
-        await RelationKind.define(session, name, description, domain)
-        await ontology.refresh(session)
+    async with system_session():
+        await RelationKind.define(name, description, domain)
+        await ontology.refresh()
 
 
 async def list_ontology() -> list[OntologyKindRow]:
@@ -374,24 +375,24 @@ async def list_ontology() -> list[OntologyKindRow]:
     carry it, so the operator sees the whole vocabulary at once and can tell a load-bearing type
     from dead weight worth folding into another.
     """
-    async with system_session() as session:
+    async with system_session():
         entity_uses = dict(
             (
-                await session.execute(
+                await session().execute(
                     select(EntityContent.type, func.count()).group_by(EntityContent.type)
                 )
             ).all()
         )
         relation_uses = dict(
             (
-                await session.execute(
+                await session().execute(
                     select(FactContent.predicate, func.count()).group_by(FactContent.predicate)
                 )
             ).all()
         )
-        entity_kinds = list(await session.scalars(select(EntityKind).order_by(EntityKind.name)))
+        entity_kinds = list(await session().scalars(select(EntityKind).order_by(EntityKind.name)))
         relation_kinds = list(
-            await session.scalars(select(RelationKind).order_by(RelationKind.name))
+            await session().scalars(select(RelationKind).order_by(RelationKind.name))
         )
     return [
         OntologyKindRow(

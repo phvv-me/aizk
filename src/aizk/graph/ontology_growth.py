@@ -1,7 +1,5 @@
 import re
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from ..config import settings
 from ..extract import ontology
 from ..store.models.tables.ontology import EntityKind
@@ -36,7 +34,7 @@ def best_matching_kind(vector: list[float]) -> tuple[str, float] | None:
     return max(scored, key=lambda pair: pair[1]) if scored else None
 
 
-async def resolve_suggested_type(session: AsyncSession, suggested: str) -> str:
+async def resolve_suggested_type(suggested: str) -> str:
     """Fold `suggested` into an existing entity kind or mint a fresh one, returning the name an
     entity typed `Concept` should actually carry.
 
@@ -49,8 +47,6 @@ async def resolve_suggested_type(session: AsyncSession, suggested: str) -> str:
     against real extraction is a measured, deployment-specific follow-up rather than a call this
     makes up front.
 
-    session: open session the row is written through, `entity_kind` carries no row level
-        security so any session works.
     suggested: the extractor's own free-text guess at what `Concept` was really standing in for.
     """
     from ..serving import Embedder
@@ -62,6 +58,6 @@ async def resolve_suggested_type(session: AsyncSession, suggested: str) -> str:
         if match is not None and match[1] >= settings.ontology_growth_threshold
         else derive_type_name(suggested)
     )
-    await EntityKind.mint(session, name=name, description=suggested, domain="auto")
-    await ontology.refresh(session)
+    await EntityKind.mint(name=name, description=suggested, domain="auto")
+    await ontology.refresh()
     return name

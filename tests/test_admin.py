@@ -96,9 +96,11 @@ def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
 
     @asynccontextmanager
     async def fake_acting_as(user_id: uuid.UUID):
-        yield FakeSession()
+        fake = FakeSession()
+        async with dbutil.use_session(fake):
+            yield fake
 
-    async def fake_forget(session: object, doc_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+    async def fake_forget(doc_ids: list[uuid.UUID]) -> list[uuid.UUID]:
         return doc_ids  # every named document contributed one live claim
 
     monkeypatch.setattr(admin, "Embedder", FakeEmbedder)
@@ -123,8 +125,8 @@ def test_link_user_binds_a_subject_without_granting_admin(migrated_db: None) -> 
         await dbutil.seed_user(settings.system_user_id, is_admin=True)
         first = await admin.link_user("gh|7", "Ada")
         again = await admin.link_user("gh|7", "ignored")
-        async with admin.system_session() as session:
-            is_admin = await admin.UserRow.administers(session, first.id)
+        async with admin.system_session():
+            is_admin = await admin.UserRow.administers(first.id)
         return first.id, again.id, is_admin
 
     first_id, again_id, is_admin = dbutil.run(run())

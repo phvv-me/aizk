@@ -4,9 +4,9 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import Range, insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..store import EntityClaim, FactClaim
+from ..store.context import session
 from ..store.mixins import TableBase
 
 # the value types a caller stakes an optional `FactClaim` column with (`valid`, `source_chunk_id`,
@@ -27,7 +27,7 @@ FACT_CLAIM_LIVE_ARBITER = {
 }
 
 
-async def mint_content(session: AsyncSession, content: TableBase) -> None:
+async def mint_content(content: TableBase) -> None:
     """Insert one content row, tolerating a duplicate another tenant already minted.
 
     Content is visible only through a claim (`store.models.tables.entity.content_policies`), so
@@ -41,28 +41,26 @@ async def mint_content(session: AsyncSession, content: TableBase) -> None:
     savepoint, so the surrounding write proceeds identically whether this exact content already
     existed or not, with no crash and no observable difference between the two cases either way.
 
-    session: open, user-scoped session the insert runs on.
     content: the transient content row to insert, its primary key already content-addressed.
     """
     try:
-        async with session.begin_nested():
-            session.add(content)
-            await session.flush()
+        async with session().begin_nested():
+            session().add(content)
+            await session().flush()
     except IntegrityError:
         pass
 
 
 async def claim_entity(
-    session: AsyncSession, content_id: uuid.UUID, owner_id: uuid.UUID, scopes: list[uuid.UUID]
+    content_id: uuid.UUID, owner_id: uuid.UUID, scopes: list[uuid.UUID]
 ) -> None:
     """Idempotently insert one entity claim, a no-op when (content, owner, scopes) already exists.
 
-    session: open, user-scoped session the insert runs on.
     content_id: entity content this claim stakes.
     owner_id: user the new claim is staked under.
     scopes: group set the new claim is shared with, private when empty.
     """
-    await session.execute(
+    await session().execute(
         insert(EntityClaim)
         .values(content_id=content_id, owner_id=owner_id, scopes=scopes)
         .on_conflict_do_nothing(index_elements=["content_id", "owner_id", "scopes"])
@@ -70,7 +68,6 @@ async def claim_entity(
 
 
 async def claim_fact(
-    session: AsyncSession,
     content_id: uuid.UUID,
     owner_id: uuid.UUID,
     scopes: list[uuid.UUID],
@@ -78,14 +75,13 @@ async def claim_fact(
 ) -> None:
     """Idempotently insert one fact claim, a no-op against an identical already-live claim.
 
-    session: open, user-scoped session the insert runs on.
     content_id: fact content this claim stakes.
     owner_id: user the new claim is staked under.
     scopes: group set the new claim is shared with, private when empty.
     claim_fields: further `FactClaim` columns the caller already resolved (`valid`,
         `source_chunk_id`, `reviewed_at`, `attributes`, `promoted_from`, ...).
     """
-    await session.execute(
+    await session().execute(
         insert(FactClaim)
         .values(content_id=content_id, owner_id=owner_id, scopes=scopes, **claim_fields)
         .on_conflict_do_nothing(**FACT_CLAIM_LIVE_ARBITER)

@@ -5,14 +5,13 @@ import networkx as nx
 from loguru import logger
 from sqlalchemy import ARRAY, Uuid, func, literal, select
 from sqlalchemy import cast as sql_cast
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..store import LiveFact
+from ..store.context import session
 
 
 async def ppr_expand(
-    session: AsyncSession,
     seed_entity_ids: list[uuid.UUID],
     top_n: int = 20,
 ) -> list[uuid.UUID]:
@@ -28,7 +27,6 @@ async def ppr_expand(
     table keeps a superseded edge out of the walk with no separate visibility gate to hand-repeat.
     Returns [] for no seeds, none present in the graph, or a non-converging power iteration.
 
-    session: open, user-scoped session whose visibility bounds the loaded graph.
     seed_entity_ids: entities to teleport back to, the matched graph seeds.
     top_n: number of related entities to return, excluding the seeds.
     """
@@ -59,7 +57,7 @@ async def ppr_expand(
         .where(walk.c.depth < settings.ppr_max_hops, ranked.c.rank <= settings.ppr_max_fanout)
     )
     node_ids = select(walk.c.entity_id)
-    edges = await session.execute(
+    edges = await session().execute(
         select(LiveFact.subject_id, LiveFact.object_id).where(
             LiveFact.object_id.is_not(None),
             LiveFact.subject_id.in_(node_ids),

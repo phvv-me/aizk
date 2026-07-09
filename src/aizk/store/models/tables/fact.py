@@ -16,12 +16,12 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSTZRANGE, Range
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.functions import GenericFunction
 from sqlmodel import Field
 
+from ...context import session
 from ...mixins import Embedded, Id, Scoped, TableBase
 from ...mixins.scoped import ScopeLattice
 from .entity import content_policies
@@ -339,7 +339,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         return recency * (1 + self.access_count)
 
     @classmethod
-    async def record_access(cls, session: AsyncSession, statements: list[str]) -> None:
+    async def record_access(cls, statements: list[str]) -> None:
         """Bump the access recency and count of the latest claims recall just surfaced.
 
         Sets last_accessed to now and increments access_count for every latest claim whose fact
@@ -347,17 +347,14 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         reaching for from one it has not touched in months. Runs on the same user-scoped
         session recall already holds open.
 
-        session: open, user-scoped session.
         statements: the fact statements recall returned in this call.
         """
         if not statements:
             return
-        await session.execute(RECORD_ACCESS_STATEMENT, {"statements": statements})
+        await session().execute(RECORD_ACCESS_STATEMENT, {"statements": statements})
 
     @classmethod
-    async def archive_stale(
-        cls, session: AsyncSession, half_life_days: float, floor: float
-    ) -> list[uuid.UUID]:
+    async def archive_stale(cls, half_life_days: float, floor: float) -> list[uuid.UUID]:
         """Archive the stale, rarely accessed latest claims, return the archived claim ids.
 
         Scores each visible latest claim by an exponential decay of its age against
@@ -367,12 +364,11 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         history and an as-of query still sees it, it only leaves the live graph default recall
         reads.
 
-        session: open, user-scoped session the archival runs under.
         half_life_days: age in days at which an unaccessed claim's relevance halves.
         floor: relevance floor a claim must clear to stay in the live graph.
         """
         now = datetime.now(UTC)
-        result = await session.execute(
+        result = await session().execute(
             DECAY_SQL,
             {
                 "now": now,
@@ -384,9 +380,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         return list(result.scalars().all())
 
     @classmethod
-    async def forget_from_documents(
-        cls, session: AsyncSession, document_ids: list[uuid.UUID]
-    ) -> list[uuid.UUID]:
+    async def forget_from_documents(cls, document_ids: list[uuid.UUID]) -> list[uuid.UUID]:
         """Retract every live claim derived from the given documents, return the retracted ids.
 
         Closes `recorded` on each live claim whose source chunk belongs to one of the documents,
@@ -395,11 +389,10 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         live graph, and nothing is deleted so the claims keep their history and an over-eager
         forget is undoable through an as-of read.
 
-        session: open, user-scoped session the retraction runs under.
         document_ids: the source documents whose derived claims are retracted.
         """
         now = datetime.now(UTC)
-        result = await session.execute(
+        result = await session().execute(
             FORGET_SQL, {"now": now, "now_iso": now.isoformat(), "document_ids": document_ids}
         )
         return list(result.scalars().all())

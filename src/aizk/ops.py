@@ -294,8 +294,8 @@ async def setup() -> SetupReport:
         await install_queue_schema()
     await grant_app_role_privileges()
     await enable_query_stats()
-    async with system_session() as session:
-        await ontology.refresh(session)
+    async with system_session():
+        await ontology.refresh()
     return SetupReport(
         migrated_from=before, migrated_to=alembic_head(config), queue_installed=not already_queued
     )

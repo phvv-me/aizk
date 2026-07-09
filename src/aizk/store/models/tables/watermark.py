@@ -5,9 +5,9 @@ from typing import cast
 from sqlalchemy import BigInteger, Text, UniqueConstraint, func, select
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB, insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import Field
 
+from ...context import session
 from ...mixins import Id, Scoped, TableBase, Timestamped
 
 # the single ref every non-entity watermark is keyed under, since those counters are graph-wide
@@ -59,7 +59,6 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
     @classmethod
     async def bump(
         cls,
-        session: AsyncSession,
         owner_id: uuid.UUID,
         kind: Watermark.Kind,
         ref: str = GLOBAL,
@@ -71,7 +70,6 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         same entity accumulate rather than race, and a counter that does not exist yet starts
         from `by`.
 
-        session: open session already acting as owner_id under row level security.
         owner_id: user that owns the counter.
         kind: discriminator naming what the counter tracks.
         ref: subject the counter is keyed to, the entity id for a dirty count, global otherwise.
@@ -86,20 +84,17 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
             )
             .returning(cls.counter)
         )
-        return await session.scalar(statement) or 0
+        return await session().scalar(statement) or 0
 
     @classmethod
-    async def read(
-        cls, session: AsyncSession, owner_id: uuid.UUID, kind: Watermark.Kind, ref: str = GLOBAL
-    ) -> int:
+    async def read(cls, owner_id: uuid.UUID, kind: Watermark.Kind, ref: str = GLOBAL) -> int:
         """Read one watermark counter, zero when the row does not exist yet.
 
-        session: open session already acting as owner_id under row level security.
         owner_id: user that owns the counter.
         kind: discriminator naming what the counter tracks.
         ref: subject the counter is keyed to.
         """
-        value = await session.scalar(
+        value = await session().scalar(
             select(cls.counter)
             .where(cls.owner_id == owner_id)
             .where(cls.kind == kind)
@@ -109,19 +104,18 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
 
     @classmethod
     async def read_payload(
-        cls, session: AsyncSession, owner_id: uuid.UUID, kind: Watermark.Kind, ref: str = GLOBAL
+        cls, owner_id: uuid.UUID, kind: Watermark.Kind, ref: str = GLOBAL
     ) -> dict:
         """Read one watermark's payload, an empty object when the row does not exist yet.
 
         The payload counterpart of `read`, so recall can read back the live config the
         self-improve pass flipped and a caller can recover any structured detail a kind stored.
 
-        session: open session already acting as owner_id under row level security.
         owner_id: user that owns the counter.
         kind: discriminator naming what the row tracks.
         ref: subject the counter is keyed to.
         """
-        payload = await session.scalar(
+        payload = await session().scalar(
             select(cls.payload)
             .where(cls.owner_id == owner_id)
             .where(cls.kind == kind)
@@ -132,7 +126,6 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
     @classmethod
     async def set_value(
         cls,
-        session: AsyncSession,
         owner_id: uuid.UUID,
         kind: Watermark.Kind,
         counter: int = 0,
@@ -145,7 +138,6 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         fact count it summarized at and the self-improve pass can store its latest scorecard
         payload.
 
-        session: open session already acting as owner_id under row level security.
         owner_id: user that owns the counter.
         kind: discriminator naming what the counter tracks.
         counter: the absolute value to store.
@@ -161,4 +153,4 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
                 set_={**values, "updated_at": func.now()},
             )
         )
-        await session.execute(statement)
+        await session().execute(statement)

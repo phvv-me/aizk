@@ -11,6 +11,7 @@ from ..config import settings
 from ..extract.llm import structured
 from ..retrieval import RecallResult, recall
 from ..store import LiveFact, acting_as
+from ..store.context import session
 from .eval_report import EvalReport
 from .generated_question import GeneratedQuestion
 from .judge_verdict import JudgeVerdict
@@ -83,10 +84,10 @@ async def sample_facts(user_id: uuid.UUID, n: int) -> list[str]:
     user_id: identity whose row level security visibility scopes the sample.
     n: maximum number of statements to sample.
     """
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         # `live_fact` already carries its own liveness gate, so this reads it directly rather than
         # opting the do_orm_execute listener out by hand the way a raw `FactClaim` read would.
-        statements = await session.scalars(
+        statements = await session().scalars(
             select(LiveFact.statement).order_by(LiveFact.id).limit(n)
         )
     return list(statements)

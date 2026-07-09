@@ -1,8 +1,8 @@
 from sqlalchemy import Boolean, Text, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import Field
 
+from ...context import session
 from ...mixins import TableBase, Timestamped
 
 
@@ -38,7 +38,7 @@ class OntologyKind:
     )
 
     @classmethod
-    async def mint(cls, session: AsyncSession, name: str, description: str, domain: str) -> None:
+    async def mint(cls, name: str, description: str, domain: str) -> None:
         """Insert one catalog row, tolerating a name another writer already minted.
 
         The auto-create cascade's own write, `ON CONFLICT DO NOTHING` on the name itself since two
@@ -46,19 +46,18 @@ class OntologyKind:
         converge on one row rather than racing a unique-violation. No savepoint needed since this
         catalog carries no row level security for a conflicting insert to hide behind.
 
-        session: open session the row is written through.
         name: the new vocabulary member, the extractor's own `suggested_type` once accepted.
         description: one-line gloss, the suggestion's own grounding statement.
         domain: grouping tag, "auto" for an auto-created row.
         """
-        await session.execute(
+        await session().execute(
             insert(cls)
             .values(name=name, description=description, domain=domain)
             .on_conflict_do_nothing(index_elements=["name"])
         )
 
     @classmethod
-    async def define(cls, session: AsyncSession, name: str, description: str, domain: str) -> None:
+    async def define(cls, name: str, description: str, domain: str) -> None:
         """Create or update one catalog row, the deliberate curator write the agent drives.
 
         Where `mint` leaves an existing row untouched, since it exists only to converge two racing
@@ -68,13 +67,12 @@ class OntologyKind:
         curation here is always add-or-refine and the bookkeeping the agent is good at costs
         nothing but a row write and a snapshot refresh.
 
-        session: open session the row is written through.
         name: the vocabulary member, the type or predicate a content row stores.
         description: one-line gloss rendered into the extraction prompt and matched by the
             auto-create similarity fold.
         domain: grouping tag such as core, general, coding, research, finance, or personal.
         """
-        await session.execute(
+        await session().execute(
             insert(cls)
             .values(name=name, description=description, domain=domain)
             .on_conflict_do_update(
@@ -83,13 +81,11 @@ class OntologyKind:
         )
 
     @classmethod
-    async def extractable_names(cls, session: AsyncSession) -> list[str]:
+    async def extractable_names(cls) -> list[str]:
         """Every non-structural member's name, sorted for a byte-stable, reproducible prompt, the
         extraction vocabulary a caller may actually emit.
-
-        session: open session the catalog is read through.
         """
-        return sorted(await session.scalars(select(cls.name).where(~cls.structural)))
+        return sorted(await session().scalars(select(cls.name).where(~cls.structural)))
 
 
 class EntityKind(OntologyKind, Timestamped, TableBase, table=True):

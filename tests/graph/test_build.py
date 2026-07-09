@@ -256,7 +256,7 @@ def test_resolve_mints_reuses_folds_or_drops(
                     content_id=entity_id("Existing", "Concept"),
                 )
         async with acting_as(owner) as session:
-            writer = GraphWriter(session, owner, ())
+            writer = GraphWriter(owner, ())
             if scenario == "insert":
                 first = await writer.resolve("Brand New", "Concept")
                 second = await writer.resolve("Brand New", "Concept")
@@ -326,7 +326,7 @@ def test_consolidate_applies_verdict(scenario: str, fixed_embedder: FixedEmbedde
             valid_from=now - timedelta(days=10) if scenario == "update" else None,
         )
         async with acting_as(owner) as session:
-            await GraphWriter(session, owner, ()).consolidate_facts([fact], resolved, chunk)
+            await GraphWriter(owner, ()).consolidate_facts([fact], resolved, chunk)
         async with acting_as(owner) as session:
             total = await session.scalar(
                 select(func.count()).select_from(FactClaim).execution_options(**GATE_OFF)
@@ -354,13 +354,11 @@ def test_consolidate_is_idempotent_and_reads_an_empty_pool(fixed_embedder: Fixed
             subject = await seedgraph.add_entity(session, owner, "Subject")
         fact = TimedFact(subject="Subject", predicate="related_to", statement="only")
         async with acting_as(owner) as session:
-            writer = GraphWriter(session, owner, ())
+            writer = GraphWriter(owner, ())
             empty = await writer.live_facts_by_subject(set())
             await writer.consolidate_facts([fact], {"Subject": subject}, chunk)
         async with acting_as(owner) as session:
-            await GraphWriter(session, owner, ()).consolidate_facts(
-                [fact], {"Subject": subject}, chunk
-            )
+            await GraphWriter(owner, ()).consolidate_facts([fact], {"Subject": subject}, chunk)
         async with acting_as(owner) as session:
             total = await session.scalar(
                 select(func.count()).select_from(FactClaim).execution_options(**GATE_OFF)
@@ -404,9 +402,7 @@ def test_consolidate_defers_borderline_facts_to_the_batch(
             for text in ("first candidate", "second candidate")
         ]
         async with acting_as(owner) as session:
-            await GraphWriter(session, owner, ()).consolidate_facts(
-                facts, {"Subject": subject}, chunk
-            )
+            await GraphWriter(owner, ()).consolidate_facts(facts, {"Subject": subject}, chunk)
         async with acting_as(owner) as session:
             return (
                 await session.scalar(
@@ -450,7 +446,7 @@ def test_close_superseded_claim_clamps_and_tolerates_a_vanished_target(scenario:
             "forward": base + timedelta(days=10),
         }.get(scenario)
         async with acting_as(owner) as session:
-            writer = GraphWriter(session, owner, ())
+            writer = GraphWriter(owner, ())
             await writer.close_superseded_claim(supersedes, valid_from, now)
             retired = await session.get(FactClaim, supersedes, execution_options=GATE_OFF)
             if retired is None:
@@ -478,8 +474,8 @@ def test_resolve_entity_type_passes_through_a_confident_type_unchanged(
     entity = ExtractedEntity(name="Ada", type="Author")
 
     async def body() -> str:
-        async with acting_as(await seedgraph.fresh_owner()) as session:
-            return await resolve_entity_type(GraphWriter(session, uuid.uuid4(), ()), entity)
+        async with acting_as(await seedgraph.fresh_owner()):
+            return await resolve_entity_type(GraphWriter(uuid.uuid4(), ()), entity)
 
     assert dbutil.run(body()) == "Author"
 
@@ -493,7 +489,7 @@ def test_resolve_entity_type_grows_the_catalog_for_a_concept_fallback_with_a_sug
     async def body() -> tuple[str, str]:
         owner = await seedgraph.fresh_owner()
         async with acting_as(owner) as session:
-            await ontology.refresh(session)
+            await ontology.refresh()
             # a non-structural kind: structural kinds (RaptorSummary, Observation) are excluded
             # from the auto-create fold pool, so a Concept fallback never resolves into one.
             name, description = (
@@ -506,7 +502,7 @@ def test_resolve_entity_type_grows_the_catalog_for_a_concept_fallback_with_a_sug
             entity = ExtractedEntity(
                 name="Something", type=ontology.CONCEPT, suggested_type=description
             )
-            resolved = await resolve_entity_type(GraphWriter(session, owner, ()), entity)
+            resolved = await resolve_entity_type(GraphWriter(owner, ()), entity)
         return resolved, name
 
     try:
@@ -516,8 +512,8 @@ def test_resolve_entity_type_grows_the_catalog_for_a_concept_fallback_with_a_sug
         dbutil.run(dbutil.admin_exec("DELETE FROM entity_kind WHERE domain = 'auto'"))
 
         async def restore() -> None:
-            async with acting_as(await seedgraph.fresh_owner()) as session:
-                await ontology.refresh(session)
+            async with acting_as(await seedgraph.fresh_owner()):
+                await ontology.refresh()
 
         dbutil.run(restore())
 

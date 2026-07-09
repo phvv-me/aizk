@@ -7,7 +7,6 @@ from typing import Protocol, runtime_checkable
 
 from loguru import logger
 from mainboard.profiling import span
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..graph.communities import community_search
@@ -28,41 +27,41 @@ class Lane(Protocol):
     slice, never anyone else's.
     """
 
-    async def run(self, session: AsyncSession, ctx: RecallContext) -> LaneResult: ...
+    async def run(self, ctx: RecallContext) -> LaneResult: ...
 
 
 class CoreLane:
     """The chunk-and-fact round every recall needs, assembling, gap-filling when thin, and
     recording access."""
 
-    async def run(self, session: AsyncSession, ctx: RecallContext) -> LaneResult:
-        round_ = Recall(session, Embedder(), ctx.query, ctx.vector, ctx.k, ctx.as_of, ctx.ppr_on)
+    async def run(self, ctx: RecallContext) -> LaneResult:
+        round_ = Recall(Embedder(), ctx.query, ctx.vector, ctx.k, ctx.as_of, ctx.ppr_on)
         hits, facts = await round_.assemble_context()
         if settings.recall_gap_fill and await has_evidence_gap(ctx.query, hits, facts):
             hits, facts = await round_.fill_gap(hits, facts)
-        await FactClaim.record_access(session, [fact.statement for fact in facts])
+        await FactClaim.record_access([fact.statement for fact in facts])
         return LaneResult(hits=hits, facts=facts)
 
 
 class SessionLane:
     """The still-working session-item lane, empty when session_recall_k is off."""
 
-    async def run(self, session: AsyncSession, ctx: RecallContext) -> LaneResult:
+    async def run(self, ctx: RecallContext) -> LaneResult:
         if not settings.session_recall_k:
             return LaneResult()
         async with stage("session_hits"):
-            notes = await session_hits(session, ctx.vector, settings.session_recall_k)
+            notes = await session_hits(ctx.vector, settings.session_recall_k)
         return LaneResult(session=notes)
 
 
 class CommunityLane:
     """The global community-summary lane, empty for a pointed rather than thematic query."""
 
-    async def run(self, session: AsyncSession, ctx: RecallContext) -> LaneResult:
+    async def run(self, ctx: RecallContext) -> LaneResult:
         if not ctx.thematic:
             return LaneResult()
         async with stage("community_search"):
-            rows = await community_search(session, ctx.vector, k=3)
+            rows = await community_search(ctx.vector, k=3)
         notes = [
             CommunityNote(label=label, summary=summary, score=sc) for label, summary, sc in rows
         ]
@@ -72,12 +71,12 @@ class CommunityLane:
 class RaptorLane:
     """The RAPTOR summary-tree lane, root summaries when thematic and leaf summaries otherwise."""
 
-    async def run(self, session: AsyncSession, ctx: RecallContext) -> LaneResult:
+    async def run(self, ctx: RecallContext) -> LaneResult:
         if not ctx.raptor_on:
             return LaneResult()
         async with stage("raptor_search"):
             rows = await raptor_search(
-                session, ctx.query, ctx.vector, thematic=ctx.thematic, k=settings.raptor_k
+                ctx.query, ctx.vector, thematic=ctx.thematic, k=settings.raptor_k
             )
         notes = [
             RaptorNote(label=label, summary=summary, level=level, score=sc)
@@ -89,11 +88,11 @@ class RaptorLane:
 class ProfileLane:
     """The top matched entity's rolled-up profile lane, null when profiles is off."""
 
-    async def run(self, session: AsyncSession, ctx: RecallContext) -> LaneResult:
+    async def run(self, ctx: RecallContext) -> LaneResult:
         if not settings.profiles:
             return LaneResult()
         async with stage("top_profile"):
-            return LaneResult(profile=await top_profile(session, ctx.vector))
+            return LaneResult(profile=await top_profile(ctx.vector))
 
 
 # the fixed lane roster every recall fans out to, one stateless instance per kind; a lane whose
@@ -105,7 +104,7 @@ LANES: tuple[Lane, ...] = (CoreLane(), SessionLane(), CommunityLane(), RaptorLan
 async def run_lane[T](
     user_id: uuid.UUID,
     scopes: tuple[uuid.UUID, ...],
-    body: Callable[[AsyncSession], Awaitable[T]],
+    body: Callable[[], Awaitable[T]],
 ) -> T:
     """Run one recall lane body on its own pooled session acting as user_id, scoped to scopes.
 
@@ -118,10 +117,11 @@ async def run_lane[T](
     user_id: identity whose row level security visibility the lane's session acts under.
     scopes: group ids narrowing the lane's session to that combination's composed graph, the whole
         visible union when empty.
-    body: the lane's own work, given the freshly opened session.
+    body: the lane's own work, run inside the `acting_as` context it opens, reading its session off
+        the task-local context.
     """
-    async with acting_as(user_id, scopes) as session:
-        return await body(session)
+    async with acting_as(user_id, scopes):
+        return await body()
 
 
 async def timed_lane(

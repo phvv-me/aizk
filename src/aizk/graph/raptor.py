@@ -6,7 +6,6 @@ import networkx as nx
 from loguru import logger
 from pgvector.utils import HalfVector
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..extract import ontology
@@ -18,6 +17,7 @@ from ..store import (
     FactContent,
     acting_as,
 )
+from ..store.context import session
 from .admin import admin_session
 from .models import Node, RaptorReport
 from .tier_builder import TierBuilder
@@ -312,13 +312,15 @@ async def write_level(
     claims: this level's freshly minted summary claims, one per entry in contents.
     edges: every member-to-parent part_of edge this level's clusters resolved, new or reused alike.
     """
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         edge_contents = [part_of_content(child_id, parent) for child_id, parent in edges]
-        session.add_all(contents)
-        session.add_all(edge_contents)
-        await session.flush()
-        session.add_all(claims)
-        session.add_all(part_of_claim(user_id, edge_content.id) for edge_content in edge_contents)
+        session().add_all(contents)
+        session().add_all(edge_contents)
+        await session().flush()
+        session().add_all(claims)
+        session().add_all(
+            part_of_claim(user_id, edge_content.id) for edge_content in edge_contents
+        )
 
 
 async def build_level(
@@ -370,9 +372,9 @@ async def stale_tree_content(user_id: uuid.UUID) -> list[uuid.UUID]:
 
     user_id: identity whose prior tree, if any, is found.
     """
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         return list(
-            await session.scalars(
+            await session().scalars(
                 select(EntityClaim.content_id)
                 .join(EntityContent, EntityContent.id == EntityClaim.content_id)
                 .where(
@@ -437,19 +439,19 @@ async def leaf_nodes(user_id: uuid.UUID) -> list[Node]:
     user_id: identity that owns the tree and whose visibility scopes the communities read.
     """
     await clear_stale_tree(user_id)
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         communities = list(
-            await session.scalars(select(Community).where(Community.embedding.is_not(None)))
+            await session().scalars(select(Community).where(Community.embedding.is_not(None)))
         )
         if len(communities) < 2:
             return []
         leaves = [leaf_content(community) for community in communities]
-        session.add_all(leaves)
+        session().add_all(leaves)
         # content and claim share no ORM `relationship()`, only a bare FK column, so the leaves
         # must actually flush before the matching claims are added, the same ordering
         # `write_level` observes, or a claim can insert ahead of the content row it stakes.
-        await session.flush()
-        session.add_all(
+        await session().flush()
+        session().add_all(
             leaf_claim(user_id, leaf, community)
             for leaf, community in zip(leaves, communities, strict=True)
         )
@@ -495,17 +497,15 @@ async def build_raptor(
     return written
 
 
-async def raptor_levels(session: AsyncSession) -> list[int]:
+async def raptor_levels() -> list[int]:
     """The sorted summary levels above the leaves, the levels recall can retrieve from.
 
     Reads the distinct level tags of the visible summary claims and keeps those above the level-0
     leaves, so recall knows which level answers a broad query and which a pointed one. Empty until
     a tree has been built.
-
-    session: open, user- and scope-scoped session the caller already holds.
     """
     depth = EntityClaim.attributes["level"].as_integer()
-    rows = await session.scalars(
+    rows = await session().scalars(
         select(depth)
         .join(EntityContent, EntityContent.id == EntityClaim.content_id)
         .where(EntityContent.type == ontology.RAPTOR_SUMMARY, depth >= 1)
@@ -515,7 +515,6 @@ async def raptor_levels(session: AsyncSession) -> list[int]:
 
 
 async def raptor_search(
-    session: AsyncSession,
     query: str,
     vector: list[float],
     thematic: bool = True,
@@ -532,20 +531,19 @@ async def raptor_search(
     recall's one round already holds both and a second session here would open a second connection
     nested inside the first for no reason.
 
-    session: open, user- and scope-scoped session the caller already holds.
     query: natural-language query, read only for its specificity when the round is not thematic.
     vector: dense query embedding.
     thematic: whether the query is broad, reading the root level rather than the leaf summaries.
     k: number of summaries to return.
     """
-    levels = await raptor_levels(session)
+    levels = await raptor_levels()
     if not levels:
         return []
     level = target_level(levels, query, thematic)
     distance = EntityContent.embedding.cosine_distance(vector)
     depth = EntityClaim.attributes["level"].as_integer()
     summary = EntityClaim.attributes["summary"].astext
-    rows = await session.execute(
+    rows = await session().execute(
         select(EntityContent.name, summary, distance.label("distance"))
         .join(EntityClaim, EntityClaim.content_id == EntityContent.id)
         .where(

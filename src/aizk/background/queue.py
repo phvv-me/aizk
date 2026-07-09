@@ -13,6 +13,7 @@ from ..config import settings
 from ..graph.build import extract_and_consolidate, pending_chunks
 from ..graph.profiles import build_profile
 from ..store import Chunk, Watermark, acting_as
+from ..store.context import session
 from .payloads import ChunkJob, JobPayload, ProfileJob
 
 # the on-write entrypoint, one durable job per pending chunk, building its graph slice then
@@ -83,18 +84,16 @@ async def process_chunk(chunk_id: uuid.UUID, user_id: uuid.UUID) -> list[uuid.UU
     chunk_id: chunk whose graph slice to build.
     user_id: identity that owns the written entities and facts.
     """
-    async with acting_as(user_id) as session:
-        chunk = await session.get(Chunk, chunk_id)
+    async with acting_as(user_id):
+        chunk = await session().get(Chunk, chunk_id)
     if chunk is None:
         logger.warning("chunk {} not visible to {}, skipping", chunk_id, user_id)
         return []
     touched = await extract_and_consolidate(chunk, user_id)
     if touched:
-        async with acting_as(user_id) as session:
+        async with acting_as(user_id):
             for entity_id in touched:
-                await Watermark.bump(
-                    session, user_id, Watermark.Kind.entity_dirty, ref=str(entity_id)
-                )
+                await Watermark.bump(user_id, Watermark.Kind.entity_dirty, ref=str(entity_id))
     return list(touched)
 
 
@@ -105,9 +104,9 @@ async def process_profile(entity_id: uuid.UUID, user_id: uuid.UUID) -> None:
     user_id: identity that owns the profile.
     """
     await build_profile(entity_id, user_id=user_id)
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         await Watermark.set_value(
-            session, user_id, Watermark.Kind.entity_dirty, counter=0, ref=str(entity_id)
+            user_id, Watermark.Kind.entity_dirty, counter=0, ref=str(entity_id)
         )
 
 

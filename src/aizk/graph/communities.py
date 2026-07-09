@@ -3,10 +3,10 @@ import uuid
 import networkx as nx
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..store import Community, EntityContent, LiveFact, acting_as
+from ..store.context import session
 from .models import CommunitySummary
 from .tier_builder import TierBuilder
 
@@ -92,8 +92,8 @@ class CommunityTierBuilder(TierBuilder[Grounding, CommunitySummary]):
         self, grounding: Grounding, report: CommunitySummary, vectors: list[list[float]]
     ) -> int:
         """Store the cluster's summary as a new, scoped community row."""
-        async with acting_as(self.user_id) as session:
-            session.add(
+        async with acting_as(self.user_id):
+            session().add(
                 Community(
                     owner_id=self.user_id,
                     label=report.label,
@@ -120,13 +120,13 @@ async def build_communities(
     user_id: identity that owns the written communities, the system user when null.
     """
     user_id = user_id or settings.system_user_id
-    async with acting_as(user_id) as session:
-        entities = {entity.id: entity for entity in await session.scalars(select(EntityContent))}
+    async with acting_as(user_id):
+        entities = {entity.id: entity for entity in await session().scalars(select(EntityContent))}
         # only embedded knowledge facts define the cluster graph, so the structural part_of edges
         # of the RAPTOR tree, which carry no embedding, never form their own summary communities.
         # `live_fact` already carries the current-and-reviewed gate.
         facts = list(
-            await session.scalars(select(LiveFact).where(LiveFact.embedding.is_not(None)))
+            await session().scalars(select(LiveFact).where(LiveFact.embedding.is_not(None)))
         )
     clusters = detect(facts, settings.community_min_size, settings.community_backend)
     written = 0
@@ -136,7 +136,6 @@ async def build_communities(
 
 
 async def community_search(
-    session: AsyncSession,
     vector: list[float],
     k: int = 3,
 ) -> list[tuple[str, str, float]]:
@@ -149,12 +148,11 @@ async def community_search(
     than opening a session or embedding of its own, since recall's one round already holds both and
     a second session here would open a second connection nested inside the first for no reason.
 
-    session: open, user- and scope-scoped session the caller already holds.
     vector: dense query embedding.
     k: number of community summaries to return.
     """
     distance = Community.embedding.cosine_distance(vector)
-    rows = await session.execute(
+    rows = await session().execute(
         select(Community.label, Community.summary, distance.label("distance"))
         .where(Community.embedding.is_not(None))
         .order_by(distance)

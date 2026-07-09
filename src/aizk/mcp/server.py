@@ -6,7 +6,6 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from loguru import logger
 from mainboard.profiling import enable_spans
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import ops, retrieval
 from ..config import settings
@@ -16,6 +15,7 @@ from ..retrieval import ContextPack
 from ..scopes import resolve_scopes
 from ..store import Document, Group, Membership, acting_as, system_session
 from ..store import User as UserRow
+from ..store.context import session
 from .middleware import AnonymousRateLimit, IdentityMiddleware
 from .models import MoveResult, PendingFact, ReviewResult, WriteResult
 from .user import current_user, require_identified
@@ -150,15 +150,15 @@ async def move(documents: str, scopes: str) -> MoveResult:
     user = require_identified(current_user())
     target = await resolve_scopes(scopes, user.id)
     document_ids = [uuid.UUID(d.strip()) for d in documents.split(",") if d.strip()]
-    async with acting_as(user.id) as session:
-        writable = set((await session.scalars(Membership.writable_group_ids(user.id))).all())
+    async with acting_as(user.id):
+        writable = set((await session().scalars(Membership.writable_group_ids(user.id))).all())
         if not set(target) <= writable:
             raise ToolError("move needs writer or admin standing in every target group")
-        moved = await Document.move_to_scope(session, user.id, document_ids, target)
+        moved = await Document.move_to_scope(user.id, document_ids, target)
     return MoveResult(moved=moved, scopes=scopes or "")
 
 
-async def resolve_group_admin(session: AsyncSession, group: str) -> Group:
+async def resolve_group_admin(group: str) -> Group:
     """Resolve a group name and refuse the call unless the caller administers it, group back.
 
     Shared by the curation verbs, it resolves the scope name, then checks the caller holds the
@@ -167,13 +167,12 @@ async def resolve_group_admin(session: AsyncSession, group: str) -> Group:
     and `Membership` carry no row level security of their own, so reading and checking them
     through the system-acting session is exactly as visible as through the caller's own.
 
-    session: open session, already acting as the system user.
     group: name of the curated group the call would administer.
     """
     user = current_user()
-    group_row = await Group.named(session, group)
+    group_row = await Group.named(group)
     try:
-        await group_row.require_admin(session, user.id)
+        await group_row.require_admin(user.id)
     except NotGroupAdminError as error:
         raise ToolError(str(error)) from error
     return group_row
@@ -196,9 +195,9 @@ async def pending(group: str) -> list[PendingFact]:
 
     group: name of the curated group whose pending facts are listed.
     """
-    async with system_session() as session:
-        group_row = await resolve_group_admin(session, group)
-        facts = await group_row.pending_facts(session)
+    async with system_session():
+        group_row = await resolve_group_admin(group)
+        facts = await group_row.pending_facts()
     return [
         PendingFact(id=f.id, owner_id=f.owner_id, predicate=f.predicate, statement=f.statement)
         for f in facts
@@ -215,10 +214,10 @@ async def approve(group: str, facts: str = "all") -> ReviewResult:
     group: name of the curated group the facts belong to.
     facts: comma-separated fact ids to approve, or "all" for every still-pending fact.
     """
-    async with system_session() as session:
-        group_row = await resolve_group_admin(session, group)
+    async with system_session():
+        group_row = await resolve_group_admin(group)
         ids = None if facts == "all" else parse_fact_ids(facts)
-        count = await group_row.approve_facts(session, ids)
+        count = await group_row.approve_facts(ids)
     return ReviewResult(group=group, count=count)
 
 
@@ -229,7 +228,7 @@ async def reject(group: str, facts: str) -> ReviewResult:
     group: name of the curated group the facts belong to.
     facts: comma-separated fact ids to reject.
     """
-    async with system_session() as session:
-        group_row = await resolve_group_admin(session, group)
-        count = await group_row.reject_facts(session, parse_fact_ids(facts))
+    async with system_session():
+        group_row = await resolve_group_admin(group)
+        count = await group_row.reject_facts(parse_fact_ids(facts))
     return ReviewResult(group=group, count=count)

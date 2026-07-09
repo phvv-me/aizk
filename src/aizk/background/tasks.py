@@ -8,7 +8,6 @@ from patos import FrozenModel, Registry
 from pgqueuer import PgQueuer
 from pgqueuer.models import Job, Schedule
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..backup import scheduled_backup
 from ..config import settings
@@ -22,6 +21,7 @@ from ..graph.profiles import refresh_profiles
 from ..graph.raptor import build_raptor
 from ..graph.session_tier import promote_sessions
 from ..store import FactClaim, Watermark, acting_as
+from ..store.context import session
 from .payloads import TaskJob
 
 FanOut = Callable[["ScheduledTask"], Awaitable[None]]
@@ -101,7 +101,7 @@ class ScheduledTask(Registry, FrozenModel, abc.ABC):
         pg.schedule(self.cron_entrypoint, self.expression)(partial(self.fire_cron, fan_out))
 
 
-async def recorded_fact_count(session: AsyncSession) -> int:
+async def recorded_fact_count() -> int:
     """Count of every fact claim ever recorded, the monotonic growth signal the gated passes read.
 
     Counts the whole claim history with the live gate off, so a superseded, decayed, or forgotten
@@ -110,11 +110,9 @@ async def recorded_fact_count(session: AsyncSession) -> int:
     decaying or forgetting graph drives back down. That lets a churning graph, one that adds far
     more than it retires yet stays near net-flat, still clear the growth threshold and rebuild its
     summaries rather than serving permanently stale ones because its live count barely moved.
-
-    session: an open session already acting as the pass's user.
     """
     return (
-        await session.scalar(
+        await session().scalar(
             select(func.count())
             .select_from(FactClaim)
             .execution_options(**{settings.skip_live_gate: True})
@@ -144,15 +142,15 @@ async def run_if_grown(
     build: the zero-argument rebuild to run once growth clears the threshold.
     label: the pass name logged when growth has not yet cleared the threshold.
     """
-    async with acting_as(user_id) as session:
-        current = await recorded_fact_count(session)
-        last = await Watermark.read(session, user_id, kind)
+    async with acting_as(user_id):
+        current = await recorded_fact_count()
+        last = await Watermark.read(user_id, kind)
     if current - last < threshold:
         logger.info("{} pass skipped for {}, {} new facts", label, user_id, current - last)
         return
     await build()
-    async with acting_as(user_id) as session:
-        await Watermark.set_value(session, user_id, kind, counter=current)
+    async with acting_as(user_id):
+        await Watermark.set_value(user_id, kind, counter=current)
 
 
 def config_from_label(label: str) -> dict[str, bool]:
@@ -179,18 +177,14 @@ def per_config_best(per_config: dict[str, float]) -> str | None:
     return max(per_config, key=lambda label: per_config[label]) if per_config else None
 
 
-async def store_scorecard(
-    session: AsyncSession, user_id: uuid.UUID, report: EvalReport, best: str | None
-) -> None:
+async def store_scorecard(user_id: uuid.UUID, report: EvalReport, best: str | None) -> None:
     """Persist the weekly self-eval scorecard as the scorecard watermark's payload.
 
-    session: an open session already acting as user_id.
     user_id: identity the scorecard is stored under.
     report: the freshly scored recall-quality report.
     best: the argmax over report.per_config, null when nothing was scored.
     """
     await Watermark.set_value(
-        session,
         user_id,
         Watermark.Kind.scorecard,
         counter=report.n,
@@ -295,8 +289,8 @@ class SelfImproveTask(ScheduledTask):
     async def run(self, user_id: uuid.UUID) -> None:
         report = await run_eval(None, user_id=user_id)
         best = per_config_best(report.per_config)
-        async with acting_as(user_id) as session:
-            await store_scorecard(session, user_id, report, best)
+        async with acting_as(user_id):
+            await store_scorecard(user_id, report, best)
         flip = apply_significant_win(report.significant_best)
         if flip:
             logger.info("self-improve flipped {} for {} in-process", flip, user_id)

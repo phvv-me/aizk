@@ -149,17 +149,17 @@ def test_resolve_group_admin_returns_the_group_or_wraps_a_domain_refusal(
     monkeypatch.setattr(server_module, "current_user", lambda: User(id=uuid.uuid4()))
 
     class FakeGroup:
-        async def require_admin(self, session: object, user_id: uuid.UUID) -> None:
+        async def require_admin(self, user_id: uuid.UUID) -> None:
             if not vetted:
                 raise NotGroupAdminError("not your group")
 
     fake_group = FakeGroup()
     monkeypatch.setattr(server_module.Group, "named", const(fake_group))
     if vetted:
-        assert dbutil.run(resolve_group_admin(object(), "team")) is fake_group
+        assert dbutil.run(resolve_group_admin("team")) is fake_group
     else:
         with pytest.raises(ToolError, match="not your group"):
-            dbutil.run(resolve_group_admin(object(), "team"))
+            dbutil.run(resolve_group_admin("team"))
 
 
 def test_recall_forwards_the_query_budget_and_resolved_lens_to_the_context_pack(
@@ -395,15 +395,16 @@ class _MoveSession:
 
 
 class _MoveActing:
-    """An `acting_as` stand-in yielding a `_MoveSession`, no real session for the move body."""
+    """An `acting_as` stand-in binding a `_MoveSession` to the context for the move body."""
 
     def __init__(self, writable: list[uuid.UUID]) -> None:
-        self.writable = writable
+        self.binding = dbutil.use_session(_MoveSession(writable))
 
-    async def __aenter__(self) -> _MoveSession:
-        return _MoveSession(self.writable)
+    async def __aenter__(self) -> object:
+        return await self.binding.__aenter__()
 
     async def __aexit__(self, *exc: object) -> bool:
+        await self.binding.__aexit__(None, None, None)
         return False
 
 
@@ -417,9 +418,7 @@ def test_move_rescopes_the_callers_own_documents_and_reports_the_count(
     """
     captured: dict[str, object] = {}
 
-    async def stub_move(
-        session: object, owner_id: uuid.UUID, document_ids: list[uuid.UUID], scopes: tuple
-    ) -> int:
+    async def stub_move(owner_id: uuid.UUID, document_ids: list[uuid.UUID], scopes: tuple) -> int:
         captured.update(owner_id=owner_id, document_ids=document_ids, scopes=scopes)
         return 3
 
@@ -428,7 +427,7 @@ def test_move_rescopes_the_callers_own_documents_and_reports_the_count(
     monkeypatch.setattr(
         server_module.Document,
         "move_to_scope",
-        classmethod(lambda cls, s, o, d, sc: stub_move(s, o, d, sc)),
+        classmethod(lambda cls, o, d, sc: stub_move(o, d, sc)),
     )
     out = dbutil.run(tools["move"].fn(documents=str(doc), scopes=None))
     assert out == MoveResult(moved=3, scopes="")

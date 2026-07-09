@@ -8,6 +8,7 @@ from ..background.queue import enqueue_pending
 from ..config import settings
 from ..extract.ingest import ingest_text
 from ..store import Membership, SessionItem, acting_as
+from ..store.context import session
 
 
 async def writable_working_items(user_id: uuid.UUID) -> list[SessionItem]:
@@ -18,9 +19,9 @@ async def writable_working_items(user_id: uuid.UUID) -> list[SessionItem]:
 
     user_id: identity whose working memory is read.
     """
-    async with acting_as(user_id) as session:
+    async with acting_as(user_id):
         return list(
-            await session.scalars(
+            await session().scalars(
                 select(SessionItem)
                 .where(SessionItem.promoted_at.is_(None))
                 .where(
@@ -38,8 +39,8 @@ async def mark_promoted(user_id: uuid.UUID, due: list[SessionItem], now: datetim
     due: the items just reingested into the graph.
     now: this promotion pass's own promoted_at stamp.
     """
-    async with acting_as(user_id) as session:
-        await session.execute(
+    async with acting_as(user_id):
+        await session().execute(
             update(SessionItem)
             .where(SessionItem.id.in_([item.id for item in due]))
             .values(promoted_at=now)

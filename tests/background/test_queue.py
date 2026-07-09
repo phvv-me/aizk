@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
+import dbutil
 import pytest
 from asyncpg.exceptions import DuplicateObjectError, DuplicateTableError
 from bg_doubles import RecordingQueue
@@ -148,13 +149,14 @@ def patch_chunk_pipeline(
 
     @asynccontextmanager
     async def fake_acting_as(user_id: uuid.UUID) -> AsyncIterator[FakeSession]:
-        yield FakeSession(chunk)
+        fake = FakeSession(chunk)
+        async with dbutil.use_session(fake):
+            yield fake
 
     async def fake_extract(built_chunk: object, user_id: uuid.UUID) -> set[uuid.UUID]:
         return touched
 
     async def fake_bump(
-        session: object,
         owner_id: uuid.UUID,
         kind: Watermark.Kind,
         ref: str = "global",
@@ -223,7 +225,6 @@ def test_process_profile_rebuilds_then_clears_the_dirty_mark(
         yield None
 
     async def fake_set_value(
-        session: object,
         owner_id: uuid.UUID,
         kind: Watermark.Kind,
         counter: int = 0,

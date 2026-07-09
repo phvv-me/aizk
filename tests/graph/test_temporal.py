@@ -130,9 +130,9 @@ def test_record_access_bumps_recency_and_count_and_no_ops_on_empty() -> None:
         async with acting_as(owner) as session:
             subject = await seedgraph.add_entity(session, owner, "Subject")
             _, claim = await seedgraph.add_fact(session, owner, subject, statement="surfaced")
-        async with acting_as(owner) as session:
-            await FactClaim.record_access(session, [])
-            await FactClaim.record_access(session, ["surfaced"])
+        async with acting_as(owner):
+            await FactClaim.record_access([])
+            await FactClaim.record_access(["surfaced"])
         async with acting_as(owner) as session:
             row = await session.scalar(select(LiveFact).where(LiveFact.id == claim))
             assert row is not None

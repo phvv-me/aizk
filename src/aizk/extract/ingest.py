@@ -4,12 +4,12 @@ from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import ColumnElement, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..serving.chunk import ChonkieChunker, CodeChunker, is_code, is_text
 from ..serving.embed import Embedder
 from ..store import Chunk, Document, SessionItem, acting_as
+from ..store.context import session
 
 # re-exported so aizk.extract.ingest keeps naming this directory-walk filter, even though the
 # detection it runs lives in aizk.serving.chunk.
@@ -59,24 +59,22 @@ async def store_document(
 
     Returns the row's id and whether it was written, the latter False only when dedupe matched.
     """
-    async with acting_as(owner_id) as session:
-        existing = await session.scalar(select(Document.id).where(dedupe))
+    async with acting_as(owner_id):
+        existing = await session().scalar(select(Document.id).where(dedupe))
         if existing is not None:
             return existing, False
         if document.source_uri is not None:
-            stale = await session.scalar(
+            stale = await session().scalar(
                 select(Document).where(Document.source_uri == document.source_uri)
             )
             if stale is not None:
-                return await refresh_document(session, stale, document), True
-        session.add(document)
-        await session.flush()
+                return await refresh_document(stale, document), True
+        session().add(document)
+        await session().flush()
         return document.id, True
 
 
-async def refresh_document(
-    session: AsyncSession, stale: Document, document: Document
-) -> uuid.UUID:
+async def refresh_document(stale: Document, document: Document) -> uuid.UUID:
     """Swap a changed source's content under its standing document row, replacing every chunk.
 
     The row is the source's stable identity (``source_uri`` is unique), so an edited file
@@ -87,7 +85,6 @@ async def refresh_document(
     supersedes whatever the new content contradicts, the bi-temporal record intact. Ownership
     and scopes stay the standing row's, a refresh changes content, never sharing.
 
-    session: the open owner-scoped session the caller's transaction runs in.
     stale: the standing document row whose content changed.
     document: the freshly assembled row carrying the new content and chunks.
     """
@@ -96,14 +93,14 @@ async def refresh_document(
     stale.title = document.title
     stale.kind = document.kind
     stale.content_hash = document.content_hash
-    for old in await session.scalars(select(Chunk).where(Chunk.document_id == stale.id)):
-        await session.delete(old)
+    for old in await session().scalars(select(Chunk).where(Chunk.document_id == stale.id)):
+        await session().delete(old)
     for chunk in replacements:
         chunk.document_id = stale.id
         chunk.owner_id = stale.owner_id
         chunk.scopes = list(stale.scopes)
-        session.add(chunk)
-    await session.flush()
+        session().add(chunk)
+    await session().flush()
     return stale.id
 
 
@@ -340,11 +337,11 @@ async def remember_session(
     """
     owner_id = owner_id or settings.system_user_id
     [embedding] = await Embedder().embed([text], mode="document")
-    async with acting_as(owner_id) as session:
+    async with acting_as(owner_id):
         item = SessionItem(
             kind=kind, text=text, embedding=embedding, owner_id=owner_id, scopes=list(scopes)
         )
-        session.add(item)
-        await session.flush()
+        session().add(item)
+        await session().flush()
         logger.info("remembered session item {} kind={}", item.id, kind)
         return item.id

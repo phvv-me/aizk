@@ -3,11 +3,11 @@ from itertools import batched
 
 from loguru import logger
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..serving import Embedder
 from ..store import Chunk, Community, EntityContent, FactContent, Profile, acting_as
+from ..store.context import session
 from .admin import admin_session
 
 # the three per-tenant embedded tables, each carrying an id, an owner, and a halfvec embedding
@@ -33,9 +33,7 @@ CONTENT_TARGETS: dict[type[ContentEmbedded], str] = {
 EmbeddedTable = ScopedEmbedded | ContentEmbedded
 
 
-async def rewrite_embeddings(
-    session: AsyncSession, embedder: Embedder, model: type[EmbeddedTable], field: str
-) -> int:
+async def rewrite_embeddings(embedder: Embedder, model: type[EmbeddedTable], field: str) -> int:
     """Re-read one table's source text and overwrite its embedding column in batches.
 
     An ORM `Session`, not a bare `Connection`, is what makes the batched `update(model)` calls
@@ -45,16 +43,15 @@ async def rewrite_embeddings(
     transaction boundary and visibility (`acting_as` for a per-tenant table, the admin engine for a
     deduplicated content table content's own UPDATE policy refuses under row level security).
 
-    session: open session the read and every batched update run on.
     embedder: backend that maps the source text to fresh vectors.
     model: the embedded ORM table to walk.
     field: name of the source text column the vector is built from.
     """
     column = getattr(model, field)
-    rows = (await session.execute(select(model.id, column).order_by(model.id))).all()
+    rows = (await session().execute(select(model.id, column).order_by(model.id))).all()
     for batch in batched(rows, settings.reembed_batch, strict=False):
         vectors = await embedder.embed([source for _, source in batch], mode="document")
-        await session.execute(
+        await session().execute(
             update(model),
             [
                 {"id": row_id, "embedding": vector}
@@ -77,8 +74,8 @@ async def reembed_scoped_table(
     model: the embedded ORM table to walk.
     field: name of the source text column the vector is built from.
     """
-    async with acting_as(user_id) as session:
-        count = await rewrite_embeddings(session, embedder, model, field)
+    async with acting_as(user_id):
+        count = await rewrite_embeddings(embedder, model, field)
     logger.info("re-embedded {} {} rows", count, model.__tablename__)
     return count
 
@@ -100,7 +97,7 @@ async def reembed_content_table(
     field: name of the source text column the vector is built from.
     """
     async with admin_session() as session:
-        count = await rewrite_embeddings(session, embedder, model, field)
+        count = await rewrite_embeddings(embedder, model, field)
         await session.commit()
     logger.info("re-embedded {} {} content rows", count, model.__tablename__)
     return count

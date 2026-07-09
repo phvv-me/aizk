@@ -30,8 +30,8 @@ async def fan_out(task: ScheduledTask) -> None:
 
     task: the scheduled task being fanned out.
     """
-    async with system_session() as session:
-        users = await User.list_all(session)
+    async with system_session():
+        users = await User.list_all()
     async with queue_queries() as queries:
         queued = sum(
             [
@@ -94,8 +94,8 @@ async def run_worker(batch_size: int = 10) -> None:
 
     batch_size: maximum number of jobs the manager dequeues per round.
     """
-    async with system_session() as session:
-        await ontology.refresh(session)
+    async with system_session():
+        await ontology.refresh()
     async with queue_connection() as connection:
         pg = PgQueuer.from_asyncpg_connection(connection)
         pg.entrypoint(EXTRACT_ENTRYPOINT, concurrency_limit=settings.graph_build_concurrency)(
