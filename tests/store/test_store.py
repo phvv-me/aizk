@@ -19,6 +19,35 @@ from aizk.store import (
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 
+def test_session_outside_a_block_fails_fast() -> None:
+    """session() raises NoTenantContext when read outside any acting_as/admin_session block."""
+    from aizk.exceptions import NoTenantContext
+    from aizk.store.context import session
+
+    with pytest.raises(NoTenantContext):
+        session()
+
+
+def test_sync_user_groups_skips_malformed_claim_entries() -> None:
+    """A malformed group-claim entry is skipped, not crashed on, while a valid one still syncs."""
+    from typing import cast
+
+    async def body() -> bool:
+        await dbutil.reset_db()
+        user = await dbutil.seed_user(uuid.uuid4())
+        memberships: list[object] = [
+            {"id": "org-alpha", "name": "Alpha", "role": "writer"},  # valid
+            {"name": "no-id"},  # missing id, the KeyError branch skips it
+            {"id": 123, "role": "reader"},  # non-string id, the isinstance branch skips it
+        ]
+        async with system_session():
+            await Group.sync_user_groups(user, cast(list[dict[str, str]], memberships))
+            rows = await Group.list_all()
+        return any(row["name"] == "Alpha" for row in rows)
+
+    assert dbutil.run(body())  # the valid entry synced; the malformed ones skipped without a crash
+
+
 def test_user_lifecycle_create_link_and_list() -> None:
     """A created user reads back, `link_oidc` binds a subject without admin, listing is by age.
 
@@ -162,13 +191,9 @@ def test_watermark_bump_read_and_payload_round_trip() -> None:
             assert await Watermark.read(owner, Watermark.Kind.fact_count) == 0
             assert await Watermark.bump(owner, Watermark.Kind.fact_count, by=3) == 3
             assert await Watermark.bump(owner, Watermark.Kind.fact_count, by=2) == 5
-            await Watermark.set_value(
-                owner, Watermark.Kind.scorecard, counter=9, payload={"k": 1}
-            )
+            await Watermark.set_value(owner, Watermark.Kind.scorecard, counter=9, payload={"k": 1})
             assert await Watermark.read(owner, Watermark.Kind.scorecard) == 9
-            assert await Watermark.read_payload(owner, Watermark.Kind.scorecard) == {
-                "k": 1
-            }
+            assert await Watermark.read_payload(owner, Watermark.Kind.scorecard) == {"k": 1}
             assert await Watermark.read_payload(owner, Watermark.Kind.config) == {}
 
     dbutil.run(body())

@@ -141,6 +141,12 @@ def test_parse_ids_round_trips_a_comma_list_and_ignores_stray_whitespace(
     assert parse_ids("") == []
 
 
+def test_parse_ids_rejects_a_malformed_id_with_a_tool_error() -> None:
+    """A non-uuid in the list surfaces as a clean ToolError, not a raw ValueError to the client."""
+    with pytest.raises(ToolError):
+        parse_ids("not-a-uuid")
+
+
 @pytest.mark.parametrize("vetted", [True, False], ids=["admin", "non-admin"])
 def test_resolve_group_admin_returns_the_group_or_wraps_a_domain_refusal(
     monkeypatch: pytest.MonkeyPatch, vetted: bool

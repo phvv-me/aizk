@@ -232,9 +232,7 @@ def test_raptor_search_picks_the_level_by_query_breadth(owner: uuid.UUID) -> Non
         await seed_two_levels(owner)
         async with acting_as(owner):
             levels = await raptor_levels()
-            broad = await raptor_search(
-                "an overview of the whole area", basis(0), thematic=True
-            )
+            broad = await raptor_search("an overview of the whole area", basis(0), thematic=True)
             pointed = await raptor_search("one specific detail", basis(0), thematic=False)
         return levels, [lvl for _, _, lvl, _ in broad], [lvl for _, _, lvl, _ in pointed]
 
