@@ -170,14 +170,16 @@ async def ingest_file(
 
     Skips a file whose content already matches a stored document, or one whose chunker returns no
     spans at all, such as an empty file. A file stored before under the same ``source_uri`` whose
-    content CHANGED refreshes its standing document in place, counting as written.
+    content CHANGED refreshes its standing document in place, counting as written. A byte the
+    `is_text` filter admitted but utf-8 cannot decode is replaced rather than raised, so one
+    malformed file never aborts the surrounding directory walk.
 
     file: source file to ingest.
     owner_id: user that owns the stored rows.
     scopes: group set the stored rows are shared with.
     embedder: the shared embedder every file in the walk reuses.
     """
-    content = file.read_text(encoding="utf-8")
+    content = file.read_text(encoding="utf-8", errors="replace")
     digest = content_hash(content)
     code = is_code(file)
     spans = (CodeChunker() if code else ChonkieChunker()).chunk(content)
@@ -237,13 +239,15 @@ async def ingest_text(
     kind: str = "note",
     owner_id: uuid.UUID | None = None,
     scopes: tuple[uuid.UUID, ...] = (),
-) -> uuid.UUID:
+) -> uuid.UUID | None:
     """Store a raw text blob as a document with embedded chunks and return its id.
 
     Chunks the text with the prose chunker, embeds the spans, and writes the document and its
     chunks in one owner-scoped transaction, returning the existing id when the same content was
-    stored before so a remember of identical text is idempotent. Graph extraction is enqueued by
-    the caller, since this only lands the rows.
+    stored before so a remember of identical text is idempotent. An empty or whitespace blob the
+    chunker yields no spans for returns null without writing a chunkless dead document, mirroring
+    `ingest_file`'s own empty-file guard. Graph extraction is enqueued by the caller, since this
+    only lands the rows.
 
     text: the content to remember.
     title: human-readable label, defaulted from the leading words when null.
@@ -255,6 +259,8 @@ async def ingest_text(
     digest = content_hash(text)
     effective_title = title or " ".join(text.split()[:8])
     spans = ChonkieChunker().chunk(text)
+    if not spans:
+        return None
     embeddings = await Embedder().embed(spans, mode="document")
     document = Document(
         kind=kind,

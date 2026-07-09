@@ -2,6 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Self
 
+from loguru import logger
 from sqlalchemy import Text, delete, false, func, select, text, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -163,8 +164,21 @@ class Group(Id, TableBase, table=True):
         """
         desired: dict[uuid.UUID, Membership.Role] = {}
         for entry in memberships:
-            group = await cls.for_oidc_org(session, entry["id"], entry.get("name", entry["id"]))
-            desired[group.id] = Membership.Role(entry.get("role", Membership.Role.reader))
+            # a hostile or drifted claim (a bare string, a dict without `id`, a role outside the
+            # enum) must never crash auth: one bad entry would otherwise fail every request the
+            # token makes and lock out a whole org. Skip the entry, keep reconciling the rest.
+            try:
+                org_id = entry["id"]
+                role = Membership.Role(entry.get("role", Membership.Role.reader))
+                name = entry.get("name", org_id)
+            except TypeError, KeyError, ValueError, AttributeError:
+                logger.warning("skipping malformed group claim entry {!r}", entry)
+                continue
+            if not isinstance(org_id, str):
+                logger.warning("skipping group claim entry with non-string id {!r}", entry)
+                continue
+            group = await cls.for_oidc_org(session, org_id, name)
+            desired[group.id] = role
         # reconcile only the Logto-backed memberships; a hand-managed local group carries no
         # oidc_org_id and is never dropped just because a token happens not to mention it
         oidc_backed = select(cls.id).where(cls.oidc_org_id.is_not(None))

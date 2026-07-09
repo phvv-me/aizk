@@ -161,7 +161,7 @@ async def refresh_profiles(
                 select(EntityClaim.content_id)
                 .where(
                     EntityClaim.owner_id == user_id,
-                    Membership.writable_scopes(EntityClaim.scopes, user_id),
+                    Membership.writable_scopes(EntityClaim.scopes, EntityClaim.owner_id, user_id),
                 )
                 .distinct()
                 .order_by(EntityClaim.content_id)

@@ -25,9 +25,9 @@
       "severity": "error"
     },
     {
-      "line": 239,
+      "line": 254,
       "column": 13,
-      "stop_line": 239,
+      "stop_line": 254,
       "stop_column": 56,
       "path": "src/aizk/background/tasks.py",
       "code": -2,
@@ -37,9 +37,9 @@
       "severity": "error"
     },
     {
-      "line": 256,
+      "line": 271,
       "column": 13,
-      "stop_line": 256,
+      "stop_line": 271,
       "stop_column": 51,
       "path": "src/aizk/background/tasks.py",
       "code": -2,
@@ -205,9 +205,9 @@
       "severity": "error"
     },
     {
-      "line": 154,
+      "line": 155,
       "column": 20,
-      "stop_line": 154,
+      "stop_line": 155,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -217,9 +217,9 @@
       "severity": "error"
     },
     {
-      "line": 260,
+      "line": 265,
       "column": 36,
-      "stop_line": 260,
+      "stop_line": 265,
       "stop_column": 59,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -229,9 +229,9 @@
       "severity": "error"
     },
     {
-      "line": 441,
+      "line": 446,
       "column": 16,
-      "stop_line": 441,
+      "stop_line": 446,
       "stop_column": 38,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -241,9 +241,9 @@
       "severity": "error"
     },
     {
-      "line": 447,
+      "line": 452,
       "column": 44,
-      "stop_line": 447,
+      "stop_line": 452,
       "stop_column": 64,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -253,9 +253,9 @@
       "severity": "error"
     },
     {
-      "line": 448,
+      "line": 453,
       "column": 37,
-      "stop_line": 448,
+      "stop_line": 453,
       "stop_column": 58,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -265,9 +265,9 @@
       "severity": "error"
     },
     {
-      "line": 912,
+      "line": 917,
       "column": 21,
-      "stop_line": 912,
+      "stop_line": 917,
       "stop_column": 47,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -277,9 +277,9 @@
       "severity": "error"
     },
     {
-      "line": 912,
+      "line": 917,
       "column": 59,
-      "stop_line": 912,
+      "stop_line": 917,
       "stop_column": 84,
       "path": "src/aizk/graph/build.py",
       "code": -2,
@@ -445,9 +445,9 @@
       "severity": "error"
     },
     {
-      "line": 42,
+      "line": 44,
       "column": 20,
-      "stop_line": 42,
+      "stop_line": 44,
       "stop_column": 38,
       "path": "src/aizk/graph/session_tier.py",
       "code": -2,
@@ -649,9 +649,33 @@
       "severity": "error"
     },
     {
-      "line": 238,
+      "line": 61,
+      "column": 9,
+      "stop_line": 61,
+      "stop_column": 27,
+      "path": "src/aizk/store/migrations/versions/0003_rls_writeguard_recall_gate.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "No attribute `drop_scoped_rls` in module `alembic.op`",
+      "concise_description": "No attribute `drop_scoped_rls` in module `alembic.op`",
+      "severity": "error"
+    },
+    {
+      "line": 62,
+      "column": 9,
+      "stop_line": 62,
+      "stop_column": 28,
+      "path": "src/aizk/store/migrations/versions/0003_rls_writeguard_recall_gate.py",
+      "code": -2,
+      "name": "missing-attribute",
+      "description": "No attribute `apply_scoped_rls` in module `alembic.op`",
+      "concise_description": "No attribute `apply_scoped_rls` in module `alembic.op`",
+      "severity": "error"
+    },
+    {
+      "line": 241,
       "column": 29,
-      "stop_line": 238,
+      "stop_line": 241,
       "stop_column": 42,
       "path": "src/aizk/store/mixins/scoped.py",
       "code": -2,
@@ -661,9 +685,9 @@
       "severity": "error"
     },
     {
-      "line": 83,
+      "line": 89,
       "column": 44,
-      "stop_line": 83,
+      "stop_line": 89,
       "stop_column": 65,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -673,9 +697,9 @@
       "severity": "error"
     },
     {
-      "line": 86,
+      "line": 92,
       "column": 20,
-      "stop_line": 86,
+      "stop_line": 92,
       "stop_column": 49,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -685,9 +709,9 @@
       "severity": "error"
     },
     {
-      "line": 91,
+      "line": 97,
       "column": 20,
-      "stop_line": 91,
+      "stop_line": 97,
       "stop_column": 41,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -697,9 +721,9 @@
       "severity": "error"
     },
     {
-      "line": 96,
+      "line": 102,
       "column": 20,
-      "stop_line": 96,
+      "stop_line": 102,
       "stop_column": 30,
       "path": "src/aizk/store/models/tables/document.py",
       "code": -2,
@@ -709,9 +733,9 @@
       "severity": "error"
     },
     {
-      "line": 170,
+      "line": 184,
       "column": 44,
-      "stop_line": 170,
+      "stop_line": 184,
       "stop_column": 66,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -721,9 +745,9 @@
       "severity": "error"
     },
     {
-      "line": 174,
+      "line": 188,
       "column": 17,
-      "stop_line": 174,
+      "stop_line": 188,
       "stop_column": 40,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -733,9 +757,9 @@
       "severity": "error"
     },
     {
-      "line": 175,
+      "line": 189,
       "column": 17,
-      "stop_line": 175,
+      "stop_line": 189,
       "stop_column": 43,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -745,9 +769,9 @@
       "severity": "error"
     },
     {
-      "line": 349,
+      "line": 363,
       "column": 56,
-      "stop_line": 349,
+      "stop_line": 363,
       "stop_column": 66,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -757,9 +781,9 @@
       "severity": "error"
     },
     {
-      "line": 357,
+      "line": 371,
       "column": 21,
-      "stop_line": 357,
+      "stop_line": 371,
       "stop_column": 44,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -769,9 +793,9 @@
       "severity": "error"
     },
     {
-      "line": 383,
+      "line": 397,
       "column": 24,
-      "stop_line": 383,
+      "stop_line": 397,
       "stop_column": 48,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -781,9 +805,9 @@
       "severity": "error"
     },
     {
-      "line": 383,
+      "line": 397,
       "column": 61,
-      "stop_line": 383,
+      "stop_line": 397,
       "stop_column": 85,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -793,9 +817,9 @@
       "severity": "error"
     },
     {
-      "line": 402,
+      "line": 416,
       "column": 13,
-      "stop_line": 402,
+      "stop_line": 416,
       "stop_column": 38,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -805,9 +829,9 @@
       "severity": "error"
     },
     {
-      "line": 402,
+      "line": 416,
       "column": 51,
-      "stop_line": 402,
+      "stop_line": 416,
       "stop_column": 76,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -817,9 +841,9 @@
       "severity": "error"
     },
     {
-      "line": 405,
+      "line": 419,
       "column": 41,
-      "stop_line": 405,
+      "stop_line": 419,
       "stop_column": 57,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -829,9 +853,9 @@
       "severity": "error"
     },
     {
-      "line": 422,
+      "line": 436,
       "column": 17,
-      "stop_line": 422,
+      "stop_line": 436,
       "stop_column": 42,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -841,9 +865,9 @@
       "severity": "error"
     },
     {
-      "line": 423,
+      "line": 437,
       "column": 17,
-      "stop_line": 423,
+      "stop_line": 437,
       "stop_column": 42,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -853,9 +877,9 @@
       "severity": "error"
     },
     {
-      "line": 424,
+      "line": 438,
       "column": 17,
-      "stop_line": 424,
+      "stop_line": 438,
       "stop_column": 33,
       "path": "src/aizk/store/models/tables/group.py",
       "code": -2,
@@ -1333,9 +1357,9 @@
       "severity": "error"
     },
     {
-      "line": 37,
+      "line": 44,
       "column": 5,
-      "stop_line": 37,
+      "stop_line": 44,
       "stop_column": 31,
       "path": "tests/serving/test_entity_gate.py",
       "code": -2,
@@ -1345,39 +1369,15 @@
       "severity": "error"
     },
     {
-      "line": 46,
+      "line": 53,
       "column": 5,
-      "stop_line": 46,
+      "stop_line": 53,
       "stop_column": 24,
       "path": "tests/serving/test_entity_gate.py",
       "code": -2,
       "name": "missing-attribute",
       "description": "Object of class `ModuleType` has no attribute `GLiNER2`",
       "concise_description": "Object of class `ModuleType` has no attribute `GLiNER2`",
-      "severity": "error"
-    },
-    {
-      "line": 69,
-      "column": 23,
-      "stop_line": 69,
-      "stop_column": 27,
-      "path": "tests/serving/test_entity_gate.py",
-      "code": -2,
-      "name": "bad-argument-type",
-      "description": "Argument `dict[str, dict[str, list[dict[str, float]]]]` is not assignable to parameter `result` with type `dict[str, object]` in function `build_gate`",
-      "concise_description": "Argument `dict[str, dict[str, list[dict[str, float]]]]` is not assignable to parameter `result` with type `dict[str, object]` in function `build_gate`",
-      "severity": "error"
-    },
-    {
-      "line": 78,
-      "column": 23,
-      "stop_line": 78,
-      "stop_column": 26,
-      "path": "tests/serving/test_entity_gate.py",
-      "code": -2,
-      "name": "bad-argument-type",
-      "description": "Argument `dict[str, dict[str, list[dict[str, float]]]]` is not assignable to parameter `result` with type `dict[str, object]` in function `build_gate`",
-      "concise_description": "Argument `dict[str, dict[str, list[dict[str, float]]]]` is not assignable to parameter `result` with type `dict[str, object]` in function `build_gate`",
       "severity": "error"
     },
     {

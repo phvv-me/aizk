@@ -19,11 +19,16 @@ from .models import TimedFact
 # (`2024-03-15`, `On 2024-03-15 the team decided...`, a journal line's own `YYYY-MM-DD`) while
 # rejecting prose, prices, times, and bare years; the one known loss is a bare month-and-year with
 # no day ("March 2024"), which the LLM's own date field normalizes to a full date in practice.
+#
+# DATE_ORDER is YMD so an ambiguous all-numeric date like "03/04/2024" resolves the ISO way this
+# store writes and reads dates everywhere, matching the `YYYY-MM-DD` journal lines and per-fact
+# date fields rather than dateparser's machine locale default.
 DATEPARSER_SETTINGS = {
     "RETURN_AS_TIMEZONE_AWARE": True,
     "PREFER_DATES_FROM": "past",
     "PARSERS": ["absolute-time"],
     "STRICT_PARSING": True,
+    "DATE_ORDER": "YMD",
 }
 
 
@@ -43,7 +48,9 @@ def parse_date(text: str) -> datetime | None:
     if direct is not None:
         return direct
     found = search_dates(text, settings=DATEPARSER_SETTINGS)
-    return found[0][1] if found else None
+    if not found:
+        return None
+    return min(date for _, date in found)
 
 
 def resolve_valid_from(explicit: str | None, statement: str) -> datetime | None:

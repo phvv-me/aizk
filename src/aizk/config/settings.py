@@ -252,11 +252,14 @@ class Settings(BaseSettings):
         default since the local GPU is already spoken for by the embed/rerank/llm vLLM trio.
     gliner_gate_enabled: whether the gliner2 relevance gate runs ahead of the combined extraction
         call at all. A chunk it clears skips the LLM call entirely.
+    gliner_gate_floor: entity kinds whose presence alone never earns a chunk an LLM call, the
+        pronoun-level catch-alls the classification head maps small talk onto (`Person` by
+        default). A chunk clears the gate only when `classify_text` reports a type past this floor.
     gliner_gate_model: gliner2 checkpoint the gate loads, the 205M unified extraction model.
-    gliner_gate_threshold: confidence a chunk's best entity match must clear to count as relevant
-        to the ontology, below which the gate skips the LLM call for that chunk. Calibrated
-        against real prose, filler text topped out around 0.5, ontology-bearing text sat at 0.9+,
-        so 0.7 sits in the wide gap between them.
+    gliner_gate_threshold: per-label confidence the classification head must clear for a type to
+        count as present, the `cls_threshold` handed to `classify_text`. Swept against real prose,
+        clear filler stayed under 0.6 while ontology-bearing text sat at 0.9+, so 0.7 rejects small
+        talk with margin without ever dropping a substantive chunk.
     graph_build_concurrency: pending chunks a graph build extracts and consolidates at once, the
         `asyncio.Semaphore` width shared by `build_graph`'s inline loop and the pgqueuer worker's
         extraction entrypoint, so both paths hit the LLM endpoint at the same bounded concurrency
@@ -520,6 +523,7 @@ class Settings(BaseSettings):
     gap_seed_terms: int = 2
     gliner_gate_device: str = "cpu"
     gliner_gate_enabled: bool = True
+    gliner_gate_floor: frozenset[str] = frozenset({"Person"})
     gliner_gate_model: str = "fastino/gliner2-base-v1"
     gliner_gate_threshold: float = 0.7
     graph_build_concurrency: int = 48

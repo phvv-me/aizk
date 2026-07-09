@@ -23,7 +23,9 @@ async def writable_working_items(user_id: uuid.UUID) -> list[SessionItem]:
             await session.scalars(
                 select(SessionItem)
                 .where(SessionItem.promoted_at.is_(None))
-                .where(Membership.writable_scopes(SessionItem.scopes, user_id))
+                .where(
+                    Membership.writable_scopes(SessionItem.scopes, SessionItem.owner_id, user_id)
+                )
                 .order_by(SessionItem.created_at)
             )
         )

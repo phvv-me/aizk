@@ -9,10 +9,11 @@ from loguru import logger
 from mainboard.profiling import span
 from openai import APIConnectionError, APITimeoutError, LengthFinishReasonError
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 
 from ..config import settings
@@ -194,16 +195,20 @@ class GraphWriter:
         return resolved
 
     async def already_claims_fact(self, content_id: uuid.UUID) -> bool:
-        """Whether this container already stakes its own claim on this fact content id, ever."""
-        gate_off = {settings.skip_live_gate: True}
+        """Whether this container already stakes a live claim on this fact content id right now.
+
+        Gated to the current version through the ORM's own live temporal criteria, so a claim
+        this container once held but has since superseded, decayed, or forgotten no longer reads
+        as claimed. That lets a later chunk re-assert a byte-identical statement the world has
+        reverted to, opening a fresh live claim, rather than silently dropping it against a closed
+        one that could never be re-opened.
+        """
         claimed = await self.session.scalar(
-            select(FactClaim.id)
-            .where(
+            select(FactClaim.id).where(
                 FactClaim.content_id == content_id,
                 FactClaim.owner_id == self.owner_id,
                 FactClaim.scopes == self.scopes,
             )
-            .execution_options(**gate_off)
         )
         return claimed is not None
 
@@ -439,7 +444,7 @@ async def pending_chunks(
     selection = (
         select(Chunk)
         .where(Chunk.processed_at.is_(None))
-        .where(Membership.writable_scopes(Chunk.scopes, user_id))
+        .where(Membership.writable_scopes(Chunk.scopes, Chunk.owner_id, user_id))
         .order_by(Chunk.id)
         .limit(limit)
     )
@@ -915,10 +920,48 @@ async def affected_fact_ids(
     )
 
 
+async def migrate_entity_claims(
+    session: AsyncSession, duplicate_id: uuid.UUID, canonical_id: uuid.UUID
+) -> None:
+    """Repoint a merged-away entity's own claims onto the canonical content before it is deleted.
+
+    `entity_claim.content_id` cascades on delete, so dropping a duplicate content row would
+    otherwise take with it the claim of any tenant who staked only that duplicate, leaving them
+    seeing neither the duplicate nor the survivor. Each such claim moves to the canonical content
+    id instead, so no tenant loses its stake. A claim that would collide with one the same owner
+    already holds on the canonical content for the identical scope set is dropped rather than
+    duplicated, since that owner already has its canonical claim and the unique key admits one.
+
+    session: session bound to the owner-role admin connection, row level security bypassed, the
+        cross-tenant reach a structural merge needs to reach every holder's claim.
+    duplicate_id: the merged-away entity content whose claims are migrated.
+    canonical_id: the surviving entity content the claims are repointed onto.
+    """
+    canonical_claim = aliased(EntityClaim)
+    collides_with_canonical = (
+        select(canonical_claim.id)
+        .where(canonical_claim.content_id == canonical_id)
+        .where(canonical_claim.owner_id == EntityClaim.owner_id)
+        .where(canonical_claim.scopes == EntityClaim.scopes)
+        .exists()
+    )
+    await session.execute(
+        delete(EntityClaim)
+        .where(EntityClaim.content_id == duplicate_id, collides_with_canonical)
+        .execution_options(synchronize_session=False)
+    )
+    await session.execute(
+        update(EntityClaim)
+        .where(EntityClaim.content_id == duplicate_id)
+        .values(content_id=canonical_id)
+        .execution_options(synchronize_session=False)
+    )
+
+
 async def merge_duplicates(
     affected_ids: list[uuid.UUID], redirect: dict[uuid.UUID, uuid.UUID | None]
 ) -> int:
-    """Repoint every affected fact and delete every duplicate entity, return the count merged.
+    """Repoint every affected fact, migrate each duplicate's claims, and delete the duplicate node.
 
     Runs entirely on the owner-role admin connection, bypassing row level security. Content's own
     claim-gated SELECT policy would otherwise hide another tenant's private claim on the very
@@ -926,7 +969,9 @@ async def merge_duplicates(
     place, so a real structural merge needs the same superuser reach migrations already run with.
     Repointing and deleting run as two separate transactions, since every repoint must land before
     a duplicate's own claims (which repoint_fact_content may have just migrated facts onto) are
-    safe to cascade away.
+    safe to cascade away. In that second transaction each duplicate's own entity claims are moved
+    onto its canonical survivor before the duplicate is deleted, so the delete's cascade never
+    strips a tenant of the only claim it held.
 
     affected_ids: fact content naming at least one duplicate, from affected_fact_ids.
     redirect: duplicate content id to its canonical replacement, from find_duplicates.
@@ -937,9 +982,11 @@ async def merge_duplicates(
             for content_id in affected_ids:
                 await repoint_fact_content(session, content_id, redirect)
         async with session.begin():
-            for duplicate_id in redirect:
+            for duplicate_id, canonical_id in redirect.items():
                 entity = await session.get(EntityContent, duplicate_id)
                 if entity is not None:  # pragma: no cover - always true within a single pass
+                    if canonical_id is not None:
+                        await migrate_entity_claims(session, duplicate_id, canonical_id)
                     await session.delete(entity)
                     merged += 1
     return merged

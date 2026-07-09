@@ -54,20 +54,29 @@ class Membership(TableBase, table=True):
 
     @classmethod
     def writable_scopes(
-        cls, column: InstrumentedAttribute[list[uuid.UUID]], user_id: uuid.UUID
+        cls,
+        scopes: InstrumentedAttribute[list[uuid.UUID]],
+        owner: InstrumentedAttribute[uuid.UUID],
+        user_id: uuid.UUID,
     ) -> ColumnElement[bool]:
-        """Boolean clause selecting rows whose scope set the user may write, private included.
+        """Boolean clause selecting rows whose scope set the user may write, their own private
+        rows included.
 
-        A row is writable when it is private (an empty scope set) or its whole scope set is
-        contained in the groups this user writes into, the application-side mirror of
-        `store.mixins.scoped.ScopeLattice.write`'s own containment shape, for the passes that must
-        target only rows they may write rather than relying on row level security to filter a
-        write attempt after the fact.
+        A row is writable when it is the user's own private row (an empty scope set they own) or a
+        shared row whose whole scope set is contained in the groups this user writes into, the
+        application-side mirror of `store.mixins.scoped.ScopeLattice.write`'s containment shape,
+        for the passes that must target only rows they may write rather than relying on row level
+        security to filter a write attempt after the fact. The empty-scope branch is guarded by
+        ownership because `'{}' <@ anything` is trivially true, so an unguarded containment check
+        would call every private row writable regardless of who owns it.
 
-        column: the scope-set column of the model being filtered.
+        scopes: the scope-set column of the model being filtered.
+        owner: the owner column of the same model, gating the private branch.
         user_id: user whose write access filters the rows.
         """
         writable = select(
             func.coalesce(func.array_agg(cls.group_id), ScopeLattice.empty_scopes())
         ).where(cls.user_id == user_id, cls.role != cls.Role.reader)
-        return (func.cardinality(column) == 0) | column.contained_by(writable.scalar_subquery())
+        return ((func.cardinality(scopes) == 0) & (owner == user_id)) | (
+            (func.cardinality(scopes) > 0) & scopes.contained_by(writable.scalar_subquery())
+        )

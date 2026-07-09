@@ -1,6 +1,7 @@
 from collections.abc import Mapping
 from typing import cast
 
+from loguru import logger
 from openai import AsyncOpenAI, BaseModel, Omit
 from patos import Singleton
 
@@ -71,5 +72,12 @@ class Reranker(Singleton):
         )
         scores = [0.0] * len(candidates)
         for result in response.results:
+            if not 0 <= result.index < len(candidates):
+                logger.warning(
+                    "rerank returned out-of-range index {idx} for {n} candidates, skipping it",
+                    idx=result.index,
+                    n=len(candidates),
+                )
+                continue
             scores[result.index] = result.relevance_score
         return scores

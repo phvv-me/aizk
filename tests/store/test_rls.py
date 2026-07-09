@@ -145,6 +145,25 @@ def test_write_predicate_enforces_lattice(scenario: Scenario) -> None:
     dbutil.run(body())
 
 
+def test_write_check_rejects_a_private_row_owned_by_another_user() -> None:
+    """An empty-scope insert is admitted only for the acting user's own private rows.
+
+    A private row carries an empty scope set, and `'{}' <@ anything` is trivially true, so the
+    write-check's containment branch alone would admit a forged private row under any victim's
+    owner id. The policy gates the empty-scope branch on ownership, so an actor may write its own
+    private row but never one owned by someone else.
+    """
+
+    async def body() -> None:
+        await dbutil.reset_db()
+        actor = await dbutil.seed_user(uuid.uuid4())
+        victim = await dbutil.seed_user(uuid.uuid4())
+        assert await dbutil.can_write_document(actor, actor, []) is True
+        assert await dbutil.can_write_document(actor, victim, []) is False
+
+    dbutil.run(body())
+
+
 def test_missing_lens_reaches_full_union_and_lens_narrows() -> None:
     """A set lens narrows an already-visible read and excludes the owner's private layer.
 

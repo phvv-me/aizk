@@ -306,6 +306,9 @@ async def rerank_hits(query: str, pool: list[Hit], k: int) -> list[Hit]:
     unaffected, since the endpoint's own latency scales with candidate length and a cross-encoder's
     verdict is dominated by a passage's early tokens anyway.
 
+    A score count that does not line up with the candidate pool, a misbehaving endpoint, falls
+    back to the fused order truncated to k rather than failing the whole recall.
+
     query: natural-language search string.
     pool: fused candidates to rescore, ordered best first.
     k: number of results to return.
@@ -313,6 +316,13 @@ async def rerank_hits(query: str, pool: list[Hit], k: int) -> list[Hit]:
     snippets = [hit.text[: settings.rerank_snippet_chars] for hit in pool]
     async with stage("rerank_http"):
         scores = await Reranker().rerank(query, snippets)
+    if len(scores) != len(pool):
+        logger.warning(
+            "rerank returned {got} scores for {want} candidates, keeping the fused order",
+            got=len(scores),
+            want=len(pool),
+        )
+        return pool[:k]
     rescored = [
         hit.model_copy(update={"score": score}) for hit, score in zip(pool, scores, strict=True)
     ]
@@ -592,9 +602,11 @@ class Recall:
         more_hits, more_facts = await Recall(
             self.session, self.embedder, expanded_query, vector, self.k, self.as_of, self.ppr
         ).assemble_context()
-        merged_hits, merged_facts = (
-            merge_hits(hits, more_hits, settings.rerank_candidates),
-            merge_facts(facts, more_facts),
-        )
+        # cap each merged lane at the budget the first round already surfaces, k reranked hits and
+        # the seed-plus-neighbor fact pool, so one gap-fill round widens a thin recall without
+        # handing the caller back roughly twice the k it asked for. The `max` never drops a
+        # first-round fact the ppr lane already grew that round past the seed-plus-neighbor cap.
+        merged_hits = merge_hits(hits, more_hits, self.k)
+        merged_facts = merge_facts(facts, more_facts)[: max(len(facts), 2 * self.k)]
         log_gap_fill(self.query, len(merged_hits) - len(hits), len(merged_facts) - len(facts))
         return merged_hits, merged_facts

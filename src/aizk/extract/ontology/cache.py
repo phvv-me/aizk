@@ -113,7 +113,11 @@ async def build_snapshot(session: AsyncSession) -> OntologySnapshot:
     entity_names = await EntityKind.extractable_names(session)
     relation_names = await RelationKind.extractable_names(session)
     entity_descriptions = dict(
-        (await session.execute(select(EntityKind.name, EntityKind.description))).all()
+        (
+            await session.execute(
+                select(EntityKind.name, EntityKind.description).where(~EntityKind.structural)
+            )
+        ).all()
     )
     try:
         embedded = (

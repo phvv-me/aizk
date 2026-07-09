@@ -47,7 +47,7 @@ def test_ingest_text_dedupes_on_content_hash(settings: Settings) -> None:
     """Remembering the same text twice lands one document and returns its id both times."""
     title = f"note {uuid.uuid4().hex}"
 
-    async def body() -> tuple[uuid.UUID, uuid.UUID, int]:
+    async def body() -> tuple[uuid.UUID | None, uuid.UUID | None, int]:
         await dbutil.reset_db()
         await dbutil.seed_user(settings.system_user_id, is_admin=True)
         note = "a remembered note about the bi-temporal memory spine across time"

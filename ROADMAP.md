@@ -45,6 +45,15 @@ paper or design each piece traces to.
   `apply_scoped_rls`/`drop_scoped_rls` Alembic ops the committed `0001_init.py` migration already
   calls, kept alive as aizk's own thin wrapper over the library's DDL builders since that call
   shape predates the library's own self-contained `apply_rls`/`drop_rls`).
+- [x] The GLiNER2 relevance gate re-enabled on a discriminating basis. It scores each chunk with
+  the classification head (`classify_text`, "which ontology types is this about") rather than span
+  extraction, which over the whole 46-type ontology matched some label above threshold in almost
+  any sentence and so passed everything; the head instead maps small talk onto `Person` alone, and
+  a chunk clears the gate only when a type past that floor is present. The 205M
+  `fastino/gliner2-base-v1` checkpoint resolves through `snapshot_download` with `local_files_only`
+  first over a persistent HF cache mount, so every warm start is a no-network path lookup and the
+  one-time download is the only cold-start cost, never the implicit fetch that hung a fresh
+  recreate before (`serving/gate/entity_gate.py`).
 
 ## Next
 
@@ -108,10 +117,6 @@ Open items carried over from the earlier gap analysis, still unbuilt or partial.
   commands the two-plane-auth rework moved off the MCP surface landed undertested, so `fail_under`
   sits at a temporary 97 (`pyproject.toml [tool.coverage.report]`). Cover them and put the gate
   back to 99.
-- [ ] **Persist the GLiNER gate model, re-enable the gate.** A fresh server recreate re-downloads
-  `fastino/gliner2-base-v1` from HF Hub and, with no token or cache, hangs startup; the recovery
-  set `AIZK_GLINER_GATE_ENABLED=false`, degrading background extraction. Bake the model into the
-  image or mount a persistent HF cache, then re-enable.
 
 ## v1.0.0
 

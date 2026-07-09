@@ -174,8 +174,14 @@ def test_resolve_suggested_type_folds_into_an_identical_existing_description(
     async def body() -> tuple[str, str]:
         async with system_session() as session:
             await ontology.refresh(session)
+            # a non-structural kind: structural kinds (RaptorSummary, Observation) are deliberately
+            # excluded from the auto-create fold pool, so a suggestion never resolves into one.
             name, description = (
-                await session.execute(select(EntityKind.name, EntityKind.description).limit(1))
+                await session.execute(
+                    select(EntityKind.name, EntityKind.description)
+                    .where(~EntityKind.structural)
+                    .limit(1)
+                )
             ).one()
             resolved = await resolve_suggested_type(session, description)
         return resolved, name

@@ -494,8 +494,14 @@ def test_resolve_entity_type_grows_the_catalog_for_a_concept_fallback_with_a_sug
         owner = await seedgraph.fresh_owner()
         async with acting_as(owner) as session:
             await ontology.refresh(session)
+            # a non-structural kind: structural kinds (RaptorSummary, Observation) are excluded
+            # from the auto-create fold pool, so a Concept fallback never resolves into one.
             name, description = (
-                await session.execute(select(EntityKind.name, EntityKind.description).limit(1))
+                await session.execute(
+                    select(EntityKind.name, EntityKind.description)
+                    .where(~EntityKind.structural)
+                    .limit(1)
+                )
             ).one()
             entity = ExtractedEntity(
                 name="Something", type=ontology.CONCEPT, suggested_type=description

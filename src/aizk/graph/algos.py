@@ -26,7 +26,7 @@ async def ppr_expand(
     keeps returning to. Bounding the walk in the database keeps memory and latency tied to the
     local neighborhood rather than the whole corpus. Reading `LiveFact` rather than the raw claim
     table keeps a superseded edge out of the walk with no separate visibility gate to hand-repeat.
-    Returns [] for no seeds or none present in the graph.
+    Returns [] for no seeds, none present in the graph, or a non-converging power iteration.
 
     session: open, user-scoped session whose visibility bounds the loaded graph.
     seed_entity_ids: entities to teleport back to, the matched graph seeds.
@@ -71,7 +71,14 @@ async def ppr_expand(
     personalization = {seed: 1.0 for seed in seed_entity_ids if seed in graph}
     if not personalization:
         return []
-    scores = nx.pagerank(graph, alpha=settings.ppr_alpha, personalization=personalization)
+    try:
+        scores = nx.pagerank(graph, alpha=settings.ppr_alpha, personalization=personalization)
+    except nx.PowerIterationFailedConvergence:
+        logger.warning(
+            "ppr power iteration did not converge over {nodes} entities, skipping expansion",
+            nodes=graph.number_of_nodes(),
+        )
+        return []
     seeds = set(seed_entity_ids)
     ranked_entities = sorted(
         (entity for entity in scores if entity not in seeds),

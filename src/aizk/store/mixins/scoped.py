@@ -167,7 +167,10 @@ class ScopeLattice:
         )
         return sa.or_(
             sa.and_(sa.func.cardinality(self.scopes) == 0, self.owner_id == self._uid),
-            self.scopes.contained_by(writer_groups),
+            sa.and_(
+                sa.func.cardinality(self.scopes) > 0,
+                self.scopes.contained_by(writer_groups),
+            ),
         )
 
     def default_policies(self) -> list[rls.Policy]:

@@ -130,3 +130,8 @@ services:
     # deployment state and the off-box mirror in `scripts/pull-aizk-backup.sh` reads it unchanged.
     volumes: !override
       - /home/crimson/.aizk/backups:/backups
+      # the GLiNER2 gate's checkpoint cache on the host, so the 205M model downloads once and every
+      # later start resolves it offline through `snapshot_download(local_files_only=True)` rather
+      # than blocking startup on an implicit HF Hub fetch. Pointed at by HF_HOME=/hf-cache in the
+      # host `.env`.
+      - /home/crimson/.aizk/hf-cache:/hf-cache

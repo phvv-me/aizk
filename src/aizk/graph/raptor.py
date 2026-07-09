@@ -201,7 +201,7 @@ class RaptorTierBuilder(TierBuilder[list[Node], RaptorReport]):
         parent = redundant_parent(self.new_parents, vector, settings.raptor_redundancy_threshold)
         if parent is None:
             parent = Node(
-                entity_id=uuid.uuid4(),
+                entity_id=uuid.uuid7(),
                 label=report.label,
                 summary=report.summary,
                 embedding=list(vector),
@@ -406,7 +406,7 @@ def leaf_content(community: Community) -> EntityContent:
     community: the single-level community this leaf summarizes, already known embedded.
     """
     return EntityContent(
-        id=uuid.uuid4(),
+        id=uuid.uuid7(),
         name=community.label,
         type=ontology.RAPTOR_SUMMARY,
         embedding=community.embedding,

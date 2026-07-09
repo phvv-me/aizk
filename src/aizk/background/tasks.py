@@ -21,7 +21,7 @@ from ..graph.insight import derive_insights
 from ..graph.profiles import refresh_profiles
 from ..graph.raptor import build_raptor
 from ..graph.session_tier import promote_sessions
-from ..store import LiveFact, Watermark, acting_as
+from ..store import FactClaim, Watermark, acting_as
 from .payloads import TaskJob
 
 FanOut = Callable[["ScheduledTask"], Awaitable[None]]
@@ -101,12 +101,26 @@ class ScheduledTask(Registry, FrozenModel, abc.ABC):
         pg.schedule(self.cron_entrypoint, self.expression)(partial(self.fire_cron, fan_out))
 
 
-async def latest_fact_count(session: AsyncSession) -> int:
-    """Count of latest facts, the growth signal both growth-gated passes measure against.
+async def recorded_fact_count(session: AsyncSession) -> int:
+    """Count of every fact claim ever recorded, the monotonic growth signal the gated passes read.
+
+    Counts the whole claim history with the live gate off, so a superseded, decayed, or forgotten
+    version still counts, since each of those only closes a claim's `recorded` upper bound and
+    never deletes its row. So this measure only ever climbs, unlike a live-fact count that a
+    decaying or forgetting graph drives back down. That lets a churning graph, one that adds far
+    more than it retires yet stays near net-flat, still clear the growth threshold and rebuild its
+    summaries rather than serving permanently stale ones because its live count barely moved.
 
     session: an open session already acting as the pass's user.
     """
-    return await session.scalar(select(func.count()).select_from(LiveFact)) or 0
+    return (
+        await session.scalar(
+            select(func.count())
+            .select_from(FactClaim)
+            .execution_options(**{settings.skip_live_gate: True})
+        )
+        or 0
+    )
 
 
 async def run_if_grown(
@@ -120,8 +134,9 @@ async def run_if_grown(
 
     The shared body of `CommunitiesTask` and `RaptorTask`, whose only difference is which watermark
     kind gates them, how large a growth threshold they wait for, and which builder they run. Reads
-    the current fact count once. Below the threshold it only logs and returns, otherwise it runs
-    the builder and advances the watermark to the count just measured.
+    the cumulative recorded fact count once, a measure that only climbs so structural churn always
+    eventually clears the gate. Below the threshold it only logs and returns, otherwise it runs the
+    builder and advances the watermark to the count just measured.
 
     user_id: identity whose slice of the pass runs.
     kind: the watermark kind the growth is measured and persisted against.
@@ -130,7 +145,7 @@ async def run_if_grown(
     label: the pass name logged when growth has not yet cleared the threshold.
     """
     async with acting_as(user_id) as session:
-        current = await latest_fact_count(session)
+        current = await recorded_fact_count(session)
         last = await Watermark.read(session, user_id, kind)
     if current - last < threshold:
         logger.info("{} pass skipped for {}, {} new facts", label, user_id, current - last)

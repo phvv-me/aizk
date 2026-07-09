@@ -221,7 +221,9 @@ def test_writable_scopes_clause_matches_the_write_lattice() -> None:
         in_readonly = await dbutil.seed_document(user, [readonly])
         async with acting_as(user) as session:
             rows = await session.execute(
-                select(Document.id).where(Membership.writable_scopes(Document.scopes, user))
+                select(Document.id).where(
+                    Membership.writable_scopes(Document.scopes, Document.owner_id, user)
+                )
             )
             selected = set(rows.scalars().all())
         assert private in selected and in_writable in selected
