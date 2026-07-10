@@ -12,7 +12,7 @@
 # swap AIZK_LLM_CHECKPOINT for a larger extractor (E4B/9B class) in crimson's .env, since
 # extraction quality is the fact-noise bottleneck of the graph.
 #
-# Usage: docker compose -f docker-compose.yml -f docker-compose.crimson.yml up -d
+# Usage: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.crimson.yml up -d
 
 services:
   vllm-emb:

@@ -4,6 +4,9 @@
 .github
 .venv
 .chefe
+deploy
+tests
+docs
 __pycache__
 *.pyc
 .pytest_cache

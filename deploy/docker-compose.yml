@@ -277,8 +277,10 @@ services:
   # are overridden here to the container-internal addresses, never edited in code.
   server:
     build:
-      context: .
-      dockerfile: Dockerfile
+      # context is the package root (parent of deploy/) so the build sees src/ and pyproject.toml;
+      # the .dockerignore at that root still applies since it is resolved against the context
+      context: ..
+      dockerfile: deploy/Dockerfile
     depends_on:
       db:
         condition: service_healthy

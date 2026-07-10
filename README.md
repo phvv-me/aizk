@@ -31,7 +31,7 @@ and one aizk container that is the MCP server, the background worker, and the sc
 at once. It migrates and comes up ready over HTTP with nothing else to run.
 
 ```sh
-docker compose up -d
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
 Then call its tools from any MCP client.
@@ -45,8 +45,9 @@ async with Client("http://localhost:8080/mcp") as client:
     print(result.data)
 ```
 
-Every docker-compose knob and every `Settings` default live in one file, `.env.example`, copy
-it to `.env` and edit, both compose and the app read the same `AIZK_`-prefixed variables. Running
+Every docker-compose knob and every `Settings` default live in one file, `deploy/.env.example`,
+copy it to `deploy/.env` and edit, both compose and the app read the same `AIZK_`-prefixed
+variables. Running
 the server, worker, or backup outside the container is a plain `pip install aizk` and the matching
 `aizk` command. See [Operations](https://phvv.me/aizk/operations/) for deployment and backups.
 
