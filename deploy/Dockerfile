@@ -6,21 +6,20 @@
 # copying only the built virtualenv and the source it points at, plus the Postgres 18 client.
 
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS builder
-# build-essential for the source-only wheels, git for the rls fork's direct reference
+# build-essential for the source-only wheels (asyncpg and friends ship no py3.14 wheel yet)
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential git \
+    && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # dependency layer, cached across source edits: install everything the manifest names but not the
 # project itself, so touching src never re-resolves torch and the rest.
 COPY pyproject.toml README.md ./
 RUN uv sync --no-dev --no-install-project
-# the project over the cached deps, then the rls fork overlay last so the sync never reverts it,
-# since the bare `rls` PyPI name is the upstream base the fork reworked. Both the overlay and the
-# sqlalchemy 2.1 override (pyproject's [tool.uv]) disappear once the fork ships as `rlsalchemy`.
+# the project over the cached deps. rlsalchemy resolves straight from PyPI, so there is no git
+# overlay to reapply; only the sqlalchemy 2.1 override (pyproject's [tool.uv]) remains, which uv
+# reads from the manifest on its own.
 COPY src ./src
-RUN uv sync --no-dev \
-    && uv pip install --python .venv --reinstall "rls @ git+https://github.com/phvv-me/rls"
+RUN uv sync --no-dev
 
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 # postgresql-client-18, version-matched to the vchord pg18 server, so `aizk backup`/`restore` run
