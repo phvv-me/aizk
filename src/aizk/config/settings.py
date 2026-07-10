@@ -571,7 +571,7 @@ class Settings(BaseSettings):
     rerank_api_key: str = ""
     rerank_candidates: int = 50
     rerank_min_pool: int = 3
-    rerank_model: str = "Qwen/Qwen3-Reranker-4B"
+    rerank_model: str = "Qwen/Qwen3-VL-Reranker-2B"
     rerank_request_timeout: float = 120.0
     rerank_snippet_chars: int = 320
     rerank_url: str = "http://localhost:8001/v1"

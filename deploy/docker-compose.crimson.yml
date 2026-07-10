@@ -4,13 +4,18 @@
 # reranker are runtime-quantized to fp8 (`--quantization fp8` over bf16 checkpoints), an Ada/Hopper
 # (sm >= 8.9) hardware path. Ampere has no fp8 compute; vLLM would fall back to weight-only
 # fp8-Marlin, a pointless risk when crimson has 48 GB across two cards. This override serves both
-# at plain bf16 (2B embedder ~4.5 GB, 4B reranker ~9 GB) pinned together on GPU 0, and gives the
-# extraction LLM GPU 1 to itself. The extractor's w4a16 compressed-tensors checkpoint runs on
+# at plain bf16 (2B embedder ~4.5 GB, 2B VL reranker ~5 GB) pinned together on GPU 0, and gives the
+# extraction LLM GPU 1 to itself. The reranker mirrors the base file's Qwen3-VL-Reranker-2B wiring
+# (`--convert classify`, the from_2_way_softmax override, the mounted reranker.jinja) minus the
+# `--quantization fp8` flag, so it runs bf16 here; that swap plus the 2048 context frees ~3 GB on
+# GPU 0 versus the old 4B reranker. The extractor's w4a16 compressed-tensors checkpoint runs on
 # Ampere unchanged (Marlin int4 is sm80+), as does the fp8 KV cache (storage-only, no fp8 matmul).
 #
-# GPU 1 hosting the extractor alone leaves ~18 GB of headroom: the standing quality lever is to
-# swap AIZK_LLM_CHECKPOINT for a larger extractor (E4B/9B class) in crimson's .env, since
-# extraction quality is the fact-noise bottleneck of the graph.
+# GPU 1 hosting the extractor alone leaves ample headroom, and this deployment already spends it:
+# crimson's host .env sets AIZK_LLM_CHECKPOINT to the larger gemma-4-12B (w4a16), since extraction
+# quality is the fact-noise bottleneck of the graph. That host .env is also where the reranker swap
+# lands at deploy time (AIZK_RERANK_MODEL, AIZK_RERANK_MAX_MODEL_LEN, AIZK_RERANK_GPU_MEM_UTIL),
+# since those keys there override the defaults below.
 #
 # Usage: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.crimson.yml up -d
 
@@ -22,9 +27,11 @@ services:
       - "--runner"
       - "pooling"
       - "--gpu-memory-utilization"
-      - "${AIZK_EMBED_GPU_MEM_UTIL:-0.35}"
+      - "${AIZK_EMBED_GPU_MEM_UTIL:-0.30}"
       - "--max-model-len"
-      - "${AIZK_EMBED_MAX_MODEL_LEN:-8192}"
+      - "${AIZK_EMBED_MAX_MODEL_LEN:-2048}"
+      - "--max-num-seqs"
+      - "${AIZK_EMBED_MAX_NUM_SEQS:-64}"
       - "--served-model-name"
       - "${AIZK_EMBED_MODEL:-qwen3-vl-emb}"
       - "--trust-remote-code"
@@ -41,22 +48,24 @@ services:
   vllm-rerank:
     command:
       - "--model"
-      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
+      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-VL-Reranker-2B}"
       - "--runner"
       - "pooling"
+      - "--convert"
+      - "classify"
       - "--gpu-memory-utilization"
-      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.55}"
+      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.35}"
       - "--max-model-len"
-      - "${AIZK_RERANK_MAX_MODEL_LEN:-8192}"
+      - "${AIZK_RERANK_MAX_MODEL_LEN:-2048}"
+      - "--max-num-seqs"
+      - "${AIZK_RERANK_MAX_NUM_SEQS:-64}"
       - "--served-model-name"
-      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
+      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-VL-Reranker-2B}"
       - "--trust-remote-code"
       - "--hf-overrides"
-      - >-
-        {"architectures": ["Qwen3ForSequenceClassification"],
-        "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}
+      - '{"classifier_from_token": ["no", "yes"], "method": "from_2_way_softmax"}'
       - "--chat-template"
-      - "examples/pooling/score/template/qwen3_reranker.jinja"
+      - "/config/reranker.jinja"
     deploy:
       resources:
         reservations:

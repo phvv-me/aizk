@@ -1,0 +1,52 @@
+{%- set default_instruction = "Given a search query, retrieve relevant candidates that answer the query." -%}
+{%- set ns = namespace(instruction="", found_instruction=false) -%}
+{%- for message in messages -%}
+    {%- if message.role == "system" -%}
+        {%- if message.content is string -%}
+            {%- set ns.instruction = message.content -%}
+        {%- else -%}
+            {%- for content in message.content -%}
+                {%- if 'text' in content -%}
+                    {%- set ns.instruction = ns.instruction + content.text -%}
+                {%- endif -%}
+            {%- endfor -%}
+        {%- endif -%}
+        {%- set ns.found_instruction = true -%}
+    {%- endif -%}
+{%- endfor -%}
+{%- if not ns.found_instruction -%}
+    {%- set ns.instruction = default_instruction -%}
+{%- endif -%}
+{%- set image_count = namespace(value=0) -%}
+{%- set video_count = namespace(value=0) -%}
+{%- macro render_multimodal(message) -%}
+    {%- if message.content is string -%}
+        {{- message.content -}}
+    {%- else -%}
+        {%- for content in message.content -%}
+            {%- if content.type == 'image' or 'image' in content or 'image_url' in content -%}
+                {%- set image_count.value = image_count.value + 1 -%}
+                {%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}
+                <|vision_start|><|image_pad|><|vision_end|>
+            {%- elif content.type == 'video' or 'video' in content -%}
+                {%- set video_count.value = video_count.value + 1 -%}
+                {%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}
+                <|vision_start|><|video_pad|><|vision_end|>
+            {%- elif 'text' in content -%}
+                {{- content.text -}}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- endif -%}
+{%- endmacro -%}
+{{- '<|im_start|>system\nJudge whether the Document meets the requirements based on the Query and the Instruct provided. Note that the answer can only be "yes" or "no".<|im_end|>\n<|im_start|>user\n<Instruct>: ' + ns.instruction + '<Query>:' -}}
+{%- for message in messages if message.role == "query" -%}
+    {{- render_multimodal(message) -}}
+{%- endfor -%}
+{{- '\n<Document>:' -}}
+{%- for message in messages if message.role == "document" -%}
+    {{- render_multimodal(message) -}}
+{%- endfor -%}
+{{- '<|im_end|>\n' -}}
+{%- if add_generation_prompt -%}
+    {{- '<|im_start|>assistant\n' -}}
+{%- endif -%}

@@ -95,11 +95,16 @@ services:
       - "--quantization"
       - "${AIZK_EMBED_QUANTIZATION:-fp8}"
       - "--gpu-memory-utilization"
-      - "${AIZK_EMBED_GPU_MEM_UTIL:-0.30}"
-      # cap the context far below the model's 262K native length; embeddings only see short chunks,
-      # and sizing the KV cache for 262K needs 28 GiB and overflows the 4090
+      - "${AIZK_EMBED_GPU_MEM_UTIL:-0.24}"
+      # aizk chunks are 2048 chars (<=700 tokens), so a 2048 context is ample; the model's 262K
+      # native length would size the KV cache at 28 GiB, and even 8192 was ~10x waste. At 2048 this
+      # lane settles near 4.7 GiB and its throughput rises ~15% over the old 8192/0.30 sizing.
       - "--max-model-len"
-      - "${AIZK_EMBED_MAX_MODEL_LEN:-8192}"
+      - "${AIZK_EMBED_MAX_MODEL_LEN:-2048}"
+      # a pooling lane saturates on batch width, not KV depth, so an explicit cap matched to the
+      # extractor's own concurrency keeps continuous batching full without over-reserving memory.
+      - "--max-num-seqs"
+      - "${AIZK_EMBED_MAX_NUM_SEQS:-64}"
       - "--served-model-name"
       - "${AIZK_EMBED_MODEL:-qwen3-vl-emb}"
       - "--trust-remote-code"
@@ -132,39 +137,46 @@ services:
               count: 1
               capabilities: ["gpu"]
 
-  # vLLM serves the cross-encoder reranker over an OpenAI-compatible /v1/rerank in the Cohere/Jina
-  # shape that aizk's Reranker posts to, on its own port so it co-resides with the embedder and the
-  # chat model on the one GPU. Qwen3-Reranker ships as a causal LM, so vLLM needs the hf-overrides
-  # below to route it through Qwen3ForSequenceClassification and read the yes/no classifier token
-  # vLLM scores from, plus the reranker's own chat template, both required for the /v1/rerank and
-  # /v1/score endpoints to work; FP8 and a 0.32 memory fraction keep it within the shared 4090,
-  # trimmed from 0.35 to make room for the vllm-llm service added alongside it (0.30 + 0.32 + 0.35
-  # is the proven three-way split on this 24 GB card).
-  # AIZK_RERANK_MODEL feeds both --model and --served-model-name, unlike the embedder, since the
-  # reranker's HF checkpoint id already reads fine as a served name, and it must match
-  # `config/settings.py`'s own rerank_model default for the request's model id to resolve here.
+  # vLLM serves the reranker over an OpenAI-compatible /v1/rerank in the Cohere/Jina shape that
+  # aizk's Reranker posts to, on its own port so it co-resides with the embedder and the chat model
+  # on the one GPU. The lane runs Qwen3-VL-Reranker-2B, the same VL family as the embedder, chosen
+  # over the older Qwen3-Reranker-4B because at fp8 it halves the reranker's weights (~3.85 vs
+  # ~4.9 GiB) while top-1 ordering stays correct, and together with the 2048 context below it drops
+  # this lane from ~7.4 to ~4.7 GiB. That freed room is what lets the three lanes sit on the 24 GB
+  # card at 0.24/0.24/0.35 with ~5.8 GiB of margin instead of the old 0.30/0.32/0.35 at 1.7 GiB.
+  # The VL reranker is a Qwen3VL generation model with a yes/no scoring head, not a sequence
+  # classifier, so its wiring differs from the 4B: `--convert classify` turns generation into
+  # scoring, hf-overrides pass only `classifier_from_token` plus `method: from_2_way_softmax` (the
+  # 4B's `architectures`/`is_original_qwen3_reranker` do not apply here and a missing `method`
+  # fails the loader), and the chat template is the model's own reranker.jinja, mounted from
+  # `deploy/reranker.jinja` at a fixed path rather than a fragile snapshot-hash path in the cache.
+  # AIZK_RERANK_MODEL feeds both --model and --served-model-name, since the checkpoint id already
+  # reads fine as a served name, and it must match `config/settings.py`'s own rerank_model default
+  # for the request's model id to resolve here.
   vllm-rerank:
     image: vllm/vllm-openai:v0.24.0
     command:
       - "--model"
-      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
+      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-VL-Reranker-2B}"
       - "--runner"
       - "pooling"
+      - "--convert"
+      - "classify"
       - "--quantization"
       - "${AIZK_RERANK_QUANTIZATION:-fp8}"
       - "--gpu-memory-utilization"
-      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.32}"
+      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.24}"
       - "--max-model-len"
-      - "${AIZK_RERANK_MAX_MODEL_LEN:-8192}"
+      - "${AIZK_RERANK_MAX_MODEL_LEN:-2048}"
+      - "--max-num-seqs"
+      - "${AIZK_RERANK_MAX_NUM_SEQS:-64}"
       - "--served-model-name"
-      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
+      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-VL-Reranker-2B}"
       - "--trust-remote-code"
       - "--hf-overrides"
-      - >-
-        {"architectures": ["Qwen3ForSequenceClassification"],
-        "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}
+      - '{"classifier_from_token": ["no", "yes"], "method": "from_2_way_softmax"}'
       - "--chat-template"
-      - "examples/pooling/score/template/qwen3_reranker.jinja"
+      - "/config/reranker.jinja"
     ports:
       - "127.0.0.1:${AIZK_RERANK_PORT:-8001}:8000"
     # second onto the shared card, only once the embedder is serving, see vllm-emb's note
@@ -180,6 +192,9 @@ services:
     ipc: host
     volumes:
       - ${AIZK_HOME:-${HOME}/.aizk}/cache/huggingface:/root/.cache/huggingface
+      # the VL reranker's own chat template, mounted at a fixed path so the command never has to
+      # name a snapshot-hash directory in the cache that a re-download would invalidate
+      - ./reranker.jinja:/config/reranker.jinja:ro
     deploy:
       resources:
         reservations:
@@ -191,8 +206,8 @@ services:
   # vLLM serves the graph-extraction chat model over an OpenAI-compatible /v1/chat/completions,
   # the third co-resident model on the same 4090, reached by aizk's `structured` seam at llm_url.
   # A default-on service now, not an opt-in profile: extraction replaced Ollama with this
-  # co-resident vLLM lane, a 0.30 memory fraction sized to fit beside the embedder (0.30) and the
-  # reranker (0.35) on one 24 GB card. Model defaults to Gemma 4 E2B (the Efficient series, 2.3B
+  # co-resident vLLM lane, a 0.35 memory fraction sized to fit beside the embedder (0.24) and the
+  # reranker (0.24) on one 24 GB card. Model defaults to Gemma 4 E2B (the Efficient series, 2.3B
   # effective, Apache 2.0), the official Google w4a16 QAT checkpoint in compressed-tensors format
   # (`google/gemma-4-E2B-it-qat-w4a16-ct`), ungated, day-0 vLLM support, JSON/function-calling
   # trained. E4B (`google/gemma-4-E4B-it-qat-w4a16-ct`) was the first choice but ruled out twice
