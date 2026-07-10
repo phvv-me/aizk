@@ -161,3 +161,10 @@ def parse_ids(raw: str) -> list[uuid.UUID]:
         return [uuid.UUID(part.strip()) for part in raw.split(",") if part.strip()]
     except ValueError as error:
         raise ToolError(f"malformed id in {raw!r}") from error
+
+
+# imported for effect: `webui` registers the onboarding web routes (/, /setup, /login, /callback)
+# on `server` through its `@server.custom_route` decorators, served on the same HTTP app as `/mcp`.
+# Kept at the bottom so `server` already exists when webui binds it, the same import-for-effect
+# shape `store/__init__` uses for its event listeners. E402 is inherent to that deferred import.
+from . import webui as webui  # noqa: E402
