@@ -1,3 +1,8 @@
+# Pin the project name so it stays `aizk` regardless of the compose file living under deploy/.
+# Compose otherwise derives the project from the first -f file's directory (deploy/), which would
+# orphan the existing aizk-* containers and the aizk_db-data volume onto a new `deploy` project.
+name: aizk
+
 services:
   db:
     image: tensorchord/vchord-suite:pg18-latest
