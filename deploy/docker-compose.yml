@@ -133,7 +133,7 @@ services:
       start_period: 300s
     ipc: host
     volumes:
-      - ${AIZK_HOME:-${HOME}/.aizk}/cache/huggingface:/root/.cache/huggingface
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -196,7 +196,7 @@ services:
       start_period: 300s
     ipc: host
     volumes:
-      - ${AIZK_HOME:-${HOME}/.aizk}/cache/huggingface:/root/.cache/huggingface
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.cache/huggingface
       # the VL reranker's own chat template, mounted at a fixed path so the command never has to
       # name a snapshot-hash directory in the cache that a re-download would invalidate
       - ./reranker.jinja:/config/reranker.jinja:ro
@@ -281,7 +281,7 @@ services:
       start_period: 300s
     ipc: host
     volumes:
-      - ${AIZK_HOME:-${HOME}/.aizk}/cache/huggingface:/root/.cache/huggingface
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
