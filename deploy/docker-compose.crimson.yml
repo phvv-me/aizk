@@ -26,6 +26,11 @@ services:
       - "${AIZK_EMBED_CHECKPOINT:-Qwen/Qwen3-VL-Embedding-2B}"
       - "--runner"
       - "pooling"
+      # Ampere has no fp8 path, so this VL model runs bf16 and its vision encoder drags the default
+      # inductor/VLLM_COMPILE whole-graph compile past 15 min on a cold 3090 cache (GPU idle, CPU
+      # grinding). Eager skips that compile entirely; a prefill-only pooling lane sees no meaningful
+      # throughput loss from dropping cudagraphs, so this is pure startup-reliability on crimson.
+      - "--enforce-eager"
       - "--gpu-memory-utilization"
       - "${AIZK_EMBED_GPU_MEM_UTIL:-0.30}"
       - "--max-model-len"
@@ -53,6 +58,9 @@ services:
       - "pooling"
       - "--convert"
       - "classify"
+      # same as vllm-emb: the VL reranker's vision encoder makes the bf16 inductor compile hang on
+      # a cold Ampere cache, and a pooling lane loses nothing meaningful running eager
+      - "--enforce-eager"
       - "--gpu-memory-utilization"
       - "${AIZK_RERANK_GPU_MEM_UTIL:-0.35}"
       - "--max-model-len"
