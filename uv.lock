@@ -58,7 +58,8 @@ dependencies = [
     { name = "pgvector" },
     { name = "pydantic-settings" },
     { name = "python-slugify" },
-    { name = "rls" },
+    { name = "rlsalchemy" },
+    { name = "scipy" },
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "sqlmodel" },
     { name = "tenacity" },
@@ -124,8 +125,9 @@ requires-dist = [
     { name = "pytest-subprocess", marker = "extra == 'dev'", specifier = ">=1.5" },
     { name = "python-slugify", specifier = ">=8.0,<9" },
     { name = "ranx", marker = "extra == 'dev'", specifier = ">=0.3.20,<0.4" },
-    { name = "rls" },
+    { name = "rlsalchemy" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "scipy", specifier = ">=1.14,<2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.0b3,<3" },
     { name = "sqlmodel", specifier = ">=0.0.39,<0.1" },
     { name = "syrupy", marker = "extra == 'dev'", specifier = ">=4" },
@@ -860,22 +862,6 @@ wheels = [
 [package.optional-dependencies]
 lua = [
     { name = "lupa" },
-]
-
-[[package]]
-name = "fastapi"
-version = "0.139.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "annotated-doc" },
-    { name = "pydantic" },
-    { name = "starlette" },
-    { name = "typing-extensions" },
-    { name = "typing-inspection" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/af/a5f50ccfa659ec1802cb4ca842c23f06d906a8cc9aef6016a2caeea3d4ed/fastapi-0.139.0.tar.gz", hash = "sha256:99ab7b2d92223c76d6cf10757ab3f89d45b38267fc20b2a136cf02f6beac3145", size = 423016, upload-time = "2026-07-01T16:35:33.436Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9e/7c/8e3c6ad324ea5cb36604fc3f968554887891c316d9dfde57761611d907ad/fastapi-0.139.0-py3-none-any.whl", hash = "sha256:cf15e1e9e667ddb0ad63811e60bd11390d1aac838ca4a7a23f421807b2308189", size = 130339, upload-time = "2026-07-01T16:35:32.19Z" },
 ]
 
 [[package]]
@@ -2967,17 +2953,17 @@ wheels = [
 ]
 
 [[package]]
-name = "rls"
-version = "0.3.2"
+name = "rlsalchemy"
+version = "0.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
-    { name = "fastapi" },
     { name = "pydantic" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "sqlglot" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0c/df/d026900993e890069bc38691c579e4428dff5d9cc0fb97dfcb87a9a088bc/rls-0.3.2-py3-none-any.whl", hash = "sha256:f4c3cf00cde43ec7659afefb7a18cda826f61eac82315f7c437c4d1a75647172", size = 15225, upload-time = "2026-04-24T18:46:56.546Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/cc/c30b43d5cf5b53afbd623eb5a33424998e3d3945246181255cd062d1e516/rlsalchemy-0.4.1-py3-none-any.whl", hash = "sha256:59c8052fba250609c55e0d5683ca7d34a5b79dfa8ac0c55dccd3644b9f0c9650", size = 35840, upload-time = "2026-07-10T00:41:22.208Z" },
 ]
 
 [[package]]
@@ -3233,6 +3219,15 @@ wheels = [
 [package.optional-dependencies]
 asyncio = [
     { name = "greenlet" },
+]
+
+[[package]]
+name = "sqlglot"
+version = "30.12.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/ed/a6c45aec29353b6392ea34548c40af3ac6ffd6bc5572cf23b2ce250876fc/sqlglot-30.12.0.tar.gz", hash = "sha256:6b8369704662d4f654bc934cea4dd31c916c2a571b389210cb9e951a275e5fd9", size = 5905110, upload-time = "2026-06-26T14:09:40.408Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/9e/82a390ecc85f066ff80affa01d195f744e3de60ad4d695b8de31c9a66da3/sqlglot-30.12.0-py3-none-any.whl", hash = "sha256:86cccc610073c645c03e72b55b60ae0518aa3253a7fc3bd56551370d003c6554", size = 707583, upload-time = "2026-06-26T14:09:38.525Z" },
 ]
 
 [[package]]

@@ -10,10 +10,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 license = "Apache-2.0"
 authors = [{ name = "Pedro Valois", email = "contact@phvv.me" }]
-keywords = [
-  "aizk",
-  # add discovery keywords users would search for
-]
+keywords = ["aizk"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
@@ -23,9 +20,6 @@ classifiers = [
   "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-  # 2.1 is still beta (2.1.0b3) but adopted deliberately for its PostgreSQL ENUM/DOMAIN and other
-  # improvements; asyncpg is unaffected by the psycopg-default-driver change since the DSN always
-  # names +asyncpg explicitly
   "sqlalchemy[asyncio]>=2.1.0b3,<3",
   "sqlmodel>=0.0.39,<0.1",
   "asyncpg>=0.30,<0.31",
@@ -37,68 +31,29 @@ dependencies = [
   "loguru>=0.7.3,<0.8",
   "fastmcp>=2.11,<3",
   "networkx>=3.4,<4",
-  # backs networkx's pagerank, the sparse-matrix solver `nx.pagerank` calls by default, so the
-  # recall PPR lane raises ModuleNotFoundError the moment a principal has a non-empty graph without it
   "scipy>=1.14,<2",
-  # the sweep and scale eval harnesses' numeric work, present transitively through pgvector too
   "numpy>=2,<3",
-  # the api embed and rerank backends' shared HTTP client, and the native pydantic structured
-  # outputs (`chat.completions.parse`) the one LLM seam extracts through, no instructor layer
   "openai>=1.109,<2",
-  # the chonkie recursive prose and tree-sitter code chunker backends; the [code] extra pulls in
-  # tree-sitter-language-pack transitively, which chonkie's CodeChunker(language="auto") uses
   "chonkie[code]>=1.6,<2",
-  # is_code/is_text's filename and content tagging, the same pre-commit-grade catalog CodeChunker's
-  # language="auto" leans on through chonkie, and a direct dependency since chunker.py reads it at
-  # import time rather than lazily
   "identify>=2.6,<3",
-  # normalize_name's transliterating fold, the entity id content-addressing depends on
   "python-slugify>=8.0,<9",
-  # the camelCase-to-snake_case fold Base.__tablename__ derives every table name from
   "inflection>=0.5,<0.6",
-  # renders the recall, scale, and sweep reports as compact text, structural loops kept out of
-  # the Python that assembles their context
   "jinja2>=3.1,<4",
-  # eval.benchmarks' load_jsonl streams the EverMemBench and TEMPO dataset files one record at a
-  # time rather than splitting the whole file into lines by hand
   "jsonlines>=4.0,<5",
   "patos",
-  # declarative PostgreSQL row level security for SQLAlchemy and Alembic, store/rls/'s
-  # dependency. The bare name is wrong on PyPI (it belongs to DelfinaCare's upstream, whose API
-  # our fork reworked), so [tool.uv.sources] below points uv at the fork while the monorepo's
-  # chefe manifest overrides it with the local path. The PyPI release stays manually gated
-  # until the fork ships under its own PyPI name a plain pip resolve can trust.
-  "rls",
-  # the span/timing profiler behind `settings.profiling`, wired through recall and the build
+  "rlsalchemy",
   "mainboard>=0.0.8",
-  # the durable queue and cron scheduler the background worker drains
   "pgqueuer>=0.10,<1",
-  # the strict absolute-format half of the fact-dating cascade
   "dateparser>=1.2,<2",
-  # transient-deadlock retry around the per-chunk write transaction
   "tenacity>=9,<10",
-  # the 205M extraction gate scoring chunks against the ontology before any LLM call
   "gliner2>=0.1",
 ]
 
 [project.scripts]
 aizk = "aizk.cli:app"
 
-# sqlmodel's released 0.0.39 caps sqlalchemy below 2.1 while this codebase deliberately runs
-# the 2.1 beta (native ENUM/DOMAIN handling, Range[datetime]); the monorepo forces the same
-# resolution through chefe's dependency-overrides, and this is uv's spelling of that override
-# for standalone and CI installs. Plain pip cannot express an override, which is the second
-# reason (after the rls git reference) the PyPI release stays manually gated until sqlmodel
-# ships SQLAlchemy 2.1 support.
 [tool.uv]
 override-dependencies = ["sqlalchemy[asyncio]>=2.1.0b3,<3"]
-
-# no [tool.uv.sources] for rls even though the bare name resolves to the upstream fork base:
-# pixi reads uv sources too, and the monorepo's chefe manifest already carries the local-path
-# override, so a git source here makes the two resolvers fight over conflicting URLs. CI
-# overlays the fork explicitly after sync (see .github/workflows/ci.yml), and a standalone
-# checkout does the same one `uv pip install` — both warts disappear when the fork ships
-# under its own PyPI name.
 
 [project.optional-dependencies]
 dev = [
@@ -114,9 +69,7 @@ dev = [
   "faker>=30",
   "polyfactory>=2.22,<3",
   "dirty-equals>=0.8",
-  # offline retrieval-metric aggregation for the eval harness (Qrels/Run/evaluate/compare)
   "ranx>=0.3.20,<0.4",
-  # house time and memory profiler the config sweep meters each config's latency and peak with
   "mainboard",
 ]
 docs = ["mkdocs-material>=9.5", "mkdocs-static-i18n>=1.2"]
@@ -137,9 +90,6 @@ target-version = "py314"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
-# the vendored `alembic/` migrations directory makes alembic a first-party package here, so its
-# imports sort with our own rather than as a third party, matching how every migration and the rls
-# ops module already order them
 [tool.ruff.lint.isort]
 known-first-party = ["alembic"]
 
@@ -153,15 +103,6 @@ reportMissingModuleSource = false
 [tool.pyrefly]
 project-includes = ["src", "tests"]
 search-path = ["src", "tests", "."]
-# SQLModel on the SQLAlchemy 2.1 beta has no usable typing for column expressions (a class
-# attribute is a plain Python type to the checker but a Column at query time, so every
-# `Model.field.in_(...)` read fails), and no plugin bridges the gap yet. The ORM surface is
-# therefore treated as untyped, the same documented pattern the monorepo applies to other
-# unstubbed heavy deps, keeping the checker sharp on everything that is not a query
-# expression. Revisit when SQLModel exposes SQLAlchemy-2.1-native Mapped typing. The column
-# expressions on our own model attributes stay visible to the checker, so those known errors
-# live in .pyrefly-baseline.json and CI gates on NEW errors only (--baseline), the same
-# no-new-error-kinds standard the codebase already worked to.
 replace-imports-with-any = ["sqlmodel", "sqlmodel.*", "sqlalchemy", "sqlalchemy.*"]
 
 [tool.mypy]
@@ -173,23 +114,15 @@ files = ["src"]
 mypy_path = "src"
 namespace_packages = false
 
-# pgvector ships no py.typed marker, so its SQLAlchemy types resolve as untyped
 [[tool.mypy.overrides]]
 module = "pgvector.*"
 ignore_missing_imports = true
 
-# pydantic's model metaclass makes mypy attribute an explicit Any to every BaseModel
-# subclass at its class statement, so disallow_any_explicit fires falsely on the modules
-# that define our settings and result models. The guard stays on everywhere else.
 [[tool.mypy.overrides]]
 module = ["aizk.config", "aizk.retrieve"]
 disallow_any_explicit = false
 
 [tool.pytest.ini_options]
-# importlib import mode gives each test file a unique module identity by path, so same-basename
-# files in different subpackages (e.g. retrieval/test_models.py and eval/test_models.py) never
-# collide the way prepend mode's basename import does. The flat helper imports (`import dbutil`)
-# keep resolving through `pythonpath` since that governs the regular sys.path, not test discovery.
 addopts = "-q -ra --strict-markers --import-mode=importlib --cov=aizk --cov-report=term-missing"
 testpaths = ["tests"]
 pythonpath = ["tests"]
@@ -198,17 +131,10 @@ markers = ["integration: needs the live GPU model services, deselected by defaul
 [tool.coverage.run]
 source = ["aizk"]
 branch = true
-# Alembic migrations are DDL executed out-of-process by `alembic upgrade` at bootstrap, never
-# imported into the pytest process, so they are integration-verified (the schema migrates and
-# `verify_scoped_rls` passes) rather than unit-covered. Excluding them keeps the reported number a
-# faithful measure of the application code the suite actually exercises.
 omit = ["*/store/migrations/*"]
 
 [tool.coverage.report]
 show_missing = true
-# restored to 99: the operator surface (admin.py/cli.py) is now covered directly, admin verbs
-# against the live schema and their delegate seams, cli routes through the command-routing table,
-# so both files are back at 100% and the whole suite clears 99.
 fail_under = 99
 exclude_lines = [
   "pragma: no cover",

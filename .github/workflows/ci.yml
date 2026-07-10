@@ -14,8 +14,6 @@ jobs:
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --extra dev
-      # the rls on PyPI is the upstream fork base; overlay our fork until it ships under its own name
-      - run: uv pip install --reinstall "rls @ git+https://github.com/phvv-me/rls"
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
       # known ORM-expression errors live in the baseline; only NEW errors fail the gate
@@ -61,6 +59,4 @@ jobs:
             GRANT USAGE, SELECT ON SEQUENCES TO aizk_app;
           SQL
       - run: uv sync --extra dev
-      # the rls on PyPI is the upstream fork base; overlay our fork until it ships under its own name
-      - run: uv pip install --reinstall "rls @ git+https://github.com/phvv-me/rls"
       - run: uv run --no-sync pytest -q

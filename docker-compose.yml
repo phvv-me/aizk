@@ -123,7 +123,7 @@ services:
       start_period: 300s
     ipc: host
     volumes:
-      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ${AIZK_HOME:-${HOME}/.aizk}/cache/huggingface:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -179,7 +179,7 @@ services:
       start_period: 300s
     ipc: host
     volumes:
-      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ${AIZK_HOME:-${HOME}/.aizk}/cache/huggingface:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -261,7 +261,7 @@ services:
       start_period: 300s
     ipc: host
     volumes:
-      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ${AIZK_HOME:-${HOME}/.aizk}/cache/huggingface:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
