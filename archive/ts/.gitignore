@@ -1,0 +1,7 @@
+node_modules
+.svelte-kit
+build
+package.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+.chefe

@@ -1,0 +1,65 @@
+# chefe.toml — the aizk TypeScript server experiment (SvelteKit, same build as personal/my).
+#
+#   chefe install        → provisions node + pnpm (conda) and the JS deps at this root
+#   chefe run dev        → vite dev
+#   chefe run build      → vite build → the adapter-node server bundle
+#   chefe run parity     → execute the ported recall statement against aizk_bench and diff
+#                          it against the Python reference fixture
+
+[workspace]
+name      = "aizk-ts"
+platforms = ["linux-64", "osx-arm64"]
+channels  = ["conda-forge"]
+dotenv    = true
+
+[deps]
+nodejs = ">=26.3.0,<26.4"
+pnpm   = ">=11.7.0,<12"
+
+[nodejs]
+manager = "pnpm"
+app     = true
+
+[nodejs.package]
+type = "module"
+
+[nodejs.deps]
+croner                      = "^10.0.1"
+drizzle-orm                 = "^0.45.2"
+es-toolkit                  = "^1.49.0"
+jose                        = "^6.2.3"
+postgres                    = "^3.4.7"
+uuid                        = "^14.0.1"
+"@logto/sveltekit"          = "^0.3.23"
+"@modelcontextprotocol/sdk" = "^1.21.0"
+"@hono/node-server"          = "^1.14.0"
+zod                         = "^4.4.3"
+
+[nodejs.dev.deps]
+"@sveltejs/kit"                 = "^2.59.1"
+"@sveltejs/adapter-node"        = "^5.4.0"
+"@sveltejs/vite-plugin-svelte"  = "^7.1.2"
+svelte                          = "^5.55.5"
+typescript                      = "^5.9.0"
+"@types/node"                   = "^26.0.0"
+tsx                             = "^4.20.0"
+eslint                          = "^9.39.0"
+typescript-eslint               = "^8.46.0"
+drizzle-kit                     = "^0.31.10"
+vite                            = "^7.2.0"
+
+[tasks]
+dev    = { run = "pnpm exec vite dev" }
+build  = { run = "pnpm exec vite build" }
+parity      = { run = "pnpm exec tsx scripts/parity.ts" }
+extract-check = { run = "pnpm exec tsx scripts/extract_check.ts" }
+share-check = { run = "pnpm exec tsx scripts/share_check.ts" }
+passes-check = { run = "pnpm exec tsx scripts/passes_check.ts" }
+lint     = { run = "pnpm exec eslint src scripts" }
+check    = { run = "pnpm exec svelte-kit sync && pnpm exec tsc --noEmit" }
+generate = { run = "pnpm exec drizzle-kit generate" }
+migrate  = { run = "pnpm exec drizzle-kit migrate" }
+mcp      = { run = "pnpm exec tsx src/mcp/index.ts" }
+worker       = { run = "pnpm exec tsx src/worker.ts" }
+worker-check = { run = "pnpm exec tsx scripts/worker_check.ts" }
+queue-check  = { run = "pnpm exec tsx scripts/queue_check.ts" }

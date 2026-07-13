@@ -30,3 +30,9 @@ __pycache__/
 .coverage
 htmlcov/
 *.egg-info/
+
+# archived ts port keeps only sources
+archive/ts/node_modules/
+archive/ts/.svelte-kit/
+archive/ts/.chefe/
+archive/ts/pnpm-lock.yaml

@@ -29,20 +29,9 @@ services:
       - "${AIZK_DB_PORT:-5433}:5432"
     # the image's own CMD (`docker inspect tensorchord/vchord-suite:pg18-latest`) already carries
     # shared_preload_libraries and search_path, and a compose `command:` replaces CMD outright
-    # rather than appending to it, so both are repeated here verbatim alongside the four declared
-    # GUC defaults this stack adds: app.uid, app.orgs, app.writable_orgs, and app.scopes, the
-    # identity, org standing, and reading-lens settings `store/events.py`'s bind_user sets per
-    # transaction. A custom "class.name" GUC needs no extension or placeholder to declare it, a bare
-    # `-c app.uid=...` is enough, and with a real default in place an untouched session already
-    # reads the anonymous user and empty standing rather than the empty-string placeholder an
-    # undeclared custom GUC reverts to. Deliberately left out of .env: `Settings.anonymous_user_id`'s
-    # own docstring calls this exact zero uuid "fixed, not configurable", since the RLS moat
-    # predicate's `::uuid` cast depends on every unscoped session binding it, so making it an env
-    # knob would dress an invariant up as a choice. The three array GUCs have no settings
-    # counterpart, an untouched session is simply Postgres's own empty-string default, which
-    # `current_setting`'s own `nullif(..., '')` reads back as null rather than an empty-array cast.
-    # bind_user still folds the public org into every session's app.orgs, so an untouched session
-    # left at the empty default reads public-scoped rows the moment it opens a transaction.
+    # rather than appending to it, so both are repeated here verbatim alongside the request GUC.
+    # User is the only request context and Pydantic serializes `User.scopes` into `app.scopes`.
+    # The empty server default stays fail closed before a session binds User.
     command:
       - postgres
       - -c
@@ -55,12 +44,6 @@ services:
       - shared_preload_libraries=vchord,vchord_bm25,vector,pg_tokenizer,pg_stat_statements
       - -c
       - search_path="$$user", public, bm25_catalog, tokenizer_catalog
-      - -c
-      - app.uid=00000000-0000-0000-0000-000000000000
-      - -c
-      - app.orgs=
-      - -c
-      - app.writable_orgs=
       - -c
       - app.scopes=
     volumes:
@@ -83,8 +66,8 @@ services:
   # vLLM serves Qwen3-VL-Embedding-2B over an OpenAI-compatible /v1/embeddings, so the model loads
   # in this container, never inside aizk. --runner pooling is the current flag (--task embed was
   # removed), is_matryoshka lets a request set dimensions=1024 to truncate the native 2048-d output.
-  # FP8 is the Ada 4090's native path, so the weights load quantized, and a 0.30 memory fraction
-  # leaves room for the reranker and the chat model to co-reside on the same 24 GB card. Every
+  # FP8 is the Ada 4090's native path, so the weights load quantized and leave room for the chat
+  # model to co-reside on the same 24 GB card. Every
   # serving knob below is an .env var with an inline default, so flipping precision or model is an
   # .env edit and never a yaml one. Bound to localhost only because vLLM ships unauthenticated;
   # never expose it on a public address. AIZK_EMBED_CHECKPOINT (the HF weights to load) and
@@ -100,7 +83,7 @@ services:
       - "--quantization"
       - "${AIZK_EMBED_QUANTIZATION:-fp8}"
       - "--gpu-memory-utilization"
-      - "${AIZK_EMBED_GPU_MEM_UTIL:-0.24}"
+      - "${AIZK_EMBED_GPU_MEM_UTIL:-0.30}"
       # aizk chunks are 2048 chars (<=700 tokens), so a 2048 context is ample; the model's 262K
       # native length would size the KV cache at 28 GiB, and even 8192 was ~10x waste. At 2048 this
       # lane settles near 4.7 GiB and its throughput rises ~15% over the old 8192/0.30 sizing.
@@ -117,12 +100,12 @@ services:
       - '{"is_matryoshka": true}'
     ports:
       - "127.0.0.1:${AIZK_EMBED_PORT:-8000}:8000"
-    # the three models share one 24 GB card, and vLLM sizes each one's KV cache against the memory
+    # The two models share one 24 GB card, and vLLM sizes each one's cache against the memory
     # free at profiling time. Started all at once they profile concurrently, each reads the whole
     # card as free, and the sum over-commits it so one dies with "No available memory for the cache
-    # blocks". The healthcheck plus the depends_on chain below serialize startup instead: the
-    # embedder comes up first, the reranker waits for it, the extractor waits for the reranker, so
-    # each profiles against the memory the earlier ones already hold. start_period covers the
+    # blocks". The healthcheck plus the depends_on chain below serialize startup instead. The
+    # embedder comes up first and the extractor profiles against the memory it already holds.
+    # start_period covers the
     # minute-plus of weight loading before /health answers, during which a failing probe is not
     # counted against retries.
     healthcheck:
@@ -142,77 +125,11 @@ services:
               count: 1
               capabilities: ["gpu"]
 
-  # vLLM serves the reranker over an OpenAI-compatible /v1/rerank in the Cohere/Jina shape that
-  # aizk's Reranker posts to, on its own port so it co-resides with the embedder and the chat model
-  # on the one GPU. The lane runs Qwen3-VL-Reranker-2B, the same VL family as the embedder, chosen
-  # over the older Qwen3-Reranker-4B because at fp8 it halves the reranker's weights (~3.85 vs
-  # ~4.9 GiB) while top-1 ordering stays correct, and together with the 2048 context below it drops
-  # this lane from ~7.4 to ~4.7 GiB. That freed room is what lets the three lanes sit on the 24 GB
-  # card at 0.24/0.24/0.35 with ~5.8 GiB of margin instead of the old 0.30/0.32/0.35 at 1.7 GiB.
-  # The VL reranker is a Qwen3VL generation model with a yes/no scoring head, not a sequence
-  # classifier, so its wiring differs from the 4B: `--convert classify` turns generation into
-  # scoring, hf-overrides pass only `classifier_from_token` plus `method: from_2_way_softmax` (the
-  # 4B's `architectures`/`is_original_qwen3_reranker` do not apply here and a missing `method`
-  # fails the loader), and the chat template is the model's own reranker.jinja, mounted from
-  # `deploy/reranker.jinja` at a fixed path rather than a fragile snapshot-hash path in the cache.
-  # AIZK_RERANK_MODEL feeds both --model and --served-model-name, since the checkpoint id already
-  # reads fine as a served name, and it must match `config/settings.py`'s own rerank_model default
-  # for the request's model id to resolve here.
-  vllm-rerank:
-    image: vllm/vllm-openai:v0.24.0
-    command:
-      - "--model"
-      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-VL-Reranker-2B}"
-      - "--runner"
-      - "pooling"
-      - "--convert"
-      - "classify"
-      - "--quantization"
-      - "${AIZK_RERANK_QUANTIZATION:-fp8}"
-      - "--gpu-memory-utilization"
-      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.24}"
-      - "--max-model-len"
-      - "${AIZK_RERANK_MAX_MODEL_LEN:-2048}"
-      - "--max-num-seqs"
-      - "${AIZK_RERANK_MAX_NUM_SEQS:-64}"
-      - "--served-model-name"
-      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-VL-Reranker-2B}"
-      - "--trust-remote-code"
-      - "--hf-overrides"
-      - '{"classifier_from_token": ["no", "yes"], "method": "from_2_way_softmax"}'
-      - "--chat-template"
-      - "/config/reranker.jinja"
-    ports:
-      - "127.0.0.1:${AIZK_RERANK_PORT:-8001}:8000"
-    # second onto the shared card, only once the embedder is serving, see vllm-emb's note
-    depends_on:
-      vllm-emb:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 300s
-    ipc: host
-    volumes:
-      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.cache/huggingface
-      # the VL reranker's own chat template, mounted at a fixed path so the command never has to
-      # name a snapshot-hash directory in the cache that a re-download would invalidate
-      - ./reranker.jinja:/config/reranker.jinja:ro
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: ["gpu"]
-
   # vLLM serves the graph-extraction chat model over an OpenAI-compatible /v1/chat/completions,
-  # the third co-resident model on the same 4090, reached by aizk's `structured` seam at llm_url.
+  # the second co-resident model on the same 4090, reached by aizk's `structured` seam at llm_url.
   # A default-on service now, not an opt-in profile: extraction replaced Ollama with this
-  # co-resident vLLM lane, a 0.35 memory fraction sized to fit beside the embedder (0.24) and the
-  # reranker (0.24) on one 24 GB card. Model defaults to Gemma 4 E2B (the Efficient series, 2.3B
+  # co-resident vLLM lane sized to fit beside the embedder on one 24 GB card. Model defaults to
+  # Gemma 4 E2B (the Efficient series, 2.3B
   # effective, Apache 2.0), the official Google w4a16 QAT checkpoint in compressed-tensors format
   # (`google/gemma-4-E2B-it-qat-w4a16-ct`), ungated, day-0 vLLM support, JSON/function-calling
   # trained. E4B (`google/gemma-4-E4B-it-qat-w4a16-ct`) was the first choice but ruled out twice
@@ -254,8 +171,10 @@ services:
       - "${AIZK_LLM_CHECKPOINT:-google/gemma-4-E2B-it-qat-w4a16-ct}"
       - "--quantization"
       - "${AIZK_LLM_QUANTIZATION:-compressed-tensors}"
+      # 0.45 (10.8 GB) still clears E2B's measured 7.23 GiB footprint with margin and makes
+      # room for the reranker's 0.20 share, keeping the three lanes inside one card.
       - "--gpu-memory-utilization"
-      - "${AIZK_LLM_GPU_MEM_UTIL:-0.35}"
+      - "${AIZK_LLM_GPU_MEM_UTIL:-0.45}"
       - "--max-model-len"
       - "${AIZK_LLM_MAX_MODEL_LEN:-8192}"
       - "--max-num-seqs"
@@ -269,7 +188,8 @@ services:
       - "--trust-remote-code"
     ports:
       - "127.0.0.1:${AIZK_LLM_PORT:-8002}:8000"
-    # last onto the shared card, only once the reranker is serving, see vllm-emb's note
+    # Start after the embedder and the reranker so every model profiles against the memory
+    # the earlier lanes already hold.
     depends_on:
       vllm-rerank:
         condition: service_healthy
@@ -290,6 +210,96 @@ services:
               count: 1
               capabilities: ["gpu"]
 
+  # vLLM serves Qwen3-Reranker-4B over /v1/rerank, the cross-encoder second pass recall
+  # uses to reorder its evidence lanes before packing. The hf-overrides block is the official
+  # recipe that mounts the original Qwen3 reranker checkpoint as a sequence classifier scoring
+  # yes/no token logits; score calibration additionally requires the official prompt scaffold,
+  # which `config/settings.py`'s rerank templates apply client-side. The 4B is the measured
+  # floor for this lane: on 253 real vault queries reranking the embedder's own top 8, the
+  # 0.6B checkpoint DEGRADED ordering (MRR 0.90 to 0.77 even correctly templated) while the
+  # 4B held it (0.90 to 0.91), so the small model is never a valid economy here. The
+  # depends_on chain keeps the three models profiling one at a time on the shared 24 GB card.
+  # AIZK_RERANK_CHECKPOINT/AIZK_RERANK_MODEL split the same way as the other lanes, weights
+  # path versus served alias, and the alias must match `config/settings.py`'s rerank_model.
+  vllm-rerank:
+    image: vllm/vllm-openai:v0.24.0
+    command:
+      - "--model"
+      - "${AIZK_RERANK_CHECKPOINT:-Qwen/Qwen3-Reranker-4B}"
+      - "--runner"
+      - "pooling"
+      - "--quantization"
+      - "${AIZK_RERANK_QUANTIZATION:-fp8}"
+      - "--gpu-memory-utilization"
+      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.20}"
+      - "--max-model-len"
+      - "${AIZK_RERANK_MAX_MODEL_LEN:-2048}"
+      - "--max-num-seqs"
+      - "${AIZK_RERANK_MAX_NUM_SEQS:-32}"
+      - "--served-model-name"
+      - "${AIZK_RERANK_MODEL:-qwen3-reranker}"
+      - "--trust-remote-code"
+      - "--hf-overrides"
+      - '{"architectures": ["Qwen3ForSequenceClassification"], "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}'
+    ports:
+      - "127.0.0.1:${AIZK_RERANK_PORT:-8004}:8000"
+    depends_on:
+      vllm-emb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    ipc: host
+    volumes:
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+
+  # The gliner sidecar serves the GLiNER2 gate (extraction gating, route classification,
+  # query mentions) so the server process never imports torch. Its custom DeBERTa multitask
+  # architecture has no vLLM serving path, so this is a plain torch FastAPI service from
+  # services/gliner. The 205M model holds ~1.2 GB on the card, inside the margin the vLLM
+  # utilization shares below leave free; GLINER_DEVICE=cpu moves it off the GPU entirely.
+  gliner:
+    build:
+      context: ../services/gliner
+    environment:
+      GLINER_DEVICE: ${AIZK_GLINER_DEVICE:-cuda}
+      GLINER_CHECKPOINT: ${AIZK_GLINER_CHECKPOINT:-fastino/gliner2-base-v1}
+    ports:
+      - "127.0.0.1:${AIZK_GLINER_PORT:-8006}:8000"
+    depends_on:
+      vllm-llm:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+    ipc: host
+    volumes:
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.aizk/hf-cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: ["gpu"]
+
   # the whole engine in one container: `serve-mcp` gathers the pgqueuer worker on its own event
   # loop (serve_with_worker defaults on), so this single service is the MCP server, the background
   # maintenance passes, and the scheduled auto-backup at once. Reaches the db and the model
@@ -301,6 +311,11 @@ services:
       # the .dockerignore at that root still applies since it is resolved against the context
       context: ..
       dockerfile: deploy/Dockerfile
+      # Patos and RLS are developed beside Aizk and may be newer than their PyPI releases.
+      # BuildKit sends only those packages as extra contexts instead of the whole monorepo.
+      additional_contexts:
+        patos: ../../patos
+        rls: ../../rls
     depends_on:
       db:
         condition: service_healthy
@@ -316,11 +331,11 @@ services:
       AIZK_DB_PORT: "5432"
       # the three model containers, each listening on its own internal 8000
       AIZK_EMBED_URL: http://vllm-emb:8000/v1
-      AIZK_RERANK_URL: http://vllm-rerank:8000/v1
       AIZK_LLM_URL: http://vllm-llm:8000/v1
+      AIZK_RERANK_URL: http://vllm-rerank:8000/v1
+      AIZK_GLINER_GATE_URL: http://gliner:8000
       # serve streamable HTTP on all interfaces inside the container, published below; a reverse
       # proxy or tunnel terminates TLS in front of it, see docs/operations.md
-      AIZK_MCP_HTTP: "1"
       AIZK_MCP_HOST: 0.0.0.0
       AIZK_MCP_PORT: "8080"
       # the integrated auto-backup, the scheduled BackupTask dumping to the mounted volume nightly

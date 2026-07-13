@@ -1,0 +1,2049 @@
+{
+  "id": "4d0ce0e0-b042-4fa6-8a7d-51c2f72a55b3",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.chunk": {
+      "name": "chunk",
+      "schema": "",
+      "columns": {
+        "embedding": {
+          "name": "embedding",
+          "type": "halfvec(1024)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ord": {
+          "name": "ord",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lexical": {
+          "name": "lexical",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tokens": {
+          "name": "tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provenance": {
+          "name": "provenance",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "tsv": {
+          "name": "tsv",
+          "type": "tsvector",
+          "primaryKey": false,
+          "notNull": false,
+          "generated": {
+            "as": "to_tsvector('english', coalesce(\"chunk\".\"lexical\", \"chunk\".\"text\"))",
+            "type": "stored"
+          }
+        },
+        "bm25": {
+          "name": "bm25",
+          "type": "bm25vector",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "processed_at": {
+          "name": "processed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ix_chunk_document_id": {
+          "name": "ix_chunk_document_id",
+          "columns": [
+            {
+              "expression": "document_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_chunk_created_by": {
+          "name": "ix_chunk_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_chunk_tsv": {
+          "name": "ix_chunk_tsv",
+          "columns": [
+            {
+              "expression": "tsv",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "ix_chunk_scopes": {
+          "name": "ix_chunk_scopes",
+          "columns": [
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "ix_chunk_pending": {
+          "name": "ix_chunk_pending",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "processed_at IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_chunk_embedding": {
+          "name": "ix_chunk_embedding",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "halfvec_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "vchordrq",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "chunk_document_id_document_id_fk": {
+          "name": "chunk_document_id_document_id_fk",
+          "tableFrom": "chunk",
+          "tableTo": "document",
+          "columnsFrom": [
+            "document_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "scope_read": {
+          "name": "scope_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "document_id IN (SELECT id FROM document)"
+        },
+        "scope_insert": {
+          "name": "scope_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "cardinality(\"chunk\".\"scopes\") > 0 AND \"chunk\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        },
+        "scope_update": {
+          "name": "scope_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"chunk\".\"scopes\") > 0 AND \"chunk\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))",
+          "withCheck": "cardinality(\"chunk\".\"scopes\") > 0 AND \"chunk\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        },
+        "scope_delete": {
+          "name": "scope_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"chunk\".\"scopes\") > 0 AND \"chunk\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.community": {
+      "name": "community",
+      "schema": "",
+      "columns": {
+        "embedding": {
+          "name": "embedding",
+          "type": "halfvec(1024)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "summary": {
+          "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "member_ids": {
+          "name": "member_ids",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        }
+      },
+      "indexes": {
+        "ix_community_created_by": {
+          "name": "ix_community_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_community_scopes": {
+          "name": "ix_community_scopes",
+          "columns": [
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "ix_community_embedding": {
+          "name": "ix_community_embedding",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "halfvec_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "vchordrq",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "scope_read": {
+          "name": "scope_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"community\".\"scopes\") > 0 AND (\"community\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'read'))\n\t\t\tOR (cardinality(\"community\".\"scopes\") = 1 AND \"community\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'public'))))"
+        },
+        "scope_insert": {
+          "name": "scope_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "cardinality(\"community\".\"scopes\") > 0 AND \"community\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        },
+        "scope_delete": {
+          "name": "scope_delete",
+          "as": "PERMISSIVE",
+          "for": "DELETE",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"community\".\"scopes\") > 0 AND \"community\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.document": {
+      "name": "document",
+      "schema": "",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source_uri": {
+          "name": "source_uri",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "promoted_from": {
+          "name": "promoted_from",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ix_document_created_by": {
+          "name": "ix_document_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_document_content_hash": {
+          "name": "ix_document_content_hash",
+          "columns": [
+            {
+              "expression": "content_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_document_scopes": {
+          "name": "ix_document_scopes",
+          "columns": [
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "document_promoted_from_document_id_fk": {
+          "name": "document_promoted_from_document_id_fk",
+          "tableFrom": "document",
+          "tableTo": "document",
+          "columnsFrom": [
+            "promoted_from"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "uq_document_source_scope": {
+          "name": "uq_document_source_scope",
+          "nullsNotDistinct": false,
+          "columns": [
+            "source_uri",
+            "scopes"
+          ]
+        }
+      },
+      "policies": {
+        "scope_read": {
+          "name": "scope_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"document\".\"scopes\") > 0 AND (\"document\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'read'))\n\t\t\tOR (cardinality(\"document\".\"scopes\") = 1 AND \"document\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'public'))))"
+        },
+        "scope_insert": {
+          "name": "scope_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "cardinality(\"document\".\"scopes\") > 0 AND \"document\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        },
+        "scope_update": {
+          "name": "scope_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"document\".\"scopes\") > 0 AND \"document\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))",
+          "withCheck": "cardinality(\"document\".\"scopes\") > 0 AND \"document\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.entity_claim": {
+      "name": "entity_claim",
+      "schema": "",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "content_id": {
+          "name": "content_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "attributes": {
+          "name": "attributes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        }
+      },
+      "indexes": {
+        "ix_entity_claim_content_id": {
+          "name": "ix_entity_claim_content_id",
+          "columns": [
+            {
+              "expression": "content_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_entity_claim_created_by": {
+          "name": "ix_entity_claim_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_entity_claim_scopes": {
+          "name": "ix_entity_claim_scopes",
+          "columns": [
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "entity_claim_content_id_entity_content_id_fk": {
+          "name": "entity_claim_content_id_entity_content_id_fk",
+          "tableFrom": "entity_claim",
+          "tableTo": "entity_content",
+          "columnsFrom": [
+            "content_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "uq_entity_claim_content_scope": {
+          "name": "uq_entity_claim_content_scope",
+          "nullsNotDistinct": false,
+          "columns": [
+            "content_id",
+            "scopes"
+          ]
+        }
+      },
+      "policies": {
+        "scope_read": {
+          "name": "scope_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"entity_claim\".\"scopes\") > 0 AND (\"entity_claim\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'read'))\n\t\t\tOR (cardinality(\"entity_claim\".\"scopes\") = 1 AND \"entity_claim\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'public'))))"
+        },
+        "scope_insert": {
+          "name": "scope_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "cardinality(\"entity_claim\".\"scopes\") > 0 AND \"entity_claim\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.entity_content": {
+      "name": "entity_content",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "halfvec(1024)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ix_entity_content_embedding": {
+          "name": "ix_entity_content_embedding",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "halfvec_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "vchordrq",
+          "with": {}
+        },
+        "ix_entity_content_name_lower": {
+          "name": "ix_entity_content_name_lower",
+          "columns": [
+            {
+              "expression": "lower(name)",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_entity_content_name_trgm": {
+          "name": "ix_entity_content_name_trgm",
+          "columns": [
+            {
+              "expression": "lower(name) gin_trgm_ops",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "entity_content_type_entity_kind_name_fk": {
+          "name": "entity_content_type_entity_kind_name_fk",
+          "tableFrom": "entity_content",
+          "tableTo": "entity_kind",
+          "columnsFrom": [
+            "type"
+          ],
+          "columnsTo": [
+            "name"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "content_read": {
+          "name": "content_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "id IN (SELECT content_id FROM entity_claim)"
+        },
+        "content_insert": {
+          "name": "content_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.entity_kind": {
+      "name": "entity_kind",
+      "schema": "",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "structural": {
+          "name": "structural",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.fact_claim": {
+      "name": "fact_claim",
+      "schema": "",
+      "columns": {
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "content_id": {
+          "name": "content_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valid": {
+          "name": "valid",
+          "type": "tstzrange",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recorded": {
+          "name": "recorded",
+          "type": "tstzrange",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "tstzrange(now(), NULL::timestamp with time zone, '[)'::text)"
+        },
+        "last_accessed": {
+          "name": "last_accessed",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_count": {
+          "name": "access_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "attributes": {
+          "name": "attributes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "perspective_key": {
+          "name": "perspective_key",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'world'"
+        },
+        "source_chunk_id": {
+          "name": "source_chunk_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "promoted_from": {
+          "name": "promoted_from",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ix_fact_claim_content_id": {
+          "name": "ix_fact_claim_content_id",
+          "columns": [
+            {
+              "expression": "content_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_fact_claim_created_by": {
+          "name": "ix_fact_claim_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_fact_claim_perspective_key": {
+          "name": "ix_fact_claim_perspective_key",
+          "columns": [
+            {
+              "expression": "perspective_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_fact_claim_source_chunk_id": {
+          "name": "ix_fact_claim_source_chunk_id",
+          "columns": [
+            {
+              "expression": "source_chunk_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_fact_claim_promoted_from": {
+          "name": "ix_fact_claim_promoted_from",
+          "columns": [
+            {
+              "expression": "promoted_from",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_fact_claim_scopes": {
+          "name": "ix_fact_claim_scopes",
+          "columns": [
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "ix_fact_claim_valid": {
+          "name": "ix_fact_claim_valid",
+          "columns": [
+            {
+              "expression": "valid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gist",
+          "with": {}
+        },
+        "ix_fact_claim_recorded": {
+          "name": "ix_fact_claim_recorded",
+          "columns": [
+            {
+              "expression": "recorded",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gist",
+          "with": {}
+        },
+        "ix_fact_claim_live": {
+          "name": "ix_fact_claim_live",
+          "columns": [
+            {
+              "expression": "valid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "upper_inf(recorded)",
+          "concurrently": false,
+          "method": "gist",
+          "with": {}
+        },
+        "uq_fact_claim_live": {
+          "name": "uq_fact_claim_live",
+          "columns": [
+            {
+              "expression": "content_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "perspective_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "upper_inf(recorded)",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "fact_claim_content_id_fact_content_id_fk": {
+          "name": "fact_claim_content_id_fact_content_id_fk",
+          "tableFrom": "fact_claim",
+          "tableTo": "fact_content",
+          "columnsFrom": [
+            "content_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "fact_claim_source_chunk_id_chunk_id_fk": {
+          "name": "fact_claim_source_chunk_id_chunk_id_fk",
+          "tableFrom": "fact_claim",
+          "tableTo": "chunk",
+          "columnsFrom": [
+            "source_chunk_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "fact_claim_promoted_from_fact_claim_id_fk": {
+          "name": "fact_claim_promoted_from_fact_claim_id_fk",
+          "tableFrom": "fact_claim",
+          "tableTo": "fact_claim",
+          "columnsFrom": [
+            "promoted_from"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "scope_read": {
+          "name": "scope_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"fact_claim\".\"scopes\") > 0 AND (\"fact_claim\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'read'))\n\t\t\tOR (cardinality(\"fact_claim\".\"scopes\") = 1 AND \"fact_claim\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'public'))))"
+        },
+        "scope_insert": {
+          "name": "scope_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "cardinality(\"fact_claim\".\"scopes\") > 0 AND \"fact_claim\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        },
+        "scope_update": {
+          "name": "scope_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"fact_claim\".\"scopes\") > 0 AND \"fact_claim\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))",
+          "withCheck": "cardinality(\"fact_claim\".\"scopes\") > 0 AND \"fact_claim\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.fact_content": {
+      "name": "fact_content",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "subject_id": {
+          "name": "subject_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "object_id": {
+          "name": "object_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "predicate": {
+          "name": "predicate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "statement": {
+          "name": "statement",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "halfvec(1024)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ix_fact_content_subject_id": {
+          "name": "ix_fact_content_subject_id",
+          "columns": [
+            {
+              "expression": "subject_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_fact_content_object_id": {
+          "name": "ix_fact_content_object_id",
+          "columns": [
+            {
+              "expression": "object_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_fact_content_embedding": {
+          "name": "ix_fact_content_embedding",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "halfvec_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "vchordrq",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "fact_content_subject_id_entity_content_id_fk": {
+          "name": "fact_content_subject_id_entity_content_id_fk",
+          "tableFrom": "fact_content",
+          "tableTo": "entity_content",
+          "columnsFrom": [
+            "subject_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "fact_content_object_id_entity_content_id_fk": {
+          "name": "fact_content_object_id_entity_content_id_fk",
+          "tableFrom": "fact_content",
+          "tableTo": "entity_content",
+          "columnsFrom": [
+            "object_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "fact_content_predicate_relation_kind_name_fk": {
+          "name": "fact_content_predicate_relation_kind_name_fk",
+          "tableFrom": "fact_content",
+          "tableTo": "relation_kind",
+          "columnsFrom": [
+            "predicate"
+          ],
+          "columnsTo": [
+            "name"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "content_read": {
+          "name": "content_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "id IN (SELECT content_id FROM fact_claim)"
+        },
+        "content_insert": {
+          "name": "content_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "true"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.profile": {
+      "name": "profile",
+      "schema": "",
+      "columns": {
+        "embedding": {
+          "name": "embedding",
+          "type": "halfvec(1024)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "subject_id": {
+          "name": "subject_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "summary": {
+          "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "ix_profile_subject_id": {
+          "name": "ix_profile_subject_id",
+          "columns": [
+            {
+              "expression": "subject_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_profile_created_by": {
+          "name": "ix_profile_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_profile_scopes": {
+          "name": "ix_profile_scopes",
+          "columns": [
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "ix_profile_embedding": {
+          "name": "ix_profile_embedding",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "halfvec_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "vchordrq",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "profile_subject_id_entity_content_id_fk": {
+          "name": "profile_subject_id_entity_content_id_fk",
+          "tableFrom": "profile",
+          "tableTo": "entity_content",
+          "columnsFrom": [
+            "subject_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "uq_profile_scope_subject": {
+          "name": "uq_profile_scope_subject",
+          "nullsNotDistinct": false,
+          "columns": [
+            "scopes",
+            "subject_id"
+          ]
+        }
+      },
+      "policies": {
+        "scope_read": {
+          "name": "scope_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"profile\".\"scopes\") > 0 AND (\"profile\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'read'))\n\t\t\tOR (cardinality(\"profile\".\"scopes\") = 1 AND \"profile\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'public'))))"
+        },
+        "scope_insert": {
+          "name": "scope_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "cardinality(\"profile\".\"scopes\") > 0 AND \"profile\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        },
+        "scope_update": {
+          "name": "scope_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"profile\".\"scopes\") > 0 AND \"profile\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))",
+          "withCheck": "cardinality(\"profile\".\"scopes\") > 0 AND \"profile\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.relation_kind": {
+      "name": "relation_kind",
+      "schema": "",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "structural": {
+          "name": "structural",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.session_item": {
+      "name": "session_item",
+      "schema": "",
+      "columns": {
+        "embedding": {
+          "name": "embedding",
+          "type": "halfvec(1024)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provenance": {
+          "name": "provenance",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "promoted_at": {
+          "name": "promoted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "ix_session_item_created_by": {
+          "name": "ix_session_item_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_session_item_promoted_at": {
+          "name": "ix_session_item_promoted_at",
+          "columns": [
+            {
+              "expression": "promoted_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_session_item_scopes": {
+          "name": "ix_session_item_scopes",
+          "columns": [
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        },
+        "ix_session_item_embedding": {
+          "name": "ix_session_item_embedding",
+          "columns": [
+            {
+              "expression": "embedding",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last",
+              "opclass": "halfvec_cosine_ops"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "vchordrq",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {
+        "scope_read": {
+          "name": "scope_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"session_item\".\"scopes\") > 0 AND (\"session_item\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'read'))\n\t\t\tOR (cardinality(\"session_item\".\"scopes\") = 1 AND \"session_item\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'public'))))"
+        },
+        "scope_insert": {
+          "name": "scope_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "cardinality(\"session_item\".\"scopes\") > 0 AND \"session_item\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        },
+        "scope_update": {
+          "name": "scope_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"session_item\".\"scopes\") > 0 AND \"session_item\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))",
+          "withCheck": "cardinality(\"session_item\".\"scopes\") > 0 AND \"session_item\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.watermark": {
+      "name": "watermark",
+      "schema": "",
+      "columns": {
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "watermark_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ref": {
+          "name": "ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'global'"
+        },
+        "counter": {
+          "name": "counter",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        }
+      },
+      "indexes": {
+        "ix_watermark_created_by": {
+          "name": "ix_watermark_created_by",
+          "columns": [
+            {
+              "expression": "created_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "ix_watermark_scopes": {
+          "name": "ix_watermark_scopes",
+          "columns": [
+            {
+              "expression": "scopes",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "gin",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "uq_watermark_scope_kind_ref": {
+          "name": "uq_watermark_scope_kind_ref",
+          "nullsNotDistinct": false,
+          "columns": [
+            "scopes",
+            "kind",
+            "ref"
+          ]
+        }
+      },
+      "policies": {
+        "scope_read": {
+          "name": "scope_read",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"watermark\".\"scopes\") > 0 AND (\"watermark\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'read'))\n\t\t\tOR (cardinality(\"watermark\".\"scopes\") = 1 AND \"watermark\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'public'))))"
+        },
+        "scope_insert": {
+          "name": "scope_insert",
+          "as": "PERMISSIVE",
+          "for": "INSERT",
+          "to": [
+            "aizk_app"
+          ],
+          "withCheck": "cardinality(\"watermark\".\"scopes\") > 0 AND \"watermark\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        },
+        "scope_update": {
+          "name": "scope_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": [
+            "aizk_app"
+          ],
+          "using": "cardinality(\"watermark\".\"scopes\") > 0 AND \"watermark\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))",
+          "withCheck": "cardinality(\"watermark\".\"scopes\") > 0 AND \"watermark\".\"scopes\" <@ ARRAY(SELECT (value)::uuid FROM jsonb_array_elements_text((NULLIF(current_setting('app.scopes', true), ''))::jsonb -> 'write'))"
+        }
+      },
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.watermark_kind": {
+      "name": "watermark_kind",
+      "schema": "public",
+      "values": [
+        "fact_count",
+        "raptor_fact_count",
+        "scorecard"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {
+    "public.live_fact": {
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "content_id": {
+          "name": "content_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "uuid[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::uuid[]"
+        },
+        "valid": {
+          "name": "valid",
+          "type": "tstzrange",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recorded": {
+          "name": "recorded",
+          "type": "tstzrange",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "tstzrange(now(), NULL::timestamp with time zone, '[)'::text)"
+        },
+        "last_accessed": {
+          "name": "last_accessed",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_count": {
+          "name": "access_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "attributes": {
+          "name": "attributes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "perspective_key": {
+          "name": "perspective_key",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'world'"
+        },
+        "source_chunk_id": {
+          "name": "source_chunk_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "promoted_from": {
+          "name": "promoted_from",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "subject_id": {
+          "name": "subject_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "object_id": {
+          "name": "object_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "predicate": {
+          "name": "predicate",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "statement": {
+          "name": "statement",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "halfvec(1024)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "definition": "select \"fact_claim\".\"id\", \"fact_claim\".\"content_id\", \"fact_claim\".\"created_by\", \"fact_claim\".\"scopes\", \"fact_claim\".\"valid\", \"fact_claim\".\"recorded\", \"fact_claim\".\"last_accessed\", \"fact_claim\".\"access_count\", \"fact_claim\".\"attributes\", \"fact_claim\".\"perspective_key\", \"fact_claim\".\"source_chunk_id\", \"fact_claim\".\"promoted_from\", \"fact_content\".\"subject_id\", \"fact_content\".\"object_id\", \"fact_content\".\"predicate\", \"fact_content\".\"statement\", \"fact_content\".\"embedding\" from \"fact_claim\" inner join \"fact_content\" on \"fact_content\".\"id\" = \"fact_claim\".\"content_id\" where upper_inf(\"fact_claim\".\"recorded\") AND (\"fact_claim\".\"valid\" IS NULL OR \"fact_claim\".\"valid\" @> now())",
+      "name": "live_fact",
+      "schema": "public",
+      "isExisting": false,
+      "with": {
+        "securityInvoker": true,
+        "securityBarrier": true
+      },
+      "materialized": false
+    }
+  },
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
