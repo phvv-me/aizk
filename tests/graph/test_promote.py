@@ -4,6 +4,7 @@ import dbutil
 import pytest
 from sqlalchemy import text
 
+from aizk.config import settings
 from aizk.exceptions import NotVisibleError
 from aizk.graph.promote import promote
 from aizk.store import (
@@ -13,10 +14,8 @@ from aizk.store import (
     EntityContent,
     FactClaim,
     FactContent,
-    acting_as,
 )
-from aizk.store.engine import caller_standing
-from aizk.store.identity import org_uuid
+from aizk.store.identity import User
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -24,16 +23,30 @@ UNIT_VECTOR = [1.0] + [0.0] * 1023
 
 
 async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
-    """Plant a private document with one chunk, one entity, and one fact owned by the promoter."""
     document, chunk, entity = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    async with acting_as(promoter) as session:
+    async with dbutil.actor(promoter) as session:
         session.add(
-            Document(id=document, content_hash="promote", owner_id=promoter, title="source")
+            Document(
+                id=document,
+                content_hash="promote",
+                created_by=promoter,
+                scopes=[promoter],
+                title="source",
+            )
         )
-        session.add(Chunk(id=chunk, document_id=document, ord=0, text="span", owner_id=promoter))
+        session.add(
+            Chunk(
+                id=chunk,
+                document_id=document,
+                ord=0,
+                text="span",
+                created_by=promoter,
+                scopes=[promoter],
+            )
+        )
         session.add(EntityContent(id=entity, name="Leech", type="concept", embedding=UNIT_VECTOR))
         await session.flush()
-        session.add(EntityClaim(content_id=entity, owner_id=promoter))
+        session.add(EntityClaim(content_id=entity, created_by=promoter, scopes=[promoter]))
         content = FactContent(
             subject_id=entity,
             predicate="related_to",
@@ -42,65 +55,74 @@ async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
         )
         session.add(content)
         await session.flush()
-        session.add(FactClaim(content_id=content.id, owner_id=promoter, source_chunk_id=chunk))
+        session.add(
+            FactClaim(
+                content_id=content.id,
+                created_by=promoter,
+                scopes=[promoter],
+                source_chunk_id=chunk,
+            )
+        )
     return document
 
 
 async def visible_copy(
     reader: uuid.UUID, source: uuid.UUID, orgs: tuple[uuid.UUID, ...] = ()
 ) -> uuid.UUID | None:
-    """The id of the promoted copy a reader sees under its org standing, null when blind to it."""
-    with caller_standing(orgs, ()):
-        async with acting_as(reader) as session:
-            return await session.scalar(
-                text("SELECT id FROM document WHERE promoted_from = :src"), {"src": source}
+    user = User.authorized(reader, read=(reader, *orgs))
+    async with user as session:
+        return (
+            await session.exec(
+                text("SELECT id FROM document WHERE promoted_from = :src"),
+                params={"src": source},
             )
+        ).scalar_one_or_none()
 
 
-def test_promote_copies_into_scope_and_an_outsider_stays_blind() -> None:
-    """A copy lands in the target org a member reads, the outsider stays blind, the source private.
-
-    The count sums the document, its one chunk, and its one fact, and the copy points back at the
-    source through promoted_from. The owner and a member standing in the target org read the same
-    copy, an outsider with no standing reads nothing, and the source keeps its private empty scope
-    set, never widened by the promotion.
-    """
-
-    async def probe() -> tuple[int, uuid.UUID | None, uuid.UUID | None, uuid.UUID | None, list]:
+def test_promote_copies_once_into_scope_and_an_outsider_stays_blind() -> None:
+    async def probe() -> tuple[
+        int, int, uuid.UUID | None, uuid.UUID | None, uuid.UUID | None, list
+    ]:
         await dbutil.reset_db()
         promoter, member, outsider = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         team_org = f"team-{uuid.uuid4()}"
-        team_scope = org_uuid(team_org)
+        team_scope = settings.scope_id(team_org)
         source = await seed_source(promoter)
-        count = await promote(source, team_org, user_id=promoter)
-        async with acting_as(promoter) as session:
-            source_scopes = await session.scalar(
-                text("SELECT scopes FROM document WHERE id = :id"), {"id": source}
-            )
+        user = User.authorized(
+            promoter,
+            read=(promoter, team_scope),
+            write=(promoter, team_scope),
+        )
+        count = await promote([source], frozenset({team_scope}), user)
+        repeated = await promote([source], frozenset({team_scope}), user)
+        async with dbutil.actor(promoter) as session:
+            source_scopes = (
+                await session.exec(
+                    text("SELECT scopes FROM document WHERE id = :id"), params={"id": source}
+                )
+            ).scalar_one()
         return (
             count,
-            await visible_copy(promoter, source),
+            repeated,
+            await visible_copy(promoter, source, (team_scope,)),
             await visible_copy(member, source, (team_scope,)),
             await visible_copy(outsider, source),
             list(source_scopes),
         )
 
-    count, promoter_sees, member_sees, outsider_sees, source_scopes = dbutil.run(probe())
-    assert count == 3  # the document, its one chunk, and its one fact
-    assert promoter_sees is not None  # the owner reads its own copy regardless of standing
+    count, repeated, promoter_sees, member_sees, outsider_sees, source_scopes = dbutil.run(probe())
+    assert count == 1 and repeated == 0
+    assert promoter_sees is not None
     assert member_sees == promoter_sees  # a member standing in the target org reads the same copy
     assert outsider_sees is None  # no standing in the target org, no copy
-    assert source_scopes == []  # the source stays private, never widened by the promotion
+    assert len(source_scopes) == 1
 
 
 def test_promote_of_an_invisible_document_raises() -> None:
-    """A promoter promoting a document they cannot see is refused before any copy is written."""
-
     async def probe() -> None:
         await dbutil.reset_db()
         promoter = uuid.uuid4()
-        team_org = f"team-{uuid.uuid4()}"
         with pytest.raises(NotVisibleError, match="no visible document"):
-            await promote(uuid.uuid4(), team_org, user_id=promoter)
+            await promote([uuid.uuid4()], frozenset({promoter}), User.private(promoter))
 
     dbutil.run(probe())

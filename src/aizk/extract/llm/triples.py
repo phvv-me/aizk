@@ -1,8 +1,8 @@
 from loguru import logger
-from pydantic import BaseModel
+from pydantic.main import BaseModel
 
 from ...config import settings
-from ...store import LiveFact
+from ...graph.consolidation import FactMatch
 from .. import ontology
 from ..dating import resolve_valid_from
 from ..models import (
@@ -12,22 +12,16 @@ from ..models import (
     Extraction,
     TimedFact,
 )
-from .client import LLMClientPool
+from .client import client_for
 from .providers import provider_settings
 
-# the batched borderline-consolidation pass's system turn, mirroring the ontology default
-# strategy's own system turn, sourced from settings.consolidation_prompt.
-CONSOLIDATION_PROMPT = settings.consolidation_prompt
+_CONSOLIDATION_PROMPT = settings.consolidation_prompt
 
 
 def extraction_system() -> str:
     """The ontology default strategy's system turn, the live ontology rules layered on the
-    few-shot guidance from `settings.extract_system_prompt` that keeps entity names and facts
-    well formed.
-
-    Read fresh from `ontology.current()` on every call rather than cached as a module constant,
-    since the live catalog can grow between calls, an auto-created type or an admin's own edit.
-    """
+    few-shot guidance from `settings.extract_system_prompt` that keeps entity names and
+    facts well formed."""
     return f"{ontology.current().prompt}\n{settings.extract_system_prompt}"
 
 
@@ -40,37 +34,17 @@ async def structured[T: BaseModel](
     timeout: float | None = None,
     max_tokens: int | None = None,
 ) -> T:
-    """Run one schema-constrained chat turn and return the validated model instance.
-
-    The single seam every extractor, judge, and summarizer flows through. Grammar-constrained
-    decoding on the OpenAI-compatible endpoint means the returned message already validates
-    against `schema` with no retry-until-valid layer on top. Takes no session or user, so it
-    is safe to call inside or outside a transaction.
-
-    system: system prompt fixing the task and the response contract.
-    user: user message carrying the content to reason over.
-    schema: pydantic model the response must validate against, also the return type.
-    temperature: sampling temperature, settings.extract_temperature when None.
-    timeout: per-call wall-clock ceiling, settings.extract_timeout when None.
-    max_tokens: hard output token cap, settings.extract_max_tokens when None.
-    """
-    # resolve the named provider preset once at the single LLM seam, so `AIZK_LLM_PROVIDER=ollama`
-    # or a hosted provider name switches the endpoint while an explicit url or model still wins,
-    # then hand the resolved endpoint to client_for as plain arguments so a concurrently running
-    # `structured` call never observes another call's provider resolution.
+    """Run one schema-constrained chat turn and return the validated model instance."""
+    # Resolve provider settings per call so concurrent requests share no mutable resolution.
     resolved = provider_settings()
-    client = LLMClientPool().client_for(resolved.llm_url, resolved.llm_model, resolved.llm_api_key)
+    client = client_for(resolved.llm_url, resolved.llm_model, resolved.llm_api_key)
     completion = await client.chat.completions.parse(
         model=resolved.llm_model,
         response_format=schema,
         temperature=resolved.extract_temperature if temperature is None else temperature,
         timeout=resolved.extract_timeout if timeout is None else timeout,
         max_tokens=resolved.extract_max_tokens if max_tokens is None else max_tokens,
-        # empty by default (see settings.llm_chat_template_kwargs), so a stock load sends no
-        # extra_body and never risks a hosted OpenAI-shaped provider rejecting an unrecognized
-        # field; the local vllm-llm deployment sets AIZK_LLM_CHAT_TEMPLATE_KWARGS to disable a
-        # hybrid-thinking model's own <think> preamble, which would otherwise burn the combined
-        # call's token budget on reasoning the closed ontology schema never asked for.
+        # Local deployments may disable a model's reasoning preamble through extra_body.
         extra_body={"chat_template_kwargs": resolved.llm_chat_template_kwargs}
         if resolved.llm_chat_template_kwargs
         else None,
@@ -86,27 +60,12 @@ async def structured[T: BaseModel](
 
 
 async def extract_with_system(system: str, text: str) -> Extraction:
-    """Run the combined wire-schema extraction call under a given system prompt.
-
-    Every extraction strategy (`extract.strategies.extract_graph`'s ontology default, summary,
-    preferences, and custom) shares this one call shape, only the system prompt's own focus
-    differs. The wire schema, built fresh from `ontology.current().llm_extraction` so its `t`/`p`
-    fields track whatever the live catalog currently allows, already carries an optional per-fact
-    date alongside its entities and facts, so `extract.dating.resolve_valid_from` only ever needs
-    the model's own field and the fact's own statement text, no second round trip. The wire
-    shapes (short keys to hold the call near the ~250-token budget) convert to the readable domain
-    shapes (`ExtractedEntity`/`TimedFact`) immediately after parsing, so nothing downstream of
-    this function ever reads the compact keys.
-
-    system: system prompt fixing the strategy's own focus, layered on the shared ontology rules.
-    text: the source span to extract from.
-    """
-    # wire's real shape is the live catalog's own dynamic class, structurally carrying e/f, never
-    # expressible as a static type narrower than the BaseModel structured itself is generic over.
+    """Run the combined wire-schema extraction call under a given system prompt."""
+    # The live ontology creates this response model dynamically.
     wire = await structured(system, text, ontology.current().llm_extraction)
     entities = [
         ExtractedEntity(name=entity.n, type=entity.t, suggested_type=entity.suggested_type)
-        for entity in wire.e  # pyrefly: ignore
+        for entity in wire.e
     ]
     facts = [
         TimedFact(
@@ -114,9 +73,11 @@ async def extract_with_system(system: str, text: str) -> Extraction:
             predicate=fact.p,
             object=fact.o,
             statement=fact.statement,
+            quote=fact.quote,
             valid_from=resolve_valid_from(fact.date, fact.statement),
+            kind=fact.k,
         )
-        for fact in wire.f  # pyrefly: ignore
+        for fact in wire.f
     ]
     logger.info(
         "extracted {} entities and {} facts from {} chars", len(entities), len(facts), len(text)
@@ -125,20 +86,13 @@ async def extract_with_system(system: str, text: str) -> Extraction:
 
 
 async def combined_extract(text: str) -> Extraction:
-    """Extract entities, facts, and each fact's own date under the ontology default strategy.
-
-    text: the source span to extract from.
-    """
+    """Extract entities, facts, and each fact's own date under the ontology default strategy."""
     return await extract_with_system(extraction_system(), text)
 
 
-def consolidation_block(index: int, fact: TimedFact, existing: list[LiveFact]) -> str:
-    """Render one candidate's new fact and its existing similar claims as a numbered prompt block.
-
-    index: the candidate's position, the number the batch verdict is keyed back to.
-    fact: the new fact awaiting a consolidation decision.
-    existing: the candidate's own similar claims, the catalog the model chooses among.
-    """
+def consolidation_block(index: int, fact: TimedFact, existing: list[FactMatch]) -> str:
+    """Render one candidate's new fact and its existing similar claims as a numbered prompt
+    block."""
     catalog = (
         "\n".join(f"  id={claim.id} statement={claim.statement}" for claim in existing)
         or "  (none)"
@@ -147,14 +101,9 @@ def consolidation_block(index: int, fact: TimedFact, existing: list[LiveFact]) -
 
 
 def resolve_verdict(
-    index: int, existing: list[LiveFact], resolution: BatchConsolidationVerdict
+    index: int, existing: list[FactMatch], resolution: BatchConsolidationVerdict
 ) -> ConsolidationVerdict:
-    """Resolve one candidate's verdict, dropping a supersedes id the batch call hallucinated.
-
-    index: the candidate's position in the batch, aligned with the resolution's own verdicts.
-    existing: the candidate's own similar claims, the only ids UPDATE may legally supersede.
-    resolution: the batch call's raw verdicts, possibly shorter than the candidate list.
-    """
+    """Resolve one candidate's verdict, dropping a supersedes id the batch call hallucinated."""
     known = {claim.id for claim in existing}
     verdict = (
         resolution.verdicts[index]
@@ -168,26 +117,16 @@ def resolve_verdict(
 
 
 async def decide_consolidations_batch(
-    candidates: list[tuple[TimedFact, list[LiveFact]]],
+    candidates: list[tuple[TimedFact, list[FactMatch]]],
 ) -> list[ConsolidationVerdict]:
-    """Decide ADD/UPDATE/NOOP for every borderline fact in one call.
-
-    The non-LLM consolidation cascade (`graph.consolidation.decide_by_rule`) already resolves
-    every candidate whose top similar claim falls outside the ambiguous cosine band. This is the
-    batched tier it defers to for the rest, one call for a whole chunk's borderline facts together
-    rather than one round trip per fact, the lever that keeps a chunk to at most two LLM calls
-    total, the combined extraction call and this one.
-
-    candidates: each borderline fact paired with its own similar existing claims, the same
-        catalog a single-fact judge would have read, batched into one prompt instead.
-    """
+    """Decide ADD/UPDATE/NOOP for every borderline fact in one call."""
     if not candidates:
         return []
     user = "\n\n".join(
         consolidation_block(index, fact, existing)
         for index, (fact, existing) in enumerate(candidates)
     )
-    resolution = await structured(CONSOLIDATION_PROMPT, user, BatchConsolidationVerdict)
+    resolution = await structured(_CONSOLIDATION_PROMPT, user, BatchConsolidationVerdict)
     results = [
         resolve_verdict(index, existing, resolution)
         for index, (_, existing) in enumerate(candidates)

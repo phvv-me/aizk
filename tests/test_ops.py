@@ -1,3 +1,4 @@
+import io
 from collections.abc import Callable
 
 import dbutil
@@ -9,11 +10,10 @@ import aizk.ops as ops
 from aizk.background.status import TasksStatus
 from aizk.config import settings
 from aizk.ops import EndpointHealth
+from alembic import command
 
 
 class FakeResponse:
-    """A stand-in httpx response carrying only the status code `probe_endpoint` reads."""
-
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
 
@@ -21,12 +21,6 @@ class FakeResponse:
 def fake_async_client(
     status_code: int | None, error: httpx.HTTPError | None
 ) -> Callable[..., object]:
-    """Build a drop-in `httpx.AsyncClient` whose GET returns a status or raises a network error.
-
-    status_code: code the faked GET answers with, ignored when an error is set.
-    error: httpx error the faked GET raises instead of answering, or null for a clean response.
-    """
-
     class Client:
         def __init__(self, *args: object, **kwargs: object) -> None:
             pass
@@ -47,8 +41,6 @@ def fake_async_client(
 
 
 class FakeConnection:
-    """A connection whose `execute` optionally raises, standing in for the admin DB connection."""
-
     def __init__(self, error: Exception | None) -> None:
         self.error = error
 
@@ -58,8 +50,6 @@ class FakeConnection:
 
 
 class FakeBegin:
-    """The async context manager `engine.begin()` returns, yielding one recording connection."""
-
     def __init__(self, connection: FakeConnection) -> None:
         self.connection = connection
 
@@ -71,8 +61,6 @@ class FakeBegin:
 
 
 class FakeEngine:
-    """A stand-in async engine whose one connection's `execute` behavior a test dictates."""
-
     def __init__(self, error: Exception | None) -> None:
         self.connection = FakeConnection(error)
         self.disposed = False
@@ -85,12 +73,10 @@ class FakeEngine:
 
 
 def dbapi_error(message: str) -> DBAPIError:
-    """A DBAPIError whose string carries `message`, the shape `enable_query_stats` inspects."""
     return DBAPIError("CREATE EXTENSION", {}, Exception(message))
 
 
 def test_alembic_config_and_head_read_the_packaged_migrations() -> None:
-    """The config points at the shipped scripts and head resolves to a real revision string."""
     config = ops.alembic_config()
 
     location = config.get_main_option("script_location")
@@ -98,13 +84,32 @@ def test_alembic_config_and_head_read_the_packaged_migrations() -> None:
     assert config.get_main_option("sqlalchemy.url") == settings.admin_database_url
     head = ops.alembic_head(config)
     assert isinstance(head, str) and head
+    output = io.StringIO()
+    config.output_buffer = output
+    ops.run_alembic(command.upgrade, config, "head", sql=True)
+    script = output.getvalue()
+    assert "CREATE TABLE document" in script
+    assert "FORCE ROW LEVEL SECURITY" in script
+    assert "CREATE POLICY scope_read" in script
 
 
 def test_run_alembic_forwards_args_and_returns_off_thread() -> None:
-    """The worker-thread wrapper runs the callable with the forwarded args and returns it."""
     result = ops.run_alembic(lambda config, revision: (config, revision), "cfg", "head")
 
     assert result == ("cfg", "head")
+
+
+def test_alembic_revision_changes_are_committed(migrated_db: None) -> None:
+    config = ops.alembic_config()
+    head = ops.alembic_head(config)
+
+    try:
+        ops.run_alembic(command.stamp, config, "base")
+        assert dbutil.run(ops.alembic_current()) is None
+    finally:
+        ops.run_alembic(command.stamp, config, "head")
+
+    assert dbutil.run(ops.alembic_current()) == head
 
 
 @pytest.mark.parametrize(
@@ -122,7 +127,6 @@ def test_probe_endpoint_maps_status_and_errors_to_reachability(
     error: httpx.HTTPError | None,
     reachable: bool,
 ) -> None:
-    """A sub-500 answer reads reachable, a 5xx or network error reads unreachable."""
     monkeypatch.setattr(ops.httpx, "AsyncClient", fake_async_client(status_code, error))
 
     health = dbutil.run(ops.probe_endpoint("embed", "http://x/v1"))
@@ -142,7 +146,6 @@ def test_probe_endpoint_maps_status_and_errors_to_reachability(
 def test_enable_query_stats_tolerates_only_the_preload_error(
     monkeypatch: pytest.MonkeyPatch, error: Exception | None, raises: bool
 ) -> None:
-    """The create succeeds or the preload warning is swallowed, but other DBAPIErrors re-raise."""
     engine = FakeEngine(error)
     monkeypatch.setattr(ops, "create_async_engine", lambda url: engine)
 
@@ -155,8 +158,6 @@ def test_enable_query_stats_tolerates_only_the_preload_error(
 
 
 def test_grant_app_role_privileges_is_idempotent(migrated_db: None) -> None:
-    """The grant set runs clean twice over, proving every statement is a rerun-safe GRANT."""
-
     async def body() -> None:
         await ops.grant_app_role_privileges()
         await ops.grant_app_role_privileges()
@@ -165,8 +166,6 @@ def test_grant_app_role_privileges_is_idempotent(migrated_db: None) -> None:
 
 
 def test_setup_is_idempotent_on_a_ready_database(migrated_db: None) -> None:
-    """Against an already-migrated, queued database setup no-ops the queue and stays at head."""
-
     async def body() -> ops.SetupReport:
         report = await ops.setup()
         assert await ops.queue_schema_present() is True
@@ -179,8 +178,6 @@ def test_setup_is_idempotent_on_a_ready_database(migrated_db: None) -> None:
 
 
 def test_setup_installs_the_queue_on_a_fresh_database(migrated_db: None) -> None:
-    """With the pgqueuer schema dropped, setup reinstalls it and reports the install."""
-
     async def body() -> ops.SetupReport:
         await dbutil.admin_exec(
             "DROP TABLE IF EXISTS pgqueuer, pgqueuer_log, pgqueuer_statistics, "
@@ -200,7 +197,6 @@ def test_setup_installs_the_queue_on_a_fresh_database(migrated_db: None) -> None
 
 
 def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A health read carries the migration, clean RLS, row counts, queue, and endpoint sections."""
     queue = TasksStatus(pending=3, running=1, failed=0, last_run=None, lag=2)
 
     async def fake_probe(name: str, url: str) -> EndpointHealth:
@@ -217,7 +213,17 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
     assert report.migration.up_to_date is True
     assert report.migration.current == report.migration.head
     assert report.rls_violations == []
-    assert set(report.row_counts) == set(ops.MAIN_TABLES)
+    assert set(report.row_counts) == {
+        "document",
+        "chunk",
+        "entity_content",
+        "entity_claim",
+        "fact_content",
+        "fact_claim",
+        "community",
+        "profile",
+        "session_item",
+    }
     assert report.queue == queue
-    assert [endpoint.name for endpoint in report.endpoints] == ["embed", "rerank", "llm"]
+    assert [endpoint.name for endpoint in report.endpoints] == ["embed", "llm"]
     assert all(endpoint.reachable for endpoint in report.endpoints)

@@ -1,49 +1,57 @@
 # The scope-set lattice
 
-Every row carries `scopes uuid[]`, a set of groups. The empty set is private to its owner. A
-singleton is an ordinary shared group. Any larger set is an implicit intersection graph. A
-claim scoped to both finance and business is readable only by someone who is a member of both
-groups and writable only with writer standing in all of them, with no administered
-finance-and-business group existing anywhere. For a user in n groups, every subset of those
-groups is a potential space where knowledge can live.
+The intersection lattice is a permanent collaboration rule. Every scoped row carries a sorted,
+duplicate-free, nonempty `scopes uuid[]` key. See [Identity and sharing](identity.md).
+
+A personal UUID derived from the Logto subject holds private memory. One organization UUID holds
+ordinary team memory. Any larger set is an intersection graph. A claim in Toshiba and SPReAD is
+readable only by someone with readable standing in both and writable only with writer standing in
+both. No local combined organization needs to exist.
+
+## Why the array stays
+
+The set containing A and B is the bridge corpus that only members of both organizations can read.
+Replacing the array with one organization or a local scalar space would remove this capability.
+Background work therefore uses the canonical scope set as its partition key.
 
 ```mermaid
 flowchart TD
-    FB["{finance, business}<br/>the bridge, members of both"]
-    F["{finance}<br/>group members"]
-    B["{business}<br/>group members"]
-    P["{} private<br/>owner only"]
-    FB --- F
-    FB --- B
-    F --- P
+    AB["{A, B}<br/>the bridge"]
+    A["{A}<br/>organization A"]
+    B["{B}<br/>organization B"]
+    P["{subject}<br/>personal"]
+    AB --- A
+    AB --- B
+    A --- P
     B --- P
 ```
 
 ## The rules
 
-- **Read.** Own the row, or your memberships contain the whole set, or the set is exactly one
-  public group's singleton. Public sharing never widens an intersection.
-- **Write.** Private, or writer-or-admin standing in every group of the set. Postgres itself
-  refuses the insert otherwise, verified live.
-- **Lens.** A reading projection. The finance lens shows pure-finance claims only, neither the
-  bridge nor your private layer. The combined finance-and-business lens adds the bridge. No
-  lens shows your whole visible union.
-- **Group deletion demotes, never widens.** Deleting business sends every set containing
-  business to private, because removing one element would leak the bridge into plain finance.
-- **Curation.** A curated group's facts wait unreviewed and invisible until a group admin
-  approves them, and that admin is usually the standing LLM reviewer judging against the
-  group's own approved canon. Promotion into a wider set is a deliberate, audited copy that
-  outranks equal-scored hits.
+- **Read.** The complete row scope must be contained by the token's readable standing. A public
+  organization admits only its singleton and never widens an intersection.
+- **Write.** The complete row scope must be contained by writable standing. A personal singleton
+  is the default destination. Organization roles configured as editor or admin let a write name
+  one organization or an explicit intersection.
+- **Retrieval.** No query-time scope selector exists. The database returns every row contained by
+  the User's complete readable standing, so standing in A and B includes A, B, and A-and-B.
+- **Provenance.** `created_by` records who or which service produced a row. It grants no read,
+  update, share, or delete authority.
+- **Public access.** Logto `customData.public` is loaded through a fail-closed M2M directory. An
+  anonymous caller has no implicit personal scope and cannot write.
 
 ## Enforcement
 
-All of it is forced Postgres row level security compiled from declarative policies on the
-models. The app role cannot bypass it, anonymous callers get a rate-limited read-only view of
-public singletons, and the test suite proves the compiled policies against an independent
-Python specification across the full user, role, scope-set, and lens cross-product. No
-open memory engine offers a multi-tenant graph with per-row isolation.
+Forced Postgres row level security compiles from declarative SQLAlchemy expressions on the models.
+The app role cannot bypass it. Property tests compare the live policies with an independent Python
+scope-containment specification across personal, organization, intersection, public, and
+creator combinations.
 
-The generic policy machinery ships as its own package,
-[phvv-me/rls](https://github.com/phvv-me/rls). A model declares its policies as SQLAlchemy
-expressions, a mapper hook collects them, alembic applies them, and a sqlglot comparator diffs
-the compiled text against the live catalog.
+The generic policy machinery ships as [phvv-me/rls](https://github.com/phvv-me/rls). A model
+declares policies as ORM expressions granted to the app role, Alembic applies them, and a sqlglot
+comparator diffs their compiled form against the live catalog. The transaction-local settings the
+policies read come from one typed `User` context. Pydantic serializes `User.scopes` as one JSON
+setting with `read`, `write`, and `public` fields. Policies convert only each JSON permission to a
+native `uuid[]`, then compare the bare row `scopes` array with PostgreSQL containment. This keeps
+the GIN scope index usable. Every mapped table must either declare policies or opt out explicitly,
+and a session binds the same class the predicates read from.

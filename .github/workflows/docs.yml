@@ -24,7 +24,8 @@ jobs:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --extra docs
-      - run: uv pip install --reinstall "rls @ git+https://github.com/phvv-me/rls"
+      # front-run PyPI lag: reinstall rlsalchemy straight from its git main
+      - run: uv pip install --reinstall "rlsalchemy @ git+https://github.com/phvv-me/rls"
       - run: uv run --no-sync --extra docs mkdocs build -d site
       - uses: actions/upload-pages-artifact@v5
         with:

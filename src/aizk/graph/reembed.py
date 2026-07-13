@@ -1,30 +1,25 @@
-import uuid
 from itertools import batched
 
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import update
+from sqlmodel import select
 
 from ..config import settings
-from ..serving import Embedder
-from ..store import Chunk, Community, EntityContent, FactContent, Profile, acting_as
-from ..store.engine import bypass_rls, session
+from ..serving import embed
+from ..store import Chunk, Community, EntityContent, FactContent, Profile
+from ..store.engine import Session, bypass_rls
+from ..types import Scopes
 
-# the three per-tenant embedded tables, each carrying an id, an owner, and a halfvec embedding
-# column, re-embedded one user's rows at a time under ordinary row level security.
 ScopedEmbedded = Chunk | Community | Profile
 
-# every scoped embedded table paired with the source column its vector is built from, so
-# re-embedding re-encodes the stored text in place rather than re-ingesting it.
-SCOPED_TARGETS: dict[type[ScopedEmbedded], str] = {
+_SCOPED_TARGETS: dict[type[ScopedEmbedded], str] = {
     Chunk: "text",
     Community: "summary",
     Profile: "summary",
 }
 
-# the two deduplicated content tables, each carrying its own embedding built from name or
-# statement; re-embedded once, system-wide, benefiting every claim regardless of container.
 ContentEmbedded = EntityContent | FactContent
-CONTENT_TARGETS: dict[type[ContentEmbedded], str] = {
+_CONTENT_TARGETS: dict[type[ContentEmbedded], str] = {
     EntityContent: "name",
     FactContent: "statement",
 }
@@ -32,27 +27,23 @@ CONTENT_TARGETS: dict[type[ContentEmbedded], str] = {
 EmbeddedTable = ScopedEmbedded | ContentEmbedded
 
 
-async def rewrite_embeddings(embedder: Embedder, model: type[EmbeddedTable], field: str) -> int:
-    """Re-read one table's source text and overwrite its embedding column in batches.
-
-    An ORM `Session`, not a bare `Connection`, is what makes the batched `update(model)` calls
-    below target one row per dict by primary key, a `Session`-level bulk-update feature a plain
-    Core connection never applies, which would otherwise set every row in the table to each batch
-    entry's values in turn. Returns how many rows were rewritten. The caller owns the session's own
-    transaction boundary and visibility (`acting_as` for a per-tenant table, the admin engine for a
-    deduplicated content table content's own UPDATE policy refuses under row level security).
-
-    embedder: backend that maps the source text to fresh vectors.
-    model: the embedded ORM table to walk.
-    field: name of the source text column the vector is built from.
-    """
+async def rewrite_embeddings(
+    session: Session,
+    model: type[EmbeddedTable],
+    field: str,
+    scopes: Scopes | None = None,
+) -> int:
+    """Re-read one table's source text and overwrite its embedding column in batches."""
     column = getattr(model, field)
-    rows = (await session().execute(select(model.id, column).order_by(model.id))).all()
+    selection = select(model.id, column).order_by(model.id)
+    if scopes is not None:
+        selection = selection.where(model.__table__.c.scopes == sorted(scopes))
+    rows = (await session.exec(selection)).all()
     for batch in batched(rows, settings.reembed_batch, strict=False):
-        vectors = await embedder.embed([source for _, source in batch], mode="document")
-        await session().execute(
+        vectors = await embed([source for _, source in batch], mode="document")
+        await session.exec(
             update(model),
-            [
+            params=[
                 {"id": row_id, "embedding": vector}
                 for (row_id, _), vector in zip(batch, vectors, strict=True)
             ],
@@ -61,69 +52,37 @@ async def rewrite_embeddings(embedder: Embedder, model: type[EmbeddedTable], fie
 
 
 async def reembed_scoped_table(
-    embedder: Embedder,
-    user_id: uuid.UUID,
+    scopes: Scopes,
     model: type[ScopedEmbedded],
     field: str,
 ) -> int:
-    """Re-embed one per-tenant table's rows under the acting user, return the count rewritten.
-
-    embedder: backend that maps the source text to fresh vectors.
-    user_id: identity whose visibility scopes and owns the rewritten rows.
-    model: the embedded ORM table to walk.
-    field: name of the source text column the vector is built from.
-    """
-    async with acting_as(user_id):
-        count = await rewrite_embeddings(embedder, model, field)
+    """Re-embed one per-tenant table's rows under the acting user, return the count
+    rewritten."""
+    async with bypass_rls() as session:
+        count = await rewrite_embeddings(session, model, field, scopes)
     logger.info("re-embedded {} {} rows", count, model.__tablename__)
     return count
 
 
 async def reembed_content_table(
-    embedder: Embedder,
     model: type[ContentEmbedded],
     field: str,
 ) -> int:
-    """Re-embed every row of one deduplicated content table, return how many vectors changed.
-
-    Content carries no owner of its own and no UPDATE policy at all under row level security, so
-    an ordinary `acting_as` session can never rewrite its embedding column. This runs instead on
-    the owner-role admin engine, the same connection migrations use. A model change benefits every
-    claim on the content at once, with no per-user repetition needed.
-
-    embedder: backend that maps the source text to fresh vectors.
-    model: the content ORM table to walk.
-    field: name of the source text column the vector is built from.
-    """
+    """Re-embed every row of one deduplicated content table, return how many vectors changed."""
     async with bypass_rls() as session:
-        count = await rewrite_embeddings(embedder, model, field)
-        await session.commit()
+        count = await rewrite_embeddings(session, model, field)
     logger.info("re-embedded {} {} content rows", count, model.__tablename__)
     return count
 
 
-async def reembed(user_id: uuid.UUID) -> int:
-    """Re-encode every stored embedding with the current embedder, the one-command model migration.
-
-    Walks each per-tenant embedded table under the acting user's own row level security, then
-    walks the two deduplicated content tables system-wide, re-reading each row's source text and
-    overwriting its halfvec with a fresh vector from the configured embedder in batches, so
-    switching `embed_model` or `embed_url` needs no re-ingest. The stored text and the schema stay
-    untouched, only the embedding columns change.
-
-    user_id: identity whose visibility scopes and owns the rewritten per-tenant rows.
-    """
-    embedder = Embedder()
+async def reembed(scopes: Scopes | None = None) -> int:
+    """Re-encode every stored embedding with the current embedder, the one-command model
+    migration."""
+    key = frozenset(scopes or (settings.system_user_id,))
     scoped = sum(
-        [
-            await reembed_scoped_table(embedder, user_id, model, field)
-            for model, field in SCOPED_TARGETS.items()
-        ]
+        [await reembed_scoped_table(key, model, field) for model, field in _SCOPED_TARGETS.items()]
     )
     content = sum(
-        [
-            await reembed_content_table(embedder, model, field)
-            for model, field in CONTENT_TARGETS.items()
-        ]
+        [await reembed_content_table(model, field) for model, field in _CONTENT_TARGETS.items()]
     )
     return scoped + content

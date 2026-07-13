@@ -1,128 +1,45 @@
 # Roadmap
 
-Where aizk is headed. This document tracks what works today and what
-each milestone needs. It is a direction, not a contract, so order and scope can shift.
+This roadmap separates shipped behavior from hypotheses that still need measured evidence.
 
-## Today (0.0.x)
+## Shipped
 
-The core loop runs end to end, and a large rework since the initial scaffold turned it from secure
-hybrid search into an actual shared-brain memory engine. See `docs/provenance.md` for exactly which
-paper or design each piece traces to.
+- [x] Logto tokens are the only source of user, organization, role, and public organization state.
+- [x] Nonempty scope sets represent personal memory, organization memory, and organization
+  intersections under forced PostgreSQL RLS.
+- [x] Speaker snapshots and epistemic kinds survive capture, extraction, consolidation, recall,
+  and context rendering without creating identity tables.
+- [x] Objective facts consolidate at world scope while experiences, observations, opinions, and
+  preferences remain distinct per speaker.
+- [x] Backdated updates become history instead of replacing newer live state.
+- [x] The hybrid retrieval plan is one typed SQLAlchemy statement with no handwritten runtime data
+  query.
+- [x] GroupMemBench imports real message histories into isolated shared scopes and evaluates each
+  question as its named asking user.
+- [x] FAMA scoring penalizes obsolete memory through explicit absence criteria.
+- [x] Graph writing, graph repair, retrieval reads, and retrieval orchestration have separate
+  modules.
+- [x] Alembic autogenerate reports zero model drift on a fresh database.
+- [x] Resolve current organization memberships and roles from Logto by verified subject with a
+  short fail-closed authority cache.
+- [x] Read the complete User authority through RLS, default writes to personal memory, and share
+  into explicit organization destinations through provenance-linked copies.
 
-- [x] Initial public scaffolding with CI, docs, and a version-driven release pipeline.
-- [x] The core loop works end to end, `ingest` or `remember` through `recall` and `get_context`,
-  over the MCP tool surface (`AizkMCP` in `mcp/server.py`).
-- [x] Bi-temporal store on SQLModel plus `tstzrange` valid and recorded windows, ADD/UPDATE/NOOP
-  consolidation, and content-addressed ids (`store/models/fact.py`, `graph/build.py`).
-- [x] The shared-brain permission lattice, reader/writer/admin roles, public groups readable
-  anonymously under a rate limit, curated groups with a review-then-publish queue (including the
-  autonomous standing reviewer), the narrowing lens, and governed promotion (`store/rls/`,
-  `store/models/group.py`, `graph/curation_review.py`, `graph/promote.py`).
-- [x] Api-only serving. Every model-shaped step, embedding, reranking, and extraction, runs in a
-  co-resident vLLM OpenAI-compatible container, so there is no in-process torch or Ollama backend
-  to configure (`docker-compose.yml`, `serving/embed/embedder.py`).
-- [x] The background registry, one `ScheduledTask` per maintenance pass (decay, dedup, communities,
-  RAPTOR, profile refresh, self-improve, session promotion, insight, curation review) fanned out
-  per user through a pgqueuer worker (`background/tasks.py`, `background/schedule.py`).
-- [x] The retrieval lanes beyond plain hybrid search, personalized pagerank, community summaries,
-  the RAPTOR tree, and rolled-up entity profiles, all fused into one `recall` call
-  (`retrieval/recall.py`).
-- [x] The as-of historical-replay path already serves off the existing schema, measured rather than
-  assumed. `store/models/fact.py`'s plain, non-partial `ix_fact_claim_recorded` GiST index, not the
-  partial `ix_fact_claim_live` the earlier note pinned the concern on, is what the planner picks for
-  `FactClaim.visible_at(as_of)`'s `recorded @> as_of` predicate; `EXPLAIN (ANALYZE, BUFFERS)` against
-  a seeded corpus (60,000 facts, 300,000 claim versions) showed a Bitmap Index Scan on
-  `ix_fact_claim_recorded`, not a sequential scan, at 30 ms end to end. No composite or additional
-  index is warranted at this scale.
-- [x] `store/rls`'s generic core shipped as its own house package, `packages/rls`
-  (https://github.com/phvv-me/rls, forked from DelfinaCare/rls, MIT), rather than staying an
-  in-tree module: policy compilation, DDL assembly, `sqlglot`-based clause comparison against the
-  live catalog, and Alembic autogenerate integration all now live there, generic over any
-  SQLAlchemy `DeclarativeBase`/`SQLModel` registry with a configurable GUC namespace, no aizk
-  import anywhere in it. `store/rls/` shrank to `predicates.py` (the aizk-specific visibility-
-  lattice expressions), `register.py` (the mapper-construction hook that also tracks
-  `metadata.info["rls"]`, the autogenerate guard set), and `ops.py` (the table-name-only
-  `apply_scoped_rls`/`drop_scoped_rls` Alembic ops the committed `0001_init.py` migration already
-  calls, kept alive as aizk's own thin wrapper over the library's DDL builders since that call
-  shape predates the library's own self-contained `apply_rls`/`drop_rls`).
-- [x] The GLiNER2 relevance gate re-enabled on a discriminating basis. It scores each chunk with
-  the classification head (`classify_text`, "which ontology types is this about") rather than span
-  extraction, which over the whole 46-type ontology matched some label above threshold in almost
-  any sentence and so passed everything; the head instead maps small talk onto `Person` alone, and
-  a chunk clears the gate only when a type past that floor is present. The 205M
-  `fastino/gliner2-base-v1` checkpoint resolves through `snapshot_download` with `local_files_only`
-  first over a persistent HF cache mount, so every warm start is a no-network path lookup and the
-  one-time download is the only cold-start cost, never the implicit fetch that hung a fresh
-  recreate before (`serving/gate/entity_gate.py`).
+## Measure next
 
-## Next
+- [ ] Run bounded GroupMemBench smoke cells on crimson, then the complete four-domain matrix.
+- [ ] Add a flat baseline over raw messages, summaries, facts, and keywords as independent keys.
+- [ ] Ablate one-hop expansion, personalized PageRank, communities, RAPTOR, profiles, reranking,
+  and context ordering independently.
+- [ ] Add Memora criteria and LongMemEval-V2 state, workflow, gotcha, and premise adapters.
+- [ ] Add Mem2ActBench once evaluation can judge tool selection and arguments.
+- [ ] Record positive evidence and obsolete negative evidence per benchmark case.
 
-Open items carried over from the earlier gap analysis, still unbuilt or partial.
+## Product hardening
 
-- [ ] **Head-to-head eval baselines.** The earliest design notes promised scoring aizk against the
-  actual Cognee, Mem0, and Zep engines. The EverMemBench and TEMPO dataset loaders exist
-  (`eval/benchmarks.py`) and the sweep can score aizk on them, but nothing yet runs the competing
-  engines side by side on the same questions.
-- [ ] **SPECTER2 or another scientific embedder as a selectable option**, the deferred lever from
-  the original design, still open since the shared Qwen3-VL-Embedding model covers the general
-  case well enough that a domain-specific swap has not been forced yet.
-- [ ] **A finer multimodal document lane**, page, figure, and table level embedding in the shape of
-  ColQwen3's late interaction, for documents whose substance is diagrams and tables rather than
-  prose. Plain whole-image embedding already ships (`ingest_image`, `Embedder.embed_images`), this
-  is the document-structure-aware tier above it.
-- [ ] **Full batch-invariant determinism mode**, the reproducibility-2 / yamone-deterministic-
-  inference tie-in flagged directly in `graph/ids.py`. Content-addressed ids and temperature-0
-  extraction already make a rerun converge; this would pin the embedder and LLM kernels themselves
-  bit for bit.
-- [ ] **Document-level curation.** The v1 review gate, human or the autonomous standing reviewer,
-  holds only facts pending (`graph/curation_review.py`), so a curated group's ingested documents
-  and chunks publish immediately while their extracted facts wait for review, a gap between what
-  is visible as source text and what is visible as graph knowledge.
-- [ ] **Zitadel hardening end to end, plus service-account PAT docs.** The introspection and JWKS
-  paths are wired (`store/models/tables/user.py`) and unit-tested, but not yet exercised start to
-  finish against a live Zitadel instance, and there is no written guide yet for minting a
-  service-account personal access token for a non-interactive caller.
-- [ ] **An import counterpart to `export_scope`.** Export emits a user-scoped, bi-temporal
-  JSONL dump today (`export.py`); nothing reads one back in, so a dump is currently a one-way
-  archive rather than a portable transfer.
-- [ ] **Erasure, a `forget(document)` tool plus content garbage collection.** Supersession handles
-  wrong knowledge but not knowledge that should never have been stored, a secret or a mistaken
-  ingest, whose payload stays readable in bi-temporal history forever. Deletion is deliberately
-  absent from the everyday surface (the knowledge lifecycle wants "no longer current", never
-  "never happened"), so erasure arrives as one narrow admin-grade verb that removes a document,
-  its chunks, and the claims derived from them, sweeping derived claims through `source_chunk_id`
-  before that `SET NULL` foreign key erases the trail. A background GC pass then collects content
-  rows left with zero claims, the same pass the known claim-less-orphan gap already needs.
-- [ ] **Compound-engineering borrows.** Every's compound-engineering plugin
-  (https://every.to/guides/compound-engineering, https://github.com/everyinc/compound-engineering-plugin)
-  is, mechanically, a weaker file-based cousin of aizk's capture→facts→recall loop: it writes typed
-  "Learnings" to `docs/solutions/` markdown, consolidates them with a hand-rolled ADD/UPDATE/NOOP,
-  refreshes stale ones, and grounds each plan against them. aizk's Stop-hook capture already is an
-  automatic `/ce-compound`, its SessionStart recall the grounding return arrow, its insight pass
-  the "Pattern generalized from several Learnings", and bi-temporal supersession subsumes their
-  whole `ce-compound-refresh`. Four ideas map cleanly onto existing machinery and are worth
-  borrowing: a first-class **DeadEnd/NegativeResult** entity (or a `rejected_because` relation) so
-  recall can warn "you tried X, it failed because Y", the most expensive and first-to-vanish
-  knowledge their bug track centers; a task-scoped **`ground(task)`** MCP tool that returns exactly
-  the Decisions/Patterns/Gotchas relevant to a described piece of work rather than the generic
-  recent-items recall; an **incident-versus-standing altitude** on facts, the mechanism for the
-  "learns standing preferences" goal where a durable preference is promoted from repeated
-  incident-level observations by a recurrence trigger on the insight pass; and **confidence
-  anchors** on the insight pass so an observation corroborated by N independent facts earns higher
-  confidence while a single-source one stays advisory and decays, the guardrail against the
-  reflective pass writing overconfident junk. Their execution harness (worktrees, PR automation,
-  CI repair) stays out of scope, aizk is the memory substrate such a harness stores into, not a
-  workflow orchestrator.
-- [ ] **Test the operator surface, restore 99% coverage.** The `admin.py` and `cli.py` operator
-  commands the two-plane-auth rework moved off the MCP surface landed undertested, so `fail_under`
-  sits at a temporary 97 (`pyproject.toml [tool.coverage.report]`). Cover them and put the gate
-  back to 99.
-
-## v1.0.0
-
-Freeze the surface and make aizk safe to depend on.
-
-- [ ] **Stable API.** Semantic versioning with a written migration and deprecation policy.
-- [ ] **Full tested parity** on every supported platform.
-- [ ] **Compatibility guarantees.** A 1.x promise for the public API.
-- [ ] **Complete reference docs** in every supported language.
+- [ ] Add authenticated invalidation for the fail-closed public organization directory.
+- [ ] Add an import counterpart to scoped export.
+- [ ] Finish narrow erasure and collect immutable content rows left without claims.
+- [ ] Replace remaining migration-only PostgreSQL DDL strings with reusable SQLAlchemy DDL
+  elements where the extension APIs permit it.
+- [ ] Freeze the MCP and operator surfaces only after the benchmark results settle the defaults.

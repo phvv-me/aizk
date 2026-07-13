@@ -1,5 +1,7 @@
 import math
 import uuid
+from collections import defaultdict
+from importlib import import_module
 
 import dbutil
 import numpy as np
@@ -19,30 +21,38 @@ from aizk.eval.scale import (
     LaneLatency,
     ScalePoint,
     ScaleReport,
-    corpus_rows,
+    corpus_batches,
     find_knees,
     index_id,
     run_scale_benchmark,
     unit_vector,
 )
 from aizk.store import Chunk, Document, EntityClaim, EntityContent, FactClaim, FactContent
+from aizk.store.identity import User
+
+
+def rows_for(
+    user_id: uuid.UUID,
+    generated: Generated,
+    scale: CorpusScale,
+    dim: int,
+) -> dict[type, list[dict]]:
+    """Materialize tiny generated batches for structural assertions."""
+    rows = defaultdict(list)
+    for table, batch in corpus_batches(
+        User.private(user_id), generated, scale, np.random.default_rng(0), dim
+    ):
+        rows[table].extend(batch)
+    return rows
 
 
 def point(
     size: int,
     recall_p95_ms: float = 0.0,
-    ppr_query_ms: float = 0.0,
+    multihop_query_ms: float = 0.0,
     community_detect_ms: float = 0.0,
     lane_p95_ms: float = 0.0,
 ) -> ScalePoint:
-    """A synthetic curve row carrying the latencies under test and zeros elsewhere.
-
-    size: the corpus size the row reports.
-    recall_p95_ms: the tail recall latency the knee logic reads.
-    ppr_query_ms: the pagerank graph-op latency.
-    community_detect_ms: the community-detection batch latency.
-    lane_p95_ms: the tail latency of the single vector lane the row carries.
-    """
     return ScalePoint(
         size=size,
         entities=size // 4,
@@ -53,7 +63,7 @@ def point(
         recall_p95_ms=recall_p95_ms,
         recall_p99_ms=recall_p95_ms,
         lanes=[LaneLatency(name="vector", p50_ms=0.0, p95_ms=lane_p95_ms, p99_ms=lane_p95_ms)],
-        ppr_query_ms=ppr_query_ms,
+        multihop_query_ms=multihop_query_ms,
         community_detect_ms=community_detect_ms,
         storage_bytes=size * 2048,
         index_bytes=size * 1024,
@@ -64,7 +74,6 @@ def point(
 
 @given(size=st.integers(min_value=1, max_value=2_000_000))
 def test_corpus_scale_derives_consistent_counts_from_one_size(size: int) -> None:
-    """One chunk count fixes documents, entities, and facts so every chunk has a parent node."""
     scale = CorpusScale.for_size(size)
 
     assert scale.chunks == size and scale.facts == size
@@ -78,7 +87,6 @@ def test_corpus_scale_derives_consistent_counts_from_one_size(size: int) -> None
     seed=st.integers(min_value=0, max_value=2**32 - 1),
 )
 def test_unit_vector_has_the_stored_width_and_unit_norm(dim: int, seed: int) -> None:
-    """A generated vector matches the halfvec width and carries unit length at every width."""
     vector = unit_vector(np.random.default_rng(seed), dim)
 
     assert len(vector) == dim
@@ -90,23 +98,20 @@ def test_unit_vector_has_the_stored_width_and_unit_norm(dim: int, seed: int) -> 
     size=st.integers(min_value=1, max_value=40),
     dim=st.sampled_from([256, 512, 1024]),
 )
-def test_corpus_rows_are_deterministic_and_structurally_sound(
+def test_corpus_batches_are_deterministic_and_structurally_sound(
     users: list[uuid.UUID], size: int, dim: int
 ) -> None:
-    """Rows key by user and index, pack chunks under documents, and never dangle an edge."""
     user, other = users
     scale = CorpusScale.for_size(size)
-    rows = corpus_rows(user, Generated(), scale, np.random.default_rng(0), dim)
-    again = corpus_rows(user, Generated(), scale, np.random.default_rng(0), dim)
+    rows = rows_for(user, Generated(), scale, dim)
+    again = rows_for(user, Generated(), scale, dim)
 
     documents = rows[Document]
     assert [row["id"] for row in documents] == [row["id"] for row in again[Document]]
-    # content carries no owner of its own, so only the per-tenant families carry an owner_id
     owned_families = (Document, Chunk, EntityClaim, FactClaim)
-    assert all(row["owner_id"] == user for table in owned_families for row in rows[table])
+    assert all(row["created_by"] == user for table in owned_families for row in rows[table])
     assert len({row["content_hash"] for row in documents}) == scale.documents  # none dedupes away
-    # a different user namespaces a different id for the same index
-    other_rows = corpus_rows(other, Generated(), scale, np.random.default_rng(0), dim)
+    other_rows = rows_for(other, Generated(), scale, dim)
     assert documents[0]["id"] != other_rows[Document][0]["id"]
 
     chunks = rows[Chunk]
@@ -127,15 +132,13 @@ def test_corpus_rows_are_deterministic_and_structurally_sound(
 
 
 @given(size=st.integers(min_value=1, max_value=40))
-def test_corpus_rows_grow_additively_without_key_collisions(size: int) -> None:
-    """The delta past a grown tally starts where the first batch stopped, no id inserted twice."""
+def test_corpus_batches_grow_additively_without_key_collisions(size: int) -> None:
     user = uuid.uuid5(uuid.NAMESPACE_DNS, "scale-test")
-    rng = np.random.default_rng(0)
     first = CorpusScale.for_size(size)
     second = CorpusScale.for_size(size * 2)
 
-    base = corpus_rows(user, Generated(), first, rng, 256)
-    delta = corpus_rows(user, Generated(**first.model_dump()), second, rng, 256)
+    base = rows_for(user, Generated(), first, 256)
+    delta = rows_for(user, Generated(**first.model_dump()), second, 256)
 
     for table in (Document, Chunk, EntityContent, FactContent, EntityClaim, FactClaim):
         base_ids = {row["id"] for row in base[table]}
@@ -149,7 +152,6 @@ def test_corpus_rows_grow_additively_without_key_collisions(size: int) -> None:
 
 
 def test_generated_starts_empty_so_growth_is_purely_additive() -> None:
-    """The running tally opens at zero on every family, so the first size inserts the delta."""
     generated = Generated()
 
     assert (generated.documents, generated.chunks, generated.entities, generated.facts) == (
@@ -161,8 +163,6 @@ def test_generated_starts_empty_so_growth_is_purely_additive() -> None:
 
 
 def test_lane_latency_timed_reads_three_ascending_percentiles() -> None:
-    """Timing a call reduces its wall times to named, non-decreasing p50, p95, and p99."""
-
     async def noop() -> None:
         return None
 
@@ -174,12 +174,6 @@ def test_lane_latency_timed_reads_three_ascending_percentiles() -> None:
 
 @st.composite
 def scale_curves(draw: st.DrawFn) -> tuple[list[ScalePoint], Budget]:
-    """An ascending curve and a budget, the input `find_knees` flags the first crossing over.
-
-    Sizes climb, every tracked latency is drawn across the budget band so a component crosses at
-    some sizes and not others, and a single vector lane carries its own tail, so the property pins
-    the first-over-budget rule across recall, both graph ops, and the per-lane series at once.
-    """
     sizes = draw(
         st.lists(st.integers(min_value=1, max_value=10**6), min_size=1, max_size=5, unique=True)
     )
@@ -188,7 +182,7 @@ def scale_curves(draw: st.DrawFn) -> tuple[list[ScalePoint], Budget]:
         point(
             size,
             recall_p95_ms=draw(latency),
-            ppr_query_ms=draw(latency),
+            multihop_query_ms=draw(latency),
             community_detect_ms=draw(latency),
             lane_p95_ms=draw(latency),
         )
@@ -198,7 +192,7 @@ def scale_curves(draw: st.DrawFn) -> tuple[list[ScalePoint], Budget]:
     budget = Budget(
         recall_p95_ms=draw(limit),
         lane_p95_ms=draw(limit),
-        ppr_query_ms=draw(limit),
+        multihop_query_ms=draw(limit),
         community_detect_ms=draw(limit),
     )
     return points, budget
@@ -208,11 +202,13 @@ def scale_curves(draw: st.DrawFn) -> tuple[list[ScalePoint], Budget]:
 def test_find_knees_flags_each_components_first_crossing(
     curve: tuple[list[ScalePoint], Budget],
 ) -> None:
-    """Each tracked component is named at the smallest size it broke its ceiling, none else."""
     points, budget = curve
     readers = {
         "recall_p95": (budget.recall_p95_ms, lambda p: p.recall_p95_ms),
-        "ppr_query": (budget.ppr_query_ms, lambda p: p.ppr_query_ms),
+        "multihop_query": (
+            budget.multihop_query_ms,
+            lambda point: point.multihop_query_ms,
+        ),
         "community_detect": (budget.community_detect_ms, lambda p: p.community_detect_ms),
         "lane:vector": (budget.lane_p95_ms, lambda p: p.lane_p95("vector")),
     }
@@ -231,7 +227,6 @@ def test_find_knees_flags_each_components_first_crossing(
 
 
 def test_scale_point_lane_p95_reads_a_present_lane_and_zeros_an_absent_one() -> None:
-    """A curve row reads a measured lane's tail and returns zero for a lane it never carried."""
     row = point(1000, lane_p95_ms=42.0)
 
     assert row.lane_p95("vector") == 42.0
@@ -244,7 +239,7 @@ def test_scale_point_lane_p95_reads_a_present_lane_and_zeros_an_absent_one() -> 
         (
             ScaleReport(
                 sizes=[1000],
-                points=[point(1000, recall_p95_ms=300.0, ppr_query_ms=10.0)],
+                points=[point(1000, recall_p95_ms=300.0, multihop_query_ms=10.0)],
                 budget=Budget(),
                 knees=find_knees([point(1000, recall_p95_ms=300.0)], Budget()),
             ),
@@ -261,7 +256,6 @@ def test_scale_point_lane_p95_reads_a_present_lane_and_zeros_an_absent_one() -> 
     ids=["knee", "empty", "within-budget"],
 )
 def test_render_renders_the_curve_lane_and_knees(report: ScaleReport, needles: list[str]) -> None:
-    """The rendered curve carries each size's metrics, the lane line, and the knee verdict."""
     rendered = report.render()
 
     assert all(needle in rendered for needle in needles)
@@ -271,26 +265,34 @@ def test_render_renders_the_curve_lane_and_knees(report: ScaleReport, needles: l
 def test_run_scale_benchmark_measures_a_tiny_curve(
     migrated_db: None,
     fake_embedder: RecordingEmbedder,
+    fake_reranker: list[list[str]],
     monkeypatch: pytest.MonkeyPatch,
     keep: bool,
 ) -> None:
-    """A tiny run grows a real corpus, measures the curve off Postgres, and honors the keep flag.
+    async def no_entities(text: str) -> list[str]:
+        del text
+        return []
 
-    The scale lane reaches only Postgres and the corpus is synthetic vectors, so the one live embed
-    call, the probe query, runs against the fake seam rather than a co-resident model.
-    """
+    monkeypatch.setattr(
+        import_module("aizk.retrieval.recall.orchestrator"), "named_entities", no_entities
+    )
 
     async def body() -> None:
         await dbutil.reset_db()
-        for field in ("rerank", "raptor", "profiles", "recall_gap_fill"):
-            monkeypatch.setattr(settings, field, False)
+        monkeypatch.setattr(settings, "multihop_max_hops", 0)
         sizes = (20, 40) if not keep else (20,)
         report = await run_scale_benchmark(sizes=sizes, k=4, repeats=2, budget=Budget(), keep=keep)
 
         assert [pt.size for pt in report.points] == list(sizes)
         for pt in report.points:
             assert pt.recall_p95_ms >= 0.0
-            assert {lane.name for lane in pt.lanes} == {"hybrid", "ppr", "community", "rls"}
+            assert {lane.name for lane in pt.lanes} == {
+                "local",
+                "global",
+                "multihop",
+                "maximal",
+                "rls",
+            }
             assert pt.storage_bytes > 0 and pt.facts == pt.size
         if len(sizes) == 2:
             assert report.points[1].facts > report.points[0].facts  # the corpus genuinely grew

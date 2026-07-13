@@ -21,23 +21,17 @@ def test_payload_round_trips_exactly_the_fields_the_worker_decodes(
     first: uuid.UUID,
     second: uuid.UUID,
 ) -> None:
-    """Each queue payload decodes back to exactly the ids its worker body reads, unchanged.
-
-    The chunk and profile jobs carry their own subject plus the user, and the task job carries
-    only the user, so a round trip through `encode`/`decode` reproduces the fields as built,
-    the wire-format contract a durable job depends on across enqueue and dequeue.
-    """
     job: ChunkJob | ProfileJob | TaskJob
     if payload_cls is ChunkJob:
-        job = ChunkJob(chunk_id=first, user_id=second)
+        job = ChunkJob(chunk_id=first, scopes=frozenset({second}))
     elif payload_cls is ProfileJob:
-        job = ProfileJob(entity_id=first, user_id=second)
+        job = ProfileJob(entity_id=first, scopes=frozenset({second}))
     else:
-        job = TaskJob(user_id=second)
+        job = TaskJob(scopes=frozenset({second}))
     encoded = job.encode()
     assert isinstance(encoded, bytes)
     decoded = payload_cls.decode(encoded)
     assert decoded == job
-    assert decoded.user_id == second
+    assert decoded.scopes == frozenset({second})
     if subject:
         assert getattr(decoded, subject) == first

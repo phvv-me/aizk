@@ -1,55 +1,31 @@
-import os
+import asyncio
+import socket
+import uuid
+from importlib import import_module
+from urllib.parse import urlsplit
 
-# Hard isolation, set before any `aizk.config` import builds the settings singleton from the
-# environment: the whole suite is pinned to its own `aizk_test` database and the NullPool engine,
-# so a run never touches the dev `aizk` database a concurrent vault build drives, and every
-# per-test `asyncio.run` loop gets a fresh connection rather than a pooled one it cannot cross.
-# Forced (not `setdefault`) for `db_name` so no ambient `AIZK_DB_NAME=aizk` can redirect the suite
-# onto the real database; overridable only through the dedicated `AIZK_TEST_DB_NAME` escape.
-os.environ["AIZK_DB_NAME"] = os.environ.get("AIZK_TEST_DB_NAME", "aizk_test")
-os.environ["AIZK_DB_NULL_POOL"] = "1"
-os.environ.setdefault("AIZK_LOG_LEVEL", "")
+import a_env
+import pytest
+from doubles import (
+    FakeLLM,
+    RecordingEmbedder,
+)
+from hypothesis import HealthCheck
+from hypothesis import settings as hypothesis_settings
+from sqlalchemy import NullPool, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import create_async_engine
 
-import importlib  # noqa: E402
-import socket  # noqa: E402
-import uuid  # noqa: E402
-from types import ModuleType  # noqa: E402
-from urllib.parse import urlsplit  # noqa: E402
+from aizk import ops
+from aizk.config import Settings
+from aizk.config import settings as aizk_settings
 
-import pytest  # noqa: E402
-from hypothesis import HealthCheck  # noqa: E402
-from hypothesis import settings as hypothesis_settings  # noqa: E402
+# a_env configures the isolated database before Aizk imports.
+assert a_env.configured()
 
-from aizk.config import Settings  # noqa: E402
-from aizk.config import settings as _settings  # noqa: E402
+pytest_plugins = ["bg_doubles"]
 
-# The model-seam doubles wrap serving/graph/extract, all under active refactor. Only the
-# quarantined lanes request the fake_embedder/fake_reranker/fake_llm fixtures, so `doubles` is
-# imported lazily through this helper rather than at module top: a mid-sweep break in those
-# surfaces must never take down the stable store/config/export lanes at collection, whose fixtures
-# never touch a model seam. The fake fixtures below skip (not error) when the import is broken.
-_doubles: ModuleType | None = None
-
-
-def load_doubles() -> ModuleType:
-    """Import the model-seam doubles on first use, skipping the requesting test if they are broken.
-
-    Cached so repeated fixture requests pay one import; a failure is surfaced as a `pytest.skip`
-    rather than a collection error, keeping the stable lanes green while a quarantined surface is
-    mid-refactor.
-    """
-    global _doubles
-    if _doubles is None:
-        try:
-            _doubles = importlib.import_module("doubles")
-        except ImportError as error:
-            pytest.skip(f"model-seam doubles unavailable (lane under refactor): {error}")
-    return _doubles
-
-
-# DB-backed properties open a real connection per example, so the per-example deadline is lifted
-# and the function-scoped-fixture health check is suppressed. Example counts are trimmed since each
-# DB example is a network round trip; the pure profile draws more.
+# DB properties use fewer examples and no deadline because each draw opens a connection.
 hypothesis_settings.register_profile(
     "aizk",
     deadline=None,
@@ -66,7 +42,6 @@ hypothesis_settings.load_profile("aizk")
 
 
 def _port_open(host: str | None, port: int | None, timeout: float = 0.5) -> bool:
-    """Whether a TCP connection to host and port succeeds within timeout."""
     if host is None or port is None:
         return False
     try:
@@ -76,37 +51,19 @@ def _port_open(host: str | None, port: int | None, timeout: float = 0.5) -> bool
         return False
 
 
-_db = urlsplit(_settings.database_url)
+_db = urlsplit(aizk_settings.database_url)
 DB_UP = _port_open(_db.hostname, _db.port)
 
 
 def ensure_test_database() -> None:
-    """Create and migrate the isolated test database when a fresh Postgres lacks it.
-
-    A brand-new environment (CI's service container, a new dev machine) carries only the
-    server and the roles, so the suite bootstraps its own database and brings it to head
-    through the same `ops.setup()` the MCP server runs at startup, migrations, queue schema,
-    and app-role grants alike. Idempotent, one alembic no-op when everything already exists.
-    """
-    import asyncio
-
-    from sqlalchemy import NullPool, text
-    from sqlalchemy.engine import make_url
-    from sqlalchemy.ext.asyncio import create_async_engine
-
-    from aizk import ops
-
     async def bootstrap() -> None:
-        maintenance = make_url(_settings.admin_database_url).set(database="postgres")
+        maintenance = make_url(aizk_settings.admin_database_url).set(database="postgres")
         engine = create_async_engine(maintenance, isolation_level="AUTOCOMMIT", poolclass=NullPool)
-        name = _settings.db_name
+        name = aizk_settings.db_name
         try:
             async with engine.connect() as connection:
-                exists = await connection.scalar(
-                    text("SELECT 1 FROM pg_database WHERE datname = :name"), {"name": name}
-                )
-                if not exists:
-                    await connection.execute(text(f'CREATE DATABASE "{name}"'))
+                await connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+                await connection.execute(text(f'CREATE DATABASE "{name}"'))
         finally:
             await engine.dispose()
         await ops.setup()
@@ -119,7 +76,6 @@ if DB_UP:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register the markers the suite uses so `--strict-markers` never rejects one."""
     config.addinivalue_line(
         "markers", "integration: needs the live GPU model services, deselected by default"
     )
@@ -127,56 +83,60 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture
 def settings() -> Settings:
-    """The shared global settings singleton every module reads, so a monkeypatch is seen widely."""
-    return _settings
+    return aizk_settings
 
 
 @pytest.fixture(scope="session")
 def migrated_db() -> None:
-    """Require the isolated `aizk_test` schema, skipping the DB lane when Postgres is unreachable.
-
-    Migrations already ran against `aizk_test` at suite setup, so this only gates on reachability
-    rather than re-migrating per test.
-    """
     if not DB_UP:
         pytest.skip("aizk_test postgres not reachable")
 
 
 @pytest.fixture
-def fake_embedder():  # noqa: ANN201 - the double's type lives in the lazily-imported doubles module
-    """Install a recording embedder behind `Embedder()` for one test, both lanes, cleared after."""
-    doubles = load_doubles()
-    embedder = doubles.RecordingEmbedder()
-    doubles.install_fake_embedder(embedder)
-    yield embedder
-    doubles.install_fake_embedder(None)
+def fake_embedder(monkeypatch: pytest.MonkeyPatch) -> RecordingEmbedder:
+    embedder = RecordingEmbedder()
+    for name in (
+        "aizk.admin",
+        "aizk.eval.scale",
+        "aizk.extract.ingest",
+        "aizk.extract.ontology.cache",
+        "aizk.graph.build",
+        "aizk.graph.communities",
+        "aizk.graph.insight",
+        "aizk.graph.profiles",
+        "aizk.graph.raptor",
+        "aizk.graph.reembed",
+        "aizk.retrieval.recall.orchestrator",
+    ):
+        module = import_module(name)
+        monkeypatch.setattr(module, "embed", embedder.embed)
+    monkeypatch.setattr(
+        import_module("aizk.extract.ingest"), "embed_images", embedder.embed_images
+    )
+    return embedder
 
 
 @pytest.fixture
-def fake_reranker():  # noqa: ANN201 - the double's type lives in the lazily-imported doubles module
-    """Install a recording reranker behind `Reranker()` for one test, cleared on exit."""
-    doubles = load_doubles()
-    reranker = doubles.RecordingReranker()
-    doubles.install_fake_reranker(reranker)
-    yield reranker
-    doubles.install_fake_reranker(None)
+def fake_reranker(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Score every rerank call neutrally and record the texts each call saw."""
+    calls: list[list[str]] = []
+
+    async def rerank(query: str, texts: list[str]) -> list[float]:
+        del query
+        calls.append(texts)
+        return [0.0] * len(texts)
+
+    monkeypatch.setattr(import_module("aizk.retrieval.rerank.rescore"), "rerank", rerank)
+    return calls
 
 
 @pytest.fixture
-def fake_llm(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201 - double type lazily imported
-    """Route every `structured` call through a recording LLM by patching the client-pool seam.
-
-    The LLM seam is `LLMClientPool.client_for`, the pool `structured` resolves its per-endpoint
-    client through; patching the method makes every `structured` call hand back the recording
-    double regardless of which endpoint a provider preset resolved to.
-    """
-    pool = importlib.import_module("aizk.extract.llm.client")
-    fake = load_doubles().FakeLLM()
-    monkeypatch.setattr(pool.LLMClientPool, "client_for", lambda self, *a, **k: fake)
+def fake_llm(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
+    fake = FakeLLM()
+    monkeypatch.setattr("aizk.extract.llm.triples.client_for", lambda *args, **kwargs: fake)
     return fake
 
 
 @pytest.fixture
 def user_id() -> uuid.UUID:
-    """A random user id, seeded on demand by the DB helpers rather than here."""
     return uuid.uuid4()

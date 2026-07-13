@@ -1,14 +1,13 @@
-import uuid
-
 from loguru import logger
 from pgqueuer import PgQueuer
 from pgqueuer.models import Job
-from sqlalchemy import select
+from sqlmodel import select
 
 from ..config import settings
 from ..extract import ontology
 from ..store import Document, SessionItem, as_system
 from ..store.engine import bypass_rls
+from ..types import Scopes
 from .payloads import ChunkJob, ProfileJob, TaskJob
 from .queue import (
     EXTRACT_ENTRYPOINT,
@@ -24,98 +23,51 @@ from .tasks import ScheduledTask
 
 
 async def fan_out(task: ScheduledTask) -> None:
-    """Read the distinct owner roster past row security and enqueue one task job per owner.
-
-    The load-bearing no-leak boundary. A scheduled pass fires outside any user scope, so it reads
-    every owner that holds stored memory once under the owner role (past row level security, the
-    one cross-tenant read a fan-out legitimately makes), then enqueues a separate job carrying each
-    owner id whose body runs inside acting_as that owner. There is no user table to read a roster
-    from any more, so the roster is exactly the owners that appear in the content itself, distinct
-    owner ids across documents and un-promoted session items, the tables the per-owner passes
-    build over. No pass ever reads the roster and writes another owner's rows in the same
-    transaction, and each job is deduplicated on the task and owner so a pass that fires while the
-    last one is still draining never piles up.
-
-    task: the scheduled task being fanned out.
-    """
-    owners = await owner_roster()
+    """Read the distinct scope roster past row security and enqueue one task per scope."""
+    scopes = await scope_roster()
     async with queue_queries() as queries:
         queued = sum(
             [
                 await enqueue_deduped(
                     queries,
                     task.queue_entrypoint,
-                    TaskJob(user_id=owner),
-                    f"{task.name}:{owner}",
+                    TaskJob(scopes=key),
+                    f"{task.name}:{','.join(map(str, sorted(key)))}",
                 )
-                for owner in owners
+                for key in scopes
             ]
         )
-    logger.info("fan-out {} enqueued {} owner jobs", task.name, queued)
+    logger.info("fan-out {} enqueued {} scope jobs", task.name, queued)
 
 
-async def owner_roster() -> list[uuid.UUID]:
-    """Every distinct owner that holds stored memory, read once under the owner role.
-
-    Unions the distinct owner ids across documents and un-promoted session items, the seeds every
-    per-owner pass builds from, so an owner with only a captured session still gets fanned out.
-    Runs under `bypass_rls` because a scheduled pass belongs to no one tenant and must see across
-    all of them to enumerate the roster, the same cross-tenant reach the old user-table read had.
-    """
+async def scope_roster() -> list[Scopes]:
+    """Every exact scope set with stored memory, read under the database administrator role."""
     async with bypass_rls() as db:
-        rows = await db.scalars(select(Document.owner_id).union(select(SessionItem.owner_id)))
-        return list(rows)
+        rows = (await db.exec(select(Document.scopes).union(select(SessionItem.scopes)))).scalars()
+        return sorted({frozenset(row) for row in rows if row}, key=lambda scopes: sorted(scopes))
 
 
 async def handle_chunk_job(job: Job) -> None:
-    """Build one dequeued chunk's graph slice, chaining a profile enqueue for what it touched.
-
-    job: dequeued job whose payload names the chunk and owning user.
-    """
+    """Build one dequeued chunk's graph slice, chaining a profile enqueue for what it
+    touched."""
     assert job.payload is not None
     chunk_job = ChunkJob.decode(job.payload)
-    touched = await process_chunk(chunk_job.chunk_id, chunk_job.user_id)
+    touched = await process_chunk(chunk_job.chunk_id, chunk_job.scopes)
     if settings.profile_on_write:
-        await enqueue_profiles(touched, chunk_job.user_id)
+        await enqueue_profiles(touched, chunk_job.scopes)
 
 
 async def handle_profile_job(job: Job) -> None:
-    """Rebuild one dequeued job's touched entity profile under its owning user.
-
-    job: dequeued job whose payload names the entity and owning user.
-    """
+    """Rebuild one dequeued job's touched entity profile under its owning user."""
     assert job.payload is not None
     profile_job = ProfileJob.decode(job.payload)
-    await process_profile(profile_job.entity_id, profile_job.user_id)
+    await process_profile(profile_job.entity_id, profile_job.scopes)
 
 
 async def run_worker(batch_size: int = 10) -> None:
-    """Run the autonomous engine, draining on-write jobs and firing the scheduled passes.
-
-    Registers the extraction entrypoint, which builds a chunk's graph slice then chains a debounced
-    profile rebuild for every entity it touched, the profile entrypoint that runs those rebuilds,
-    and one queue-and-cron pair per registered `ScheduledTask`. `pg.run` then runs both the queue
-    manager and the scheduler at once until interrupted, so a single `aizk worker` is the whole
-    self-maintaining engine.
-
-    The extraction entrypoint carries its own `concurrency_limit=settings.graph_build_concurrency`
-    so it always has that many chunks in flight regardless of how many cheap profile-rebuild or
-    scheduled-task jobs share the same dequeue round. `batch_size` must still comfortably exceed
-    that width for pgqueuer to ever dequeue enough extraction jobs to fill it, the queue-side half
-    of the fix, `settings.queue_batch_size` by default. `max_concurrent_tasks` is set well above
-    `batch_size` since pgqueuer requires at least twice the batch size and this worker otherwise
-    has no reason to cap it any tighter, each entrypoint's own concurrency_limit already the real
-    throttle.
-
-    The ontology cache refreshes here before the first job is dequeued, since the extraction
-    gate reads it and a worker is not guaranteed to run in a process that already bootstrapped
-    (the standalone `aizk worker` CLI, or a server started with `auto_setup` off, both crashed
-    every chunk job with `OntologyNotReadyError` otherwise).
-
-    batch_size: maximum number of jobs the manager dequeues per round.
-    """
-    async with as_system():
-        await ontology.refresh()
+    """Run the autonomous engine, draining on-write jobs and firing the scheduled passes."""
+    async with as_system() as session:
+        await ontology.refresh(session)
     async with queue_connection() as connection:
         pg = PgQueuer.from_asyncpg_connection(connection)
         pg.entrypoint(EXTRACT_ENTRYPOINT, concurrency_limit=settings.graph_build_concurrency)(

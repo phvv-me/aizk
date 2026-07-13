@@ -1,27 +1,28 @@
 import json
-import uuid
 from pathlib import Path
+from typing import TextIO
 
 from loguru import logger
 from patos import FrozenModel
-from sqlalchemy import select
+from sqlmodel import select
 
 from .config import settings
-from .store import Chunk, Document, EntityClaim, EntityContent, FactClaim, FactContent, acting_as
-from .store.engine import session
+from .store import (
+    Chunk,
+    Document,
+    EntityClaim,
+    EntityContent,
+    FactClaim,
+    FactContent,
+)
+from .store.engine import Session
+from .store.identity import User
+
+type Exported = Document | Chunk | EntityContent | EntityClaim | FactContent | FactClaim
 
 
 class ExportReport(FrozenModel):
-    """The per-table row counts one scoped export wrote, the receipt an admin reads back.
-
-    documents: source documents written.
-    chunks: chunk spans written.
-    entity_content: deduplicated entity content rows written.
-    entity_claims: entity claim rows written.
-    fact_content: deduplicated fact content rows written.
-    fact_claims: fact claim rows written, including the superseded history rows.
-    path: the JSONL file the dump landed in.
-    """
+    """The per-table row counts one scoped export wrote, the receipt an admin reads back."""
 
     documents: int
     chunks: int
@@ -31,75 +32,60 @@ class ExportReport(FrozenModel):
     fact_claims: int
     path: str
 
+    def render(self) -> str:
+        """One receipt line per exported table, ending with where the dump landed."""
+        counts = self.model_dump(exclude={"path"})
+        rows = "\n".join(f"{table}: {count}" for table, count in counts.items())
+        return f"{rows}\nwritten to {self.path}"
+
+
+async def _write_table(
+    session: Session, output: TextIO, model: type[Exported], history: bool = False
+) -> int:
+    """Stream one visible table to `output` and return its row count."""
+    statement = select(model).order_by(model.id)
+    if history:
+        statement = statement.execution_options(**{settings.skip_live_gate: True})
+    rows = await session.stream_scalars(statement)
+    count = 0
+    async for row in rows:
+        output.write(json.dumps(row.record(), ensure_ascii=False) + "\n")
+        count += 1
+    return count
+
 
 async def export_scope(
     path: Path,
-    user_id: uuid.UUID | None = None,
+    user: User | None = None,
 ) -> ExportReport:
-    """Dump the user-visible documents, chunks, entity/fact content, and claims to a JSONL.
-
-    Runs entirely under `acting_as` so row level security decides exactly which rows leave, the
-    user's own and its org-shared scopes and no other tenant's. Content's read-through-a-
-    claim policy means only content this user's claims actually reach ever leaves too. The
-    claim reads opt out of the live gate so superseded history and both temporal windows are
-    dumped, not only the currently-valid edges. Emits only, no import path back in.
-
-    path: the JSONL file the dump is written to.
-    user_id: identity whose row level security visibility scopes exactly what is exported,
-        the system user when null.
-    """
-    user_id = user_id or settings.system_user_id
-    async with acting_as(user_id):
-        documents = list(await session().scalars(select(Document).order_by(Document.id)))
-        chunks = list(await session().scalars(select(Chunk).order_by(Chunk.id)))
-        entity_content = list(
-            await session().scalars(select(EntityContent).order_by(EntityContent.id))
-        )
-        entity_claims = list(await session().scalars(select(EntityClaim).order_by(EntityClaim.id)))
-        fact_content = list(await session().scalars(select(FactContent).order_by(FactContent.id)))
-        fact_claims = list(
-            await session().scalars(
-                select(FactClaim)
-                .order_by(FactClaim.id)
-                .execution_options(**{settings.skip_live_gate: True})
-            )
-        )
-    # every row serializes through the one pydantic-driven TableBase.record, the fact claims
-    # carrying both the valid and recorded ranges so the dump preserves the full bi-temporal
-    # history
-    records = [
-        row.record()
-        for row in [
-            *documents,
-            *chunks,
-            *entity_content,
-            *entity_claims,
-            *fact_content,
-            *fact_claims,
-        ]
-    ]
-    path.write_text(
-        "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
-        encoding="utf-8",
-    )
+    """Dump the user-visible documents, chunks, entity/fact content, and claims to a JSONL."""
+    user = user or User.system()
+    with path.open("w", encoding="utf-8") as output:
+        async with user as session:
+            documents = await _write_table(session, output, Document)
+            chunks = await _write_table(session, output, Chunk)
+            entity_content = await _write_table(session, output, EntityContent)
+            entity_claims = await _write_table(session, output, EntityClaim)
+            fact_content = await _write_table(session, output, FactContent)
+            fact_claims = await _write_table(session, output, FactClaim, history=True)
     logger.info(
         "exported {} documents, {} chunks, {} entity content, {} entity claims, "
         "{} fact content, {} fact claims to {} for user {}",
-        len(documents),
-        len(chunks),
-        len(entity_content),
-        len(entity_claims),
-        len(fact_content),
-        len(fact_claims),
+        documents,
+        chunks,
+        entity_content,
+        entity_claims,
+        fact_content,
+        fact_claims,
         path,
-        user_id,
+        user.id,
     )
     return ExportReport(
-        documents=len(documents),
-        chunks=len(chunks),
-        entity_content=len(entity_content),
-        entity_claims=len(entity_claims),
-        fact_content=len(fact_content),
-        fact_claims=len(fact_claims),
+        documents=documents,
+        chunks=chunks,
+        entity_content=entity_content,
+        entity_claims=entity_claims,
+        fact_content=fact_content,
+        fact_claims=fact_claims,
         path=str(path),
     )

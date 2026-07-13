@@ -22,57 +22,53 @@ classifiers = [
 dependencies = [
   "sqlalchemy[asyncio]>=2.1.0b3,<3",
   "sqlmodel>=0.0.39,<0.1",
-  "asyncpg>=0.30,<0.31",
-  "alembic>=1.14,<2",
-  "pgvector>=0.3.6,<0.5",
-  "pydantic-settings>=2.5,<3",
-  "httpx>=0.28,<0.29",
-  "cyclopts>=4,<5",
+  "asyncpg>=0.31,<0.32",
+  "alembic>=1.18.5,<2",
+  "pgvector>=0.5,<0.6",
+  "pydantic-settings>=2.14.2,<3",
+  "httpx>=0.28.1,<0.29",
+  "async-lru>=2.3,<3",
+  "cyclopts>=4.21,<5",
   "loguru>=0.7.3,<0.8",
-  "fastmcp>=2.11,<3",
-  "networkx>=3.4,<4",
-  "scipy>=1.14,<2",
-  "numpy>=2,<3",
-  "openai>=1.109,<2",
-  "chonkie[code]>=1.6,<2",
-  "identify>=2.6,<3",
-  "python-slugify>=8.0,<9",
-  "inflection>=0.5,<0.6",
-  "jinja2>=3.1,<4",
-  "jsonlines>=4.0,<5",
-  "patos",
-  "rlsalchemy",
-  "mainboard>=0.0.8",
-  "pgqueuer>=0.10,<1",
-  "dateparser>=1.2,<2",
-  "tenacity>=9,<10",
-  "gliner2>=0.1",
+  "fastmcp>=3.4.4,<4",
+  "networkx>=3.6.1,<4",
+  "scipy>=1.18,<2",
+  "numpy>=2.4.6,<2.5",
+  "openai>=2.45,<3",
+  "pydantic-ai-slim[openai]>=2.8,<3",
+  "pydantic-evals>=2.8,<3",
+  "chonkie[code]>=1.7,<2",
+  "identify>=2.6.19,<3",
+  "python-slugify>=8.0.4,<9",
+  "inflection>=0.5.1,<0.6",
+  "jinja2>=3.1.6,<4",
+  "patos>=0.0.8,<0.1",
+  "rlsalchemy>=0.4.1,<0.6",
+  "mainboard>=0.0.8,<0.1",
+  "pgqueuer>=1.1.1,<2",
+  "dateparser>=1.4.1,<2",
+  "tenacity>=9.1.4,<10",
+  "ranx>=0.3.21,<0.4",
 ]
 
 [project.scripts]
 aizk = "aizk.cli:app"
 
-[tool.uv]
-override-dependencies = ["sqlalchemy[asyncio]>=2.1.0b3,<3"]
-
 [project.optional-dependencies]
 dev = [
   "ruff>=0.6",
   "pyrefly>=1",
+  "ty>=0.0.59,<0.1",
   "mypy>=1.11",
   "pytest>=8",
-  "hypothesis>=6.100",
   "pytest-cov>=5",
-  "syrupy>=4",
-  "pytest-subprocess>=1.5",
-  "pytest-mock>=3.14",
-  "faker>=30",
+  "hypothesis>=6.100",
   "polyfactory>=2.22,<3",
-  "dirty-equals>=0.8",
-  "ranx>=0.3.20,<0.4",
-  "mainboard",
 ]
 docs = ["mkdocs-material>=9.5", "mkdocs-static-i18n>=1.2"]
+
+[tool.uv]
+override-dependencies = ["sqlalchemy[asyncio]>=2.1.0b3,<3"]
 
 [project.urls]
 Homepage = "https://phvv.me/aizk"
@@ -91,7 +87,7 @@ target-version = "py314"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["alembic"]
+known-first-party = ["aizk", "alembic"]
 
 [tool.pyright]
 pythonVersion = "3.14"
@@ -103,24 +99,62 @@ reportMissingModuleSource = false
 [tool.pyrefly]
 project-includes = ["src", "tests"]
 search-path = ["src", "tests", "."]
-replace-imports-with-any = ["sqlmodel", "sqlmodel.*", "sqlalchemy", "sqlalchemy.*"]
+python-interpreter-path = "../../.chefe/.pixi/envs/default/bin/python"
+replace-imports-with-any = ["sqlmodel.ext.*"]
 
-[tool.mypy]
-python_version = "3.14"
-strict = true
-disallow_any_explicit = true
-plugins = ["pydantic.mypy"]
-files = ["src"]
-mypy_path = "src"
-namespace_packages = false
+[tool.ty.environment]
+python = "../../.chefe/.pixi/envs/default"
+root = ["src"]
 
-[[tool.mypy.overrides]]
-module = "pgvector.*"
-ignore_missing_imports = true
+# ty covers src as the second checker beside pyrefly, which also covers tests.
+# Each override below downgrades one known third-party typing gap to a warning on the
+# exact files that hit it, so anything new anywhere stays an error and fails the gate.
+[tool.ty.src]
+include = ["src"]
 
-[[tool.mypy.overrides]]
-module = ["aizk.config", "aizk.retrieve"]
-disallow_any_explicit = false
+# sqlmodel exec() types union()/compound selects as TupleResult, whose typing-only
+# whitelist lacks scalars(), while runtime returns a plain Result that has it.
+# https://github.com/fastapi/sqlmodel/issues/2040
+[[tool.ty.overrides]]
+include = [
+  "src/aizk/background/schedule.py",
+  "src/aizk/graph/session_tier.py",
+  "src/aizk/store/models/tables/fact.py",
+]
+[tool.ty.overrides.rules]
+unresolved-attribute = "warn"
+
+# sqlmodel's dataclass-transform makes FK columns required in __init__ even though
+# relationship-populated construction is valid at runtime. Known design tension upstream,
+# intentionally not filed.
+[[tool.ty.overrides]]
+include = ["src/aizk/extract/ingest.py", "src/aizk/graph/promote.py"]
+[tool.ty.overrides.rules]
+missing-argument = "warn"
+
+# list[variable] passed to pydantic create_model. ty follows the typing spec in rejecting
+# variables inside explicit specializations, closed as by design upstream.
+# https://github.com/astral-sh/ty/issues/1817
+[[tool.ty.overrides]]
+include = ["src/aizk/extract/ontology/cache.py"]
+[tool.ty.overrides.rules]
+invalid-type-form = "warn"
+
+# pydantic-ai's OutputSpec is a manual generic TypeAliasType, which ty does not expand yet,
+# so Agent(output_type=X) is inferred as Agent[object, str] and .run().output as str.
+# https://github.com/astral-sh/ty/issues/1737
+[[tool.ty.overrides]]
+include = ["src/aizk/eval/runner.py"]
+[tool.ty.overrides.rules]
+invalid-return-type = "warn"
+
+# sqlmodel's SQLModelConfig does not declare ignored_types (sqlalchemy hybrid_property)
+# and its metaclass bridge loses the declared_attr shape of __tablename__.
+[[tool.ty.overrides]]
+include = ["src/aizk/store/mixins/base.py"]
+[tool.ty.overrides.rules]
+invalid-assignment = "warn"
+invalid-attribute-override = "warn"
 
 [tool.pytest.ini_options]
 addopts = "-q -ra --strict-markers --import-mode=importlib --cov=aizk --cov-report=term-missing"
@@ -135,7 +169,7 @@ omit = ["*/store/migrations/*"]
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 99
+fail_under = 100
 exclude_lines = [
   "pragma: no cover",
   "raise NotImplementedError",

@@ -1,11 +1,13 @@
-from .base import Json, MappedBase, TableBase, aizk_registry
+from .base import Json, MappedBase, TableBase
+from .claimed import ClaimedContent
 from .embedded import Embedded
 from .identity import Id, Timestamped
 from .scoped import Scoped
-from .view import ViewBase, create_view_ddl
+from .view import ViewBase
 
 __all__ = [
     "Embedded",
+    "ClaimedContent",
     "Id",
     "Json",
     "MappedBase",
@@ -13,6 +15,4 @@ __all__ = [
     "TableBase",
     "Timestamped",
     "ViewBase",
-    "aizk_registry",
-    "create_view_ddl",
 ]

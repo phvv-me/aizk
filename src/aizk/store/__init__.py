@@ -1,14 +1,12 @@
-# importing the `rls` library arms its global mapper-construction hook and registers its alembic
-# operations, comparator, and renderers as a side effect, so `op.apply_scoped_rls` exists and the
-# autogenerate guard runs before any migration or autogenerate pass.
 import rls
+from sqlalchemy.engine import Connection
 
 from ..exceptions import NoTenantContext
-
-# importing events registers the after_begin and do_orm_execute listeners as a side effect, the
-# same import-for-effect contract `rls` carries for its alembic operations.
 from . import events as events
-from .engine import acting_as, app_sessions, as_system
+from .engine import (
+    as_system,
+    session_for,
+)
 from .mixins import TableBase
 from .models import (
     Chunk,
@@ -26,18 +24,13 @@ from .models import (
     Watermark,
 )
 
-# populate the shared row-level-security registry once every model above is mapped. `rls.register`
-# backfills `TableBase.metadata.info["rls_policies"]`, the `["rls"]` protected-table set, and
-# `["rls_grant_role"]` from each model's own `__rls_policies__`, reading them with all sibling
-# model names already bound (so a content table's read-through-claim policy resolves its claim
-# class), and remembers the metadata so a table-name-only `op.apply_scoped_rls` can recover a
-# table's policies at migration time. It runs before any query, autogenerate pass, or migration
-# reads the registry.
-rls.register(TableBase, grant_role="aizk_app")
+_catalog = rls.Catalog(TableBase.mapper_registry)
 
-# re-exported from `rls` so callers keep reading it off `aizk.store`; the no-leak verify itself is
-# generic and lives in the library.
-verify_scoped_rls = rls.verify_scoped_rls
+
+def verify_rls(connection: Connection) -> list[str]:
+    """Report drift from Aizk's complete row security declaration."""
+    return _catalog.verify(connection)
+
 
 __all__ = [
     "Chunk",
@@ -55,8 +48,7 @@ __all__ = [
     "SessionItem",
     "TableBase",
     "Watermark",
-    "acting_as",
-    "app_sessions",
     "as_system",
-    "verify_scoped_rls",
+    "session_for",
+    "verify_rls",
 ]

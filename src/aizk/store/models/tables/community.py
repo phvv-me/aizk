@@ -1,33 +1,37 @@
 import uuid
+from typing import ClassVar
 
-from sqlalchemy import Column, Text, Uuid
+from sqlalchemy import Column as SAColumn
+from sqlalchemy import ColumnElement, Index, Text, UniqueConstraint, Uuid
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import declared_attr
 from sqlmodel import Field
 
+from ....common import sql
+from ....common.sql import Column
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
 
 
 class Community(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
-    """A detected cluster of related entities with one LLM summary, the global-query lane.
+    """Scoped entity cluster summarized for thematic retrieval."""
 
-    Community detection over the latest-fact entity graph groups densely connected entities, and
-    each group is summarized once into a label and a paragraph the recall lane can match when a
-    query is thematic rather than pointed. The summary embedding is what community_search ranks,
-    and member_ids records which entities the cluster covers so a summary traces back to its facts.
-    Rows are scoped and row-level-security forced exactly like entities and facts.
+    deletable: ClassVar[bool] = True
 
-    id: stable identity, generated client-side on insert.
-    owner_id: user that owns the row, enforced by row level security.
-    scopes: org set the row is shared with, empty when private to the owner.
-    label: short human-readable name for the cluster.
-    summary: paragraph describing what the cluster's entities and facts are about.
-    embedding: halfvec dense vector of the summary, what community search ranks.
-    member_ids: the entity content ids the cluster covers.
-    created_at: build timestamp.
-    """
-
-    label: str = Field(sa_type=Text)
-    summary: str = Field(sa_type=Text)
-    member_ids: list[uuid.UUID] = Field(
-        default_factory=list, sa_column=Column(ARRAY(Uuid), nullable=False)
+    label: Column[str] = Field(sa_type=Text)
+    summary: Column[str] = Field(sa_type=Text)
+    member_ids: Column[list[uuid.UUID]] = Field(
+        default_factory=list, sa_column=SAColumn(ARRAY(Uuid), nullable=False)
     )
+
+    @declared_attr.directive
+    def __table_args__(cls) -> tuple[Index | UniqueConstraint, ...]:
+        return (
+            *super().__table_args__,
+            Index("ix_community_scopes", "scopes", postgresql_using="gin"),
+        )
+
+    @classmethod
+    def line(cls) -> ColumnElement[str]:
+        """The community's `- label: summary` evidence line."""
+        label, summary = cls.label, cls.summary
+        return sql.concat(t"- {label}: {summary}")

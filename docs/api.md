@@ -1,67 +1,38 @@
 # API
 
-The public surface is the MCP tool set. Any [MCP](concepts.md#agent-and-mcp)-capable assistant,
-or a bare `fastmcp.Client` as shown on the [home page](index.md#use), calls these directly with
-no Python import beyond that one client.
+The public network surface has four MCP tools. Maintenance and evaluation stay on the SSH-only
+CLI so a client token cannot rebuild, export, promote, or erase data.
 
-## Everyday verbs
+## MCP tools
 
-| tool | does |
+| Tool | Purpose |
 |---|---|
-| `recall(query, scopes, k)` | the one retrieval verb, five fused lanes, warm around 0.3 to 0.5 s |
-| `remember(text, scopes, kind)` | write text as fast working memory |
-| `reference(uri, scopes)` | record a paper, url, or file as recallable |
-| `ingest(path, scopes)` | ingest a file or directory into the graph pipeline |
-| `ingest_image(path, scopes)` | ingest an image for the vision-embedding lane |
-| `get_context(query, scopes)` | assemble one token-budgeted, prompt-ready context pack |
-| `timeline(since_days, entity, scopes)` | the weekly-review view, newest facts first |
-| `projects(scopes)` | every visible Project entity with its profile and recent facts |
+| `recall(query, budget)` | Return one token-budgeted context pack from all retrieval lanes |
+| `remember(text, kind)` | Capture working memory for later extraction |
+| `reference(uri)` | Record a paper, URL, or file as a source |
+| `share(documents, scopes)` | Copy visible documents into one authorized destination with provenance |
 
-## Groups and governance
+Every tool derives scope authority from the verified Logto user. Recall reads the caller's complete
+visible union, including personal, organization, and eligible intersection rows. Writes default to
+the personal singleton. Passing organization names chooses one explicit destination, including an
+intersection such as A and B, and succeeds only when the caller may write every member.
+`created_by` records provenance and never grants access. Sharing leaves the source unchanged and
+creates a provenance-linked copy in the destination.
 
-| tool | does |
+## Operator CLI
+
+Run commands through `chefe run aizk` from the monorepo root.
+
+| Command group | Commands |
 |---|---|
-| `create_group(name, public, curated)` | create a sharing group |
-| `publish_group(group, public)` | make a group's singleton scope public |
-| `curate_group(group, curated)` | require review before a claim in this group is visible |
-| `add_member` / `remove_member` | manage reader, writer, or admin membership |
-| `pending(group)` | a curated group's unreviewed claims |
-| `approve` / `reject` | resolve a curated group's pending claims |
-| `promote(document, to_scopes)` | publish an audited copy into a wider scope set |
-| `delete_group(group)` | demote every scope set containing this group to private, never widen |
+| `aizk graph` | `rebuild`, `decay`, `reembed`, `raptor`, `forget` |
+| `aizk ontology` | `define-entity`, `define-relation`, `list` |
+| `aizk data` | `ingest`, `ingest-image`, `promote`, `export`, `audit` |
+| `aizk eval` | `bench`, `sweep`, `scale`, `groupmem` |
+| `aizk db` | `setup`, `health`, `migrate`, `makemigrations`, `install-queue`, `backup`, `restore`, `check-rls`, `tasks-status` |
 
-See [Lattice](engine/lattice.md) for why membership, not a standalone group, decides visibility.
+The top-level process commands are `serve-mcp`, `worker`, `recall-context`, `capture-session`, and
+`profile-report`.
 
-## Maintenance and admin
-
-Registered only for the resolved root user.
-
-| tool | does |
-|---|---|
-| `setup()` / `health()` | migrate, install the queue, grant roles / report readiness in one call |
-| `tasks_status()` | background-pass watermarks and queue depth |
-| `audit(limit)` | recent writes, owner, scope, and promotion provenance |
-| `force_rebuild` / `force_decay` / `force_raptor` / `force_reembed` | run a background pass now rather than wait on its schedule |
-| `bench` / `sweep` / `benchmark` / `scale` | the eval harness, gated by `AIZK_BENCHMARKS_ENABLED` where noted |
-| `export_scope(path)` | dump one scope's claims and history to a file |
-| `profile_report()` | span-profiler timing stats, when `AIZK_PROFILING=1` |
-| `create_user` / `grant_admin` / `list_groups` / `list_users` | identity and group bootstrap |
-
-`scopes` parameters take a comma-separated list of group names. `scopes="finance,business"`
-writes or reads the intersection only members of both groups can see.
-
-## The CLI
-
-The CLI is a process and bootstrap entrypoint only, no engine-verb mirror, everyday memory
-calls always go through the MCP tools above.
-
-| command | does |
-|---|---|
-| `aizk serve-mcp` | run the MCP server, stdio or HTTP with `AIZK_MCP_HTTP=1` |
-| `aizk worker` | drain the durable background-pass queue |
-| `aizk migrate` / `aizk makemigrations` | apply or author a schema migration |
-| `aizk check-rls` | diff compiled row level security policies against the live catalog |
-| `aizk install-queue` | install the pgqueuer schema once |
-| `aizk create-user <name>` | bootstrap the first user before any auth exists |
-| `aizk scale` | run the scale eval harness |
-| `aizk recall-context` / `aizk capture-session` | the Claude Code session hook bridges |
+There are no local user, organization, membership, role, or curation commands. Logto is the source
+of truth for those concerns.

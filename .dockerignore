@@ -1,6 +1,11 @@
-# only pyproject, README, and src are needed to build the image; keep the context small and the
-# layer cache stable by excluding everything the build never reads.
+# only pyproject, README, src, and services are needed to build the images; keep the context
+# small and the layer cache stable by excluding everything the builds never read.
 .git
+archive
+.hypothesis
+.mypy_cache
+.benchmarks
+.lote
 .github
 .venv
 .chefe

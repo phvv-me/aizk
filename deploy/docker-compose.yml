@@ -270,7 +270,11 @@ services:
   # utilization shares below leave free; GLINER_DEVICE=cpu moves it off the GPU entirely.
   gliner:
     build:
-      context: ../services/gliner
+      # context is the package root so the image copies the shared wire contract from
+      # src/aizk/serving/gate/contract.py beside services/gliner/app.py; the root
+      # .dockerignore keeps the context small
+      context: ..
+      dockerfile: services/gliner/Dockerfile
     environment:
       GLINER_DEVICE: ${AIZK_GLINER_DEVICE:-cuda}
       GLINER_CHECKPOINT: ${AIZK_GLINER_CHECKPOINT:-fastino/gliner2-base-v1}

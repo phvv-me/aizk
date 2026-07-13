@@ -16,8 +16,10 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
-      # known ORM-expression errors live in the baseline; only NEW errors fail the gate
-      - run: uv run --no-sync pyrefly check --baseline .pyrefly-baseline.json
+      - run: uv run --no-sync pyrefly check
+      # second checker; known third-party gaps are per-file warnings in [tool.ty.overrides],
+      # any new error still fails. --python overrides the local pixi path from pyproject.
+      - run: uv run --no-sync ty check --python .venv --exit-zero-on-warning
 
   # The suite is hermetic above the database seam (every model endpoint is faked), but the
   # database itself is real: the same VectorChord image the compose file ships, on the same
@@ -59,4 +61,11 @@ jobs:
             GRANT USAGE, SELECT ON SEQUENCES TO aizk_app;
           SQL
       - run: uv sync --extra dev
-      - run: uv run --no-sync pytest -q
+      # Two-pass coverage union: the default sysmon core cannot emit one async-with enter
+      # arc (graph/build.py retry loop), so that single test re-runs under the pytrace
+      # core and appends before the 100% gate is enforced on the union.
+      - run: uv run --no-sync pytest -q --cov-fail-under=0
+      - run: >
+          COVERAGE_CORE=pytrace uv run --no-sync pytest -q
+          'tests/graph/test_build.py::test_write_graph_slice_retries_a_transient_db_conflict'
+          -o addopts='--import-mode=importlib' --cov=aizk --cov-append --cov-report=term-missing

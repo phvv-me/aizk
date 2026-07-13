@@ -1,78 +1,60 @@
-import uuid
-from datetime import UTC, datetime
-
 from loguru import logger
-from sqlalchemy import select, update
+from sqlalchemy import func, update
 
 from ..background.queue import enqueue_pending
 from ..config import settings
-from ..extract.ingest import ingest_text
-from ..store import SessionItem, acting_as
-from ..store.engine import session
-from ..store.mixins.scoped import ScopeLattice
+from ..extract.ingest import TextSource, ingest_texts
+from ..provenance import CaptureContext
+from ..store import SessionItem
+from ..store.identity import User
+from ..types import Scopes
 
 
-async def writable_working_items(user_id: uuid.UUID) -> list[SessionItem]:
-    """This user's still-working items, oldest first, in scope sets the pass may currently write.
-
-    Promotion reingests each item into its own scope set, a write the RLS write policy admits only
-    for the acting session's own standing, so the filter mirrors that policy through
-    `ScopeLattice.write`: an item in a scope set the pass carries no writer standing in stays
-    working rather than failing its reingest. A background pass carries no org standing, so only
-    the owner's own private items promote, exactly the write the policy would let through.
-
-    user_id: identity whose working memory is read.
-    """
-    async with acting_as(user_id):
-        return list(
-            await session().scalars(
-                select(SessionItem)
-                .where(SessionItem.promoted_at.is_(None))
-                .where(ScopeLattice(SessionItem.__table__).write())
-                .order_by(SessionItem.created_at)
+async def due_working_items(scopes: Scopes) -> list[SessionItem]:
+    """The aged and overflow working items in one exact scope set, decided in the database."""
+    async with User.system(scopes) as session:
+        result = await session.exec(
+            SessionItem.due_for_promotion(
+                scopes,
+                settings.session_promote_age_minutes,
+                settings.session_promote_threshold,
             )
         )
+        return list(result.scalars())
 
 
-async def mark_promoted(user_id: uuid.UUID, due: list[SessionItem], now: datetime) -> None:
-    """Stamp the promoted items so writable_working_items never offers them again.
-
-    user_id: identity whose working memory is being promoted.
-    due: the items just reingested into the graph.
-    now: this promotion pass's own promoted_at stamp.
-    """
-    async with acting_as(user_id):
-        await session().execute(
+async def mark_promoted(scopes: Scopes, due: list[SessionItem]) -> None:
+    """Stamp the promoted items so due_working_items never offers them again."""
+    async with User.system(scopes) as session:
+        await session.exec(
             update(SessionItem)
             .where(SessionItem.id.in_([item.id for item in due]))
-            .values(promoted_at=now)
+            .values(promoted_at=func.now())
         )
 
 
 async def promote_sessions(
-    user_id: uuid.UUID | None = None,
+    scopes: Scopes | None = None,
 ) -> int:
-    """Feed a user's aged or overflow working items into the graph, return how many moved.
-
-    Reingests each due item through the same text pipeline a remember once ran so it is chunked,
-    embedded, and its graph slice queued for extraction and consolidation, so the on-write
-    pipeline turns settled working memory into graph facts without the recall path ever paying
-    that cost.
-
-    user_id: identity whose working memory is promoted and that owns the written graph rows,
-        the system user when null.
-    """
-    user_id = user_id or settings.system_user_id
-    now = datetime.now(UTC)
-    items = await writable_working_items(user_id)
-    due = SessionItem.due_for_promotion(
-        items, now, settings.session_promote_age_minutes, settings.session_promote_threshold
-    )
+    """Feed a user's aged or overflow working items into the graph, return how many moved."""
+    key = frozenset(scopes or (settings.system_user_id,))
+    due = await due_working_items(key)
     if not due:
         return 0
-    for item in due:
-        await ingest_text(item.text, kind=item.kind, owner_id=user_id, scopes=tuple(item.scopes))
-    await mark_promoted(user_id, due, now)
-    await enqueue_pending(user_id=user_id)
-    logger.info("promoted {} working items into the graph for {}", len(due), user_id)
+    await ingest_texts(
+        User.system(key),
+        [
+            TextSource(
+                text=item.text,
+                kind=item.kind,
+                created_by=item.created_by,
+                scopes=key,
+                capture=CaptureContext.model_validate(item.provenance),
+            )
+            for item in due
+        ],
+    )
+    await mark_promoted(key, due)
+    await enqueue_pending(scopes=key)
+    logger.info("promoted {} working items into graph scope {}", len(due), key)
     return len(due)

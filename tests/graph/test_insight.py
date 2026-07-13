@@ -3,18 +3,18 @@ from collections.abc import Iterator
 
 import dbutil
 import pytest
-from sqlalchemy import select
+from doubles import FakeLLM
+from sqlmodel import select
 
 from aizk.config import settings
 from aizk.extract import ontology
 from aizk.graph.insight import derive_insights, kept_observations
 from aizk.graph.models import InsightReport, Observation
-from aizk.store import EntityClaim, EntityContent, FactClaim, FactContent, LiveFact, acting_as
+from aizk.store import EntityClaim, EntityContent, FactClaim, FactContent, LiveFact
 
 
 @pytest.fixture
 def owner(migrated_db: None) -> Iterator[uuid.UUID]:
-    """A freshly reset schema minting one owner id, the graph the reflective pass reads."""
     pid = uuid.uuid4()
 
     async def setup() -> None:
@@ -27,7 +27,6 @@ def owner(migrated_db: None) -> Iterator[uuid.UUID]:
 def test_kept_observations_gates_on_significance_and_caps_the_count(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only the observations over the floor survive, highest first, capped at the write limit."""
     report = InsightReport(
         observations=[
             Observation(statement="weak", significance=0.2),
@@ -41,12 +40,11 @@ def test_kept_observations_gates_on_significance_and_caps_the_count(
 
 
 async def seed_two_facts(owner: uuid.UUID) -> None:
-    """Plant one entity and two latest facts, the grounding the reflective pass reasons over."""
     subject = uuid.uuid4()
-    async with acting_as(owner) as session:
+    async with dbutil.actor(owner) as session:
         session.add(EntityContent(id=subject, name="alice", type="author", embedding=None))
         await session.flush()
-        session.add(EntityClaim(content_id=subject, owner_id=owner))
+        session.add(EntityClaim(content_id=subject, created_by=owner, scopes=[owner]))
         for index in range(2):
             content = FactContent(
                 subject_id=subject,
@@ -56,14 +54,13 @@ async def seed_two_facts(owner: uuid.UUID) -> None:
             )
             session.add(content)
             await session.flush()
-            session.add(FactClaim(content_id=content.id, owner_id=owner))
+            session.add(FactClaim(content_id=content.id, created_by=owner, scopes=[owner]))
 
 
 async def observed(user: uuid.UUID) -> list[str]:
-    """The observes-fact statements one user reads in its own graph."""
-    async with acting_as(user) as session:
+    async with dbutil.actor(user) as session:
         return list(
-            await session.scalars(
+            await session.exec(
                 select(LiveFact.statement).where(LiveFact.predicate == ontology.OBSERVES)
             )
         )
@@ -71,14 +68,8 @@ async def observed(user: uuid.UUID) -> list[str]:
 
 @pytest.mark.usefixtures("fake_embedder")
 def test_insight_writes_only_the_gated_observation_and_is_idempotent(
-    owner: uuid.UUID, fake_llm: object
+    owner: uuid.UUID, fake_llm: FakeLLM
 ) -> None:
-    """The pass writes the significant observation under the owner and a rerun changes nothing.
-
-    The gate keeps the low-significance candidate out of the graph, the surviving observation lands
-    as an observes fact hanging off the owner's observation node, and the content-addressed id
-    makes a second pass find the same claim and write nothing.
-    """
     fake_llm.register(
         InsightReport,
         InsightReport(
@@ -91,8 +82,8 @@ def test_insight_writes_only_the_gated_observation_and_is_idempotent(
 
     async def probe() -> tuple[int, int, list[str]]:
         await seed_two_facts(owner)
-        written = await derive_insights(user_id=owner)
-        again = await derive_insights(user_id=owner)
+        written = await derive_insights(scopes=frozenset({owner}))
+        again = await derive_insights(scopes=frozenset({owner}))
         return written, again, await observed(owner)
 
     written, again, mine = dbutil.run(probe())
@@ -102,16 +93,14 @@ def test_insight_writes_only_the_gated_observation_and_is_idempotent(
 
 
 @pytest.mark.usefixtures("fake_embedder")
-def test_insight_skips_a_graph_with_too_few_facts(owner: uuid.UUID, fake_llm: object) -> None:
-    """A graph without at least two facts is left untouched, so the pass never reasons blind."""
-    assert dbutil.run(derive_insights(user_id=owner)) == 0
+def test_insight_skips_a_graph_with_too_few_facts(owner: uuid.UUID, fake_llm: FakeLLM) -> None:
+    assert dbutil.run(derive_insights(scopes=frozenset({owner}))) == 0
 
 
 @pytest.mark.usefixtures("fake_embedder")
 def test_insight_writes_nothing_when_no_observation_clears_the_gate(
-    owner: uuid.UUID, fake_llm: object
+    owner: uuid.UUID, fake_llm: FakeLLM
 ) -> None:
-    """When every candidate falls below the significance floor the graph gains no observation."""
     fake_llm.register(
         InsightReport,
         InsightReport(
@@ -121,6 +110,6 @@ def test_insight_writes_nothing_when_no_observation_clears_the_gate(
 
     async def probe() -> int:
         await seed_two_facts(owner)
-        return await derive_insights(user_id=owner)
+        return await derive_insights(scopes=frozenset({owner}))
 
     assert dbutil.run(probe()) == 0

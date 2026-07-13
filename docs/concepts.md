@@ -33,7 +33,10 @@ once, meaning-based search, exact-word search, and graph traversal, rather than 
 A scope is a group knowledge can be shared with, a team, a project, a household. aizk lets one
 piece of knowledge belong to several scopes at once, and only someone standing in every one of
 those groups can see it, which is what "the scope-set lattice" means in the deeper pages, see
-[Lattice](engine/lattice.md).
+[Lattice](engine/lattice.md). The several-scope form is a real intersection corpus, not a request
+to choose one active organization. Logto owns the organizations and memberships while aizk stores
+only the stable scope IDs derived from their signed identifiers, see
+[Identity and sharing](engine/identity.md).
 
 ## Row level security
 

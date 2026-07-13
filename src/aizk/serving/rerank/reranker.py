@@ -1,83 +1,57 @@
-from collections.abc import Mapping
-from typing import cast
+from functools import cache
 
-from loguru import logger
-from openai import AsyncOpenAI, BaseModel, Omit
-from patos import Singleton
+import httpx
 
 from ...config import settings
 
 
-class RerankResult(BaseModel):
-    """One scored candidate in a /v1/rerank response, in the Cohere/Jina result shape.
+@cache
+def client() -> httpx.AsyncClient:
+    """Reuse the rerank HTTP client for the process lifetime."""
+    headers = (
+        {"Authorization": f"Bearer {settings.rerank_api_key}"} if settings.rerank_api_key else {}
+    )
+    return httpx.AsyncClient(
+        base_url=f"{settings.rerank_url.rstrip('/')}/",
+        headers=headers,
+        timeout=settings.rerank_request_timeout,
+    )
 
-    Subclasses the OpenAI SDK's own `BaseModel` rather than the house `patos.FrozenModel`, since
-    the low-level `client.post(cast_to=...)` escape hatch this reranker uses for the non-standard
-    /v1/rerank endpoint only parses into its own model type.
 
-    index: position of the candidate in the request's `documents` array.
-    relevance_score: the cross-encoder's score for that candidate against the query.
+def templated(query: str, texts: list[str]) -> tuple[str, list[str]]:
+    """Wrap the query and documents in the configured cross-encoder prompt scaffold."""
+    wrapped_query = (
+        settings.rerank_query_template.format(instruction=settings.rerank_instruction, query=query)
+        if settings.rerank_query_template
+        else query
+    )
+    wrapped_texts = [
+        settings.rerank_document_template.format(document=text)
+        if settings.rerank_document_template
+        else text
+        for text in texts
+    ]
+    return wrapped_query, wrapped_texts
+
+
+async def rerank(query: str, texts: list[str]) -> list[float]:
+    """Score texts against a query through the cross-encoder rerank endpoint.
+
+    query: the question the evidence is scored against.
+    texts: candidate evidence lines, scores return aligned to their order.
     """
-
-    index: int
-    relevance_score: float
-
-
-class RerankResponse(BaseModel):
-    """The /v1/rerank response body, an unordered array of scored results.
-
-    results: one entry per candidate, in the endpoint's own ranked order rather than input order.
-    """
-
-    results: list[RerankResult]
-
-
-class Reranker(Singleton):
-    """The single reranker, an OpenAI-compatible /v1/rerank client in the Cohere/Jina shape.
-
-    Posts the query and candidate documents to the co-resident vLLM reranker container through the
-    OpenAI SDK client's low-level `post`, since the non-standard /v1/rerank endpoint needs it. The
-    endpoint answers with results in its own ranked order, which this realigns to the input order
-    by the returned index so scores stay row-aligned with the candidates passed in. A `patos`
-    singleton, one shared instance built the first time anything constructs a `Reranker()`.
-
-    rerank_url: base URL of the OpenAI-compatible endpoint, ending at the /v1 prefix.
-    rerank_model: served model name the endpoint matches, the vllm-rerank --served-model-name.
-    """
-
-    def __init__(self) -> None:
-        self.rerank_url = settings.rerank_url
-        self.rerank_model = settings.rerank_model
-        self.api_key = settings.rerank_api_key
-        drop_auth: Mapping[str, str] = cast("Mapping[str, str]", {"Authorization": Omit()})
-        self.client = AsyncOpenAI(
-            base_url=self.rerank_url,
-            api_key=self.api_key or "none",
-            timeout=settings.rerank_request_timeout,
-            default_headers=None if self.api_key else drop_auth,
-        )
-
-    async def rerank(self, query: str, candidates: list[str]) -> list[float]:
-        """Score candidates against the query through the /v1/rerank endpoint.
-
-        query: the search string.
-        candidates: candidate texts row-aligned with the returned scores.
-        """
-        if not candidates:
-            return []
-        response = await self.client.post(
-            "/rerank",
-            cast_to=RerankResponse,
-            body={"model": self.rerank_model, "query": query, "documents": candidates},
-        )
-        scores = [0.0] * len(candidates)
-        for result in response.results:
-            if not 0 <= result.index < len(candidates):
-                logger.warning(
-                    "rerank returned out-of-range index {idx} for {n} candidates, skipping it",
-                    idx=result.index,
-                    n=len(candidates),
-                )
-                continue
-            scores[result.index] = result.relevance_score
-        return scores
+    if not texts:
+        return []
+    wrapped_query, wrapped_texts = templated(query, texts)
+    response = await client().post(
+        "rerank",
+        json={"model": settings.rerank_model, "query": wrapped_query, "documents": wrapped_texts},
+    )
+    response.raise_for_status()
+    results = response.json()["results"]
+    if len(results) != len(texts):
+        raise ValueError(f"reranker returned {len(results)} scores for {len(texts)} texts")
+    scores = [0.0] * len(texts)
+    for result in results:
+        scores[result["index"]] = float(result["relevance_score"])
+    return scores

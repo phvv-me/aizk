@@ -1,347 +1,393 @@
 import hashlib
 import uuid
+from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
-from sqlalchemy import ColumnElement, select
+from patos import FrozenModel
+from sqlalchemy import ColumnElement, or_
+from sqlmodel import delete, select
 
 from ..config import settings
-from ..serving.chunk import ChonkieChunker, CodeChunker, is_code, is_text
-from ..serving.embed import Embedder
-from ..store import Chunk, Document, SessionItem, acting_as
-from ..store.engine import session
-
-# re-exported so aizk.extract.ingest keeps naming this directory-walk filter, even though the
-# detection it runs lives in aizk.serving.chunk.
-__all__ = ["is_text"]
+from ..provenance import CaptureContext
+from ..serving.chunk import chunk_code, chunk_text, is_code, is_text
+from ..serving.embed import embed, embed_images
+from ..store import Chunk, Document, FactClaim, SessionItem
+from ..store.engine import Session
+from ..store.identity import User
+from ..types import Scopes
 
 
 def content_hash(text: str) -> str:
-    """Digest the source text so re-ingesting identical content is a no-op.
-
-    text: full document text.
-    """
+    """Digest the source text so re-ingesting identical content is a no-op."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def contextual_lexical(title: str, text: str) -> str | None:
-    """The lexical-lane text for a chunk, a title-prefixed preamble when contextual bm25 is on.
-
-    Prepending the title lets a chunk match on its document's context in the lexical lane, feeding
-    only the separate `lexical` column so the dense embedding and displayed chunk text stay the raw
-    span. Returns null when the flag is off or the title is blank, so the lexical lane falls back
-    to the raw span through the generated column's coalesce.
-
-    title: the document title the preamble situates the chunk under.
-    text: the raw chunk span the preamble is prepended to.
-    """
-    preamble = title.strip()
-    if not settings.contextual_bm25 or not preamble:
+def contextual_lexical(title: str, text: str, capture: CaptureContext | None = None) -> str | None:
+    """The lexical-lane text for a chunk, enriched with document and speaker context."""
+    preamble = title.strip() if settings.contextual_bm25 else ""
+    searchable = capture.search_text(text) if capture is not None else text
+    if not preamble and searchable == text:
         return None
-    return f"{preamble}\n{text}"
+    return "\n".join(part for part in (preamble, searchable) if part)
+
+
+class TextSource(FrozenModel):
+    """One text source ready for batched chunking, embedding, and storage."""
+
+    text: str
+    title: str | None = None
+    kind: str = "note"
+    source_uri: str | None = None
+    created_by: uuid.UUID | None = None
+    scopes: Scopes = frozenset()
+    capture: CaptureContext | None = None
+    processed: bool = False
+
+
+class PreparedText(FrozenModel):
+    """A nonempty text source after identity, chunk, and search text preparation."""
+
+    source: TextSource
+    title: str
+    digest: str
+    created_by: uuid.UUID
+    scopes: Scopes
+    spans: tuple[str, ...]
+    searchable: tuple[str, ...]
+
+
+class DocumentStore:
+    """Store and refresh documents inside one caller-owned transaction."""
+
+    __slots__ = ("session",)
+
+    def __init__(self, opened: Session) -> None:
+        self.session = opened
+
+    async def find(self, plans: list[PreparedText]) -> list[Document | None]:
+        """Find every standing document for a prepared batch in one query."""
+        if not plans:
+            return []
+        conditions: list[ColumnElement[bool]] = [
+            (
+                Document.source_uri == plan.source.source_uri
+                if plan.source.source_uri is not None
+                else Document.content_hash == plan.digest
+            )
+            & (Document.scopes == sorted(plan.scopes))
+            for plan in plans
+        ]
+        documents = list(await self.session.exec(select(Document).where(or_(*conditions))))
+        by_source = {
+            (document.source_uri, frozenset(document.scopes)): document
+            for document in documents
+            if document.source_uri is not None
+        }
+        by_hash = {
+            (document.content_hash, frozenset(document.scopes)): document for document in documents
+        }
+        return [
+            (
+                by_source.get((plan.source.source_uri, plan.scopes))
+                if plan.source.source_uri is not None
+                else by_hash.get((plan.digest, plan.scopes))
+            )
+            for plan in plans
+        ]
+
+    async def store(
+        self, dedupe: ColumnElement[bool], document: Document
+    ) -> tuple[uuid.UUID, bool]:
+        """Dedupe-check then store or refresh a document in its exact scope."""
+        exact_scope = Document.scopes == document.scopes
+        existing = (await self.session.exec(select(Document).where(dedupe, exact_scope))).first()
+        if existing is not None:
+            if existing.content_hash == document.content_hash:
+                return existing.id, False
+            return await self.refresh(existing, document), True
+        self.session.add(document)
+        await self.session.flush()
+        return document.id, True
+
+    async def refresh(self, stale: Document, document: Document) -> uuid.UUID:
+        """Replace a changed document's chunks while retaining its stable identity."""
+        replacements = list(document.chunks)
+        document.chunks = []
+        stale.title = document.title
+        stale.kind = document.kind
+        stale.content_hash = document.content_hash
+        await FactClaim.retract_from_documents(self.session, [stale.id], "source_refreshed")
+        await self.session.exec(
+            delete(Chunk)
+            .where(Chunk.document_id == stale.id)
+            .execution_options(synchronize_session=False)
+        )
+        for chunk in replacements:
+            chunk.document_id = stale.id
+            chunk.created_by = stale.created_by
+            chunk.scopes = list(stale.scopes)
+            self.session.add(chunk)
+        await self.session.flush()
+        return stale.id
+
+
+class TextIngestor:
+    """Batch text ingestion so many messages share the embedder's efficient request batches."""
+
+    __slots__ = ("user",)
+
+    def __init__(self, user: User) -> None:
+        self.user = user
+
+    def prepare(self, source: TextSource) -> PreparedText | None:
+        """Resolve one source and return its nonempty chunk plan, or null for blank text."""
+        spans = chunk_code(source.text) if source.kind == "code" else chunk_text(source.text)
+        if not spans:
+            return None
+        created_by = source.created_by or settings.system_user_id
+        title = source.title or " ".join(source.text.split()[:8])
+        searchable = tuple(
+            source.capture.search_text(span) if source.capture is not None else span
+            for span in spans
+        )
+        return PreparedText(
+            source=source,
+            title=title,
+            digest=content_hash(source.text),
+            created_by=created_by,
+            scopes=frozenset(source.scopes or (created_by,)),
+            spans=tuple(spans),
+            searchable=searchable,
+        )
+
+    async def ingest_many(
+        self, sources: Sequence[TextSource]
+    ) -> list[tuple[uuid.UUID | None, bool]]:
+        """Ingest sources in order after removing unchanged documents before embedding."""
+        plans = [self.prepare(source) for source in sources]
+        prepared = [plan for plan in plans if plan is not None]
+        async with self.user as opened:
+            existing = iter(await DocumentStore(opened).find(prepared))
+        standing = [next(existing) if plan is not None else None for plan in plans]
+        pending = [
+            plan
+            for plan, document in zip(plans, standing, strict=True)
+            if plan is not None and (document is None or document.content_hash != plan.digest)
+        ]
+        searchable = [text for plan in pending for text in plan.searchable]
+        vectors = await embed(searchable, mode="document") if searchable else []
+        offset = 0
+        results: list[tuple[uuid.UUID | None, bool]] = []
+        async with self.user as opened:
+            store = DocumentStore(opened)
+            for plan, document in zip(plans, standing, strict=True):
+                if plan is None:
+                    results.append((None, False))
+                    continue
+                if document is not None and document.content_hash == plan.digest:
+                    results.append((document.id, False))
+                    continue
+                embeddings = vectors[offset : offset + len(plan.spans)]
+                offset += len(plan.spans)
+                document = self.document(plan, embeddings)
+                dedupe = (
+                    Document.source_uri == plan.source.source_uri
+                    if plan.source.source_uri is not None
+                    else Document.content_hash == plan.digest
+                )
+                document_id, created = await store.store(dedupe, document)
+                logger.info("resolved document {} kind={}", document_id, plan.source.kind)
+                results.append((document_id, created))
+        return results
+
+    async def ingest(self, source: TextSource) -> tuple[uuid.UUID | None, bool]:
+        """Ingest one source through the same batching path used for a corpus."""
+        return (await self.ingest_many([source]))[0]
+
+    @staticmethod
+    def document(plan: PreparedText, embeddings: list[list[float]]) -> Document:
+        """Build the mapped document and chunk rows for one prepared source."""
+        capture = plan.source.capture
+        return Document(
+            kind=plan.source.kind,
+            title=plan.title,
+            source_uri=plan.source.source_uri,
+            content_hash=plan.digest,
+            created_by=plan.created_by,
+            scopes=list(plan.scopes),
+            chunks=[
+                Chunk(
+                    ord=order,
+                    text=span,
+                    lexical=contextual_lexical(plan.title, span, capture),
+                    provenance=capture.record() if capture is not None else {},
+                    embedding=embedding,
+                    processed_at=datetime.now(UTC) if plan.source.processed else None,
+                    created_by=plan.created_by,
+                    scopes=list(plan.scopes),
+                )
+                for order, (span, embedding) in enumerate(zip(plan.spans, embeddings, strict=True))
+            ],
+        )
 
 
 async def store_document(
-    owner_id: uuid.UUID, dedupe: ColumnElement[bool], document: Document
+    user: User, dedupe: ColumnElement[bool], document: Document
 ) -> tuple[uuid.UUID, bool]:
-    """Dedupe-check then store or refresh a document under one owner-scoped transaction.
-
-    The one seam every ingest path shares: look up an existing row by its own dedupe column, and
-    only write when something changed, so a re-ingest of identical content is idempotent no
-    matter which caller built the row. A source whose content CHANGED (same ``source_uri``,
-    different hash, the edited note case) keeps its standing document row and swaps the content
-    under it through :func:`refresh_document`, since ``source_uri`` is the document's stable
-    identity and a second insert would violate its unique constraint.
-
-    owner_id: user the transaction acts as.
-    dedupe: the `Document` column-equality clause idempotency is checked against before insert.
-    document: the fully assembled row to store when nothing already matches.
-
-    Returns the row's id and whether it was written, the latter False only when dedupe matched.
-    """
-    async with acting_as(owner_id):
-        existing = await session().scalar(select(Document.id).where(dedupe))
-        if existing is not None:
-            return existing, False
-        if document.source_uri is not None:
-            stale = await session().scalar(
-                select(Document).where(Document.source_uri == document.source_uri)
-            )
-            if stale is not None:
-                return await refresh_document(stale, document), True
-        session().add(document)
-        await session().flush()
-        return document.id, True
-
-
-async def refresh_document(stale: Document, document: Document) -> uuid.UUID:
-    """Swap a changed source's content under its standing document row, replacing every chunk.
-
-    The row is the source's stable identity (``source_uri`` is unique), so an edited file
-    updates it in place: title, kind and content hash move to the fresh values, the old chunks
-    are deleted and the fresh spans inserted with ``processed_at`` null so the next graph build
-    re-extracts them. Claims minted from the old spans stay live with their provenance nulled
-    (``source_chunk_id`` is SET NULL on chunk delete), and the re-extraction's consolidation
-    supersedes whatever the new content contradicts, the bi-temporal record intact. Ownership
-    and scopes stay the standing row's, a refresh changes content, never sharing.
-
-    stale: the standing document row whose content changed.
-    document: the freshly assembled row carrying the new content and chunks.
-    """
-    replacements = list(document.chunks)
-    document.chunks = []
-    stale.title = document.title
-    stale.kind = document.kind
-    stale.content_hash = document.content_hash
-    for old in await session().scalars(select(Chunk).where(Chunk.document_id == stale.id)):
-        await session().delete(old)
-    for chunk in replacements:
-        chunk.document_id = stale.id
-        chunk.owner_id = stale.owner_id
-        chunk.scopes = list(stale.scopes)
-        session().add(chunk)
-    await session().flush()
-    return stale.id
+    """Dedupe-check then store or refresh a document in one exact scope transaction."""
+    async with user as opened:
+        return await DocumentStore(opened).store(dedupe, document)
 
 
 async def ingest_image(
+    user: User,
     path: Path,
     title: str | None = None,
     caption: str | None = None,
-    owner_id: uuid.UUID | None = None,
-    scopes: tuple[uuid.UUID, ...] = (),
+    created_by: uuid.UUID | None = None,
+    scopes: Scopes = frozenset(),
 ) -> uuid.UUID:
-    """Store an image as a document whose one chunk embeds into the shared multimodal space.
-
-    The image is embedded through the embedder's image lane into the same halfvec space the text
-    chunks live in, so a later text query recalls it by plain cosine without a separate index. The
-    write dedupes on the image bytes' content hash so re-ingesting the same picture is idempotent.
-
-    path: image file to ingest.
-    title: human-readable label, defaulted from the file stem when null.
-    caption: text stored on the chunk, defaulted to the file name when null.
-    owner_id: user that owns the stored rows, the system user when null.
-    scopes: org set the stored rows are shared with, private to the owner when empty.
-    """
-    owner_id = owner_id or settings.system_user_id
+    """Store an image as a document whose one chunk embeds into the shared multimodal space."""
+    created_by = created_by or settings.system_user_id
+    key = frozenset(scopes or (created_by,))
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    [embedding] = await Embedder().embed_images([str(path)])
+    [embedding] = await embed_images([str(path)])
     document = Document(
         kind="image",
         title=title or path.stem,
         source_uri=path.resolve().as_uri(),
         content_hash=digest,
-        owner_id=owner_id,
-        scopes=list(scopes),
+        created_by=created_by,
+        scopes=sorted(key),
         chunks=[
             Chunk(
                 ord=0,
                 text=caption or path.name,
                 embedding=embedding,
-                owner_id=owner_id,
-                scopes=list(scopes),
+                created_by=created_by,
+                scopes=sorted(key),
             )
         ],
     )
-    document_id, created = await store_document(
-        owner_id, Document.content_hash == digest, document
-    )
+    document_id, created = await store_document(user, Document.content_hash == digest, document)
     if created:
         logger.info("ingested image {} from {}", document_id, path)
     return document_id
 
 
 def text_files(path: Path) -> list[Path]:
-    """The text files under path, itself when it is one file, else every text file below it.
-
-    path: file or directory to enumerate.
-    """
+    """The text files under path, itself when it is one file, else every text file below it."""
     candidates = [path] if path.is_file() else sorted(path.rglob("*"))
     return [file for file in candidates if is_text(file)]
 
 
-async def ingest_file(
-    file: Path, owner_id: uuid.UUID, scopes: tuple[uuid.UUID, ...], embedder: Embedder
-) -> bool:
-    """Chunk, embed, and store one file as a document, returning whether it was written.
-
-    Skips a file whose content already matches a stored document, or one whose chunker returns no
-    spans at all, such as an empty file. A file stored before under the same ``source_uri`` whose
-    content CHANGED refreshes its standing document in place, counting as written. A byte the
-    `is_text` filter admitted but utf-8 cannot decode is replaced rather than raised, so one
-    malformed file never aborts the surrounding directory walk.
-
-    file: source file to ingest.
-    owner_id: user that owns the stored rows.
-    scopes: org set the stored rows are shared with.
-    embedder: the shared embedder every file in the walk reuses.
-    """
-    content = file.read_text(encoding="utf-8", errors="replace")
-    digest = content_hash(content)
-    code = is_code(file)
-    spans = (CodeChunker() if code else ChonkieChunker()).chunk(content)
-    if not spans:
-        return False
-    embeddings = await embedder.embed(spans, mode="document")
-    document = Document(
-        kind="code" if code else "note",
-        title=file.stem,
-        source_uri=file.resolve().as_uri(),
-        content_hash=digest,
-        owner_id=owner_id,
-        scopes=list(scopes),
-        chunks=[
-            Chunk(
-                ord=order,
-                text=span,
-                lexical=contextual_lexical(file.stem, span),
-                embedding=embedding,
-                owner_id=owner_id,
-                scopes=list(scopes),
-            )
-            for order, (span, embedding) in enumerate(zip(spans, embeddings, strict=True))
-        ],
-    )
-    _, created = await store_document(owner_id, Document.content_hash == digest, document)
-    return created
-
-
 async def ingest_path(
+    user: User,
     path: Path,
-    owner_id: uuid.UUID | None = None,
-    scopes: tuple[uuid.UUID, ...] = (),
+    created_by: uuid.UUID | None = None,
+    scopes: Scopes = frozenset(),
 ) -> int:
-    """Ingest every supported file under path and return the documents stored.
-
-    Skips a file whose content hash already matches a stored Document. A source file (kind=code)
-    is split by the code chunker and a note (kind=note) by the prose one, then each document with
-    its embedded chunks writes in one owner-scoped transaction.
-
-    path: file or directory to ingest.
-    owner_id: user that owns the stored rows, the system user when null.
-    scopes: org set the stored rows are shared with, private to the owner when empty.
-    """
-    owner_id = owner_id or settings.system_user_id
+    """Ingest every supported file under path and return the documents stored."""
+    created_by = created_by or settings.system_user_id
+    key = frozenset(scopes or (created_by,))
     logger.info("ingest start path={}", path)
-    embedder = Embedder()
-    written = [await ingest_file(file, owner_id, scopes, embedder) for file in text_files(path)]
-    ingested = sum(written)
+    sources = [
+        TextSource(
+            text=file.read_text(encoding="utf-8", errors="replace"),
+            title=file.stem,
+            kind="code" if is_code(file) else "note",
+            source_uri=file.resolve().as_uri(),
+            created_by=created_by,
+            scopes=key,
+        )
+        for file in text_files(path)
+    ]
+    ingested = sum(created for _, created in await TextIngestor(user).ingest_many(sources))
     logger.info("ingest done documents={}", ingested)
     return ingested
 
 
 async def ingest_text(
+    user: User,
     text: str,
     title: str | None = None,
     kind: str = "note",
-    owner_id: uuid.UUID | None = None,
-    scopes: tuple[uuid.UUID, ...] = (),
+    source_uri: str | None = None,
+    created_by: uuid.UUID | None = None,
+    scopes: Scopes = frozenset(),
+    capture: CaptureContext | None = None,
 ) -> uuid.UUID | None:
-    """Store a raw text blob as a document with embedded chunks and return its id.
-
-    Chunks the text with the prose chunker, embeds the spans, and writes the document and its
-    chunks in one owner-scoped transaction, returning the existing id when the same content was
-    stored before so a remember of identical text is idempotent. An empty or whitespace blob the
-    chunker yields no spans for returns null without writing a chunkless dead document, mirroring
-    `ingest_file`'s own empty-file guard. Graph extraction is enqueued by the caller, since this
-    only lands the rows.
-
-    text: the content to remember.
-    title: human-readable label, defaulted from the leading words when null.
-    kind: coarse type tag stamped on the document, such as note or code.
-    owner_id: user that owns the stored rows, the system user when null.
-    scopes: org set the stored rows are shared with, private to the owner when empty.
-    """
-    owner_id = owner_id or settings.system_user_id
-    digest = content_hash(text)
-    effective_title = title or " ".join(text.split()[:8])
-    spans = ChonkieChunker().chunk(text)
-    if not spans:
-        return None
-    embeddings = await Embedder().embed(spans, mode="document")
-    document = Document(
-        kind=kind,
-        title=effective_title,
-        content_hash=digest,
-        owner_id=owner_id,
-        scopes=list(scopes),
-        chunks=[
-            Chunk(
-                ord=order,
-                text=span,
-                lexical=contextual_lexical(effective_title, span),
-                embedding=embedding,
-                owner_id=owner_id,
-                scopes=list(scopes),
-            )
-            for order, (span, embedding) in enumerate(zip(spans, embeddings, strict=True))
-        ],
+    """Store a raw text blob as a document with embedded chunks and return its id."""
+    document_id, _ = await TextIngestor(user).ingest(
+        TextSource(
+            text=text,
+            title=title,
+            kind=kind,
+            source_uri=source_uri,
+            created_by=created_by,
+            scopes=scopes,
+            capture=capture,
+        )
     )
-    document_id, created = await store_document(
-        owner_id, Document.content_hash == digest, document
-    )
-    if created:
-        logger.info("remembered document {} kind={}", document_id, kind)
     return document_id
 
 
+async def ingest_texts(user: User, sources: Sequence[TextSource]) -> list[uuid.UUID | None]:
+    """Batch a corpus of text sources through one chunk preparation and embedding pipeline."""
+    return [document_id for document_id, _ in await TextIngestor(user).ingest_many(sources)]
+
+
 async def record_reference(
+    user: User,
     uri: str,
     title: str | None = None,
-    owner_id: uuid.UUID | None = None,
-    scopes: tuple[uuid.UUID, ...] = (),
+    created_by: uuid.UUID | None = None,
+    scopes: Scopes = frozenset(),
 ) -> uuid.UUID:
-    """Record a pointer to an external paper, url, or file as a reference document.
-
-    Stores a chunkless Document stamped kind=reference whose source_uri is the locator, so the
-    reference is recallable by title and deduped on its uri, returning the existing id when that
-    uri was recorded before. Fetching and chunking the target is a later enrichment pass.
-
-    uri: locator of the paper, url, or file to reference.
-    title: human-readable label, defaulted to the uri when null.
-    owner_id: user that owns the stored row, the system user when null.
-    scopes: org set the row is shared with, private to the owner when empty.
-    """
-    owner_id = owner_id or settings.system_user_id
-    document = Document(
-        kind="reference",
-        title=title or uri,
-        source_uri=uri,
-        content_hash=content_hash(uri),
-        owner_id=owner_id,
-        scopes=list(scopes),
+    """Store an embedded reference pointer as an already-processed searchable document."""
+    created_by = created_by or settings.system_user_id
+    key = frozenset(scopes or (created_by,))
+    document_id, _ = await TextIngestor(user).ingest(
+        TextSource(
+            text=uri,
+            title=title or uri,
+            kind="reference",
+            source_uri=uri,
+            created_by=created_by,
+            scopes=key,
+            processed=True,
+        )
     )
-    document_id, created = await store_document(owner_id, Document.source_uri == uri, document)
-    if created:
-        logger.info("recorded reference {} uri={}", document_id, uri)
+    assert document_id is not None
     return document_id
 
 
 async def remember_session(
+    user: User,
     text: str,
     kind: str = "note",
-    owner_id: uuid.UUID | None = None,
-    scopes: tuple[uuid.UUID, ...] = (),
+    created_by: uuid.UUID | None = None,
+    scopes: Scopes = frozenset(),
+    capture: CaptureContext | None = None,
 ) -> uuid.UUID:
-    """Store a remembered blob as one working-memory item and return its id, the cheap front write.
-
-    A remember lands here first rather than paying the chunk, embed, and extract pipeline up
-    front, so a capture is a single embedded row the recall lane can already rank. The promotion
-    pass later feeds the aged or overflow items into the long-term graph. The write runs as
-    owner_id so the row level security write policy admits it.
-
-    text: the content to remember.
-    kind: coarse type tag carried through to the promoted document.
-    owner_id: user that owns the stored item, the system user when null.
-    scopes: org set the item is shared with, private to the owner when empty.
-    """
-    owner_id = owner_id or settings.system_user_id
-    [embedding] = await Embedder().embed([text], mode="document")
-    async with acting_as(owner_id):
+    """Store a remembered blob as one working-memory item and return its id, the cheap front
+    write."""
+    created_by = created_by or settings.system_user_id
+    key = frozenset(scopes or (created_by,))
+    searchable = capture.search_text(text) if capture is not None else text
+    [embedding] = await embed([searchable], mode="document")
+    async with user as session:
         item = SessionItem(
-            kind=kind, text=text, embedding=embedding, owner_id=owner_id, scopes=list(scopes)
+            kind=kind,
+            text=text,
+            provenance=capture.record() if capture is not None else {},
+            embedding=embedding,
+            created_by=created_by,
+            scopes=sorted(key),
         )
-        session().add(item)
-        await session().flush()
+        session.add(item)
+        await session.flush()
         logger.info("remembered session item {} kind={}", item.id, kind)
         return item.id

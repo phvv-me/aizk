@@ -1,8 +1,9 @@
-from .embedder import Embedder, EmbedMode, image_url_for, instructed, instruction_for
+from .embedder import EmbedMode, embed, embed_images, image_url_for, instructed, instruction_for
 
 __all__ = [
     "EmbedMode",
-    "Embedder",
+    "embed",
+    "embed_images",
     "image_url_for",
     "instructed",
     "instruction_for",

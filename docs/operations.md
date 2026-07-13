@@ -6,7 +6,7 @@ and a real deployment. Both are covered here.
 
 ## The whole engine in one compose
 
-`docker compose up -d` brings up the whole stack, the VectorChord Postgres, the three model
+`docker compose up -d` brings up the whole stack, the VectorChord Postgres, the two model
 containers, and one `server` container that is the entire aizk engine at once. That single
 container runs `serve-mcp`, which gathers the pgqueuer worker on its own event loop
 (`serve_with_worker`, on by default), so one process is the MCP server, every background
@@ -25,6 +25,21 @@ addresses in the compose file itself, never in code. It publishes the MCP HTTP p
 Only when you scale horizontally, several server replicas behind a load balancer, do you split the
 worker out, so the crons fire once rather than once per replica. Set `AIZK_SERVE_WITH_WORKER=0` on
 the extra replicas and run one `aizk worker` beside them.
+
+## Schema upgrades
+
+Build the replacement server image while the old server remains live. Take an Aizk database
+backup, stop only the server, run `aizk migrate` from the new image, and recreate only the server.
+Do not restart Logto or its preserved database for an Aizk schema upgrade.
+
+The pre-POC schema history is one fused revision, `0001_init`. It creates the complete schema with
+immutable `created_by` provenance, installs the nonempty personal, organization, and
+organization-intersection scope lattice under forced RLS with every policy granted to the
+`aizk_app` role rather than PUBLIC, and builds `live_fact` as a security-invoker,
+security-barrier view. Before the proof of concept, upgrading from the discarded history means
+backing up the Aizk database, dropping only that database, and letting `aizk db setup` create the
+fresh baseline. Never stamp an older live schema as `0001_init`, and never touch Logto's separate
+database or data volume during this reset.
 
 ## Backup and restore
 
@@ -93,11 +108,10 @@ drill before you ever rely on the backups as your only durable copy.
 
 ## Deployment over HTTP with TLS
 
-Local use runs the server over stdio. Multiple users reaching it over a network need the HTTP
-transport behind TLS. The application side is one switch.
+The MCP server always uses streamable HTTP. Bind it to loopback and put TLS in front when it is
+reachable over a network.
 
 ```sh
-AIZK_MCP_HTTP=1
 AIZK_MCP_HOST=127.0.0.1   # bind to loopback, the proxy in front is the only public listener
 AIZK_MCP_PORT=8080
 ```
@@ -123,9 +137,30 @@ opening a port at all, Cloudflare terminates TLS at its edge and the tunnel carr
 
 ### Authentication
 
-A public deployment must resolve real users, which is the Zitadel path, a bearer token validated
-against the issuer's JWKS and mapped to a user, provisioning one on first sight. The wiring
-is in place but awaits a live end-to-end pass against a real Zitadel instance, tracked on the
-[Roadmap](https://github.com/phvv-me/aizk/blob/main/ROADMAP.md). Until then the local API key and
-the default user are the single-user paths, so stand a deployment up behind TLS first, then
-turn on Zitadel once its flow is proven.
+A public deployment uses Logto as the only identity and organization authority. aizk validates
+the bearer signature, issuer, expiry, resource audience, and required scopes. It derives the
+personal scope from the signed subject, then resolves current organizations and roles through the
+Management API. It never provisions or mirrors a user, organization, membership, role, or
+permission row.
+
+The authority lookup and public organization behavior are specified in
+[Identity and sharing](engine/identity.md). Management lookup failures remove shared and public
+standing while preserving only a verified subject's personal scope.
+
+Organization authority and public discovery use a Logto M2M application with a role that includes
+the built-in Management API `all` permission. The token exchange uses HTTP Basic client
+authentication and the OSS resource indicator `https://default.logto.app/api`.
+
+### Logto upgrades
+
+The crimson compose pins Logto 1.41.0. Do not deploy `latest` against the preserved Logto database.
+A controlled upgrade pulls one reviewed version, backs up the Logto database, applies that image's
+Logto CLI database alterations, and only then starts the service.
+
+```sh
+npm run cli db alt deploy
+```
+
+`logto db seed` is first-install initialization and is not the upgrade mechanism. Never hide a
+failed seed or alteration behind `|| true`. The deployment should stop when identity schema work
+fails, while the previous pinned Logto container and database remain intact.

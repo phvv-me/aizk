@@ -1,4 +1,7 @@
 import asyncio
+import os
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
@@ -10,54 +13,42 @@ from aizk.config import settings
 
 
 class FakeProcess:
-    """A `create_subprocess_exec` stand-in's return, only `returncode` and `communicate` read.
-
-    returncode: the exit code the fake tool reports.
-    stderr: the bytes `communicate` hands back as the tool's stderr.
-    """
-
     def __init__(self, returncode: int, stderr: bytes) -> None:
         self.returncode = returncode
         self.stderr = stderr
 
     async def communicate(self) -> tuple[None, bytes]:
-        """Return the fixed stdout and stderr, stdout None since it streamed straight to a file."""
         return None, self.stderr
+
+
+@dataclass
+class ProcessRecord:
+    args: list[str] = field(default_factory=list)
+    calls: list[list[str]] = field(default_factory=list)
+    stdin: BinaryIO | None = None
+    stdout: BinaryIO | None = None
 
 
 def patch_pg_tool(
     monkeypatch: pytest.MonkeyPatch,
-    record: dict[str, object],
+    record: ProcessRecord,
     *,
     returncode: int = 0,
     reported_stderr: bytes = b"",
     archive: bytes = b"",
 ) -> None:
-    """Replace the one subprocess seam with a fake recording its argv and streaming `archive`.
-
-    The fake writes `archive` to whatever file handle `backup_database` opened for stdout, so a
-    backup's reported size is real without ever running `pg_dump`, and records the argv and the
-    stdin/stdout handles so a test asserts the exact command the tools were invoked with.
-
-    record: a dict the fake populates with `args`, `stdin`, and `stdout`.
-    returncode: the exit code the fake tool reports.
-    reported_stderr: the stderr bytes the fake tool reports, named apart from the `stderr`
-        redirect argument the real call passes so the two never collide.
-    archive: bytes the fake writes to the stdout handle, a backup's simulated dump.
-    """
-
     async def fake(
         *args: str,
         stdin: BinaryIO | None = None,
         stdout: BinaryIO | None = None,
         stderr: int | None = None,
     ) -> FakeProcess:
-        # the scalar keys keep the FIRST invocation (the pg tool under test); `calls` accumulates
-        # every argv so the post-restore tokenizer probe is assertable too
-        record.setdefault("args", list(args))
-        record.setdefault("stdin", stdin)
-        record.setdefault("stdout", stdout)
-        record.setdefault("calls", []).append(list(args))  # type: ignore[union-attr]
+        # Scalar keys retain the first invocation while calls records every command.
+        if not record.calls:
+            record.args = list(args)
+            record.stdin = stdin
+            record.stdout = stdout
+        record.calls.append(list(args))
         if stdout is not None and archive:
             stdout.write(archive)
         return FakeProcess(returncode, reported_stderr)
@@ -68,61 +59,53 @@ def patch_pg_tool(
 def test_backup_streams_pg_dump_to_the_path_and_reports_size(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A backup runs `pg_dump --format=custom` streaming to the file and reports its real size."""
     monkeypatch.setattr(settings, "pg_client_launcher", [])
-    record: dict[str, object] = {}
+    record = ProcessRecord()
     patch_pg_tool(monkeypatch, record, archive=b"ARCHIVE")
     dump = tmp_path / "x.dump"
 
     report = asyncio.run(backup.backup_database(str(dump)))
 
     assert report.bytes == len(b"ARCHIVE")
-    assert record["args"][:3] == ["pg_dump", "--format=custom", "--dbname"]  # type: ignore[index]
-    assert record["stdout"] is not None  # streamed to the file handle, not captured in memory
+    assert record.args[:3] == ["pg_dump", "--format=custom", "--dbname"]
+    assert record.stdout is not None  # streamed to the file handle, not captured in memory
 
 
 def test_restore_streams_the_archive_and_cleans_the_configured_database(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Restoring the configured database runs `pg_restore --clean --if-exists` reading the file."""
     monkeypatch.setattr(settings, "pg_client_launcher", [])
-    record: dict[str, object] = {}
+    record = ProcessRecord()
     patch_pg_tool(monkeypatch, record)
     dump = tmp_path / "x.dump"
     dump.write_bytes(b"ARCHIVE")
 
     report = asyncio.run(backup.restore_database(str(dump)))
 
-    assert record["args"][0] == "pg_restore"  # type: ignore[index]
-    assert "--clean" in record["args"] and "--if-exists" in record["args"]  # type: ignore[operator]
-    assert record["stdin"] is not None
+    assert record.args[0] == "pg_restore"
+    assert "--clean" in record.args and "--if-exists" in record.args
+    assert record.stdin is not None
     assert report.database == settings.db_name
-    # the restore is followed by the tokenizer probe, the post-restore repair seam
-    calls = record["calls"]
-    assert len(calls) == 2 and calls[1][0] == "psql"  # type: ignore[index]
-    assert backup.PROBE_TOKENIZER_SQL in calls[1]  # type: ignore[operator]
+    assert len(record.calls) == 2 and record.calls[1][0] == "psql"
+    assert "tokenizer_catalog.tokenize" in record.calls[1][-1]
 
 
 def test_restore_recreates_the_bm25_tokenizer_when_the_probe_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A restored database without the tokenizer registration gets it recreated, EAFP.
-
-    `pg_dump` does not carry the vchord_bm25 catalog registration, so the probe `tokenize`
-    call fails on a fresh restore and the repair issues `create_tokenizer`; a database whose
-    registration survived probes clean and is never touched.
-    """
     issued: list[list[str]] = []
 
-    async def fake_tool(args: list[str], **_: object) -> None:
+    async def fake_tool(
+        args: list[str], *, stdout_path: str | None = None, stdin_path: str | None = None
+    ) -> None:
         issued.append(args)
-        if backup.PROBE_TOKENIZER_SQL in args:
+        if "tokenizer_catalog.tokenize" in args[-1]:
             raise backup.BackupError("Tokenizer not found: aizk_bm25")
 
     monkeypatch.setattr(settings, "pg_client_launcher", [])
     monkeypatch.setattr(backup, "run_pg_tool", fake_tool)
     asyncio.run(backup.ensure_bm25_tokenizer())
-    assert any(backup.CREATE_TOKENIZER_SQL in call for call in issued)
+    assert any("tokenizer_catalog.create_tokenizer" in call[-1] for call in issued)
 
     issued.clear()
 
@@ -131,32 +114,33 @@ def test_restore_recreates_the_bm25_tokenizer_when_the_probe_fails(
 
     monkeypatch.setattr(backup, "run_pg_tool", healthy_tool)
     asyncio.run(backup.ensure_bm25_tokenizer())
-    assert len(issued) == 1 and backup.PROBE_TOKENIZER_SQL in issued[0]
+    assert len(issued) == 1 and "tokenizer_catalog.tokenize" in issued[0][-1]
 
 
 def test_restore_into_a_scratch_database_skips_the_clean_flags(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Restoring into a named fresh database drops the clean flags, the non-destructive path."""
     monkeypatch.setattr(settings, "pg_client_launcher", [])
-    record: dict[str, object] = {}
+    record = ProcessRecord()
     patch_pg_tool(monkeypatch, record)
     dump = tmp_path / "x.dump"
     dump.write_bytes(b"ARCHIVE")
 
     report = asyncio.run(backup.restore_database(str(dump), database="scratch"))
 
-    assert "--clean" not in record["args"]  # type: ignore[operator]
+    assert "--clean" not in record.args
     assert report.database == "scratch"
 
 
 def test_a_nonzero_exit_raises_backup_error_naming_the_tool_and_its_stderr(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A tool exiting non-zero, a version mismatch among the causes, raises a legible error."""
     monkeypatch.setattr(settings, "pg_client_launcher", [])
     patch_pg_tool(
-        monkeypatch, {}, returncode=1, reported_stderr=b"aborting because of server version"
+        monkeypatch,
+        ProcessRecord(),
+        returncode=1,
+        reported_stderr=b"aborting because of server version",
     )
 
     with pytest.raises(BackupError, match="pg_dump exited 1.*server version"):
@@ -166,20 +150,18 @@ def test_a_nonzero_exit_raises_backup_error_naming_the_tool_and_its_stderr(
 def test_the_launcher_prefixes_the_command_so_the_tool_runs_in_the_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A configured launcher runs the tool through it, the compose version-match seam."""
     monkeypatch.setattr(settings, "pg_client_launcher", ["docker", "exec", "-i", "aizk-db-1"])
-    record: dict[str, object] = {}
+    record = ProcessRecord()
     patch_pg_tool(monkeypatch, record, archive=b"A")
 
     asyncio.run(backup.backup_database(str(tmp_path / "x.dump")))
 
-    assert record["args"][:5] == ["docker", "exec", "-i", "aizk-db-1", "pg_dump"]  # type: ignore[index]
+    assert record.args[:5] == ["docker", "exec", "-i", "aizk-db-1", "pg_dump"]
 
 
 def test_connection_url_prefers_the_override_and_swaps_the_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The backup connection uses `backup_database_url` when set, and swaps in an alternate db."""
     monkeypatch.setattr(settings, "backup_database_url", "postgresql://aizk:pw@db:5432/aizk")
     assert "db:5432/aizk" in backup.connection_url()
     assert backup.connection_url("scratch").endswith("/scratch")
@@ -189,10 +171,6 @@ def test_connection_url_prefers_the_override_and_swaps_the_database(
 
 
 def test_prune_backups_removes_only_the_old_matching_dumps(tmp_path: Path) -> None:
-    """Prune deletes dumps past the age cutoff, leaving recent and non-matching files alone."""
-    import os
-    import time
-
     old = tmp_path / "aizk-old.dump"
     recent = tmp_path / "aizk-recent.dump"
     other = tmp_path / "notes.txt"
@@ -211,11 +189,10 @@ def test_prune_backups_removes_only_the_old_matching_dumps(tmp_path: Path) -> No
 def test_scheduled_backup_writes_a_timestamped_dump_and_prunes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A scheduled backup dumps into `backup_dir` under a timestamped name and prunes old dumps."""
     monkeypatch.setattr(settings, "pg_client_launcher", [])
     monkeypatch.setattr(settings, "backup_dir", str(tmp_path / "backups"))
     monkeypatch.setattr(settings, "backup_keep_days", 14)
-    patch_pg_tool(monkeypatch, {}, archive=b"ARCHIVE")
+    patch_pg_tool(monkeypatch, ProcessRecord(), archive=b"ARCHIVE")
 
     report = asyncio.run(backup.scheduled_backup())
 

@@ -1,96 +1,127 @@
 import uuid
+from collections.abc import Collection
 from datetime import datetime
+from typing import Self
 
-from sqlalchemy import Select, select
+import sqlalchemy
+from sqlalchemy import ColumnElement, and_, case, func, or_
 from sqlalchemy.dialects.postgresql import Range
+from sqlmodel import select
+from sqlmodel.sql.expression import Select, SelectOfScalar
 
+from ....common import sql
+from ....common.sql import Column
 from ...mixins import ViewBase
 from ..tables.fact import FactClaim, FactContent
 
 
 class LiveFact(ViewBase):
-    """A read-only mirror of the live `fact_claim` x `fact_content` join, mapped onto `live_fact`.
+    """Security-invoker view joining current fact claims with immutable content.
 
-    The view is `fact_claim JOIN fact_content WHERE FactClaim.is_current`, so a caller that only
-    ever wants the live graph reads through this class instead of re-deriving the same temporal
-    predicate and the same claim-to-content join by hand on every query. `__view_select__` below
-    is that predicate's one SQL rendering, the source both the mapped columns and the migration's
-    `CREATE VIEW` DDL (`store.mixins.view.create_view_ddl`) are built from. `security_invoker =
-    true` on the view means every read still runs under the calling session's own row level
-    security, not the view owner's, so switching a query from `FactClaim`/`FactContent` to
-    `LiveFact` narrows which rows are live without widening which rows are visible. Never written
-    to: every write still targets `FactContent` and `FactClaim` and the base tables they map.
-
-    id: the live claim's own identity.
-    content_id: the fact content this claim stakes, the structural row two containers may share.
-    subject_id: entity content the fact is about.
-    object_id: entity content the fact points to, null for unary facts.
-    predicate: ontology relation type.
-    statement: self-contained natural-language rendering of the fact.
-    embedding: halfvec dense vector of the statement, null until embedded.
-    owner_id: user that holds this claim.
-    scopes: org set this claim is shared with, empty when private to the owner.
-    valid: world-time range when the statement holds.
-    recorded: transaction-time range, always open on every row this view admits.
-    last_accessed: transaction time recall last surfaced this claim.
-    access_count: how many times recall has surfaced this claim.
-    attributes: free-form structured detail extracted alongside this claim.
-    source_chunk_id: chunk the fact was extracted from, null when the chunk is gone.
-    promoted_from: the claim this one was promoted from, null for an ordinary write.
+    The view earns its migration over a per-statement CTE. One definition serves the ORM
+    entity, the raw recall SQL, and psql alike, and since it is a plain security-invoker
+    relation the planner inlines it into every calling statement exactly as a CTE would
+    while row security still runs as the caller. A CTE would need no migration but would be
+    retyped in each statement, drift between the Python and SQL copies, and stay invisible
+    from psql. Keep the view.
     """
 
-    id: uuid.UUID
-    content_id: uuid.UUID
-    subject_id: uuid.UUID
-    object_id: uuid.UUID | None
-    predicate: str
-    statement: str
-    embedding: list[float] | None
-    owner_id: uuid.UUID
-    scopes: list[uuid.UUID]
-    valid: Range[datetime] | None
-    recorded: Range[datetime]
-    last_accessed: datetime | None
-    access_count: int
-    attributes: dict
-    source_chunk_id: uuid.UUID | None
-    promoted_from: uuid.UUID | None
+    id: Column[uuid.UUID]
+    content_id: Column[uuid.UUID]
+    subject_id: Column[uuid.UUID]
+    object_id: Column[uuid.UUID | None]
+    predicate: Column[str]
+    statement: Column[str]
+    embedding: Column[list[float] | None]
+    created_by: Column[uuid.UUID]
+    scopes: Column[list[uuid.UUID]]
+    valid: Column[Range[datetime] | None]
+    recorded: Column[Range[datetime]]
+    last_accessed: Column[datetime | None]
+    access_count: Column[int]
+    attributes: Column[dict]
+    perspective_key: Column[str]
+    source_chunk_id: Column[uuid.UUID | None]
+    promoted_from: Column[uuid.UUID | None]
 
     @classmethod
-    def __view_select__(cls) -> Select:
-        """`fact_claim` joined to its `fact_content`, narrowed to `FactClaim.is_current`.
+    def line(cls) -> ColumnElement[str]:
+        """The fact's prompt-ready evidence line, speaker attribution then the predicate
+        and statement. A world fact with no recorded speaker skips the attribution
+        bracket entirely."""
+        speaker_label = cls.attributes >> "speaker_label"
+        speaker_name = func.coalesce(speaker_label, "unknown speaker")
+        speaker_role = cls.attributes >> "speaker_role"
+        speaker_suffix = sql.fragment(t", {speaker_role}")
+        epistemic_kind = func.coalesce(cls.attributes >> "epistemic_kind", "world")
+        attribution = case(
+            (and_(epistemic_kind == "world", speaker_label.is_(None)), ""),
+            else_=sql.concat(t"[{speaker_name}{speaker_suffix}, {epistemic_kind}] "),
+        )
+        predicate, statement = cls.predicate, cls.statement
+        return sql.concat(t"- {attribution}({predicate}) {statement}")
 
-        `fc.id`/`fc.content_id` name both halves of the join explicitly (the "expose both"
-        contract `promote` and the recall lanes both read), the structural columns
-        (subject_id, object_id, predicate, statement, embedding) come from the deduplicated
-        content, and every bi-temporal and decay column (owner_id, scopes, valid,
-        recorded, last_accessed, access_count, attributes, source_chunk_id,
-        promoted_from) comes from the claim. `FactClaim.is_current` is the identical hybrid
-        predicate `is_current_expression`, the do_orm_execute loader-criteria listener, and
-        `visible_at`'s live branch all share, so this view can never drift from what "current"
-        means anywhere else in the schema.
+    @classmethod
+    def embedded(cls) -> SelectOfScalar[Self]:
+        """Every live fact carrying an embedding, the corpus graph passes cluster over."""
+        return select(cls).where(cls.embedding.is_not(None))
+
+    @classmethod
+    def touching(
+        cls, entity_ids: Collection[uuid.UUID]
+    ) -> Select[tuple[uuid.UUID, uuid.UUID | None, str]]:
+        """Subject, object, and statement of every live fact naming one of the given
+        entities as subject or object, oldest recorded first with the id as tiebreak.
+
+        entity_ids: the entities whose surrounding facts to load.
         """
-        claim = FactClaim.__table__
-        content = FactContent.__table__
         return (
-            select(
-                claim.c.id.label("id"),
-                claim.c.content_id.label("content_id"),
-                content.c.subject_id.label("subject_id"),
-                content.c.object_id.label("object_id"),
-                content.c.predicate.label("predicate"),
-                content.c.statement.label("statement"),
-                content.c.embedding.label("embedding"),
-                claim.c.owner_id.label("owner_id"),
-                claim.c.scopes.label("scopes"),
-                claim.c.valid.label("valid"),
-                claim.c.recorded.label("recorded"),
-                claim.c.last_accessed.label("last_accessed"),
-                claim.c.access_count.label("access_count"),
-                claim.c.attributes.label("attributes"),
-                claim.c.source_chunk_id.label("source_chunk_id"),
-                claim.c.promoted_from.label("promoted_from"),
+            select(cls.subject_id, cls.object_id, cls.statement)
+            .where(
+                or_(
+                    cls.subject_id.in_(entity_ids),
+                    cls.object_id.in_(entity_ids),
+                )
             )
-            .select_from(claim.join(content, content.c.id == claim.c.content_id))
+            .order_by(func.lower(cls.recorded), cls.id)
+        )
+
+    @classmethod
+    def newest_statements(cls, limit: int) -> SelectOfScalar[str]:
+        """The most recently recorded live statements, newest first. Callers chain their
+        own predicate filters onto the returned select.
+
+        limit: how many statements to keep.
+        """
+        return select(cls.statement).order_by(func.lower(cls.recorded).desc()).limit(limit)
+
+    @classmethod
+    def __view_select__(cls) -> sqlalchemy.Select:
+        return (
+            sqlalchemy.select(
+                FactClaim.id.label("id"),
+                FactClaim.content_id.label("content_id"),
+                FactContent.subject_id.label("subject_id"),
+                FactContent.object_id.label("object_id"),
+                FactContent.predicate.label("predicate"),
+                FactContent.statement.label("statement"),
+                FactContent.embedding.label("embedding"),
+                FactClaim.created_by.label("created_by"),
+                FactClaim.scopes.label("scopes"),
+                FactClaim.valid.label("valid"),
+                FactClaim.recorded.label("recorded"),
+                FactClaim.last_accessed.label("last_accessed"),
+                FactClaim.access_count.label("access_count"),
+                FactClaim.attributes.label("attributes"),
+                FactClaim.perspective_key.label("perspective_key"),
+                FactClaim.source_chunk_id.label("source_chunk_id"),
+                FactClaim.promoted_from.label("promoted_from"),
+            )
+            .select_from(
+                FactClaim.__table__.join(
+                    FactContent.__table__,
+                    FactContent.id == FactClaim.content_id,
+                )
+            )
             .where(FactClaim.is_current)
         )

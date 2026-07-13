@@ -1,14 +1,9 @@
 class NoTenantContext(RuntimeError):
-    """A scoped table was queried without a user in context, so the read was refused.
-
-    The database already fails closed to NULL when app.uid is unset, since the scope predicate
-    then matches no row, so this raise is defense in depth that turns a forgotten `acting_as` into
-    a loud error at the call site instead of a silently empty result.
-    """
+    """A scoped table was queried without a user in context, so the read was refused."""
 
 
 class ScopeNotFoundError(ValueError):
-    """No org is visible under the given name."""
+    """The requested write destination is unknown or outside the caller's authority."""
 
 
 class NotVisibleError(ValueError):
@@ -17,21 +12,12 @@ class NotVisibleError(ValueError):
 
 class OntologyError(ValueError):
     """An ontology operation that violates a structural invariant, such as deactivating a
-    system-written entity type or relation."""
+    system- written entity type or relation."""
 
 
 class OntologyNotReadyError(RuntimeError):
-    """The ontology cache was read before `ops.setup()` ever refreshed it.
-
-    `setup` runs at server start, worker start, and test bootstrap alike, so reaching this
-    genuinely means a missed bootstrap, not a race worth papering over with a lazy default.
-    """
+    """The ontology cache was read before `ops.setup()` ever refreshed it."""
 
 
 class ExtractionUnreachableError(RuntimeError):
-    """The graph-extraction chat endpoint refused the connection, not merely one slow call.
-
-    Raised instead of grinding through every remaining pending chunk against a dead endpoint, one
-    `APITimeoutError` per call; names `AIZK_LLM_URL` and the opt-in `vllm-llm` compose profile so
-    the fix is the error message itself rather than a stack trace into httpx.
-    """
+    """The graph-extraction chat endpoint refused the connection, not merely one slow call."""

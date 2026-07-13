@@ -15,14 +15,15 @@ flowchart LR
     R --> P
     B[background worker] --> P
     W -.-> V[vLLM<br/>extract]
-    R -.-> K[vLLM<br/>embed + rerank]
+    R -.-> K[vLLM<br/>embed]
     W -.-> K
 ```
 
-The engine splits into five parts, each with its own page.
+The engine splits into six parts, each with its own page.
 
 - [Write path](write-path.md), how text becomes a knowledge graph at one LLM call per chunk
 - [Store](store.md), the content and claim union model and the bi-temporal core
+- [Identity](identity.md), the Logto boundary and multi-organization authority lookup
 - [Lattice](lattice.md), the scope-set visibility model row level security enforces
 - [Read path](read-path.md), five retrieval lanes fused into one recall call
 - [Autonomy](autonomy.md), the background passes that maintain the graph
@@ -37,5 +38,5 @@ the map from every mechanism back to its paper lives in [Provenance](../provenan
 engine and is exposed over MCP, so a scope name never crosses tenants and there are no UIs.
 
 **Minimize own work.** aizk builds only the differentiated core, the RLS temporal graph, and
-rents everything else. Identity is Zitadel, serving is vLLM, the queue is pgqueuer, and the ORM
-is SQLModel.
+rents everything else. Identity and organization authorization are Logto, serving is vLLM, the
+queue is pgqueuer, and the ORM is SQLModel.

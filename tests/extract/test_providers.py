@@ -12,27 +12,23 @@ from aizk.extract.llm.providers import (
 
 @pytest.mark.parametrize("name", list(PROVIDERS))
 def test_registered_provider_resolves_to_its_preset(name: str) -> None:
-    """Every registered name resolves to a `Provider` carrying a url and a default model."""
     provider = resolve_provider(name)
     assert isinstance(provider, Provider)
     assert provider.name == name and provider.url and provider.model
 
 
 def test_unregistered_label_resolves_to_none() -> None:
-    """The default `vllm` label and any unknown name are not presets, so they resolve to None."""
     assert resolve_provider("vllm") is None
     assert resolve_provider("not-a-provider") is None
 
 
 def _class_default(field: str) -> object:
-    """The declared class default of a settings field, independent of any `.env` override."""
     return Settings.model_fields[field].get_default(call_default_factory=True)
 
 
 def test_at_default_reads_the_field_class_default(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`at_default` is true only while a field still holds its declared default."""
     monkeypatch.setattr(settings, "llm_url", _class_default("llm_url"))
     assert at_default("llm_url")
     monkeypatch.setattr(settings, "llm_url", "http://elsewhere/v1")
@@ -42,7 +38,6 @@ def test_at_default_reads_the_field_class_default(
 def test_unregistered_provider_returns_settings_unchanged(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With an unregistered label, `provider_settings` hands back the same configured object."""
     monkeypatch.setattr(settings, "llm_provider", "vllm")
     assert provider_settings() is settings
 
@@ -50,7 +45,6 @@ def test_unregistered_provider_returns_settings_unchanged(
 def test_named_provider_overlays_only_default_fields(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A named provider fills only fields at their default; an explicit url still wins."""
     monkeypatch.setattr(settings, "llm_provider", "cerebras")
     monkeypatch.setattr(settings, "llm_url", _class_default("llm_url"))
     monkeypatch.setattr(settings, "llm_model", _class_default("llm_model"))

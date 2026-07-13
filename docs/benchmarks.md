@@ -1,62 +1,124 @@
 # Benchmarks and evaluation
 
-Every number here was measured on the live stack, one RTX 4090 shared by the embed, rerank,
-and extract containers next to one Postgres, against the real vault corpus of 1,109 documents
-and 3,824 chunks that built a graph of 16,162 entities and 20,396 facts.
+Aizk keeps three evaluation levels separate. A test proves a contract. The internal harness
+measures retrieval over memory already stored in one deployment. An external benchmark imports
+its own history into an isolated scope before it asks any question.
 
-## Build throughput
+## Internal evaluation
 
-| Metric | Value |
-|---|---|
-| Full vault build | 35.6 min |
-| Amortized per chunk | 667 ms (was 4,500 ms, 6.8x) |
-| LLM calls per chunk | 1.22 (was ~13) |
-| Aggregate throughput | 3,794 tok/s |
-| GLiNER2 gate skip rate | 2.2% on this dense corpus |
+`aizk eval bench` samples visible live facts or reads one question per line from a file. It reports
+hit rate, nDCG, MRR, optional answerability judging, and the multihop expansion breakdown.
+This is useful for regression checks on a real corpus. It is not an external benchmark score.
 
-## The full-surface drive
+`aizk eval sweep` measures quality, latency, host memory, GPU memory, and vector storage across a
+bounded configuration matrix. `aizk eval scale` grows an isolated synthetic corpus and records the
+point where latency or storage crosses its declared budget.
 
-Every one of the 36 MCP tools was driven end to end with timings. Every failure in the run
-traced to the drive script's own argument guesses or a correctly enforced gate, none to the
-engine.
+The 2026-07-12 query regression used PostgreSQL 18, VectorChord 1.1.1, and 100,000 chunks plus
+100,000 live facts. Moving chunk reads through document RLS and starting dense facts from bounded
+content candidates reduced local database execution from about 855 ms to 340 ms. The same pass
+removed temporary I/O and reduced the cold multihop plan from about 3.02 seconds to 2.05 seconds.
+Warm multihop execution was about 0.5 seconds. A curated Vault check over 23 related notes and ten
+explicit source qrels kept identical rankings with hit at 8 and MRR both equal to 1.0. This is a
+regression cell, not a published quality score.
 
-| Tool | Time | Tool | Time |
-|---|---|---|---|
-| list, audit, membership verbs | 4 to 15 ms | remember, reference | 6 to 15 ms |
-| tasks_status, pending | 12 to 32 ms | ingest one note | 36 ms |
-| health full report | 252 ms | setup no-op path | 141 ms |
-| recall warm | 464 to 491 ms | get_context | 467 ms |
-| projects, 252 portraits | 711 ms | delete_group with demotion sweep | 30 to 41 ms |
-| timeline, whole graph in window | 887 ms | export_scope full dump | 6.6 s |
-| force_rebuild pending slice | 11.6 s | bench, n=10 eval | 23.0 s |
+The 2026-07-12 ranking upgrade was validated on a planted corpus of 128 topics, 99,840 chunks,
+and 104,448 live facts whose ground truth encodes each mechanism: dense-invisible chain facts
+reachable only through the graph, high-degree hub entities, fresh and stale claim twins at equal
+cosine distance, near-duplicate mega documents, and off-corpus noise questions. Inside the final
+packed context, mention-seeded personalized PageRank recovered 508 of 512 planted chain facts
+where the previous recursive walk recovered 128, access-decay blending ranked the fresh twin
+first in 128 of 128 pairs where distance-only ordering managed 13 of 32 at the smaller scale, the
+per-document cap lifted distinct sources from 1 to 4 of 8, and the calibrated relevance floor
+packed zero lines across every noise question. Local recall executed at about 259 ms p50 and
+multihop at about 465 ms p50 on this cell, with the packing walk's ordered candidates now
+materialized so the recursive budget walk no longer re-runs every lane per kept row. The floor
+default of 0.65 comes from real Qwen3-VL embeddings, where relevant vault chunks landed at
+cosine distance 0.27 to 0.49 and off-corpus questions bottomed out at 0.60 to 0.75. This is a
+regression cell, not a published quality score.
 
-The timeline number deserves its caveat. It scales with entries returned, and this graph was
-built yesterday, so a week window holds all twenty thousand claims. On a settled corpus a
-week's delta answered in 18 ms.
+The 2026-07-12 embedder shootout chunked the real vault with the production chunker into
+1,903 spans over 1,156 notes and scored self-retrieval for 1,101 title queries per candidate
+model at the schema's 1,024 dimensions. `Qwen3-VL-Embedding-2B`, the multimodal default,
+reached hit@5 88.0% and MRR 0.794; `Qwen3-Embedding-0.6B` 89.3% and 0.792;
+`Qwen3-Embedding-4B` 90.1% and 0.802, rising to 90.3% and 0.807 at its native 2,560
+dimensions. Native dimensions added under one point everywhere, validating the Matryoshka
+truncation. The text-only models push the nearest off-corpus distance from 0.46 to 0.63,
+a cleaner abstention margin, at the cost of the image lane. Absolute cosine values are
+model-specific geometry under instruction-asymmetric embedding and only margins carry
+meaning, so cross-model distance comparisons say nothing about quality.
 
-## Retrieval quality
+The 2026-07-12 reranker cell scored both original Qwen3 reranker checkpoints served through
+vLLM's yes/no-classifier conversion, reranking the embedder's own top 8 for 253 real vault
+queries. Without the official prompt scaffold both checkpoints ranked filler above answers
+and collapsed MRR from 0.90 to about 0.40, so the scaffold is correctness, not style. With
+it, the 0.6B still degraded MRR to 0.77 while the 4B held 0.91 against a 0.90 baseline with
+little headroom. The lane therefore ships with the 4B checkpoint, stays off without a
+configured endpoint, and owes its real quality verdict to a benchmark with genuine question
+headroom rather than title self-retrieval.
 
-| Metric | Score |
-|---|---|
-| hit@8 | 0.80 |
-| nDCG@8 | 0.743 |
-| MRR | 0.725 |
+The same database held 10,000 entities and 100,000 live facts for the graph write-path check.
+Loading every full live fact for 32 subjects and reranking in Python took about 833 ms and spilled
+1,455 temporary blocks. A typed lateral query ranked each candidate through the subject index,
+selected only claim ID, predicate, object, statement, and raw cosine distance, and returned the top
+five in about 39 ms without temporary I/O. Entity resolution now sends a whole extracted batch
+through one `VALUES` relation, and unchanged documents are removed before any embedding request.
 
-The full config sweep held a surprise. The cheap config with rerank and pagerank both off
-scored recall@8 0.90 and nDCG 0.775 on the same set, better than the full-lanes default at a
-third of the latency. The n is small (ten synthesized questions), but it argues the expensive
-lanes should earn their latency per query, which is exactly what the gated query routing is
-for.
+## GroupMemBench
+
+The GroupMemBench adapter reads the released conversation and question schemas independently. It
+does not copy the upstream implementation, whose repository currently declares no license. Each
+domain gets one deterministic shared scope. The complete corpus contains 30,000 messages in each
+domain. Every message keeps its author, role, channel, reply, phase, topic, decision marker, and
+source time. Every question recalls as its named asking user.
+
+```sh
+aizk eval groupmem /path/to/GroupMemBench --domain Finance --question-limit 2
+```
+
+The runner performs the complete path. It batches message embeddings, stores distinct message
+identities, builds the graph, assembles asker-aware context, generates an answer from that context,
+and judges it against the gold answer. Pydantic Evals owns the typed cases, concurrent execution,
+LLM verdicts, durations, and failures. Question families remain separate in the report so an
+overall score cannot hide failures on updates, time, speaker perspective, terminology, or
+abstention.
+
+The released comparison protocol uses `k=10`, GPT-5 for answer generation, and GPT-5 for judging.
+Finance and Technology use the released solvability-filtered questions. Healthcare and
+Manufacturing remain useful diagnostic domains, but their released questions are unfiltered.
+
+A publishable report therefore requires the complete 30,000-message corpus, every question in one
+filtered domain, the reference models, `k=10`, and no operational failures. A message or question
+limit always marks the report diagnostic. Reusing the local extraction model also marks it
+diagnostic. The report records both model names and never turns a network, generation, database,
+or evaluator failure into an ordinary wrong answer.
+
+No Aizk GroupMemBench score is published yet. The adapter is implemented and tested, but a full
+run requires the deployed embedding and extraction lanes and must not be replaced by a synthetic
+estimate. The paper reports that its best evaluated system reaches 46 percent overall, which is a
+useful difficulty reference rather than an Aizk result.
+
+## Forgetting-aware scoring
+
+`FAMAScore` implements the Memora paper equation per question.
+
+```text
+max(0, MPA - weight * (1 - FAA))
+```
+
+MPA is current-memory presence accuracy. FAA is obsolete-memory absence accuracy. The weight is
+the number of forgetting criteria divided by all criteria. A relevant answer that also repeats an
+invalidated memory therefore loses credit.
 
 ## Verification posture
 
-- 577 tests across 57 files, all green, property-based first with Hypothesis. The RLS lattice
-  is proven against an independent Python specification over the full user, role,
-  scope-set, and lens cross-product.
-- 100.00% consolidated line and branch coverage, 3,877 statements and 454 branches with zero
-  missed.
-- The schema regenerates from the models, the RLS drift probe comes back empty over repeated
-  fresh-volume cycles, and the downgrade path is verified.
-- Five real bugs were found and fixed by the benchmark drives themselves, a concurrency
-  deadlock, GLiNER thread oversubscription, a batch-killing unhandled exception, a second
-  truncation shape, and the greedy date parser.
+The suite uses Hypothesis for algebraic and authorization properties and parametrized tests for
+backend matrices. A fresh `aizk_test` database migrates from `0001_init`, and Alembic autogenerate
+returns an empty revision against the current models. The RLS verifier separately checks every
+scoped table and policy in the PostgreSQL catalog.
+
+Sources include [GroupMemBench](https://arxiv.org/abs/2605.14498),
+[Memora](https://arxiv.org/abs/2604.20006), and
+[LongMemEval-V2](https://arxiv.org/abs/2605.12493). Query profiling follows
+[PostgreSQL 18 EXPLAIN](https://www.postgresql.org/docs/18/sql-explain.html), and filtered vector
+search follows [VectorChord prefilter](https://docs.vectorchord.ai/vectorchord/usage/prefilter.html).

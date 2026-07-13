@@ -3,78 +3,95 @@ from datetime import UTC, datetime, timedelta
 
 import dbutil
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
-from aizk.store import SessionItem, Watermark, acting_as
+from aizk.store import SessionItem, Watermark
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 
-def test_session_outside_a_block_fails_fast() -> None:
-    """session() raises NoTenantContext when read outside any acting_as/bypass_rls block."""
-    from aizk.exceptions import NoTenantContext
-    from aizk.store.engine import session
-
-    with pytest.raises(NoTenantContext):
-        session()
-
-
 def test_watermark_bump_read_and_payload_round_trip() -> None:
-    """`bump` accumulates, `set_value` writes absolutely, and payloads read back under RLS."""
-
     async def body() -> None:
         await dbutil.reset_db()
         owner = uuid.uuid4()
-        async with acting_as(owner):
-            assert await Watermark.read(owner, Watermark.Kind.fact_count) == 0
-            assert await Watermark.bump(owner, Watermark.Kind.fact_count, by=3) == 3
-            assert await Watermark.bump(owner, Watermark.Kind.fact_count, by=2) == 5
-            await Watermark.set_value(owner, Watermark.Kind.scorecard, counter=9, payload={"k": 1})
-            assert await Watermark.read(owner, Watermark.Kind.scorecard) == 9
-            assert await Watermark.read_payload(owner, Watermark.Kind.scorecard) == {"k": 1}
-            assert await Watermark.read_payload(owner, Watermark.Kind.config) == {}
+        key = frozenset({owner})
+        async with dbutil.actor(owner) as db:
+            assert await Watermark.read(db, key, Watermark.Kind.fact_count) == 0
+            await Watermark.bump_many(db, key, Watermark.Kind.entity_dirty, [])
+            await Watermark.bump_many(db, key, Watermark.Kind.entity_dirty, ["a", "b", "a"], by=2)
+            assert await Watermark.read(db, key, Watermark.Kind.entity_dirty, "a") == 2
+            assert await Watermark.read(db, key, Watermark.Kind.entity_dirty, "b") == 2
+            assert await Watermark.bump(db, key, Watermark.Kind.fact_count, by=3) == 3
+            assert await Watermark.bump(db, key, Watermark.Kind.fact_count, by=2) == 5
+            await Watermark.set_value(
+                db, key, Watermark.Kind.scorecard, counter=9, payload={"k": 1}
+            )
+            assert await Watermark.read(db, key, Watermark.Kind.scorecard) == 9
+            assert await Watermark.read_payload(db, key, Watermark.Kind.scorecard) == {"k": 1}
+            assert await Watermark.read_payload(db, key, Watermark.Kind.config) == {}
 
     dbutil.run(body())
 
 
 def test_watermark_is_private_to_its_owner() -> None:
-    """A watermark counter never leaks across users, the private-bookkeeping guarantee."""
-
     async def body() -> None:
         await dbutil.reset_db()
         owner = uuid.uuid4()
         other = uuid.uuid4()
-        async with acting_as(owner):
-            await Watermark.bump(owner, Watermark.Kind.fact_count, by=7)
-        async with acting_as(other):
-            assert await Watermark.read(owner, Watermark.Kind.fact_count) == 0
+        async with dbutil.actor(owner) as db:
+            await Watermark.bump(db, frozenset({owner}), Watermark.Kind.fact_count, by=7)
+        async with dbutil.actor(other) as db:
+            assert await Watermark.read(db, frozenset({owner}), Watermark.Kind.fact_count) == 0
 
     dbutil.run(body())
 
 
-def test_session_item_due_for_promotion_unions_aged_and_overflow() -> None:
-    """`due_for_promotion` returns aged items plus the oldest overflow, oldest-first, deduped."""
-    now = datetime(2024, 1, 10, tzinfo=UTC)
+@settings(max_examples=10, deadline=None)
+@given(
+    ages=st.lists(st.integers(min_value=0, max_value=24 * 60), max_size=8),
+    age_minutes=st.integers(min_value=1, max_value=24 * 60),
+    threshold=st.integers(min_value=0, max_value=8),
+)
+def test_session_item_promotion_is_the_ordered_union_of_age_and_overflow(
+    migrated_db: None, ages: list[int], age_minutes: int, threshold: int
+) -> None:
+    """The database decides due items: aged past the cutoff or the oldest overflow, oldest
+    first, replayed here against the same rows."""
+    owner = uuid.uuid4()
+    ordered_ages = sorted(ages, reverse=True)
+    overflow = max(0, len(ordered_ages) - threshold)
 
-    def item(minutes_old: float, ident: uuid.UUID) -> SessionItem:
-        made = SessionItem(text="t", owner_id=uuid.uuid4())
-        made.id = ident
-        made.created_at = now - timedelta(minutes=minutes_old)
-        return made
+    async def body() -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        await dbutil.reset_db()
+        now = datetime.now(UTC)
+        seeded: list[uuid.UUID] = []
+        for age in ordered_ages:
+            item_id = uuid.uuid4()
+            await dbutil.admin_exec(
+                "INSERT INTO session_item (id, created_by, scopes, kind, text, created_at) "
+                "VALUES (:id, :owner, CAST(:scopes AS uuid[]), 'note', 't', :created_at)",
+                {
+                    "id": item_id,
+                    "owner": owner,
+                    "scopes": [str(owner)],
+                    "created_at": now - timedelta(minutes=age),
+                },
+            )
+            seeded.append(item_id)
+        expected = [
+            item_id
+            for index, (item_id, age) in enumerate(zip(seeded, ordered_ages, strict=True))
+            # Strictly older than the cutoff: seeding time already passed since created_at.
+            if age >= age_minutes or index < overflow
+        ]
+        async with dbutil.actor(owner) as session:
+            result = await session.exec(
+                SessionItem.due_for_promotion(frozenset({owner}), age_minutes, threshold)
+            )
+            due = [item.id for item in result.scalars()]
+        return due, expected
 
-    aged = item(120, uuid.uuid4())
-    fresh_a = item(1, uuid.uuid4())
-    fresh_b = item(2, uuid.uuid4())
-    items = [aged, fresh_b, fresh_a]  # oldest first
-    due = SessionItem.due_for_promotion(items, now, age_minutes=60, threshold=1)
-    # the aged item passes the age cutoff; overflow=len-threshold=2 takes the two oldest by index
-    assert aged in due
-    assert [i.id for i in due] == [i.id for i in items if i in due]
+    due, expected = dbutil.run(body())
 
-
-def test_session_item_nothing_due_when_fresh_and_under_threshold() -> None:
-    """A small, fresh working set drains nothing, the steady-state no-op."""
-    now = datetime(2024, 1, 10, tzinfo=UTC)
-    made = SessionItem(text="t", owner_id=uuid.uuid4())
-    made.id = uuid.uuid4()
-    made.created_at = now
-    assert SessionItem.due_for_promotion([made], now, age_minutes=60, threshold=20) == []
+    assert due == expected

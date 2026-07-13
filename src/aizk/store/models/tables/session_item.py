@@ -1,60 +1,72 @@
-from datetime import datetime, timedelta
-from typing import Self, cast
+from datetime import datetime
+from typing import ClassVar, Self, cast
 
-from sqlalchemy import DateTime, Text
+from sqlalchemy import ColumnElement, DateTime, Index, Text, UniqueConstraint, func, or_, select
+from sqlalchemy.orm import declared_attr
+from sqlalchemy.sql.selectable import Select
 from sqlmodel import Field
 
+from ....common import sql
+from ....common.sql import Column, TypedJSONB
+from ....types import Scopes
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
 
 
 class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
-    """One fast working-memory item a user remembered, before it reaches the long-term graph.
+    """Fast working-memory item awaiting long-term graph promotion."""
 
-    The session tier is the cheap front of memory. A remember writes a single embedded row here
-    rather than paying the chunk, embed, and extract pipeline up front, so a capture is immediate.
-    A recall reads the still-working items alongside the graph, and the promotion pass later feeds
-    the aged or overflow items through the on-write pipeline that extracts and consolidates them,
-    stamping promoted_at so they leave the working set once their knowledge lives in the graph. The
-    row is scoped and row-level-security forced exactly like the memory it becomes.
+    mutable: ClassVar[bool] = True
 
-    id: stable identity, generated client-side on insert.
-    owner_id: user that owns the row, enforced by row level security.
-    scopes: org set the row is shared with, empty when private to the owner.
-    kind: coarse type tag carried through to the promoted document, such as note or code.
-    text: the remembered content, ranked by its embedding and fed whole to promotion.
-    embedding: halfvec dense vector of the text, what the session recall lane ranks.
-    created_at: capture time, the age the promotion pass measures against.
-    promoted_at: time the item was fed into the long-term graph, null while it is still working.
-    """
-
-    kind: str = Field(default="note")
-    text: str = Field(sa_type=Text)
-    promoted_at: datetime | None = Field(
+    kind: Column[str] = Field(default="note")
+    text: Column[str] = Field(sa_type=Text)
+    provenance: Column[dict] = Field(
+        default_factory=dict, sa_type=TypedJSONB, sa_column_kwargs={"server_default": "{}"}
+    )
+    promoted_at: Column[datetime | None] = Field(
         default=None, index=True, sa_type=cast(type[datetime], DateTime(timezone=True))
     )
 
+    @declared_attr.directive
+    def __table_args__(cls) -> tuple[Index | UniqueConstraint, ...]:
+        return (
+            *super().__table_args__,
+            Index("ix_session_item_scopes", "scopes", postgresql_using="gin"),
+        )
+
     @classmethod
-    def due_for_promotion(
-        cls, items: list[Self], now: datetime, age_minutes: float, threshold: int
-    ) -> list[Self]:
-        """The working items to move into the graph, the aged ones plus any over the working cap.
+    def line(cls) -> ColumnElement[str]:
+        """The item's `- [kind] speaker: text` evidence line, the speaker prefix only
+        when provenance recorded one."""
+        speaker_label = cls.provenance >> "speaker_label"
+        speaker = sql.fragment(t"{speaker_label}: ")
+        kind, text = cls.kind, cls.text
+        return sql.concat(t"- [{kind}] {speaker}{text}")
 
-        An item is due once it has aged past the cutoff, so knowledge settles into the graph on a
-        steady cadence, and additionally the oldest items beyond the working threshold are due
-        whatever their age, so the working set stays bounded under a burst of writes. The two sets
-        union while keeping the oldest-first order the caller reads, so a single pass drains both
-        triggers.
+    @classmethod
+    def due_for_promotion(cls, scopes: Scopes, age_minutes: float, threshold: int) -> Select[Self]:
+        """Select the aged and overflow working items oldest first, decided in the database.
 
-        items: the unpromoted working items, ordered oldest first.
-        now: the moment the pass runs, the reference the age is measured from.
-        age_minutes: age after which an item is promoted regardless of the working count.
-        threshold: most unpromoted items the working set may hold before the oldest overflow.
+        An item is due once it outlives `age_minutes`, and the oldest items past the
+        `threshold` count spill over regardless of age; the window functions rank one pass
+        over the still-working items in the exact scope set.
         """
-        cutoff = now - timedelta(minutes=age_minutes)
-        overflow = max(0, len(items) - threshold)
-        due = {
-            item.id: item
-            for index, item in enumerate(items)
-            if item.created_at <= cutoff or index < overflow
-        }
-        return [item for item in items if item.id in due]
+        ranked = (
+            select(
+                cls,
+                func.row_number().over(order_by=cls.created_at).label("position"),
+                func.count().over().label("total"),
+            )
+            .where(cls.promoted_at.is_(None), cls.scopes == sorted(scopes))
+            .subquery("working")
+        )
+        working = ranked.c
+        # make_interval only accepts a fractional value in its seconds slot.
+        age = func.make_interval(0, 0, 0, 0, 0, 0, age_minutes * 60.0)
+        aged = working.created_at <= func.now() - age
+        overflow = working.position <= working.total - threshold
+        return (
+            select(cls)
+            .join(ranked, working.id == cls.id)
+            .where(or_(aged, overflow))
+            .order_by(working.created_at)
+        )

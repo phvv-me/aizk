@@ -8,6 +8,7 @@ import pytest
 import aizk.cli as cli
 from aizk.config import Settings
 from aizk.mcp import server as mcp_server
+from aizk.store.identity import User
 
 DOC_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
 USER_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -15,15 +16,6 @@ OTHER_USER_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
 
 
 class Recorder:
-    """A call double recording the last call's arguments and returning a fixed value.
-
-    It stands over one boundary the CLI reaches, capturing the argv-derived arguments so a test
-    asserts the wiring and handing back a fresh coroutine when the boundary is awaited.
-
-    ret: value returned, awaited through a new coroutine when `is_async`.
-    is_async: whether a call returns an awaitable rather than the value directly.
-    """
-
     def __init__(self, ret: object = None, is_async: bool = False) -> None:
         self.ret = ret
         self.is_async = is_async
@@ -45,26 +37,12 @@ class Recorder:
 
 
 class Block:
-    """One recalled context block, the lane-tagged line `recall-context` formats to stdout."""
-
     def __init__(self, lane: str, line: str) -> None:
         self.lane = lane
         self.line = line
 
 
-class Pack:
-    """A stand-in context pack whose `blocks` are the lines `recall-context` prints."""
-
-    def __init__(self, blocks: list[Block]) -> None:
-        self.blocks = blocks
-
-
 class Rendered:
-    """A stand-in report whose `render()` is the one text the scale verb prints.
-
-    text: fixed string `render()` returns, so a test reads stdout without a real report.
-    """
-
     def __init__(self, text: str) -> None:
         self.text = text
 
@@ -73,18 +51,16 @@ class Rendered:
 
 
 class Seams:
-    """The recording doubles installed over every boundary a CLI command reaches."""
-
     def __init__(self) -> None:
         self.run_alembic = Recorder()
         self.alembic_config = Recorder(ret="CONFIG")
+        self.setup = Recorder(ret=SimpleNamespace(migrated_to="head"), is_async=True)
         self.rls = Recorder(ret=[], is_async=True)
         self.enable_spans = Recorder()
         self.worker = Recorder(is_async=True)
         self.install_queue = Recorder(is_async=True)
         self.serve_http = Recorder(is_async=True)
-        self.serve_stdio = Recorder(is_async=True)
-        self.recall = Recorder(ret=Pack([Block("fact", "codec shipped")]), is_async=True)
+        self.recall = Recorder(ret=(Block("fact", "codec shipped"),), is_async=True)
         self.ingest = Recorder(ret=DOC_ID, is_async=True)
         self.enqueue = Recorder(is_async=True)
         self.run_scale = Recorder(ret=Rendered("SCALE-CURVE"), is_async=True)
@@ -96,39 +72,37 @@ class Seams:
 
 @pytest.fixture
 def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
-    """Install recording doubles over the alembic, queue, worker, serve, recall, and scale seams.
-
-    Each command reads the real global `settings` while every boundary call is captured, so a test
-    asserts the argv it was handed without a database, network, or server. The `ops` module
-    functions the thin commands delegate to are patched on `ops` itself, the lazily-imported
-    `run_scale_benchmark` and mcp `server` on their own modules.
-    """
     seams = Seams()
     monkeypatch.setattr(cli.ops, "run_alembic", seams.run_alembic)
     monkeypatch.setattr(cli.ops, "alembic_config", seams.alembic_config)
+    monkeypatch.setattr(cli.ops, "setup", seams.setup)
     monkeypatch.setattr(cli.ops, "scoped_rls_violations", seams.rls)
     monkeypatch.setattr(cli, "enable_spans", seams.enable_spans)
     monkeypatch.setattr(cli, "run_worker", seams.worker)
     monkeypatch.setattr(cli, "install_queue_schema", seams.install_queue)
-    monkeypatch.setattr(cli, "assemble_context_pack", seams.recall)
+    monkeypatch.setattr(cli, "recall", seams.recall)
     monkeypatch.setattr(cli, "ingest_text", seams.ingest)
     monkeypatch.setattr(cli, "enqueue_pending", seams.enqueue)
     monkeypatch.setattr(cli.backup_ops, "backup_database", seams.backup)
     monkeypatch.setattr(cli.backup_ops, "restore_database", seams.restore)
     monkeypatch.setattr(mcp_server.server, "run_http_async", seams.serve_http)
-    monkeypatch.setattr(mcp_server.server, "run_stdio_async", seams.serve_stdio)
     monkeypatch.setattr(cli.admin, "scale", seams.run_scale)
     return seams
 
 
 def dispatch(tokens: list[str]) -> None:
-    """Drive the cyclopts app over an argv list without exiting the process on a command error."""
     cli.app(tokens, exit_on_error=False, result_action="return_value")
 
 
 def check_migrate(seams: Seams, out: str) -> None:
     assert seams.run_alembic.args == (cli.command.upgrade, "CONFIG", "head")
     assert "done" in out
+
+
+def check_offline_migrate(seams: Seams, out: str) -> None:
+    assert seams.run_alembic.args == (cli.command.upgrade, "CONFIG", "head")
+    assert seams.run_alembic.kwargs == {"sql": True}
+    assert "done" not in out
 
 
 def check_makemigrations(seams: Seams, out: str) -> None:
@@ -161,6 +135,7 @@ def check_restore(seams: Seams, out: str) -> None:
 
 COMMANDS: list[tuple[str, list[str], Callable[[Seams, str], None]]] = [
     ("db migrate", ["db", "migrate"], check_migrate),
+    ("db migrate offline", ["db", "migrate", "--sql"], check_offline_migrate),
     ("db makemigrations", ["db", "makemigrations", "add col"], check_makemigrations),
     ("db install-queue", ["db", "install-queue"], check_install_queue),
     (
@@ -184,11 +159,6 @@ def test_command_dispatches_argv_to_its_boundary(
     seams: Seams,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Each verb routes its argv to the right boundary with the right arguments and prints it.
-
-    tokens: the argv the CLI dispatches, one row per command in the table.
-    check: the per-command assertion over the captured call and stdout.
-    """
     dispatch(tokens)
     check(seams, capsys.readouterr().out)
 
@@ -197,7 +167,6 @@ def test_command_dispatches_argv_to_its_boundary(
 def test_worker_enables_spans_only_when_profiling(
     seams: Seams, settings: Settings, monkeypatch: pytest.MonkeyPatch, profiling: bool
 ) -> None:
-    """The worker drives the run loop with the given batch size and profiles only when asked."""
     monkeypatch.setattr(settings, "profiling", profiling)
 
     dispatch(["worker", "--batch-size", "7"])
@@ -214,7 +183,11 @@ def test_worker_enables_spans_only_when_profiling(
             "hello world",
             OTHER_USER_ID,
         ),
-        (["recall-context"], cli.PROJECT_CONTEXT_QUERY, cli.settings.system_user_id),
+        (
+            ["recall-context"],
+            "recent decisions, patterns, gotchas, and project context",
+            cli.settings.system_user_id,
+        ),
     ],
     ids=["explicit", "default"],
 )
@@ -225,24 +198,17 @@ def test_recall_context_resolves_query_and_user(
     expected_query: str,
     expected_user: uuid.UUID,
 ) -> None:
-    """An explicit query and user pass through, a bare call falls back to the defaults.
-
-    tokens: the argv the recall command dispatches.
-    expected_query: the recall query the fallback resolves to.
-    expected_user: the user id the fallback resolves to.
-    """
     dispatch(tokens)
 
     assert seams.recall.args[0] == expected_query
-    assert seams.recall.kwargs["user_id"] == expected_user
+    assert seams.recall.kwargs["user"] == User.system((expected_user,))
     assert "[fact] codec shipped" in capsys.readouterr().out
 
 
 def test_recall_context_prints_placeholder_when_nothing_recalled(
     seams: Seams, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """An empty pack prints the no-context placeholder rather than a blank line."""
-    seams.recall.ret = Pack([])
+    seams.recall.ret = ()
 
     dispatch(["recall-context"])
 
@@ -253,7 +219,6 @@ def test_recall_context_prints_placeholder_when_nothing_recalled(
 def test_check_rls_gates_on_violations(
     seams: Seams, capsys: pytest.CaptureFixture[str], violations: list[str]
 ) -> None:
-    """A clean schema prints ok, a lost policy is listed and gates CI through a non-zero exit."""
     seams.rls.ret = violations
 
     if violations:
@@ -266,28 +231,27 @@ def test_check_rls_gates_on_violations(
         assert "ok" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("over_http", [True, False])
 @pytest.mark.parametrize("with_worker", [True, False])
-def test_serve_mcp_gathers_the_transport_and_optionally_the_worker(
+@pytest.mark.parametrize("auto_setup", [True, False])
+def test_serve_mcp_runs_http_and_optionally_the_worker(
     seams: Seams,
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
-    over_http: bool,
     with_worker: bool,
+    auto_setup: bool,
 ) -> None:
-    """serve-mcp runs http or stdio, gathering the worker on one loop when serve_with_worker."""
-    monkeypatch.setattr(settings, "mcp_http", over_http)
     monkeypatch.setattr(settings, "mcp_port", 9999)
     monkeypatch.setattr(settings, "serve_with_worker", with_worker)
+    monkeypatch.setattr(settings, "auto_setup", auto_setup)
+    monkeypatch.setattr(settings, "profiling", with_worker)
 
     dispatch(["serve-mcp"])
 
-    if over_http:
-        assert seams.serve_http.count == 1 and seams.serve_stdio.count == 0
-        assert seams.serve_http.kwargs["port"] == 9999
-    else:
-        assert seams.serve_stdio.count == 1 and seams.serve_http.count == 0
+    assert seams.serve_http.count == 1
+    assert seams.serve_http.kwargs["port"] == 9999
     assert seams.worker.count == (1 if with_worker else 0)
+    assert seams.setup.count == int(auto_setup)
+    assert seams.enable_spans.count == int(with_worker)
 
 
 def test_capture_session_ingests_the_transcript_and_enqueues_extraction(
@@ -296,16 +260,16 @@ def test_capture_session_ingests_the_transcript_and_enqueues_extraction(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """With a transcript on disk the Stop hook remembers its text and enqueues the graph build."""
     transcript = tmp_path / "session.jsonl"
     transcript.write_text("decided to ship the codec", encoding="utf-8")
-    monkeypatch.setenv(cli.TRANSCRIPT_ENV, str(transcript))
+    monkeypatch.setenv("AIZK_SESSION_TRANSCRIPT", str(transcript))
 
     dispatch(["capture-session"])
 
-    assert seams.ingest.args[0] == "decided to ship the codec"
+    assert seams.ingest.args[0] == cli.User.system((cli.settings.system_user_id,))
+    assert seams.ingest.args[1] == "decided to ship the codec"
     assert seams.ingest.kwargs["title"] == "session"
-    assert seams.ingest.kwargs["owner_id"] == cli.settings.system_user_id
+    assert seams.ingest.kwargs["created_by"] == cli.settings.system_user_id
     assert seams.enqueue.count == 1
     assert str(DOC_ID) in capsys.readouterr().out
 
@@ -318,11 +282,10 @@ def test_capture_session_is_a_quiet_noop_without_a_transcript(
     capsys: pytest.CaptureFixture[str],
     state: str,
 ) -> None:
-    """With no transcript, env unset or pointing nowhere, the hook neither ingests nor enqueues."""
     if state == "unset":
-        monkeypatch.delenv(cli.TRANSCRIPT_ENV, raising=False)
+        monkeypatch.delenv("AIZK_SESSION_TRANSCRIPT", raising=False)
     else:
-        monkeypatch.setenv(cli.TRANSCRIPT_ENV, str(tmp_path / "absent.jsonl"))
+        monkeypatch.setenv("AIZK_SESSION_TRANSCRIPT", str(tmp_path / "absent.jsonl"))
 
     dispatch(["capture-session"])
 
@@ -331,8 +294,6 @@ def test_capture_session_is_a_quiet_noop_without_a_transcript(
     assert "no session transcript" in capsys.readouterr().out
 
 
-# each operator command routes its argv to the matching `admin.<fn>` and prints a summary. The
-# tuple is (argv, admin function name, its faked return, a substring the command must print).
 OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
     (["graph", "rebuild", "--limit", "5"], "rebuild", (3, 7), "3 entities and 7 facts"),
     (["graph", "decay", "--half-life-days", "30"], "decay", 4, "archived 4"),
@@ -344,7 +305,7 @@ OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
         SimpleNamespace(claims=6, documents=["A", "B"]),
         "retracted 6 claims from 2 notes",
     ),
-    (["data", "promote", str(DOC_ID), "team"], "promote", 5, "promoted 5 rows into team"),
+    (["data", "promote", str(DOC_ID), "team"], "promote", 5, "promoted 5 document into team"),
     (["data", "ingest", "notes/"], "ingest", 4, "ingested 4 documents"),
     (["data", "ingest-image", "pic.png"], "ingest_image", DOC_ID, str(DOC_ID)),
     (["data", "export", "dump.jsonl"], "export_scope", Rendered("EXPORT-DUMP"), "EXPORT-DUMP"),
@@ -368,12 +329,9 @@ OPERATOR_COMMANDS: list[tuple[list[str], str, object, str]] = [
     ),
     (["eval", "bench"], "bench", Rendered("BENCH-REPORT"), "BENCH-REPORT"),
     (["eval", "sweep"], "sweep", Rendered("SWEEP-REPORT"), "SWEEP-REPORT"),
-    (
-        ["eval", "benchmark", "evermembench", "ds.jsonl"],
-        "benchmark",
-        Rendered("BENCHMARK-REPORT"),
-        "BENCHMARK-REPORT",
-    ),
+    (["eval", "plans"], "plan_study", Rendered("PLAN-REPORT"), "PLAN-REPORT"),
+    (["eval", "gate"], "gate_check", Rendered("GATE-REPORT"), "GATE-REPORT"),
+    (["eval", "groupmem", "corpus/"], "groupmem", Rendered("GM-REPORT"), "GM-REPORT"),
 ]
 
 
@@ -390,17 +348,6 @@ def test_operator_command_routes_to_admin_and_prints(
     ret: object,
     expected: str,
 ) -> None:
-    """Every operator verb delegates to its `admin` function and renders a readable summary.
-
-    The whole operational surface lives in the CLI now, so this is the operator plane's own wiring
-    contract: the argv reaches the matching `admin.<fn>` and its result prints, no MCP tool
-    involved.
-
-    tokens: the argv the CLI dispatches.
-    fn_name: the `admin` function the command must delegate to.
-    ret: the value the faked admin function resolves to.
-    expected: a substring the command must print from that result.
-    """
     recorder = Recorder(ret=ret, is_async=True)
     monkeypatch.setattr(cli.admin, fn_name, recorder)
 
@@ -410,10 +357,53 @@ def test_operator_command_routes_to_admin_and_prints(
     assert expected in capsys.readouterr().out
 
 
+class JsonRendered(Rendered):
+    def model_dump_json(self, indent: int | None = None) -> str:
+        return '{"kind": "study"}'
+
+
+@pytest.mark.parametrize(
+    ("tokens", "fn_name", "expected_kwargs"),
+    [
+        (
+            ["eval", "plans", "--strata", "local, multihop", "--gate-limit", "9"],
+            "plan_study",
+            {
+                "k": 8,
+                "per_stratum": 8,
+                "strata": ("local", "multihop"),
+                "seeding": True,
+                "gate_limit": 9,
+            },
+        ),
+        (["eval", "gate", "--limit", "3"], "gate_check", {"limit": 3, "user_id": None}),
+    ],
+    ids=["plans", "gate"],
+)
+def test_eval_study_commands_write_the_json_report_beside_the_table(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    tokens: list[str],
+    fn_name: str,
+    expected_kwargs: dict[str, object],
+) -> None:
+    recorder = Recorder(ret=JsonRendered("STUDY-TABLE"), is_async=True)
+    monkeypatch.setattr(cli.admin, fn_name, recorder)
+    out_path = tmp_path / "report.json"
+
+    dispatch([*tokens, "--out", str(out_path)])
+
+    assert recorder.kwargs == expected_kwargs
+    assert out_path.read_text(encoding="utf-8") == '{"kind": "study"}'
+    printed = capsys.readouterr().out
+    assert f"wrote {out_path}" in printed
+    assert "STUDY-TABLE" in printed
+
+
 def test_audit_renders_each_write_with_scopes(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The audit log prints each write's id, kind, scope-set, and title, private when unscoped."""
     scope = uuid.UUID("44444444-4444-4444-4444-444444444444")
     docs = [
         SimpleNamespace(id=DOC_ID, kind="note", scopes=[scope], title="Shared note"),
@@ -431,7 +421,6 @@ def test_audit_renders_each_write_with_scopes(
 def test_list_ontology_marks_structural_kinds(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The catalog surface stars a system-written kind and leaves an extractable one unmarked."""
     rows = [
         SimpleNamespace(kind="entity", name="Concept", domain="general", uses=3, structural=False),
         SimpleNamespace(
@@ -452,7 +441,6 @@ def test_list_ontology_marks_structural_kinds(
 def test_profile_report_lists_spans_or_reports_none(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """With spans the report lists them, with none it prints the how-to-enable placeholder."""
     monkeypatch.setattr(cli.admin, "profile_report", Recorder(ret=["span-one"]))
     dispatch(["profile-report"])
     assert "span-one" in capsys.readouterr().out
@@ -463,11 +451,6 @@ def test_profile_report_lists_spans_or_reports_none(
 
 
 class Jsonable:
-    """A stand-in report whose `model_dump_json` is the one text the JSON commands print.
-
-    payload: fixed JSON string returned regardless of the requested indent.
-    """
-
     def __init__(self, payload: str) -> None:
         self.payload = payload
 
@@ -486,11 +469,6 @@ def test_json_command_prints_the_model_dump(
     tokens: list[str],
     fn_name: str,
 ) -> None:
-    """The status and health commands serialize their report to indented JSON on stdout.
-
-    tokens: the argv the command dispatches.
-    fn_name: the `admin` function the command reports from.
-    """
     monkeypatch.setattr(cli.admin, fn_name, Recorder(ret=Jsonable('{"ok": true}'), is_async=True))
 
     dispatch(tokens)

@@ -1,34 +1,24 @@
 from typing import ClassVar, cast
 
-from pgvector.sqlalchemy import HALFVEC
-from sqlalchemy import Index
+from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.orm import declared_attr
 from sqlmodel import Field
 
+from ...common.sql import Column, CosineHalfvec
 from ...config import settings
 
 
 class Embedded:
-    """A halfvec dense embedding column, null until embedded, with its own cosine ANN index.
+    """Nullable halfvec embedding with a cosine ANN index."""
 
-    A subclass declaring extra `__table_args__` composes this one with `*super().__table_args__`
-    rather than re-listing the embedding index, so the ann lane never drifts per table.
-
-    embedding: halfvec dense vector, null until embedded.
-    """
-
-    # a bare annotation, never assigned here: every concrete table mixes `Embedded` alongside
-    # `TableBase`, whose own `declared_attr` supplies the real value, so this only states the one
-    # attribute `__table_args__` below reaches for. Typing `cls` against `TableBase` itself trips
-    # pyrefly's self-type check, since `Embedded` is not one of its subclasses.
     __tablename__: ClassVar[str]
 
-    embedding: list[float] | None = Field(
-        default=None, sa_type=cast(type[list[float]], HALFVEC(settings.embed_dim))
+    embedding: Column[list[float] | None] = Field(
+        default=None, sa_type=cast(type[list[float]], CosineHalfvec(settings.embed_dim))
     )
 
     @declared_attr.directive
-    def __table_args__(cls) -> tuple[Index, ...]:
+    def __table_args__(cls) -> tuple[Index | UniqueConstraint, ...]:
         table = cls.__tablename__
         return (
             Index(

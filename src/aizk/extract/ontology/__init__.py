@@ -1,4 +1,4 @@
-from .cache import OntologySnapshot, build_snapshot, current, gate_labels, refresh
+from .cache import OntologySnapshot, build_snapshot, current, ensure_current, gate_labels, refresh
 from .constants import (
     AREA,
     CITES,
@@ -32,6 +32,7 @@ __all__ = [
     "SUPERSEDES",
     "build_snapshot",
     "current",
+    "ensure_current",
     "gate_labels",
     "refresh",
 ]

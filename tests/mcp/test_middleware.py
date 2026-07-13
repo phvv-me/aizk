@@ -1,112 +1,118 @@
 import uuid
+from typing import cast
 
 import dbutil
+import mcp.types as mt
 import pytest
+from fastmcp.exceptions import ToolError
+from fastmcp.server.context import Context
+from fastmcp.server.middleware import MiddlewareContext
 from fastmcp.server.middleware.rate_limiting import RateLimitError
+from fastmcp.tools import ToolResult
 from hypothesis import given
 from hypothesis import strategies as st
+from mcp_probe import context_for
 
-import aizk.mcp.middleware as middleware_module
 from aizk.config import settings
-from aizk.mcp.middleware import AnonymousRateLimit, IdentityMiddleware
-from aizk.mcp.user import USER_STATE_KEY, User
-from aizk.store.engine import current_standing
-
-
-class FakeFastmcpContext:
-    """A request context stand-in exposing the state slot the middleware reads and writes.
-
-    state: the initial Context state, the resolved `User` a downstream middleware reads back.
-    """
-
-    def __init__(self, state: dict[str, object] | None = None) -> None:
-        self.state = state or {}
-
-    def set_state(self, key: str, value: object) -> None:
-        self.state[key] = value
-
-    def get_state(self, key: str) -> object:
-        return self.state.get(key)
+from aizk.mcp.auth import Auth
+from aizk.mcp.middleware import AnonymousRateLimit, IdentityMiddleware, bound_user
+from aizk.store.identity import User
 
 
 class FakeContext:
-    """A `MiddlewareContext` stand-in carrying only the `fastmcp_context` the middleware reads."""
+    def __init__(self, fastmcp_context: Context | None = None) -> None:
+        self.fastmcp_context = fastmcp_context
 
-    def __init__(self, state: dict[str, object] | None = None) -> None:
-        self.fastmcp_context = FakeFastmcpContext(state)
+
+type ToolContext = MiddlewareContext[mt.CallToolRequestParams]
+
+
+def tool_context(user: User | None = None) -> ToolContext:
+    return cast("ToolContext", FakeContext(context_for(user)))
 
 
 @given(rate=st.floats(min_value=0.01, max_value=1000))
 def test_anonymous_bucket_is_sized_to_a_five_second_burst_never_below_one(rate: float) -> None:
-    """The bucket holds a five-second burst of the sustained rate, floored at one token."""
     limiter = AnonymousRateLimit(max_requests_per_second=rate).limiter
     assert limiter.capacity == max(1, round(rate * 5))
     assert limiter.refill_rate == rate
 
 
-def test_user_middleware_resolves_once_stashes_it_and_binds_its_standing(
+def test_user_middleware_resolves_once_and_stashes_the_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`on_call_tool` resolves the caller once, stashes it, and binds its standing for the call.
-
-    The wrapped handler runs under exactly the token's `(orgs, writable_orgs)`, so an `acting_as`
-    a verb opens inside the call reads the caller's own standing rather than the empty default.
-    """
     org = uuid.uuid4()
-    resolved = User(id=uuid.uuid4(), orgs=(org,), writable_orgs=(org,))
-    monkeypatch.setattr(middleware_module, "resolve_user", lambda: _async_return(resolved))
-    context = FakeContext()
-    reached: list[object] = []
-    standing_inside: list[tuple[tuple[uuid.UUID, ...], tuple[uuid.UUID, ...]]] = []
+    user_id = uuid.uuid4()
+    resolved = User.authorized(
+        user_id,
+        read=(user_id, org),
+        write=(user_id, org),
+    )
 
-    async def call_next(ctx: object) -> str:
-        reached.append(ctx)
-        standing_inside.append(current_standing())
-        return "ok"
+    auth = Auth()
 
-    result = dbutil.run(IdentityMiddleware().on_call_tool(context, call_next))
-    assert result == "ok"
+    async def resolve() -> User:
+        return resolved
+
+    monkeypatch.setattr(auth, "resolve", resolve)
+    context = tool_context()
+    reached: list[ToolContext] = []
+    users_inside: list[User | None] = []
+    expected = ToolResult(content=[])
+
+    async def call_next(context: ToolContext) -> ToolResult:
+        reached.append(context)
+        assert context.fastmcp_context is not None
+        users_inside.append(await bound_user(context.fastmcp_context))
+        return expected
+
+    result = dbutil.run(IdentityMiddleware(auth).on_call_tool(context, call_next))
+    assert result is expected
     assert reached == [context]  # the wrapped handler ran once, after the stash
-    assert context.fastmcp_context.get_state(USER_STATE_KEY) == resolved
-    assert standing_inside == [((org,), (org,))]  # the token's standing bound for the call
-    assert current_standing() == ((), ())  # and reset once the call unwound
+    assert users_inside == [resolved]
 
 
-@pytest.mark.parametrize(
-    "state",
-    [None, User(id=uuid.uuid4())],
-    ids=["unresolved", "authenticated"],
-)
-def test_rate_limit_lets_any_non_anonymous_call_pass_uncharged(state: object) -> None:
-    """A missing or authenticated user is never charged, so the shared bucket stays full."""
-    limit = AnonymousRateLimit(max_requests_per_second=0.2)  # capacity == max(1, round(1.0)) == 1
-    seed = {USER_STATE_KEY: state} if state is not None else {}
-    context = FakeContext(seed)
+def test_middleware_refuses_a_call_without_a_request_context() -> None:
+    async def call_next(context: ToolContext) -> ToolResult:
+        raise AssertionError("the wrapped handler must never run")
 
-    async def call_next(ctx: object) -> str:
-        return "ok"
+    bare = cast("ToolContext", FakeContext())
+    with pytest.raises(ToolError, match="no request context"):
+        dbutil.run(AnonymousRateLimit(max_requests_per_second=1.0).on_call_tool(bare, call_next))
+
+
+def test_bound_user_ignores_a_foreign_state_value() -> None:
+    async def body() -> User | None:
+        request = context_for()
+        await request.set_state("aizk_user", "not a user", serializable=False)
+        return await bound_user(request)
+
+    assert dbutil.run(body()) is None
+
+
+def test_rate_limit_lets_authenticated_calls_pass_uncharged() -> None:
+    limit = AnonymousRateLimit(max_requests_per_second=0.2)  # capacity floors at one token
+    context = tool_context(User.private(uuid.uuid4()))
+    expected = ToolResult(content=[])
+
+    async def call_next(context: ToolContext) -> ToolResult:
+        return expected
 
     for _ in range(3):  # more calls than the lone burst token, yet none consume it
-        assert dbutil.run(limit.on_call_tool(context, call_next)) == "ok"
+        assert dbutil.run(limit.on_call_tool(context, call_next)) is expected
 
 
 def test_rate_limit_drains_one_shared_burst_then_refuses_the_stranger() -> None:
-    """The anonymous user drains the lone burst token, then the next call is refused."""
     limit = AnonymousRateLimit(max_requests_per_second=0.2)  # capacity floors at one token
-    anon = User(id=settings.anonymous_user_id)
-    context = FakeContext({USER_STATE_KEY: anon})
-    served: list[object] = []
+    context = tool_context(User.private(settings.anonymous_user_id))
+    served: list[ToolContext] = []
+    expected = ToolResult(content=[])
 
-    async def call_next(ctx: object) -> str:
-        served.append(ctx)
-        return "ok"
+    async def call_next(context: ToolContext) -> ToolResult:
+        served.append(context)
+        return expected
 
-    assert dbutil.run(limit.on_call_tool(context, call_next)) == "ok"  # the lone burst token
+    assert dbutil.run(limit.on_call_tool(context, call_next)) is expected
     with pytest.raises(RateLimitError, match="anonymous rate limit"):
-        dbutil.run(limit.on_call_tool(context, call_next))  # bucket drained, stranger refused
+        dbutil.run(limit.on_call_tool(context, call_next))
     assert served == [context]  # only the admitted call ever reached the wrapped handler
-
-
-async def _async_return[T](value: T) -> T:
-    """Await to `value`, the coroutine a patched zero-arg `resolve_user` returns."""
-    return value

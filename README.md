@@ -26,7 +26,7 @@ speaks MCP, so Claude or any other MCP-capable assistant calls it directly. Full
 
 ## Quickstart
 
-One command brings up the whole engine, Postgres, the embed, rerank, and extraction containers,
+One command brings up the whole engine, Postgres, the embedding and extraction containers,
 and one aizk container that is the MCP server, the background worker, and the scheduled auto-backup
 at once. It migrates and comes up ready over HTTP with nothing else to run.
 

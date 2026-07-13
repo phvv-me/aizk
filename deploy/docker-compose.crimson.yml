@@ -1,23 +1,5 @@
-# Crimson override: two RTX 3090s (Ampere sm_86), so the Ada-only fp8 squeeze is undone.
-#
-# On the 4090 the three model services co-reside on one 24 GB card only because the embedder and
-# reranker are runtime-quantized to fp8 (`--quantization fp8` over bf16 checkpoints), an Ada/Hopper
-# (sm >= 8.9) hardware path. Ampere has no fp8 compute; vLLM would fall back to weight-only
-# fp8-Marlin, a pointless risk when crimson has 48 GB across two cards. This override serves both
-# at plain bf16 (2B embedder ~4.5 GB, 4B reranker ~9 GB) pinned together on GPU 0, and gives the
-# extraction LLM GPU 1 to itself. The extractor's w4a16 compressed-tensors checkpoint runs on
-# Ampere unchanged (Marlin int4 is sm80+), as does the fp8 KV cache (storage-only, no fp8 matmul).
-#
-# GPU 1 hosting the extractor alone leaves ~18 GB of headroom: the standing quality lever is to
-# swap AIZK_LLM_CHECKPOINT for a larger extractor (E4B/9B class) in crimson's .env, since
-# extraction quality is the fact-noise bottleneck of the graph.
-#
-# The base file's #51 serving tuning (Qwen3-VL-Reranker-2B, --max-model-len 2048, --max-num-seqs,
-# --enforce-eager) is deliberately NOT carried here. It is validated on the Ada 4090's fp8 path,
-# but on these Ampere bf16 cards the VL models hang at load: --enforce-eager deadlocks the
-# EngineCore on a futex at FlashAttention init (vLLM v0.24.0), and only the default compiled path
-# comes up healthy. GPU 0 has 24 GB for just two small models, so the memory savings buy nothing
-# here anyway. Crimson keeps the proven config; re-test on a newer vLLM before touching this.
+# Crimson has two RTX 3090s. The embedder runs in bf16 on GPU 0 because Ampere has no native fp8
+# compute. The compressed extraction model and its fp8 KV cache run on GPU 1.
 #
 # Usage: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.crimson.yml up -d
 
@@ -31,39 +13,14 @@ services:
       - "--gpu-memory-utilization"
       - "${AIZK_EMBED_GPU_MEM_UTIL:-0.35}"
       - "--max-model-len"
-      - "${AIZK_EMBED_MAX_MODEL_LEN:-8192}"
+      - "${AIZK_EMBED_MAX_MODEL_LEN:-2048}"
+      - "--max-num-seqs"
+      - "${AIZK_EMBED_MAX_NUM_SEQS:-64}"
       - "--served-model-name"
       - "${AIZK_EMBED_MODEL:-qwen3-vl-emb}"
       - "--trust-remote-code"
       - "--hf-overrides"
       - '{"is_matryoshka": true}'
-    deploy:
-      resources:
-        reservations:
-          devices: !override
-            - driver: nvidia
-              device_ids: ["0"]
-              capabilities: [gpu]
-
-  vllm-rerank:
-    command:
-      - "--model"
-      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
-      - "--runner"
-      - "pooling"
-      - "--gpu-memory-utilization"
-      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.55}"
-      - "--max-model-len"
-      - "${AIZK_RERANK_MAX_MODEL_LEN:-8192}"
-      - "--served-model-name"
-      - "${AIZK_RERANK_MODEL:-Qwen/Qwen3-Reranker-4B}"
-      - "--trust-remote-code"
-      - "--hf-overrides"
-      - >-
-        {"architectures": ["Qwen3ForSequenceClassification"],
-        "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}
-      - "--chat-template"
-      - "examples/pooling/score/template/qwen3_reranker.jinja"
     deploy:
       resources:
         reservations:
@@ -94,21 +51,16 @@ services:
       - server
     restart: unless-stopped
 
-  # Logto, the self-hosted OIDC provider we are moving to as aizk's identity plane, replacing
-  # Zitadel. Shares the one Postgres in the db container through its own `logto` database (created
-  # host-side by a one-off `CREATE DATABASE logto`, then seeded by Logto on first boot). It runs
-  # alongside Zitadel for now; the cutover just rewires the aizk server's `AIZK_OIDC_*` settings to
-  # point here. The admin console (ADMIN_ENDPOINT, published on 3002) is where you create the first
-  # admin user and add the GitHub social connector; the auth endpoint (ENDPOINT, published on 3001)
-  # is what browsers and the aizk server hit. Both default to localhost so an SSH tunnel reaches
-  # them; set AIZK_LOGTO_ENDPOINT / AIZK_LOGTO_ADMIN_ENDPOINT to public URLs once a Cloudflare
-  # hostname is wired. The entrypoint seeds on first run and no-ops the seed on later restarts.
+  # Logto is the only identity and organization authority. It shares Postgres through its own
+  # preserved `logto` database. The reviewed release is pinned and applies that release's explicit
+  # database alterations before starting. Any alteration failure stops startup instead of serving
+  # code against the wrong identity schema.
   logto:
-    image: svhd/logto:latest
+    image: svhd/logto:1.41.0
     depends_on:
       db:
         condition: service_healthy
-    entrypoint: ["sh", "-c", "npm run cli db seed -- --swe || true; exec npm start"]
+    entrypoint: ["sh", "-c", "npm run cli db alt deploy && exec npm start"]
     environment:
       - TRUST_PROXY_HEADER=1
       - DB_URL=postgres://aizk_admin:${AIZK_ADMIN_PASSWORD:-aizk}@db:5432/logto

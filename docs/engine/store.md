@@ -6,14 +6,20 @@ Knowledge splits into two tables per kind. Content is the immutable structure, a
 normalized name and type or a fact's subject, predicate, object, and statement, addressed by
 `uuid5` of its own normalized text. Two people independently extracting the same knowledge
 mint the same row with no lookup and no coordination. Claims are per-container stakes on that
-content, carrying the owner, the scope set, the bi-temporal ranges, review state, and access
+content, carrying creator provenance, the scope set, the bi-temporal ranges, and access
 counters. Dedup across the whole tenancy happens by construction, and nobody's claim leaks
 through anyone else's.
 
+RLS hides shared content until the caller has a readable claim. PostgreSQL therefore cannot use
+`ON CONFLICT` for content IDs because conflict arbitration applies the table's `SELECT` policy.
+`ClaimedContent.mint()` follows SQLAlchemy's PostgreSQL SAVEPOINT pattern instead. It rolls back
+only a duplicate key, preserves the surrounding claim transaction, and propagates every other
+integrity failure.
+
 ```mermaid
 flowchart LR
-    A[claim, owner A<br/>scopes finance] --> C{{content<br/>uuid5 of text}}
-    B[claim, owner B<br/>scopes empty, private] --> C
+    A[claim<br/>scopes finance] --> C{{content<br/>uuid5 of text}}
+    B[claim<br/>personal subject scope] --> C
     C --> E[embedding<br/>stored once]
 ```
 
@@ -42,14 +48,28 @@ gantt
 Value objects get `uuid5` and events get `uuid7`. Content is what it says, so its id derives
 from the text and a rerun converges on the same graph. A claim is the event of someone saying
 it, so its id carries a timestamp prefix and lands writes on one edge of the index. The one
-fixed id is the anonymous sentinel, uuid zero.
+fixed id is the anonymous sentinel, uuid zero. Logto subjects and organizations use UUID5 under
+the standard URL namespace with separate user and organization paths.
 
 ## Declarative everything
 
 SQLModel classes are the single source of truth. Foreign keys and indexes are field kwargs,
 one `Timestamped` mixin carries both audit stamps, and views are first-class citizens. A
-`ViewBase` subclass declares typed fields plus the `Select` that is the view, registers itself
-the moment its class body ends, and compiles into `CREATE VIEW` with `security_invoker` so a
+`ViewBase` subclass declares typed fields plus the `Select` that is the view and registers itself
+when its class body ends. Typed SQLAlchemy DDL compiles it with `security_invoker` so a
 view can never accidentally bypass row security. The whole schema regenerates from the models,
 and the drift probe diffs compiled RLS policies against the live catalog through sqlglot and
 must come back empty.
+
+## The SQLModel boundary
+
+SQLModel owns table entities, relationships, field constraints, ordinary selects, and the async
+session API. Normal model reads should use SQLModel `select` with `AsyncSession.exec`, which keeps
+scalar model results direct and typed. SQLAlchemy Core remains the narrow escape hatch for
+PostgreSQL array and range operators, CTEs, conflict-aware bulk DML, views, migration DDL, and RLS
+expressions.
+
+Patos `FrozenModel` owns immutable values that cross service boundaries, including verified token
+standing, queue payloads, and retrieval results. SQLModel table entities remain mutable because
+the ORM unit of work manages their database state. Keeping these two roles separate avoids a
+second request-model hierarchy without asking one base class to serve incompatible purposes.

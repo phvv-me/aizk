@@ -1,31 +1,32 @@
+import asyncio
+import uuid
 from collections.abc import Awaitable, Callable
+from types import SimpleNamespace
+from typing import cast
 
-# the client verbs the server registers, the whole surface a key-holder reaches; every operational
-# operation now lives in the CLI rather than as a tagged, listing-hidden tool.
+from fastmcp.server.context import Context
+from mcp.server.session import ServerSession
+
+from aizk.mcp.middleware import bind_user
+from aizk.mcp.server import server
+from aizk.store.identity import User
+
+# Complete MCP surface available to an authenticated caller
 USER_TOOLS = {
     "recall",
     "remember",
     "reference",
-    "move",
+    "share",
 }
 
 
 def text_of(result: object) -> str:
-    """The rendered string a str-returning tool carries on its structured content.
-
-    result: the `ToolResult` a `tool.run` resolved to.
-    """
     content = getattr(result, "structured_content", None)
     assert isinstance(content, dict)
     return content["result"]
 
 
 def const[T](value: T) -> Callable[..., Awaitable[T]]:
-    """An async function ignoring its arguments and resolving to `value`, a seam stand-in.
-
-    value: the constant the returned coroutine yields.
-    """
-
     async def fixed(*args: object, **kwargs: object) -> T:
         return value
 
@@ -33,13 +34,17 @@ def const[T](value: T) -> Callable[..., Awaitable[T]]:
 
 
 class Rendered:
-    """A report stand-in whose `render()` is the one text-producing seam a tool body calls.
-
-    text: the fixed string `render()` returns, so a test asserts on the tool's output directly.
-    """
-
     def __init__(self, text: str) -> None:
         self.text = text
 
     def render(self) -> str:
         return self.text
+
+
+def context_for(user: User | None = None) -> Context:
+    """A request context carrying an already resolved caller, as the middleware leaves it."""
+    session = SimpleNamespace(_fastmcp_state_prefix=f"test-{uuid.uuid4()}")
+    context = Context(fastmcp=server, session=cast("ServerSession", session))
+    if user is not None:
+        asyncio.run(bind_user(context, user))
+    return context

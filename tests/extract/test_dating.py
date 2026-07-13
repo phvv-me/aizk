@@ -7,19 +7,16 @@ from aizk.extract.models import TimedFact
 
 
 def test_empty_text_parses_to_none() -> None:
-    """An empty string names no date, so the cascade returns null rather than guessing."""
     assert parse_date("") is None
 
 
 def test_direct_iso_date_parses_timezone_aware() -> None:
-    """A string that is itself a complete date takes the fast path, timezone-aware."""
     parsed = parse_date("2024-03-15")
     assert parsed is not None and parsed.tzinfo is not None
     assert (parsed.year, parsed.month, parsed.day) == (2024, 3, 15)
 
 
 def test_embedded_date_is_found_by_the_search_fallback() -> None:
-    """A complete date inside a longer sentence is recovered by the search fallback tier."""
     parsed = parse_date("On 2020-01-15 the team decided to ship")
     assert parsed is not None and (parsed.year, parsed.month, parsed.day) == (2020, 1, 15)
 
@@ -36,29 +33,24 @@ def test_embedded_date_is_found_by_the_search_fallback() -> None:
     ],
 )
 def test_non_date_text_parses_to_none(text: str) -> None:
-    """Prose, relative keywords, bare times, and bare years all resolve to null, never a stamp."""
     assert parse_date(text) is None
 
 
 def test_resolve_valid_from_prefers_explicit_over_statement() -> None:
-    """The model's own date field wins; the statement date is only the second tier."""
     resolved = resolve_valid_from("2019-05-06", "mentions 2022-11-12 in passing")
     assert resolved is not None and (resolved.year, resolved.month) == (2019, 5)
 
 
 def test_resolve_valid_from_falls_back_to_the_statement() -> None:
-    """With no explicit date, a date parsed from the statement text stands in."""
     resolved = resolve_valid_from(None, "shipped on 2018-02-03 finally")
     assert resolved is not None and resolved.year == 2018
 
 
 def test_resolve_valid_from_is_none_when_neither_carries_a_date() -> None:
-    """Neither an explicit date nor a statement date leaves the fact undated at this tier."""
     assert resolve_valid_from(None, "no date in this prose") is None
 
 
 def test_document_fallback_fills_only_undated_facts() -> None:
-    """The final tier stamps every undated fact with the document time, dated ones untouched."""
     doc_time = datetime(2020, 6, 1, tzinfo=UTC)
     kept = datetime(2015, 1, 1, tzinfo=UTC)
     facts = [

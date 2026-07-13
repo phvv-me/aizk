@@ -30,7 +30,6 @@ theme:
         icon: material/weather-sunny
         name: Light mode
   features:
-    - navigation.instant
     - navigation.tabs
     - navigation.top
     - navigation.indexes
@@ -50,6 +49,7 @@ nav:
       - engine/index.md
       - Write path: engine/write-path.md
       - Store: engine/store.md
+      - Identity: engine/identity.md
       - Lattice: engine/lattice.md
       - Read path: engine/read-path.md
       - Autonomy: engine/autonomy.md

@@ -1,3 +1,3 @@
-from .entity_gate import EntityGate
+from .gliner import classify, named_entities, relevant
 
-__all__ = ["EntityGate"]
+__all__ = ["classify", "named_entities", "relevant"]

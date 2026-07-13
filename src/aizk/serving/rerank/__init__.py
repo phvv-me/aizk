@@ -1,7 +1,3 @@
-from .reranker import Reranker, RerankResponse, RerankResult
+from .reranker import rerank
 
-__all__ = [
-    "RerankResponse",
-    "RerankResult",
-    "Reranker",
-]
+__all__ = ["rerank"]

@@ -1,44 +1,57 @@
 import asyncio
 
-import rls as rls
-from sqlalchemy import text
+import sqlalchemy as sa
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-# importing `rls` registers the apply_scoped_rls/drop_scoped_rls alembic operations the migrations
-# call plus the autogenerate comparator that guards every scoped table, and importing `aizk.store`
-# runs `rls.register(TableBase)` so `metadata.info["rls_policies"]`/`["rls_grant_role"]` are
-# populated; both have to happen before any migration or autogenerate pass reads them.
+# Importing the store maps models and attaches their RLS declarations.
 from aizk.store import TableBase
 from alembic import context
 
 config = context.config
 target_metadata = TableBase.metadata
 
+_pg_depend = sa.table(
+    "pg_depend",
+    sa.column("objid", sa.BigInteger()),
+    sa.column("refobjid", sa.BigInteger()),
+    sa.column("deptype", sa.Text()),
+    schema="pg_catalog",
+)
+_pg_extension = sa.table(
+    "pg_extension",
+    sa.column("oid", sa.BigInteger()),
+    schema="pg_catalog",
+)
+_pg_class = sa.table(
+    "pg_class",
+    sa.column("oid", sa.BigInteger()),
+    sa.column("relname", sa.Text()),
+    schema="pg_catalog",
+)
+
 
 def do_run_migrations(connection: Connection) -> None:
-    """Run migrations on an already-open synchronous connection.
+    """Run migrations on an already-open synchronous connection."""
 
-    connection: connection handed over by the async runner.
-    """
+    views = target_metadata.info.get("views", set())
+    extension_owned = set(
+        connection.execute(
+            sa.select(_pg_class.c.relname)
+            .join(_pg_depend, _pg_depend.c.objid == _pg_class.c.oid)
+            .join(_pg_extension, _pg_depend.c.refobjid == _pg_extension.c.oid)
+            .where(_pg_depend.c.deptype == "e")
+        ).scalars()
+    )
+
+    def include_name(name, type_, parent_names) -> bool:
+        """Skip queue-owned tables and mapped views before Alembic reflects their children."""
+        if type_ != "table":
+            return True
+        return not (name.startswith("pgqueuer") or name in views)
 
     def include_object(object, name, type_, reflected, compare_to) -> bool:
-        """Skip reflected objects that live outside the ORM metadata by deliberate design.
-
-        Autogenerate reflects every table in the target schema, including ones an extension like
-        pg_tokenizer creates for its own bookkeeping (tokenizer, model, synonym, stopwords), so
-        without this filter a diff against our ORM metadata misreads them as dropped tables. The
-        vchord_bm25 lane's `chunk.bm25` column and its index are the one deliberately-unmapped
-        column in the schema, a bm25vector type the ORM has no ann for, kept in sync by a
-        migration-owned trigger and read only through a text() statement, so they are excluded the
-        same way rather than misread as drift. Every `ViewBase` view (`live_fact` today) is
-        hand-written `CREATE VIEW` DDL, reflected as an ordinary table since autogenerate cannot
-        tell a view from a table at all. The ORM side is excluded by its own `info={"is_view":
-        True}` tag, while the reflected side, a plain `Table` carrying no such info, is excluded
-        by the `views` name set `store.mixins.view.register_view` stamps onto the shared metadata,
-        so a future view needs no edit here.
-        """
-        views = target_metadata.info.get("views", set())
+        """Skip reflected objects that live outside the ORM metadata by deliberate design."""
         if type_ == "table" and object.info.get("is_view"):
             return False
         if type_ == "column" and reflected and compare_to is None:
@@ -49,32 +62,42 @@ def do_run_migrations(connection: Connection) -> None:
             return False
         if type_ != "table" or not reflected or compare_to is not None:
             return True
-        owned = connection.execute(
-            text(
-                "SELECT 1 FROM pg_depend d "
-                "JOIN pg_extension e ON d.refobjid = e.oid "
-                "JOIN pg_class c ON d.objid = c.oid "
-                "WHERE c.relname = :name AND d.deptype = 'e'"
-            ),
-            {"name": name},
-        ).first()
-        return owned is None
+        return name not in extension_owned
 
     context.configure(
-        connection=connection, target_metadata=target_metadata, include_object=include_object
+        connection=connection,
+        target_metadata=target_metadata,
+        include_name=include_name,
+        include_object=include_object,
+        autogenerate_plugins=["alembic.autogenerate.*", "rls"],
     )
     with context.begin_transaction():
         context.run_migrations()
 
 
 async def run_migrations_online() -> None:
-    """Open an async engine and run the migrations through a sync bridge."""
+    """Run and commit migrations through an async connection."""
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}), prefix="sqlalchemy."
     )
-    async with connectable.connect() as connection:
+    async with connectable.begin() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()
 
 
-asyncio.run(run_migrations_online())
+def run_migrations_offline() -> None:
+    """Render migrations as PostgreSQL SQL without opening a connection."""
+    context.configure(
+        url=config.get_main_option("sqlalchemy.url"),
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    asyncio.run(run_migrations_online())

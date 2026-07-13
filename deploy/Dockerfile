@@ -11,15 +11,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-# dependency layer, cached across source edits: install everything the manifest names but not the
-# project itself, so touching src never re-resolves torch and the rest.
+# Dependency layer, cached across source edits. The project and local RLS package are installed as
+# small runtime overlays so changing either never rewrites the multi-gigabyte dependency layer.
 COPY pyproject.toml README.md ./
 RUN uv sync --no-dev --no-install-project
-# the project over the cached deps. rlsalchemy resolves straight from PyPI, so there is no git
-# overlay to reapply; only the sqlalchemy 2.1 override (pyproject's [tool.uv]) remains, which uv
-# reads from the manifest on its own.
-COPY src ./src
-RUN uv sync --no-dev
 
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 # postgresql-client-18, version-matched to the vchord pg18 server, so `aizk backup`/`restore` run
@@ -36,11 +31,21 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends postgresql-client-18 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+ENV PATH="/app/.venv/bin:$PATH"
 # the built virtualenv and the source its editable install points at, both at the same path the
 # builder used so the venv's own path references still resolve
 COPY --from=builder /app/.venv /app/.venv
 COPY pyproject.toml README.md ./
 COPY src ./src
-# `--no-sync` so the entrypoint never re-resolves at runtime, it runs the environment built above
-ENTRYPOINT ["uv", "run", "--no-sync", "aizk"]
+# Migrations run against the RLS and Patos APIs from this checkout. These pure Python projects land
+# after the stable dependency layer and need no dependency resolution of their own.
+COPY --from=patos pyproject.toml README.md /tmp/patos/
+COPY --from=patos src /tmp/patos/src
+COPY --from=rls pyproject.toml README.md /tmp/rls/
+COPY --from=rls rls /tmp/rls/rls
+RUN uv pip install --python .venv --reinstall --no-deps /tmp/patos \
+    && uv pip install --python .venv --reinstall --no-deps /tmp/rls \
+    && uv pip install --python .venv --reinstall --no-deps .
+# The built environment is immutable at runtime, so the command needs no resolver wrapper.
+ENTRYPOINT ["aizk"]
 CMD ["serve-mcp"]

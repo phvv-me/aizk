@@ -1,37 +1,40 @@
 # Comparison
 
-## Against grep and qmd over the vault
+## Against vault search
 
-The vault's own tools were timed on the same queries as the engine, on the same machine.
+Literal search remains the right tool for exact strings and file discovery. Aizk is for questions
+that need meaning, source time, speaker perspective, shared scopes, or evidence across documents.
+It should complement `rg` and qmd rather than replace them.
 
-| Scenario | vault, rg or qmd | aizk | Who wins |
-|---|---|---|---|
-| exact-term lookup | under 10 ms | ~475 ms | vault, grep is unbeatable on literal strings |
-| lexical search, on-topic phrasing | ~190 ms | ~475 ms | tie on speed, qmd returns raw notes while aizk returns fused facts with sources |
-| paraphrase of intent | no results | ~475 ms, correct doc top-ranked | aizk, BM25 misses reworded intent entirely |
-| cross-document synthesis | manual, minutes | ~475 ms | aizk, graph facts and neighbors fuse sources |
-| weekly review | 16 ms | 887 ms, see the benchmark caveat | tie, both instant on a settled corpus and aizk's answer is scoped and structured |
-| multi-user, permissions, anonymous sharing | none | native | aizk, the vault has no concept of it |
-| point-in-time replay | git archaeology | 30 ms range query | aizk |
+| Need | Vault tools | Aizk |
+|---|---|---|
+| exact term or path | fastest and simplest | unnecessary overhead |
+| paraphrased intent | embedding search where available | dense and lexical fusion |
+| shared project memory | no authorization model | Logto-derived scope lattice |
+| overlap of organizations | manual duplication | native scope intersection |
+| speaker belief or preference | prose interpretation | captured and attributed perspective |
+| point-in-time fact replay | Git archaeology | bi-temporal range query |
+| sourced agent context | manual note assembly | budgeted MCP context pack |
 
-The honest summary is a division of labor. Keep grep for literal strings, and everything that
-involves meaning, time, or more than one person is the engine's ground.
+## Against published memory systems
 
-## Against the engines the papers came from
-
-| Capability | Zep / Graphiti | Mem0 | GraphRAG | aizk |
+| Capability | Zep and Graphiti | Mem0 | GraphRAG | Aizk |
 |---|---|---|---|---|
-| bi-temporal facts | 4 flat timestamps | – | – | `tstzrange` pairs, Allen algebra, GiST-indexed replay |
-| extraction calls per chunk | 1 combined | per memory | 1 plus gleanings | 1 plus at most one batched borderline call, rules do the rest |
-| consolidation | LLM over a shortlist | LLM ADD/UPDATE/NOOP | – | uuid5, then a cosine rule, then LLM only for the 0.75 to 0.9 band |
-| multi-tenant isolation | app level | app level | – | forced Postgres RLS per row, proven against the catalog |
-| intersection scopes and lens | – | – | – | the scope-set lattice, implicit subset graphs |
-| curation and governed publish | – | – | – | review-then-publish, an autonomous reviewer, a promoted-provenance bonus |
-| runs fully local | cloud service | optional | batch pipeline | one Postgres and three vLLM containers, nothing leaves |
-| retrieval fusion | graph plus text | vector | global summaries | dense, BM25, facts, pagerank, communities, RAPTOR, and profiles in one call |
+| temporal facts | temporal graph | memory updates | no | valid and recorded ranges |
+| consolidation | model-driven | add, update, delete | no | rules first, model on ambiguity |
+| group speaker semantics | limited | user namespace | no | author snapshot and epistemic kind |
+| authorization | application layer | application layer | no | forced PostgreSQL RLS |
+| overlapping scopes | no | no | no | arbitrary nonempty scope sets |
+| retrieval | graph and text | vector | community summaries | typed hybrid query and optional graph lanes |
+| local operation | service oriented | optional | batch oriented | PostgreSQL and local model lanes |
 
-Head-to-head scored runs against the live engines remain on the roadmap. This table compares
-published mechanisms. The EverMemBench and TEMPO loaders ship behind
-`AIZK_BENCHMARKS_ENABLED`.
+This table compares mechanisms, not scores. The honest GroupMemBench adapter now exists, but the
+full Aizk run has not been completed. External head-to-head claims wait for the same imported
+histories, answer model, judge, and hardware budget across systems.
 
-The full map from each mechanism back to its paper lives in [Provenance](provenance.md).
+Recent evidence also argues against assuming that more graph machinery is better. The ACL 2026
+study [Does Memory Need Graphs](https://aclanthology.org/2026.acl-long.1232/) finds that raw session
+evidence plus independent summaries, facts, and keywords is a strong baseline. Similarity edges
+can add noise, and graph summaries can improve retrieval metrics while reducing answer quality if
+they crowd raw evidence out of the prompt. Aizk therefore keeps lane ablation and a flat baseline
+on the roadmap.

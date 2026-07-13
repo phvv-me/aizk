@@ -32,7 +32,6 @@ def test_eval_report_round_trips_through_its_own_serialization(
     routed: float | None,
     winner: str | None,
 ) -> None:
-    """Every scorecard field survives a dump then load unchanged, our field wiring intact."""
     report = EvalReport(
         n=n,
         hit_at_k=hit,
@@ -49,9 +48,14 @@ def test_eval_report_round_trips_through_its_own_serialization(
 
     assert EvalReport.model_validate(report.model_dump()) == report
 
+    rendered = report.render()
+    assert f"n={n}" in rendered
+    assert ("judge=" in rendered) is (mean_judge is not None)
+    for label in per_config:
+        assert label in rendered
+
 
 def test_optional_ab_fields_default_to_null_on_a_report_without_gold() -> None:
-    """A report built without the A/B fields leaves them null, the no-gold default."""
     report = EvalReport(
         n=0,
         hit_at_k=0.0,
@@ -69,7 +73,6 @@ def test_optional_ab_fields_default_to_null_on_a_report_without_gold() -> None:
 
 
 def test_qa_and_verdict_models_carry_their_fields() -> None:
-    """The small eval items hold exactly the fields the harness reads off them."""
     qa = QA(question="what holds", expected=None)
     generated = GeneratedQuestion(question="which packing is densest")
     verdict = JudgeVerdict(answerable=True)
