@@ -25,15 +25,19 @@ every member.
 `created_by` records provenance and never grants access. Sharing leaves the source unchanged and
 creates a provenance-linked copy in the destination.
 
-The first level-one Markdown heading becomes the internal retrieval title. `- Type <kind>` declares
-the heading as any entity kind in the live ontology. A relation line uses
-`- <predicate> [<object kind>] <object name>`. For example, a project can declare
-`- part_of [Area] Research` and `- has_status [Status] Active`. Project, Area, and Status use the
-same mechanism as Paper, Method, Tool, or a newly defined kind. Other text is an ordinary note and
-may be untitled. These declarations stay in the source text so clients never send a second
-conflicting type or title. `source_uri` is only for the original URL of an external website or
-paper PDF. It supplies provenance and stable refresh identity but does not change retrieval
-behavior.
+The first level-one Markdown heading becomes the internal retrieval title. A generic source tag uses
+`#<kind>: <entity name>`, where kind is any live database ontology kind. If the entity name matches
+the heading, the tag declares that heading as the kind. Otherwise AIZK creates a generic
+`related_to` edge from the titled source to that entity. Project, Area, Paper, Method, Tool, and
+future kinds all use this one form.
+
+An explicit `- Type <kind>` line remains available. A relation line uses
+`- <predicate> [<object kind>] <object name>` when the exact predicate matters. For example, a
+Project can declare `- part_of [Area] Research` and `- has_status [Status] Active`. Tags express
+association and never imply status, ownership, access, or a more specific predicate. These
+declarations stay in the source text so clients never send a second conflicting metadata payload.
+`source_uri` is only for the original URL of an external website or paper PDF. It supplies
+provenance and stable refresh identity but does not change retrieval behavior.
 
 ## Agent-managed lifecycle and temporal inputs
 
@@ -131,10 +135,12 @@ share(
 {"shared": 1}
 ```
 
-A managed Project declares its ontology type and any known relations in its text. PostgreSQL builds
-query-relevant catalogs from declared subjects and live graph endpoints, groups them by exact scope
-set, and joins every current state relation. Missing status or area facts remain knowledge gaps.
-Tags, checkboxes, profiles, and file activity do not declare current state.
+A managed Project can declare its ontology type with a same-name `#project` tag and associate itself
+with an Area through `#area`. Exact `part_of` and `has_status` relations remain explicit when the
+management catalog needs those semantics. PostgreSQL builds query-relevant catalogs from declared
+subjects and live graph endpoints, groups them by exact scope set, and joins current state
+relations. Missing status or area facts remain knowledge gaps. Association tags, checkboxes,
+profiles, and file activity do not declare current state.
 
 There is no bulk vault importer. An agent examines one subject in context and sends only its current
 brief or durable finding through `remember`. A storage cleaner cannot decide whether old prose is

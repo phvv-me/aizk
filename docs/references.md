@@ -102,6 +102,14 @@ These systems clarified the product surface but did not supply Aizk code.
 | [Mem0](https://github.com/mem0ai/mem0) and [Letta](https://github.com/letta-ai/letta) | the useful boundary sits between a minimal memory API and a full agent framework | Aizk is memory infrastructure and does not own the agent loop |
 | the authored Zettelkasten and `qmd` | exact files remain the human source of truth and the honest retrieval baseline | Aizk supplies scoped current-state recall, temporal history, and one prompt-ready result rather than replacing authored notes |
 
+## Knowledge organization
+
+| Source | Inherited idea | AIZK adaptation |
+|---|---|---|
+| [The PARA Method](https://fortelabs.com/blog/para/) | Projects are finite action-oriented outcomes while Areas are ongoing responsibilities that need attention | Areas and Projects remain ontology entities rather than folders, and source tags associate knowledge without moving it |
+| [Combining Building a Second Brain and the Zettelkasten Method](https://zettelkasten.de/posts/building-a-second-brain-and-zettelkasten/) | PARA supplies action context while a Zettelkasten supplies atomic durable knowledge and structure notes that link supporting material | one maintained brief maps each Area or Project, while atomic supporting notes use `#project: <name>` and `#area: <name>` |
+| the user's historical Zettelkasten Structure Note | `#project` and `#area` identify structure notes and every Project belongs to an Area | key-value source tags name the exact entity, work for any live ontology kind, and never imply status or access |
+
 “Shared brain” is Aizk's product description. The phrase also acknowledges the historical
 Brainshared product idea, but no Brainshared package or code runs inside Aizk. Here it means that
 several people and MCP agents can use one memory service while database policy preserves private,

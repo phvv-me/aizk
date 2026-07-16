@@ -1,12 +1,14 @@
 # The write path
 
 Agents send text rather than filesystem objects. A small deterministic parser recognizes an
-optional level-one title, `Type` declaration, generic typed relation lines, and dated journal
-entries. It does not parse PDFs or own a file-format layer, since the calling agent supplies the
-paper's Markdown and original URL. A document is chunked recursively for prose, embedded once,
-and then flows through one configured extractor. The production LLM path uses the cheap relevance
-gate first. The experimental GLiNER path performs entity and relation extraction itself and
-therefore skips that separate gate.
+optional level-one title, generic ontology tags, a `Type` declaration, typed relation lines, and
+dated journal entries. A tag uses `#<kind>: <entity name>`. A same-name tag declares the heading as
+that kind. Other tags create `related_to` edges to the typed entities without Project, Area, or any
+other user-facing kind appearing in Python enums. It does not parse PDFs or own a file-format layer,
+since the calling agent supplies the paper's Markdown and original URL. A document is chunked
+recursively for prose, embedded once, and then flows through one configured extractor. The
+production LLM path uses the cheap relevance gate first. The experimental GLiNER path performs
+entity and relation extraction itself and therefore skips that separate gate.
 
 Explicit declarations and model extraction meet at the same `Extraction` value. A declared
 subject type is stored on the source document so later chunks retain it, while arbitrary relations

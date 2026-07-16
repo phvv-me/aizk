@@ -242,10 +242,11 @@ class TextIngestor:
         if not spans:
             return None
         created_by = source.created_by or settings.system_user_id
-        declaration = SourceDeclaration.from_text(source.text, source.title)
+        ontology = Ontology.current()
+        declaration = SourceDeclaration.from_text(source.text, source.title).canonical(ontology)
         subject_type = source.subject_type or declaration.subject_type
         if subject_type is not None:
-            subject_type = Ontology.current().entity_kind(subject_type)
+            subject_type = ontology.entity_kind(subject_type)
         title = declaration.title or " ".join(source.text.split()[:8])
         searchable = tuple(
             source.capture.search_text(span) if source.capture is not None else span
@@ -273,6 +274,7 @@ class TextIngestor:
     ) -> tuple[list[PreparedText | None], list[Document | None]]:
         """Hash and match sources before any embedding work begins."""
         async with self.user as opened:
+            await Ontology.ensure(opened)
             store = DocumentStore(opened)
             digests = await store.hash_texts([source.text for source in sources])
             plans = [

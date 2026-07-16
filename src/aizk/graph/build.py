@@ -117,11 +117,11 @@ def source_extraction(
         if journals
         else []
     )
-    if chunk.ord != 0 or document.subject_type is None:
+    if chunk.ord != 0:
         return entities, journals
-    declaration = SourceDeclaration.from_text(chunk.text, document.title).model_copy(
-        update={"subject_type": document.subject_type}
-    )
+    declaration = SourceDeclaration.from_text(chunk.text, document.title)
+    if document.subject_type is not None:
+        declaration = declaration.model_copy(update={"subject_type": document.subject_type})
     extracted = declaration.extraction(
         Ontology.current(),
         document.observed_at or document.created_at,

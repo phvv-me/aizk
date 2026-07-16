@@ -22,6 +22,7 @@ from aizk.extract.ingest import (
     ingest_text,
     ingest_texts,
 )
+from aizk.ontology import Ontology
 from aizk.provenance import CaptureContext
 from aizk.store import (
     Chunk,
@@ -83,6 +84,22 @@ def test_ingest_texts_batches_stores_and_skips_the_blank_source(settings: Settin
     results = dbutil.run(body())
     assert results[0] is None  # the blank source plans nothing and stores no document
     assert isinstance(results[1], uuid.UUID)  # the real source becomes one stored document
+
+
+@pytest.mark.usefixtures("migrated_db", "fake_embedder")
+def test_ingest_loads_the_ontology_in_a_fresh_server_process() -> None:
+    async def body() -> UUID7 | None:
+        await dbutil.reset_db()
+        Ontology.clear()
+        return await ingest_text(
+            User.system(),
+            "# First write\n\n- Type Project\n\nThe server can accept this before any recall.",
+        )
+
+    document_id = dbutil.run(body())
+
+    assert document_id is not None
+    assert Ontology.current().entity_kind("project") == "project"
 
 
 @pytest.mark.usefixtures("migrated_db")

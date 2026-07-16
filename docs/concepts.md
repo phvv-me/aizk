@@ -19,6 +19,56 @@ to use vLLM for extraction." A thing is an entity, a statement connecting two th
 The whole web of entities and facts is the knowledge graph, and it is what makes "what did we
 decide about this three weeks ago" answerable instead of a search through old notes.
 
+## Areas, Projects, and source tags
+
+AIZK combines the action layer of PARA with the linked knowledge layer of a Zettelkasten. PARA
+distinguishes short-term outcomes from ongoing responsibilities. A Zettelkasten keeps durable ideas
+in one network and uses structure notes as maps instead of moving every useful note into a folder.
+AIZK follows both ideas. Knowledge stays independently recallable while source tags connect it to
+the work where it is useful.
+
+An Area is an ongoing responsibility, identity, or standard of care with no finish line. Health,
+Research, and Business are typical Areas. An Area states what good care means, its current
+condition, and the finite Projects serving it.
+
+A Project is a finite effort toward one concrete outcome inside one Area. It has a beginning, a
+success condition, and an end. A maintained Project brief is the structure note for that outcome.
+It summarizes current state, problems, next actions, and success without absorbing every supporting
+finding or source.
+
+Any note can associate itself with live ontology entities through generic source tags.
+
+```md
+# Upload security decision
+
+#project: AIZK Productization
+#area: Business
+```
+
+The general form is `#<ontology kind>: <entity name>`. Project and Area are examples rather than
+reserved application fields. A tag whose entity name matches the level-one heading declares that
+heading as the tagged kind. Other tags create generic `related_to` graph edges from the titled
+source to the tagged entities. This same mechanism can use Paper, Method, Tool, or a future kind
+defined only in the database ontology.
+
+Tags express association. They do not encode status, ownership, access, or exact domain predicates.
+An exact relation such as `part_of` or `has_status` remains an explicit typed relation in the source.
+The Project tag never means Active, and the Area tag never changes the write scope.
+
+```md
+# AIZK Productization
+
+#project: AIZK Productization
+#area: Business
+
+- part_of [Area] Business
+- has_status [Status] Active
+```
+
+The current brief remains authoritative. Supporting notes keep their own purpose and use tags to
+join the same knowledge neighborhood. This preserves the Zettelkasten principle that durable
+knowledge should outlive one Project while retaining PARA's action-oriented context.
+
 ## Embeddings and retrieval
 
 An embedding turns a piece of text into a list of numbers positioned so that similar meanings

@@ -36,6 +36,12 @@ writes or repository files.
   or prediction that documentation might change.
 - Omit expiration for living documentation, project briefs, research, decisions, and software
   instructions without a scheduled end. When they change, update or correct them.
+- Use `#project: <name>` and `#area: <name>` when a note belongs to a Project and Area. The generic
+  form is `#<ontology kind>: <entity name>` and works with any live ontology kind.
+- A same-name tag declares the heading as that kind. Other tags create generic associations through
+  `related_to`.
+- Tags do not imply status, access, ownership, or write scope. Keep exact ontology relations such as
+  `part_of` and `has_status` explicit when their semantics matter.
 - Omit `scopes` for private memory. Name a shared organization only when sharing is intended.
 - After remembering, recall the subject once and verify that the source is visible and current.
 

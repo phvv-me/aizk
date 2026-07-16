@@ -46,21 +46,24 @@ optional `budget` unless repeated responses are too long.
 
 ## Remember durable context
 
-Send self-describing Markdown. The first level-one heading becomes the retrieval title. An optional
-`Type` line declares any entity kind in the live ontology. Typed relation lines declare their
-predicate, object type, and object name without a second metadata payload.
+Send self-describing Markdown. The first level-one heading becomes the retrieval title. A generic
+source tag associates the note with any entity kind in the live ontology. A same-name tag declares
+the heading itself as that kind. Typed relation lines remain available when an exact predicate is
+important.
 
 ```json
 {
-  "text": "# Assay validation\n\n- Type Project\n- part_of [Area] Research\n- has_status [Status] Active\n\nThe team selected the current assay plan."
+  "text": "# Assay validation\n\n#project: Assay validation\n#area: Research\n\n- part_of [Area] Research\n- has_status [Status] Active\n\nThe team selected the current assay plan."
 }
 ```
 
-AIZK validates the declared types and predicates against its database-backed ontology. Project,
-Area, Paper, Method, and Status are ordinary ontology kinds rather than special document fields.
-Other valid kinds and relations use the same syntax, and ordinary notes need no declaration. Use
-`source_uri` only for the original URL of an external website or paper PDF. The title belongs in the
-text, and authored notes do not need a source URI.
+AIZK validates tag kinds, declared types, and predicates against its database-backed ontology. The
+general tag form is `#<kind>: <entity name>`. Project and Area are examples rather than special
+document fields. A supporting note can use `#project: Assay validation` while keeping its own title.
+Tags express association and never imply status or write scope. Other valid kinds and relations use
+the same syntax, and ordinary notes need no declaration. Use `source_uri` only for the original URL
+of an external website or paper PDF. The title belongs in the text, and authored notes do not need a
+source URI.
 
 Both `observed_at` and `expires_at` are optional. Omit them for ordinary durable knowledge. Set
 `observed_at` only when a known applicability time differs materially from capture. Set

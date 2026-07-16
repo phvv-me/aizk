@@ -62,10 +62,61 @@ def test_generic_source_declaration_parses_typed_relations() -> None:
     ]
 
 
+def test_generic_tags_declare_the_subject_and_associate_other_typed_entities() -> None:
+    declared = SourceDeclaration.from_text(
+        "# AIZK Productization\n\n#project: AIZK Productization\n#area: Business"
+    )
+
+    assert declared.subject_type == "project"
+    assert [(tag.object_type, tag.object_name) for tag in declared.tags] == [
+        ("project", "AIZK Productization"),
+        ("area", "Business"),
+    ]
+    extracted = declared.extraction(Ontology.current(), datetime(2026, 7, 16, tzinfo=UTC), None)
+    assert [(entity.name, entity.type) for entity in extracted.entities] == [
+        ("AIZK Productization", "project"),
+        ("Business", "area"),
+    ]
+    assert [(fact.predicate, fact.object_) for fact in extracted.facts] == [
+        (System.Relation.RELATED_TO, "Business")
+    ]
+
+
+def test_supporting_note_tags_use_the_generic_related_to_relation() -> None:
+    declared = SourceDeclaration.from_text(
+        "# Ontology boundary\n\n#project: AIZK Productization\n#area: Business"
+    )
+
+    assert declared.subject_type is None
+    extracted = declared.extraction(Ontology.current(), datetime(2026, 7, 16, tzinfo=UTC), None)
+    assert [(entity.name, entity.type) for entity in extracted.entities] == [
+        ("Ontology boundary", System.Entity.CONCEPT),
+        ("AIZK Productization", "project"),
+        ("Business", "area"),
+    ]
+    assert [(fact.predicate, fact.object_) for fact in extracted.facts] == [
+        (System.Relation.RELATED_TO, "AIZK Productization"),
+        (System.Relation.RELATED_TO, "Business"),
+    ]
+
+
+def test_self_tags_reject_conflicting_subject_kinds() -> None:
+    with pytest.raises(ValueError, match="conflicting ontology kinds"):
+        SourceDeclaration.from_text("# AIZK\n\n#project: AIZK\n#area: AIZK")
+
+
+def test_generic_tag_kind_must_exist_in_the_live_ontology() -> None:
+    declared = SourceDeclaration.from_text("# Finding\n\n#imaginary kind: AIZK")
+
+    with pytest.raises(ValueError, match="unknown ontology entity type"):
+        declared.canonical(Ontology.current())
+
+
 def test_management_words_without_type_remain_an_ordinary_note() -> None:
     declared = SourceDeclaration.from_text("# Notes\n- Status Active\nThis project is great")
 
     assert declared.subject_type is None
+    assert declared.tags == ()
     assert declared.relations == ()
 
 

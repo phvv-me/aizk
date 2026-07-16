@@ -1203,6 +1203,36 @@ def test_source_declaration_becomes_generic_ontology_facts() -> None:
     assert all(fact.valid_from == observed for fact in facts)
 
 
+def test_source_tags_become_generic_ontology_entities_and_edges() -> None:
+    owner = uuid5()
+    chunk = Chunk(
+        id=uuid5(),
+        document_id=uuid5(),
+        ord=0,
+        text=("# Ontology boundary\n\n#project: AIZK Productization\n#area: Business"),
+        created_by=owner,
+        scopes=[owner],
+    )
+    document = Document(
+        content_hash=uuid8(),
+        created_by=owner,
+        scopes=[owner],
+        title="Ontology boundary",
+    )
+
+    entities, facts = source_extraction(chunk, document)
+
+    assert [(entity.name, entity.type) for entity in entities] == [
+        ("Ontology boundary", System.Entity.CONCEPT),
+        ("AIZK Productization", "project"),
+        ("Business", "area"),
+    ]
+    assert [(fact.predicate, fact.object_) for fact in facts] == [
+        (System.Relation.RELATED_TO, "AIZK Productization"),
+        (System.Relation.RELATED_TO, "Business"),
+    ]
+
+
 @pytest.mark.parametrize(
     ("relation", "expected"),
     [

@@ -189,6 +189,12 @@ statement. Keep current truth separate from dated history. An Area expresses an 
 care. A Project expresses a finite outcome within an Area. Maintained briefs should state the owner,
 status, applicable date when material, current state, problems, next actions, and success condition.
 
+Use `#project: <name>` and `#area: <name>` to associate a note with its finite outcome and ongoing
+responsibility. These are instances of the generic `#<ontology kind>: <entity name>` form. A
+same-name tag declares the heading as that kind. Other tags create generic graph associations while
+the note keeps its own atomic purpose. Tags do not encode status, access, or write scope. Keep exact
+`part_of` and `has_status` relations explicit when those semantics matter.
+
 Use the original website or paper PDF URL as `source_uri` for external material. Reuse the same URL
 and scope set when refreshing it. Omit `source_uri` for authored notes and repository files. Set
 `observed_at` only when the content became applicable at a materially different known time. Set

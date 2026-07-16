@@ -76,3 +76,8 @@ considered. The full breakdown of both, with a diagram for each stage, lives in
 Self-describing Markdown may declare any live ontology kind with `- Type <kind>` and any typed
 relation with `- <predicate> [<object kind>] <object name>`. Projects and areas use this generic
 ontology path rather than dedicated metadata fields.
+
+Generic source tags use `#<kind>: <entity name>`. A same-name tag declares the heading as that live
+ontology kind, while other tags connect the note to typed entities through `related_to`. For
+example, supporting AIZK notes can use `#project: AIZK Productization` and `#area: Business` without
+adding Project or Area to application enums.
