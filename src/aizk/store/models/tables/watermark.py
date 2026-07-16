@@ -26,7 +26,6 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         entity_dirty = auto()
         fact_count = auto()
         raptor_fact_count = auto()
-        curation_pending = auto()
         config = auto()
 
     mutable: ClassVar[bool] = True

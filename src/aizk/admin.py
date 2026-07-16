@@ -32,7 +32,7 @@ class ForgetResult(FrozenModel):
 
 
 class OntologyKindRow(FrozenModel):
-    """One ontology kind with how much of the graph uses it, the catalog review row."""
+    """One ontology kind with how much of the graph uses it, the catalog inspection row."""
 
     name: str
     kind: str
@@ -166,7 +166,7 @@ async def define_relation_kind(
 
 
 async def list_ontology() -> list[OntologyKindRow]:
-    """Every ontology kind with how much of the graph uses it, the catalog review surface."""
+    """Every ontology kind with how much of the graph uses it, the catalog inspection surface."""
     entity_uses = (
         sql_select(func.count())
         .select_from(Entity.Content)

@@ -38,6 +38,11 @@ to choose one active organization. Logto owns the organizations and memberships 
 only the stable scope IDs derived from their signed identifiers, see
 [Identity and sharing](engine/identity.md).
 
+Public means readable by every authenticated AIZK user. It does not mean writable by everyone and
+it does not currently mean readable without login. Only organization members whose effective Logto
+permissions include `write:memory` can write into that organization, whether it is public or
+private.
+
 ## Row level security
 
 Row level security, RLS, is a Postgres feature that filters which rows of a table a query is
@@ -52,6 +57,40 @@ Most memory only tracks when it learned something. aizk tracks two independent c
 fact was true in the world, and when aizk itself recorded it. That second clock lets a later
 correction coexist with the original claim rather than overwrite it, so the engine can honestly
 answer what it believed on a given day in the past, see [Store](engine/store.md).
+
+## Agent-managed currentness
+
+AIZK has no review system and will not gain one. A source does not wait for approval after an agent
+calls `remember`. It becomes available immediately, and background jobs create graph facts,
+profiles, and summaries as replaceable projections. Agents own the knowledge lifecycle. They recall
+before writing, select an authorized scope, preserve provenance, correct changed information, and
+decide whether a real temporal boundary exists. Human operators maintain authentication, storage,
+backups, and model services rather than process a knowledge queue.
+
+Changed knowledge does not need a scheduled inspection date. An agent encounters new evidence,
+recalls the current source, and writes the correction or updates the maintained external source
+through the same `source_uri` and scope set. Bi-temporal claims preserve what was previously known
+without presenting closed claims as current truth.
+
+## Observation and expiration
+
+`observed_at` answers when the information became applicable. It is useful when that time is known
+and materially different from when the agent captured it. Most notes omit it because capture time
+is close enough.
+
+`expires_at` answers when the information stops being true. It is a hard validity boundary rather
+than a reminder. After that time, ordinary recall excludes the source and its derived current facts,
+while temporal history remains stored. Expiration does not create a task, notification, or automatic
+replacement.
+
+Use `expires_at` only when the outside world supplies a known cutoff. An event schedule with a stated
+end, a temporary access grant, or a policy with an announced replacement date qualifies. Living
+documentation, project briefs, research findings, design decisions, and software instructions with
+no scheduled end do not. The possibility that something may change someday is not an expiration
+condition. Neither are uncertainty, a maintenance interval, or a desire to inspect the note later.
+
+When in doubt, omit `expires_at`. A durable source should remain current until an agent observes a
+change and corrects it.
 
 ## Self-hosted and local-first
 

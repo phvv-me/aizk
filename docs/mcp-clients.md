@@ -37,7 +37,20 @@ browser callback to the machine where Codex is listening.
 
 ## Claude Code
 
-Commit the Aizk entry in `.mcp.json`.
+The shortest personal setup uses Claude Code's user scope.
+
+```sh
+claude mcp add --scope user --transport http --callback-port 8912 aizk https://aizk.phvv.me/mcp
+claude mcp login aizk
+```
+
+After starting or restarting Claude Code, ask it to complete its own setup.
+
+```text
+Ask AIZK how to do AIZK onboarding and follow it.
+```
+
+For a shared repository, commit the equivalent Aizk entry in `.mcp.json` instead.
 
 ```json
 {
@@ -50,8 +63,9 @@ Commit the Aizk entry in `.mcp.json`.
 }
 ```
 
-Claude Code starts the browser login when it first reaches the protected server. It needs no shared
-OAuth credential.
+Claude Code needs no shared OAuth credential. For a headless or SSH session, run
+`claude mcp login --no-browser aizk`, open the printed URL locally, and paste the resulting redirect
+URL back into Claude's prompt. This flow needs no callback port forward.
 
 ## OpenCode
 

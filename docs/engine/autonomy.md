@@ -1,5 +1,11 @@
 # Autonomy
 
+AIZK has no review system and will not gain one. Agents decide what to remember, where it belongs,
+and when changed evidence requires a correction. A successful write becomes a source immediately.
+The autonomous engine maintains rebuildable projections and operational health rather than judging
+whether knowledge deserves acceptance. Human operators maintain infrastructure rather than process
+memory.
+
 Maintenance never runs in a caller request. A pgqueuer worker drains durable jobs and a cron
 scheduler fans scheduled passes out once per exact scope set. Each job binds authority for only
 that scope set before it opens an application session.

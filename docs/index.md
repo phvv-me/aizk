@@ -74,6 +74,11 @@ aizk
     Documents and source chunks stay authoritative. Facts, profiles, communities, and recursive
     summaries are rebuildable projections that can add evidence but cannot erase it.
 
+-   ### Agents manage currentness
+
+    There is no approval queue or human knowledge gate. Agents write sources directly, correct them
+    when evidence changes, and use expiration only for a real known end to validity.
+
 -   ### Retrieval wins by merit
 
     Source, fact, graph, profile, community, and overview candidates enter one maximal plan. A
@@ -144,7 +149,7 @@ Aizk.
 
 ## Measured on the real stack
 
-The current production corpus contains reviewed Area and Project briefs plus distilled research
+The current production corpus contains agent-maintained Area and Project briefs plus distilled research
 papers. A 960-question management benchmark ranked the intended current source first every time.
 Representative end-to-end recalls took about 0.7 to 2.6 seconds and beat the refreshed vault index
 on broad current-state questions in the measured cell.

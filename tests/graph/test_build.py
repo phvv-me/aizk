@@ -479,7 +479,7 @@ def test_speaker_bound_claims_coexist_inside_one_shared_scope(
                     session,
                     speaker,
                     frozenset({scope}),
-                    CaptureContext(speaker_label=label, speaker_role="Reviewer"),
+                    CaptureContext(speaker_label=label, speaker_role="Analyst"),
                 )
                 await consolidate(writer, [opinion], {"Subject": subject}, chunk)
         async with dbutil.actor(scope) as session:
@@ -671,7 +671,7 @@ def test_prepare_entities_passes_through_a_confident_type_unchanged(
     assert dbutil.run(body()) == "author"
 
 
-def test_prepare_entities_matches_a_curated_kind_for_a_concept_suggestion(
+def test_prepare_entities_matches_a_declared_kind_for_a_concept_suggestion(
     fake_embedder: RecordingEmbedder,
 ) -> None:
     async def body() -> tuple[str, str]:

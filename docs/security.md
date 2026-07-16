@@ -65,9 +65,20 @@ the private worker.
 ## Network exposure
 
 Every published host port has an explicit `127.0.0.1` binding. The Cloudflare Tunnel is outbound
-and reaches the server through the Compose network. The public profile runs `check-public` with
-`AIZK_REQUIRE_AUTH=1` before the tunnel starts. A missing Logto URL, public URL, Management API
-client, OAuth web client, or client secret therefore stops deployment.
+and reaches the server through the Compose network. The public profile waits for Logto and the
+tunnel, applies the committed Logto authorization policy, then runs `check-public` with
+`AIZK_REQUIRE_AUTH=1`. A missing Logto URL, public URL, Management API client, OAuth web client, or
+client secret therefore stops the MCP server.
+
+Public organizations affect database read standing only. They never enter writable standing. A
+write requires current Logto membership and the effective `write:memory` organization permission,
+then forced row security applies the same check inside PostgreSQL. The production OAuth proxy also
+requires a bearer before a tool runs, so public organization content is not anonymously reachable.
+
+Self-registration is not currently enabled. Before opening it, require verified Logto accounts,
+keep new users out of every organization by default, preserve invitation-only organization roles,
+and add abuse controls sized for model-backed recall. Unauthenticated semantic recall should remain
+a separate read-only service if it is ever introduced.
 
 Cloudflare should also enforce request body size and rate limits for `/authorize`, `/register`,
 `/token`, and `/mcp`. Application middleware covers MCP tool calls after FastMCP has established a
@@ -144,15 +155,15 @@ survive theft, fire, controller failure, administrator error, or ransomware.
 ## Software supply chain
 
 The server image installs from the committed `uv.lock` with frozen resolution. Direct GLiNER
-sidecar dependencies use the exact versions validated on Crimson. External images use reviewed
+sidecar dependencies use the exact versions validated on Crimson. External images use validated
 release tags. VectorChord Suite currently exposes a floating PostgreSQL 18 suite tag, so Compose
 also pins its tested digest.
 
 vLLM runs model repositories with `trust-remote-code`. Model checkpoint selection is therefore
-equivalent to selecting executable code. Only reviewed model repositories and revisions belong in
-production. The Hugging Face cache must not be writable by untrusted users.
+equivalent to selecting executable code. Only trusted model repositories and pinned revisions
+belong in production. The Hugging Face cache must not be writable by untrusted users.
 
-Dependency and image updates are deliberate changes. Review upstream release notes, rebuild from
+Dependency and image updates are deliberate changes. Inspect upstream release notes, rebuild from
 scratch, run the full test and type gates, scan the resulting images, deploy privately, run the
 five-second health check, and only then restore public traffic.
 

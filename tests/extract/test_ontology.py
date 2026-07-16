@@ -120,12 +120,12 @@ def test_define_creates_then_refines_a_catalog_row(
     async def body() -> str:
         async with User.system() as session:
             await Ontology.define_entity(
-                session, name="Curated Kind", description="first", domain="test"
+                session, name="Declared Kind", description="first", domain="test"
             )
             await Ontology.define_entity(
-                session, name="curated_kind", description="second", domain="test"
+                session, name="declared_kind", description="second", domain="test"
             )
-            row = await session.get_one(Entity.Kind, "curated_kind")
+            row = await session.get_one(Entity.Kind, "declared_kind")
         return row.description
 
     assert dbutil.run(body()) == "second"  # ON CONFLICT DO UPDATE refreshes, unlike mint

@@ -44,6 +44,19 @@ and effective permissions. Cached properties index writable and public organizat
 creating identity tables. Status omits emails, phone numbers, linked identities, and internal IDs
 because they do not help an agent choose a memory scope.
 
+Global roles and organization roles are separate authorization layers. The global `aizk-user` role
+grants the AIZK API permission needed to enter the service. It never grants a write into every
+organization. An organization role such as editor becomes writable only when its organization
+template assigns `write:memory`. Assigning the global API resource permission named `control` does
+not satisfy this check. The distinct names keep service access separate from collaboration writes.
+
+`deploy/logto.conf` declares the AIZK-owned API resource, API permissions, default global user role,
+organization roles, and the organization write permission. Every field is an `AIZK_` setting that
+`.env` can override. `aizk logto audit` reports drift and exits nonzero when repair is needed.
+`aizk logto apply` reconciles the policy through the Logto Management API. It deletes only obsolete
+global user roles under the configured managed prefix and preserves unrelated roles and
+permissions.
+
 ## Scope sets are the collaboration model
 
 The `scopes uuid[]` column is intentional. It is not a denormalized substitute for one
@@ -87,12 +100,39 @@ organization's singleton scope world-readable. It must not satisfy one member of
 scope. A row in A and B remains restricted to authenticated members of both even when A itself is
 public.
 
+Public status never grants write standing. A caller may write into a public organization only when
+they are a member and their effective Logto organization permissions include the configured
+`write:memory` permission. A public reader who is not a member has the organization ID only in
+`User.scopes.public`. A writer has it independently in `User.scopes.write`. `User.write_scope()`
+checks the write set before opening a transaction, and forced PostgreSQL row security repeats that
+check for insert and update.
+
 The client lists organizations through the Management API and retains only entries whose
 `customData.public` value is exactly true. It uses an M2M application with the Management API
 `all` permission and HTTP Basic client authentication. Failure closes access by yielding no public
 organizations. FastMCP's OAuth proxy still requires a valid bearer, so public means visible to
 every authenticated caller rather than an unauthenticated internet endpoint. The anonymous User
 exists for local auth-off operation and policy tests.
+
+## Signup and unauthenticated access
+
+The current deployment is invitation-only. An administrator creates the Logto account and sends
+the initial credentials privately. There is no self-registration page in the AIZK flow. Once a user
+authenticates, the default global `aizk-user` role grants entry to the MCP API. It does not grant
+membership or write standing in any organization.
+
+A future self-service signup should remain an authenticated flow through Logto. A new account would
+receive `aizk-user`, its private memory scope, and read access to singleton public organizations. It
+would receive no organization membership and no shared write access. An invitation or explicit
+administrator action would still grant private organization membership and roles. Email
+verification, request throttling, and abuse controls should be enabled before opening registration
+because recall invokes database and model work.
+
+True unauthenticated reading is a different feature and is not enabled. The safest public interface
+for general documentation remains the static website. If unauthenticated semantic recall is added,
+it should use a separate read-only surface that exposes only `recall`, binds the anonymous sentinel
+with no personal or writable scopes, reads singleton public organizations only, and carries strict
+rate and budget limits. It must not expose `status`, `remember`, or `share`.
 
 ## Background work follows the same scope set
 

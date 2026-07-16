@@ -145,7 +145,7 @@ export const llmExtraction = async (
 	return [extraction.entities, withDocumentFallback(extraction.facts, fallback)];
 };
 
-// Map one suggested-type embedding onto the curated ontology.
+// Map one suggested-type embedding onto the declared ontology.
 export const closestEntityType = (vector: number[]): string => {
 	const scored = Object.entries(ontology.current().entityDescriptionVectors).map(
 		([name, candidate]) => [name, cosineSimilarity(vector, candidate)] as const

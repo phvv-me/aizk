@@ -40,7 +40,7 @@ class ManagementQuestions(FrozenModel):
         "What work was recently completed in the {name} Area?",
         "What part of the {name} Area is being neglected?",
         "What should not be treated as active work in the {name} Area?",
-        "When should the {name} Area be reviewed next?",
+        "What event or evidence should change the current plan for the {name} Area?",
         "Summarize the vision, current state, problems, and next actions for {name}.",
     )
     project_templates: ClassVar[tuple[str, ...]] = (

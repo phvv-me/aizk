@@ -66,7 +66,7 @@ def _mock_client(handler: httpx.MockTransport) -> lt.LogtoClient:
 @pytest.mark.parametrize(
     ("role", "permissions", "writable"),
     [
-        ("custom", ("control",), True),
+        ("custom", ("write:memory",), True),
         ("admin", (), False),
         ("editor", ("read",), False),
         ("viewer", (), False),
@@ -225,7 +225,13 @@ def test_client_reads_current_user_directory_and_caches_by_subject(
         if request.url.path.endswith("/scopes"):
             return httpx.Response(
                 200,
-                json=[{"id": "control", "name": "control", "description": "Write"}],
+                json=[
+                    {
+                        "id": "write-memory",
+                        "name": "write:memory",
+                        "description": "Write shared memory",
+                    }
+                ],
             )
         if request.url.path == "/api/organizations/org-a/users":
             return httpx.Response(
@@ -275,7 +281,7 @@ def test_client_reads_current_user_directory_and_caches_by_subject(
     assert user.username == "pedro"
     assert user.roles == ("aizk-user",)
     assert second[0].roles[0].name == "editor"
-    assert second[0].scopes[0].name == "control"
+    assert second[0].scopes[0].name == "write:memory"
     assert second[0].members[0].roles[0].name == "editor"
     assert calls.count("/oidc/token") == 1
     assert calls.count("/api/users/user/a/organizations") == 1

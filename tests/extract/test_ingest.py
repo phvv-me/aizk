@@ -138,7 +138,7 @@ def test_ingest_text_uses_source_uri_as_message_identity(settings: Settings) -> 
 
 @pytest.mark.usefixtures("migrated_db", "fake_embedder")
 def test_ingest_text_refreshes_changed_retrieval_metadata(settings: Settings) -> None:
-    reviewed = datetime(2026, 7, 15, tzinfo=UTC)
+    observed = datetime(2026, 7, 15, tzinfo=UTC)
 
     async def body() -> tuple[
         UUID7 | None,
@@ -160,7 +160,7 @@ def test_ingest_text_refreshes_changed_retrieval_metadata(settings: Settings) ->
                 "A corrected source body."
             ),
             source_uri="vault:///Zettelkasten/Definitions.md",
-            capture=CaptureContext(observed_at=reviewed),
+            capture=CaptureContext(observed_at=observed),
         )
         async with dbutil.actor(settings.system_user_id) as session:
             document = (await session.exec(select(Document))).one()
@@ -177,7 +177,7 @@ def test_ingest_text_refreshes_changed_retrieval_metadata(settings: Settings) ->
     assert (title, subject_type, observed_at) == (
         "Definitions",
         "project",
-        reviewed,
+        observed,
     )
 
 
@@ -187,7 +187,7 @@ def test_ingest_text_updates_validity_without_reembedding(
     fake_embedder: RecordingEmbedder,
 ) -> None:
     text = "# Aizk\n- Type Project\n- has_status [Status] Active\nThe brief stays stable."
-    reviewed = datetime(2026, 7, 15, tzinfo=UTC)
+    observed = datetime(2026, 7, 15, tzinfo=UTC)
 
     async def body() -> tuple[UUID7 | None, UUID7 | None, Document]:
         await dbutil.reset_db()
@@ -201,7 +201,7 @@ def test_ingest_text_updates_validity_without_reembedding(
             User.system(),
             text,
             source_uri="vault:///Zettelkasten/Aizk.md",
-            capture=CaptureContext(observed_at=reviewed),
+            capture=CaptureContext(observed_at=observed),
         )
         assert len(fake_embedder.calls) == calls
         async with dbutil.actor(settings.system_user_id) as session:
@@ -212,7 +212,7 @@ def test_ingest_text_updates_validity_without_reembedding(
 
     assert refreshed == original
     assert document.subject_type == "project"
-    assert document.observed_at == reviewed
+    assert document.observed_at == observed
 
 
 @pytest.mark.usefixtures("migrated_db", "fake_embedder")

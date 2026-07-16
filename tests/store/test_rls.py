@@ -106,6 +106,22 @@ def test_creator_is_provenance_and_empty_scopes_are_rejected() -> None:
     dbutil.run(body())
 
 
+def test_public_scope_grants_read_but_never_write() -> None:
+    async def body() -> None:
+        await dbutil.reset_db()
+        creator, caller, organization = uuid5(), uuid5(), uuid5()
+        document = await dbutil.seed_document(creator, [organization])
+
+        assert await dbutil.can_read_document(
+            caller,
+            document,
+            public_orgs=(organization,),
+        )
+        assert not await dbutil.can_write_document(caller, caller, [organization])
+
+    dbutil.run(body())
+
+
 def test_read_authority_reaches_the_full_visible_union() -> None:
     async def body() -> None:
         await dbutil.reset_db()

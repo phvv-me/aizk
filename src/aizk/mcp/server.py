@@ -115,7 +115,8 @@ async def remember(
     text: self-describing Markdown or plain text that remains the source authority.
     source_uri: original website or paper PDF URL. Omit it for authored notes.
     observed_at: optional time when the statement became applicable. Normally omitted.
-    expires_at: optional time after which the statement is no longer current. Normally omitted.
+    expires_at: known time after which the statement stops being true. It is not a reminder.
+        Normally omitted.
     scopes: optional authorized Logto organization names. Omission means private memory.
     """
     if not text.strip():

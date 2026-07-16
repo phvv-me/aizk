@@ -246,7 +246,7 @@ class Ontology(FrozenModel):
         """Constrain extracted graph values to the database ontology.
 
         Unknown entity types become concept suggestions so vector resolution can recover a
-        curated type. Facts with unknown predicates are discarded as unsupported claims.
+        declared type. Facts with unknown predicates are discarded as unsupported claims.
         """
         cls.current()
         entity_types = {underscore(entity.type) for entity in entities}

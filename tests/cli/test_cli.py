@@ -10,6 +10,7 @@ from id_factory import uuid5, uuid7
 from pydantic import UUID5, UUID7
 
 import aizk.cli as cli
+from aizk.common.auth.logto import PolicyReport
 from aizk.config import Settings
 from aizk.retrieval import Candidate, Lane
 from aizk.store.identity import User
@@ -223,6 +224,39 @@ def test_check_public_reports_complete_configuration(capsys: pytest.CaptureFixtu
     dispatch(["check-public"])
 
     assert "configuration is complete" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("command_name", "clean", "exits"),
+    [("audit", True, False), ("audit", False, True), ("apply", True, False)],
+    ids=["audit-clean", "audit-drift", "apply"],
+)
+def test_logto_commands_report_policy_and_close_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command_name: str,
+    clean: bool,
+    exits: bool,
+) -> None:
+    client = SimpleNamespace(close=AsyncMock())
+    report = PolicyReport(clean=clean, changes=() if clean else ("repair role",))
+    reconciler = SimpleNamespace(
+        audit=AsyncMock(return_value=report),
+        apply=AsyncMock(return_value=report),
+    )
+    monkeypatch.setattr(cli, "LogtoClient", Mock(return_value=client))
+    monkeypatch.setattr(cli, "LogtoPolicy", Mock(return_value=reconciler))
+
+    if exits:
+        with pytest.raises(SystemExit) as exit_info:
+            dispatch(["logto", command_name])
+        assert exit_info.value.code == 1
+    else:
+        dispatch(["logto", command_name])
+
+    assert getattr(reconciler, command_name).call_count == 1
+    assert client.close.call_count == 1
+    assert f'"clean": {str(clean).lower()}' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("with_worker", [True, False])

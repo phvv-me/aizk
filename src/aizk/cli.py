@@ -14,6 +14,7 @@ from . import admin, ops
 from . import backup as backup_ops
 from .background.queue import enqueue_pending, install_queue_schema, retry_failed_chunks
 from .background.schedule import run_worker
+from .common.auth.logto import LogtoClient, LogtoPolicy
 from .config import settings
 from .extract.ingest import ingest_text
 from .mcp.server import AizkMCP
@@ -37,7 +38,8 @@ graph = App(name="graph", help="Graph maintenance: rebuild, decay, reembed, rapt
 ontology = App(name="ontology", help="Ontology: the entity types and relation predicates.")
 data = App(name="data", help="Data: ingest, export, audit, and promote documents.")
 db = App(name="db", help="Database and engine ops: setup, health, migrations, backup, restore.")
-for _sub in (graph, ontology, data, db):
+logto = App(name="logto", help="Logto authorization policy audit and reconciliation.")
+for _sub in (graph, ontology, data, db, logto):
     app.command(_sub)
 
 
@@ -138,6 +140,30 @@ def check_public() -> None:
     URL, Logto issuer, Logto Management API client, and OAuth web application.
     """
     print("public authentication configuration is complete")
+
+
+@logto.command(name="audit")
+async def audit_logto() -> None:
+    """Report drift between Logto and the policy configured through `AIZK_` settings."""
+    client = LogtoClient()
+    try:
+        report = await LogtoPolicy(client).audit()
+    finally:
+        await client.close()
+    print(report.model_dump_json(indent=2))
+    if not report.clean:
+        raise SystemExit(1)
+
+
+@logto.command(name="apply")
+async def apply_logto() -> None:
+    """Reconcile Logto with the configured AIZK authorization policy and print each mutation."""
+    client = LogtoClient()
+    try:
+        report = await LogtoPolicy(client).apply()
+    finally:
+        await client.close()
+    print(report.model_dump_json(indent=2))
 
 
 @app.command
@@ -289,7 +315,7 @@ async def define_relation_kind(
 
 @ontology.command(name="list")
 async def list_ontology() -> None:
-    """List every ontology kind with how much of the graph uses it, the catalog review
+    """List every ontology kind with how much of the graph uses it, the catalog inspection
     surface."""
     for row in await admin.list_ontology():
         mark = "*" if row.structural else " "

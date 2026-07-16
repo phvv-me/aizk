@@ -45,10 +45,12 @@ async with Client("http://localhost:8080/mcp") as client:
     print(result.data)
 ```
 
-Every Compose setting and every `Settings` default is documented in `deploy/.env.example`. Copy it
-to `.env`, generate independent database passwords, and run Compose from the package root. Every
-host port binds to loopback. The optional public profile opens an outbound Cloudflare Tunnel only
-after its Logto and OAuth preflight succeeds. See
+Every secret and deployment override is documented in `deploy/.env.example`. The committed
+nonsecret Logto role and permission policy lives in `deploy/logto.conf`, and `.env` overrides any
+matching value. Copy the example to `.env`, generate independent database passwords, and run
+Compose from the package root. Every host port binds to loopback. The optional public profile
+opens an outbound Cloudflare Tunnel, reconciles Logto, and starts MCP only after its authentication
+preflight succeeds. See
 [Operations](https://phvv.me/aizk/operations/) for storage and backups, and
 [Security](https://phvv.me/aizk/security/) for the production release gate.
 See [Onboarding](ONBOARDING.md) to add a collaborator, create a shared organization, and connect

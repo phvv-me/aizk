@@ -146,8 +146,8 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   `aizk user` and `aizk group` CLI verbs, group creation, membership grants, and the public-group
   toggle. Identity and org standing now come from the Logto token, and the group-delete demotion
   trigger goes with the table.
-- The curation-review loop in full: the `reviewed_at` gate, the `curated` group flag, the
-  `pending`/`approve`/`reject` MCP verbs, the standing-reviewer background pass, and the
+- The human approval loop in full, including its timestamp gate, group flag,
+  `pending`/`approve`/`reject` MCP verbs, standing approver background pass, and the
   server-wide `is_admin` flag that existed only for its cross-tenant reach. A write is canon the
   moment it lands.
 
@@ -188,7 +188,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 - The read path, `recall()` fusing dense, lexical, graph-neighbor, community, RAPTOR, and
   profile lanes behind one hybrid Postgres function plus a cross-encoder rerank.
 - Autonomy, a pgqueuer-backed worker and cron scheduler driving graph build, session
-  promotion, dedup, decay, communities, RAPTOR, profiles, insights, and curation review.
+  promotion, dedup, decay, communities, RAPTOR, profiles, and insights.
 - 36 MCP tools over FastMCP, everyday memory verbs, group governance, and root-only
   maintenance and admin, with Zitadel or local API-key identity.
 - The eval harness, hit@k/nDCG@k/MRR scoring, a config sweep, and EverMemBench/TEMPO dataset

@@ -14,7 +14,9 @@ from sqlalchemy.sql.selectable import Select
 type StatementValue = str | int | float | None | list[str] | list[float]
 
 # Resolve the package environment independently of the process working directory.
-_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
+_PACKAGE_ROOT = Path(__file__).resolve().parents[3]
+_LOGTO_POLICY_FILE = _PACKAGE_ROOT / "deploy" / "logto.conf"
+_ENV_FILE = _PACKAGE_ROOT / ".env"
 _ANONYMOUS_USER_ID = uuid.uuid5(
     uuid.NAMESPACE_URL,
     "https://aizk.phvv.me/subjects/anonymous",
@@ -92,7 +94,11 @@ class Settings(BaseSettings):
     """Runtime configuration read from AIZK_-prefixed environment variables."""
 
     # Compose adds vLLM variables that are outside this model.
-    model_config = SettingsConfigDict(env_prefix="AIZK_", env_file=_ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="AIZK_",
+        env_file=(_LOGTO_POLICY_FILE, _ENV_FILE),
+        extra="ignore",
+    )
 
     admin_database_url: str = ""
     admin_password: str = ""
@@ -192,8 +198,23 @@ class Settings(BaseSettings):
     logto_management_resource: AnyHttpUrl = AnyHttpUrl("https://default.logto.app/api")
     logto_cache_seconds: PositiveFloat = 60.0
     logto_http_timeout: PositiveFloat = 10.0
+    logto_api_name: str = "AIZK MCP"
+    logto_api_token_seconds: PositiveInt = 3600
+    logto_managed_role_prefix: str = "aizk-"
+    logto_user_role: str = "aizk-user"
+    logto_user_role_description: str = "Access AIZK"
     logto_required_scopes: frozenset[str] = frozenset({"control"})
-    logto_write_permission: str = "control"
+    logto_scope_descriptions: dict[str, str] = {
+        "control": "Use AIZK memory through MCP",
+    }
+    logto_organization_roles: dict[str, str] = {
+        "admin": "Manage and write shared AIZK memory",
+        "editor": "Write shared AIZK memory",
+        "viewer": "Read shared AIZK memory",
+    }
+    logto_writable_roles: frozenset[str] = frozenset({"admin", "editor"})
+    logto_write_permission: str = "write:memory"
+    logto_write_permission_description: str = "Write shared AIZK memory in an organization"
     louvain_seed: int = 7
     mcp_host: str = "127.0.0.1"
     mcp_recall_budget_max_tokens: PositiveInt = 16_384
@@ -307,6 +328,23 @@ class Settings(BaseSettings):
             self.admin_database_url = (
                 f"postgresql+asyncpg://aizk_admin:{self.admin_password}@{self.db_host}:{self.db_port}"
                 f"/{self.db_name}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def valid_logto_policy(self) -> Self:
+        """Reject role and permission policy that cannot be reconciled safely."""
+        if not self.logto_user_role.startswith(self.logto_managed_role_prefix):
+            raise ValueError("logto_user_role must use logto_managed_role_prefix")
+        missing_descriptions = self.logto_required_scopes - self.logto_scope_descriptions.keys()
+        if missing_descriptions:
+            raise ValueError(
+                "logto_scope_descriptions is missing " + ", ".join(sorted(missing_descriptions))
+            )
+        unknown_writers = self.logto_writable_roles - self.logto_organization_roles.keys()
+        if unknown_writers:
+            raise ValueError(
+                "logto_writable_roles contains unknown roles " + ", ".join(sorted(unknown_writers))
             )
         return self
 

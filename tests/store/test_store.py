@@ -43,7 +43,6 @@ def test_watermark_bump_read_and_payload_round_trip() -> None:
             await Watermark.set_value(db, key, Watermark.Kind.config, counter=9, payload={"k": 1})
             assert await Watermark.read(db, key, Watermark.Kind.config) == 9
             assert await Watermark.read_payload(db, key, Watermark.Kind.config) == {"k": 1}
-            assert await Watermark.read_payload(db, key, Watermark.Kind.curation_pending) == {}
 
     dbutil.run(body())
 

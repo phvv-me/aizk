@@ -97,7 +97,7 @@ These systems clarified the product surface but did not supply Aizk code.
 | [Tanka](https://www.tanka.ai/) | shared memory should preserve high-density human intent from a large stream of automated execution | Aizk is memory infrastructure rather than a messenger or company operating system |
 | [EverOS](https://github.com/EverMind-AI/EverOS) | Tanka's open framework separates atomic facts, episodes, profiles, and agentic use | Aizk does not adopt its proactive work layer or make profiles authoritative |
 | [SharedMemory](https://docs.sharedmemory.ai/) | a short write and query API, isolated volumes, conflict checks, and multi-agent access are useful product language | Aizk uses three MCP verbs, database RLS, bi-temporal claims, and source-first retrieval rather than adopting its guard or volume model |
-| [Brainshared](https://brainshared.com/) | historical inspiration for turning the best reviewed individual memory into a shared team floor | the site is no longer an available implementation reference and Aizk does not depend on it |
+| [Brainshared](https://brainshared.com/) | historical inspiration for turning the best validated individual memory into a shared team floor | the site is no longer an available implementation reference and Aizk does not depend on it |
 | [Cognee](https://github.com/topoteretes/cognee) | a PostgreSQL node and edge schema can unify graph and vector storage | Aizk was written from scratch as a smaller PostgreSQL-only engine with its own scope lattice |
 | [Mem0](https://github.com/mem0ai/mem0) and [Letta](https://github.com/letta-ai/letta) | the useful boundary sits between a minimal memory API and a full agent framework | Aizk is memory infrastructure and does not own the agent loop |
 | the authored Zettelkasten and `qmd` | exact files remain the human source of truth and the honest retrieval baseline | Aizk supplies scoped current-state recall, temporal history, and one prompt-ready result rather than replacing authored notes |
@@ -112,7 +112,7 @@ shared, and intersection knowledge.
 The [Bun Rust rewrite report](https://bun.com/blog/bun-in-rust) and its original
 [`PORTING.md` commit](https://github.com/oven-sh/bun/commit/46d3bc29f270fa881dd5730ef1549e88407701a5)
 influenced the refactor process rather than the runtime. The reusable ideas are a written mapping
-before a broad change, small trial cells, bounded ownership, independent adversarial review, errors
+before a broad change, small trial cells, bounded ownership, independent adversarial audit, errors
 as a work queue, and a language-independent test suite as the final authority. Aizk does not copy
 Bun code and does not treat compilation as proof of behavior.
 
@@ -129,7 +129,7 @@ References also matter when the evidence says not to ship a mechanism.
 | fixed lane ordering | rejected | facts-first and overview-first each failed on a different evaluation stratum |
 | GLiNER2 as graph authority | rejected for production | the large GPU model is fast but still misses dense relations that the LLM extracts |
 | graph-only authority | rejected | source briefs and chunks are more faithful than generated profiles and summaries |
-| human curation queue | rejected as a dependency | any review layer must be agentic and evidence-backed |
+| human acceptance queue | permanently rejected | AIZK has no acceptance layer because agents write sources directly and correct them when evidence changes |
 | bespoke graph workflow ledger | rejected for now | the graph is a rebuildable projection and PgQueuer already owns durable execution state |
 | TRACE-KG ontology induction | studied, not adopted | Aizk currently prefers a declared ontology with deterministic validation |
 | Tanka-style proactive work layer | deferred | Aizk supplies memory and does not own the agent's planning or action loop |

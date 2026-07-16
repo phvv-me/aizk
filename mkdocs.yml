@@ -46,6 +46,7 @@ nav:
   - Home: index.md
   - Start:
       - Quickstart: quickstart.md
+      - Onboarding: onboarding.md
       - MCP clients: mcp-clients.md
       - API: api.md
   - Concepts:

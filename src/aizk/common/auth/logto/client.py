@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import Literal
 from urllib.parse import quote
 
 import httpx
@@ -7,6 +8,7 @@ from async_lru import alru_cache
 from loguru import logger
 from pydantic import TypeAdapter, ValidationError
 from pydantic.networks import AnyHttpUrl
+from pydantic.types import JsonValue
 from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
 from tenacity import (
     RetryCallState,
@@ -90,7 +92,7 @@ class LogtoClient:
             return ()
         try:
             path = f"api/users/{quote(subject, safe='')}/organizations"
-            organizations = await self._pages(path, _ORGANIZATIONS)
+            organizations = await self.pages(path, _ORGANIZATIONS)
             details = await asyncio.gather(
                 *(
                     asyncio.gather(
@@ -115,10 +117,7 @@ class LogtoClient:
             return None
         try:
             path = f"api/users/{quote(subject, safe='')}"
-            response = await self.http.get(
-                str(self.management_url.join(path)),
-                headers={"Authorization": f"Bearer {await self._access_token()}"},
-            )
+            response = await self.management("GET", path)
             return _ACCOUNT.validate_python(response.json())
         except (httpx.HTTPError, ValidationError, ValueError) as error:
             logger.warning("Logto user directory refresh failed: {}", error)
@@ -130,7 +129,7 @@ class LogtoClient:
         if settings.logto_url is None:
             return ()
         try:
-            return await self._pages(f"api/users/{quote(subject, safe='')}/roles", _ROLES)
+            return await self.pages(f"api/users/{quote(subject, safe='')}/roles", _ROLES)
         except (httpx.HTTPError, ValidationError, ValueError) as error:
             logger.warning("Logto user role refresh failed: {}", error)
             return ()
@@ -142,7 +141,7 @@ class LogtoClient:
             return ()
         try:
             path = f"api/organizations/{quote(organization_id, safe='')}/users"
-            return await self._pages(path, _MEMBERS)
+            return await self.pages(path, _MEMBERS)
         except (httpx.HTTPError, ValidationError, ValueError) as error:
             logger.warning("Logto organization member refresh failed: {}", error)
             return ()
@@ -156,10 +155,7 @@ class LogtoClient:
                 f"api/organizations/{quote(organization_id, safe='')}/users/"
                 f"{quote(subject, safe='')}/scopes"
             )
-            response = await self.http.get(
-                str(self.management_url.join(path)),
-                headers={"Authorization": f"Bearer {await self._access_token()}"},
-            )
+            response = await self.management("GET", path)
             return _ORGANIZATION_SCOPES.validate_python(response.json())
         except (httpx.HTTPError, ValidationError, ValueError) as error:
             logger.warning("Logto organization permission refresh failed closed: {}", error)
@@ -173,7 +169,7 @@ class LogtoClient:
         try:
             organizations = tuple(
                 organization
-                for organization in await self._pages("api/organizations", _ORGANIZATIONS)
+                for organization in await self.pages("api/organizations", _ORGANIZATIONS)
                 if organization.is_public()
             )
             members = await asyncio.gather(
@@ -243,16 +239,40 @@ class LogtoClient:
             writable=organization.permits(settings.logto_write_permission),
         )
 
-    async def _pages[T](self, path: str, adapter: TypeAdapter[tuple[T, ...]]) -> tuple[T, ...]:
+    async def management(
+        self,
+        method: Literal["GET", "POST", "PUT", "PATCH", "DELETE"],
+        path: str,
+        *,
+        params: dict[str, str | int] | None = None,
+        payload: dict[str, JsonValue] | None = None,
+    ) -> httpx.Response:
+        """Call one Logto Management API endpoint with the cached M2M credential.
+
+        method: HTTP operation supported by the Management API.
+        path: tenant-relative endpoint such as `api/organization-scopes`.
+        params: optional query parameters.
+        payload: optional JSON object.
+        """
+        response = await self.http.request(
+            method,
+            str(self.management_url.join(path)),
+            params=params,
+            json=payload,
+            headers={"Authorization": f"Bearer {await self._access_token()}"},
+        )
+        response.raise_for_status()
+        return response
+
+    async def pages[T](self, path: str, adapter: TypeAdapter[tuple[T, ...]]) -> tuple[T, ...]:
         """Read every 100-item Management API page and validate one typed tuple."""
-        token = await self._access_token()
         items: list[T] = []
         page = 1
         while True:
-            response = await self.http.get(
-                str(self.management_url.join(path)),
+            response = await self.management(
+                "GET",
+                path,
                 params={"page": page, "page_size": 100},
-                headers={"Authorization": f"Bearer {token}"},
             )
             batch = adapter.validate_python(response.json())
             items.extend(batch)

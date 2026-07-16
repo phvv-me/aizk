@@ -195,7 +195,7 @@ def test_recall_describes_only_shared_scopes_present_in_evidence(
                 name="Docs",
                 description="Public docs on tools, libraries, languages, and more",
                 roles=("editor",),
-                permissions=("control",),
+                permissions=("write:memory",),
                 public=True,
             ),
             OrganizationStanding(
@@ -258,7 +258,7 @@ def test_status_returns_the_resolved_user_with_logto_values(
                     ),
                 ),
                 roles=("editor",),
-                permissions=("control",),
+                permissions=("write:memory",),
                 public=True,
             ),
             OrganizationStanding(
@@ -292,7 +292,7 @@ def test_status_returns_the_resolved_user_with_logto_values(
                     },
                 ),
                 "roles": ("editor",),
-                "permissions": ("control",),
+                "permissions": ("write:memory",),
                 "public": True,
                 "writable": True,
             },

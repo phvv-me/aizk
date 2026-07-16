@@ -4,6 +4,8 @@
 name: aizk
 
 x-aizk-env: &aizk-env
+  - path: ./logto.conf
+    required: true
   - path: ../.env
     required: false
   - path: ${AIZK_SECRET_ENV_FILE:-${HOME}/.aizk/.env}
@@ -452,6 +454,23 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # Reconcile the committed authorization policy through Logto's Management API before the
+  # public server starts. The command is idempotent and leaves unrelated roles and permissions
+  # alone.
+  logto-setup:
+    <<: *aizk-runtime
+    profiles: ["public"]
+    command: ["logto", "apply"]
+    depends_on:
+      cloudflared:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+    environment:
+      <<: *aizk-runtime-environment
+      AIZK_REQUIRE_AUTH: "1"
+    restart: "no"
+
   # This one-shot gate makes the public server fail closed when authentication is absent or
   # partial. The shared tunnel must be ready first because it publishes Logto's canonical issuer.
   public-check:
@@ -459,10 +478,8 @@ services:
     profiles: ["public"]
     command: ["check-public"]
     depends_on:
-      cloudflared:
-        condition: service_healthy
-      logto:
-        condition: service_healthy
+      logto-setup:
+        condition: service_completed_successfully
     environment:
       <<: *aizk-runtime-environment
       AIZK_REQUIRE_AUTH: "1"

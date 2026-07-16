@@ -16,7 +16,7 @@ It should complement `rg` and qmd rather than replace them.
 | point-in-time fact replay | Git archaeology | bi-temporal range query |
 | sourced agent context | manual note assembly | budgeted MCP context pack |
 
-### Curated management comparison on 2026-07-15
+### Managed knowledge comparison on 2026-07-15
 
 The comparison refreshed the full QMD index after the management notes were normalized, then asked
 both systems the same eight representative questions. Aizk ranked the intended current brief first

@@ -18,6 +18,8 @@ handling away from database-owner credentials without creating a second deployme
 | `server` | Serve the four MCP tools | Forced-RLS app role | Loopback only |
 | `worker` | Run projections, maintenance, and backups | App role plus owner maintenance | None |
 | `logto` | Own users, organizations, roles, and OAuth login | Dedicated Logto database role | Loopback only |
+| `logto-setup` | Reconcile AIZK-owned Logto authorization policy | None | None |
+| `public-check` | Fail closed on incomplete public authentication settings | None | None |
 | model services | Embed, extract, rerank, and gate | None | Loopback only |
 | `cloudflared` | Carry authenticated traffic to the Cloudflare edge | None | Outbound only |
 
@@ -50,16 +52,32 @@ AIZK_LOGTO_DB_PASSWORD=
 ```
 
 The migration owner, the forced-RLS application role, and Logto must never share a password.
+`deploy/logto.conf` contains the committed nonsecret authorization policy. Pydantic and Compose
+load it before `.env`, so any matching `AIZK_` value in `.env` is the deployment override. Keep
+Logto M2M credentials, OAuth application credentials, public URLs, and tunnel tokens only in
+`.env`.
+
+The default policy has one global human role named `aizk-user` with the AIZK API `control`
+permission. New users receive it because the role is a Logto default. The organization roles are
+admin, editor, and viewer. Admin and editor receive the organization permission `write:memory`,
+while viewer remains read-only. Inspect or repair the live tenant with these idempotent commands.
+
+```sh
+aizk logto audit
+aizk logto apply
+```
+
 Start the local stack from the package root.
 
 ```sh
 docker compose --env-file .env -f deploy/docker-compose.yml up -d
 ```
 
-The optional public profile also starts Logto, Cloudflare Tunnel, and the authentication
-preflight. The tunnel must publish Logto's canonical issuer before discovery can succeed. The MCP
-server remains stopped until that tunnel is healthy and the preflight validates the Logto and
-OAuth configuration with `AIZK_REQUIRE_AUTH=1`.
+The optional public profile also starts Logto, Cloudflare Tunnel, authorization reconciliation,
+and the authentication preflight. The tunnel must publish Logto's canonical issuer before
+discovery and Management API access can succeed. The MCP server remains stopped until the tunnel
+is healthy, `logto-setup` has reconciled policy, and the preflight validates the Logto and OAuth
+configuration with `AIZK_REQUIRE_AUTH=1`.
 
 ```sh
 docker compose --profile public --env-file .env -f deploy/docker-compose.yml up -d
@@ -173,7 +191,7 @@ The WAL settings favor a write-heavy projection pass while preserving crash safe
 and longer checkpoints trade disk space and recovery time for smoother I/O. See the [WAL
 configuration reference](https://www.postgresql.org/docs/18/runtime-config-wal.html).
 
-Treat these values as an initial measured operating point. Review `pg_stat_statements`, cache hit
+Treat these values as an initial measured operating point. Inspect `pg_stat_statements`, cache hit
 rate, checkpoint frequency, temporary file volume, queue lag, and the five-second health report
 after realistic ingestion. Change one group at a time and keep the previous value in the decision
 record.
@@ -225,7 +243,7 @@ sudo systemctl enable --now smartmontools
 sudo systemctl enable --now fstrim.timer
 ```
 
-Review the dedicated device and both other SSDs.
+Inspect the dedicated device and both other SSDs.
 
 ```sh
 sudo smartctl -a /dev/nvme1n1
@@ -262,13 +280,14 @@ up with stored chunks, and a nonempty recall sample without an error.
 ## Authentication and upgrades
 
 A public deployment uses Logto as the only identity and organization authority. FastMCP exposes
-an OAuth proxy to MCP clients while Logto handles human login. The committed public preflight
+an OAuth proxy to MCP clients while Logto handles human login. The committed public startup gate
 requires the public MCP URL, Logto URL, Logto Management API client, OAuth web client, and their
-secrets. Client-specific setup lives in [MCP clients](mcp-clients.md), and the complete authority
-model lives in [Identity and sharing](engine/identity.md).
+secrets. It first applies `deploy/logto.conf`, then validates the complete authentication settings.
+Client-specific setup lives in [MCP clients](mcp-clients.md), and the complete authority model
+lives in [Identity and sharing](engine/identity.md).
 
-Every external image uses a reviewed version tag. VectorChord Suite currently provides only the
+Every external image uses a validated version tag. VectorChord Suite currently provides only the
 floating `pg18-latest` suite tag, so that one image also carries the tested digest. Update images
-deliberately, review release notes, take both database backups, rebuild, run migrations through the
+deliberately, inspect release notes, take both database backups, rebuild, run migrations through the
 one-shot setup service, and finish with the full health probe. Never use `down -v` during an
 upgrade.

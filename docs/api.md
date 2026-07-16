@@ -35,10 +35,29 @@ conflicting type or title. `source_uri` is only for the original URL of an exter
 paper PDF. It supplies provenance and stable refresh identity but does not change retrieval
 behavior.
 
-`observed_at` and `expires_at` are optional and ordinary durable notes omit both. Use `observed_at`
-only when the applicable date is known and differs materially from capture. Use `expires_at` only
-for information with a real validity deadline. PostgreSQL excludes expired chunks from source
-retrieval and gives extracted open facts the same valid-time upper bound.
+## Agent-managed lifecycle and temporal inputs
+
+AIZK has no review system and will not gain one. `remember` stores a source immediately. Agents own
+selection, scope choice, provenance, correction, and temporal meaning. The worker only builds
+reproducible projections and never approves or rejects the source. Human operators maintain the
+service rather than process memory.
+
+`observed_at` and `expires_at` are optional. Ordinary durable notes omit both.
+
+| Input | Meaning | Use it when | Omit it when |
+|---|---|---|---|
+| `observed_at` | when the statement became applicable | the known applicability time differs materially from capture | capture time is an adequate approximation |
+| `expires_at` | the known instant after which the statement is no longer true | an external event, agreement, access grant, or announced policy supplies a real cutoff | the content merely might change or should remain maintained |
+
+Expiration is a hard validity boundary. PostgreSQL excludes an expired document from source
+retrieval and gives its extracted open facts the same valid-time upper bound. AIZK retains temporal
+history. Expiration creates no reminder, task, notification, or refresh job.
+
+Do not use `expires_at` for documentation with no scheduled end, research findings, design
+decisions, project briefs, ordinary project status, uncertainty, maintenance intervals, or a desire
+to inspect something later. When durable knowledge changes without a known cutoff, an agent recalls
+the current source and writes a correction. A maintained website or paper source reuses the same
+`source_uri` and exact scope set. When in doubt, omit expiration.
 
 ## Short examples
 
@@ -62,7 +81,7 @@ status()
         {"name": "Pedro Valois", "username": "pedro", "avatar": null, "roles": ["editor"]}
       ],
       "roles": ["editor"],
-      "permissions": ["control"],
+      "permissions": ["write:memory"],
       "public": true,
       "writable": true
     }
@@ -117,7 +136,7 @@ query-relevant catalogs from declared subjects and live graph endpoints, groups 
 set, and joins every current state relation. Missing status or area facts remain knowledge gaps.
 Tags, checkboxes, profiles, and file activity do not declare current state.
 
-There is no bulk vault importer. An agent reviews one subject in context and sends only its current
+There is no bulk vault importer. An agent examines one subject in context and sends only its current
 brief or durable finding through `remember`. A storage cleaner cannot decide whether old prose is
 current, relevant, or safe to promote into working memory.
 
@@ -136,5 +155,5 @@ Run commands through `chefe run aizk` from the monorepo root.
 The top-level process commands are `serve-mcp`, `worker`, `recall-context`, `capture-session`, and
 `profile-report`.
 
-There are no local user, organization, membership, role, or curation commands. Logto is the source
+There are no local user, organization, membership, role, or acceptance commands. Logto is the source
 of truth for those concerns.

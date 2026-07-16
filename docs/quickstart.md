@@ -1,8 +1,8 @@
 # Quickstart
 
 You need one MCP URL. The lab deployment is available at
-`https://aizk.phvv.me/mcp`. A Logto account with the Aizk `control` permission can sign in from any
-supported client.
+`https://aizk.phvv.me/mcp`. Account provisioning automatically grants each invited user the global
+AIZK role and API permission needed to sign in from any supported client.
 
 ## Connect a client
 
@@ -25,6 +25,9 @@ codex mcp list
 Call `status` before the first shared write. It returns the caller's Logto profile and global roles.
 Each organization includes its description, custom data, members, organization roles, effective
 permissions, and a `writable` field. Private memory remains available by omitting `scopes`.
+Public organizations are readable by every authenticated AIZK user, but only members with the
+effective `write:memory` permission can write to them. The current endpoint requires login and has
+no anonymous or self-registration flow.
 
 ## Recall existing memory
 
@@ -37,9 +40,9 @@ than a transport-specific result tree.
 }
 ```
 
-The response is one Markdown string. It lists only the scopes involved in the result, marks their
-read or write standing, and then gives numbered merit-ordered evidence behind an untrusted-data
-warning. Omit the optional `budget` unless repeated responses are too long.
+The response is one Markdown string. It lists only shared scopes involved in the result with their
+descriptions, then gives numbered merit-ordered evidence with exact scope provenance. Omit the
+optional `budget` unless repeated responses are too long.
 
 ## Remember durable context
 
@@ -59,13 +62,15 @@ Other valid kinds and relations use the same syntax, and ordinary notes need no 
 `source_uri` only for the original URL of an external website or paper PDF. The title belongs in the
 text, and authored notes do not need a source URI.
 
-Both `observed_at` and `expires_at` are optional. Omit them for ordinary durable knowledge. Set the
-former only when a known applicable date matters and the latter only for a real validity deadline.
+Both `observed_at` and `expires_at` are optional. Omit them for ordinary durable knowledge. Set
+`observed_at` only when a known applicability time differs materially from capture. Set
+`expires_at` only when the outside world supplies a known time after which the information stops
+being true. It is not a reminder or maintenance date. See [Observation and expiration](concepts.md#observation-and-expiration).
 
 An optional `scopes` list chooses an authorized organization or intersection destination. Without
 it, `remember` writes to the caller's private scope.
 
-## Share reviewed memory
+## Share memory
 
 `share` copies visible documents into one authorized scope set and preserves their provenance. It
 never moves or broadens the source row.
@@ -79,7 +84,7 @@ never moves or broadens the source row.
 
 ## Run your own stack
 
-Copy `deploy/.env.example` to `.env`, fill the three independent database passwords, review the
+Copy `deploy/.env.example` to `.env`, fill the three independent database passwords, inspect the
 model and storage settings, then start the single Compose file. Compose runs migrations, the
 public request server, and the privileged worker as separate services from the same image.
 

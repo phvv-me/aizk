@@ -36,7 +36,7 @@ title fixed all fifteen cases without changing the maximal retrieval plan. This 
 identity and packing correctness. It does not by itself judge whether an answer model used every
 field in the brief correctly.
 
-Seven curated briefs from the vendored memory papers formed a second production cell. One focused
+Seven selected briefs from the vendored memory papers formed a second production cell. One focused
 question per paper ranked its own brief first for all seven papers. The set covered GroupMemBench,
 Does Memory Need Graphs, Hindsight, APEX-MEM, LongMemEval-V2, Memora, and Mem2ActBench. Sequential
 representative recalls later took about 1.0 to 2.3 seconds. The durable design conclusions were
@@ -47,7 +47,7 @@ The 2026-07-12 query regression used PostgreSQL 18, VectorChord 1.1.1, and 100,0
 100,000 live facts. Moving chunk reads through document RLS and starting dense facts from bounded
 content candidates reduced local database execution from about 855 ms to 340 ms. The same pass
 removed temporary I/O and reduced the cold multihop plan from about 3.02 seconds to 2.05 seconds.
-Warm multihop execution was about 0.5 seconds. A curated Vault check over 23 related notes and ten
+Warm multihop execution was about 0.5 seconds. A focused Vault check over 23 related notes and ten
 explicit source qrels kept identical rankings with hit at 8 and MRR both equal to 1.0. This is a
 regression cell, not a published quality score.
 
@@ -88,7 +88,7 @@ headroom rather than title self-retrieval.
 
 The 2026-07-14 crimson smoke cell exercised the deployed stack with three vendored papers, one
 repository guide, and five source files. Extraction completed all 220 chunks and produced 2,086
-entities, 2,033 facts, and 2,079 profiles. A manual review of eight cross-document questions found
+entities, 2,033 facts, and 2,079 profiles. A manual analysis of eight cross-document questions found
 three strong answers, two partial answers, and three justified abstentions. The HAWQ-V3 and gauge
 theory questions recovered the core mechanisms. LongMemEval-V2 definition and comparison questions
 were weaker. Two abstentions followed incomplete retrieval, while one comparative abstention had

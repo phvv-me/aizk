@@ -59,11 +59,13 @@ def test_complete_logto_configuration_derives_the_resource() -> None:
     cfg = Settings(
         **_COMPLETE_LOGTO,
         logto_required_scopes={"control"},
-        logto_write_permission="control",
+        logto_write_permission="write:memory",
     )
     assert cfg.mcp_resource_id == "https://aizk.test/mcp"
     assert cfg.logto_required_scopes == frozenset({"control"})
-    assert cfg.logto_write_permission == "control"
+    assert cfg.logto_write_permission == "write:memory"
+    assert cfg.logto_writable_roles == frozenset({"admin", "editor"})
+    assert set(cfg.logto_organization_roles) == {"admin", "editor", "viewer"}
     assert not {
         "oidc_issuer",
         "oidc_jwks_url",
@@ -72,6 +74,31 @@ def test_complete_logto_configuration_derives_the_resource() -> None:
         "mcp_http",
         "mcp_transport",
     } & set(type(cfg).model_fields)
+
+
+@pytest.mark.parametrize(
+    ("configuration", "message"),
+    [
+        (
+            {"logto_managed_role_prefix": "aizk-", "logto_user_role": "member"},
+            "managed_role_prefix",
+        ),
+        (
+            {"logto_required_scopes": {"missing"}, "logto_scope_descriptions": {}},
+            "scope_descriptions",
+        ),
+        (
+            {"logto_writable_roles": {"missing"}, "logto_organization_roles": {}},
+            "unknown roles",
+        ),
+    ],
+    ids=["unmanaged-user-role", "missing-scope-description", "unknown-writable-role"],
+)
+def test_logto_policy_rejects_unsafe_configuration(
+    configuration: dict[str, str | set[str] | dict[str, str]], message: str
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        Settings.model_validate(configuration)
 
 
 @given(missing=st.sets(st.sampled_from(_LOGTO_DEPENDENCIES), min_size=1))

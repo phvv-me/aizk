@@ -744,7 +744,6 @@ def upgrade() -> None:
                 "entity_dirty",
                 "fact_count",
                 "raptor_fact_count",
-                "curation_pending",
                 "config",
                 name="watermark_kind",
             ),
