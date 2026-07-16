@@ -1,5 +1,6 @@
-from .rescore import rescore
+from .rescore import MeritOrder, merit_order
 
 __all__ = [
-    "rescore",
+    "MeritOrder",
+    "merit_order",
 ]

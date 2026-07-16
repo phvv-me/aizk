@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapper, ORMExecuteState, Session, with_loader_criteri
 from ..config import settings
 from ..exceptions import NoTenantContext
 from .mixins import Scoped, TableBase
-from .models import FactClaim
+from .models import Fact
 
 
 def canonicalize_scope_assignment(
@@ -59,5 +59,5 @@ def apply_live_temporal_gate(state: ORMExecuteState) -> None:
     if state.execution_options.get(settings.skip_live_gate):
         return
     state.statement = state.statement.options(
-        with_loader_criteria(FactClaim, lambda cls: cls.is_current, include_aliases=True)
+        with_loader_criteria(Fact.Claim, lambda cls: cls.is_current, include_aliases=True)
     )

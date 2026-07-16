@@ -5,9 +5,10 @@ from sqlalchemy import update
 from sqlmodel import select
 
 from ..config import settings
-from ..serving import embed
-from ..store import Chunk, Community, EntityContent, FactContent, Profile
-from ..store.engine import Session, bypass_rls
+from ..serving.embed import embed
+from ..store import Chunk, Community, Entity, Fact, Profile
+from ..store.engine import Session
+from ..store.identity import User
 from ..types import Scopes
 
 ScopedEmbedded = Chunk | Community | Profile
@@ -18,10 +19,10 @@ _SCOPED_TARGETS: dict[type[ScopedEmbedded], str] = {
     Profile: "summary",
 }
 
-ContentEmbedded = EntityContent | FactContent
+ContentEmbedded = Entity.Content | Fact.Content
 _CONTENT_TARGETS: dict[type[ContentEmbedded], str] = {
-    EntityContent: "name",
-    FactContent: "statement",
+    Entity.Content: "name",
+    Fact.Content: "statement",
 }
 
 EmbeddedTable = ScopedEmbedded | ContentEmbedded
@@ -58,7 +59,7 @@ async def reembed_scoped_table(
 ) -> int:
     """Re-embed one per-tenant table's rows under the acting user, return the count
     rewritten."""
-    async with bypass_rls() as session:
+    async with User.system().owner as session:
         count = await rewrite_embeddings(session, model, field, scopes)
     logger.info("re-embedded {} {} rows", count, model.__tablename__)
     return count
@@ -69,7 +70,7 @@ async def reembed_content_table(
     field: str,
 ) -> int:
     """Re-embed every row of one deduplicated content table, return how many vectors changed."""
-    async with bypass_rls() as session:
+    async with User.system().owner as session:
         count = await rewrite_embeddings(session, model, field)
     logger.info("re-embedded {} {} content rows", count, model.__tablename__)
     return count

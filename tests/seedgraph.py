@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime
 
 import dbutil
+from id_factory import uuid5, uuid8
+from pydantic import UUID5, UUID7
 from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,51 +11,49 @@ from aizk.store import (
     Chunk,
     Community,
     Document,
-    EntityClaim,
-    EntityContent,
-    FactClaim,
-    FactContent,
+    Entity,
+    Fact,
     Profile,
 )
 from aizk.store.identity import User
 
 
-async def fresh_owner() -> uuid.UUID:
+async def fresh_owner() -> UUID5 | UUID7:
     await dbutil.reset_db()
-    return uuid.uuid4()
+    return uuid5()
 
 
 async def add_entity(
     session: AsyncSession,
-    owner: uuid.UUID,
+    owner: UUID5 | UUID7,
     name: str,
     type: str = "concept",
     embedding: list[float] | None = None,
-    content_id: uuid.UUID | None = None,
-) -> uuid.UUID:
-    content_id = content_id or uuid.uuid4()
-    session.add(EntityContent(id=content_id, name=name, type=type, embedding=embedding))
+    content_id: UUID5 | UUID7 | None = None,
+) -> UUID5 | UUID7:
+    content_id = content_id or uuid5()
+    session.add(Entity.Content(id=content_id, name=name, type=type, embedding=embedding))
     await session.flush()
-    session.add(EntityClaim(content_id=content_id, created_by=owner, scopes=[owner]))
+    session.add(Entity.Claim(content_id=content_id, created_by=owner, scopes=[owner]))
     await session.flush()
     return content_id
 
 
 async def add_fact(
     session: AsyncSession,
-    owner: uuid.UUID,
-    subject_id: uuid.UUID,
+    owner: UUID5 | UUID7,
+    subject_id: UUID5 | UUID7,
     statement: str,
     predicate: str = "related_to",
-    object_id: uuid.UUID | None = None,
+    object_id: UUID5 | UUID7 | None = None,
     embedding: list[float] | None = None,
     valid: Range[datetime] | None = None,
     recorded: Range[datetime] | None = None,
-    content_id: uuid.UUID | None = None,
-) -> tuple[uuid.UUID, uuid.UUID]:
-    content_id = content_id or uuid.uuid4()
+    content_id: UUID5 | UUID7 | None = None,
+) -> tuple[UUID5 | UUID7, UUID5 | UUID7]:
+    content_id = content_id or uuid5()
     session.add(
-        FactContent(
+        Fact.Content(
             id=content_id,
             subject_id=subject_id,
             object_id=object_id,
@@ -63,7 +63,7 @@ async def add_fact(
         )
     )
     await session.flush()
-    claim = FactClaim(content_id=content_id, created_by=owner, scopes=[owner], valid=valid)
+    claim = Fact.Claim(content_id=content_id, created_by=owner, scopes=[owner], valid=valid)
     if recorded is not None:
         claim.recorded = recorded
     session.add(claim)
@@ -72,8 +72,12 @@ async def add_fact(
 
 
 async def seed_chunk(
-    owner: uuid.UUID, text: str, title: str | None = None, scopes: tuple[uuid.UUID, ...] = ()
-) -> uuid.UUID:
+    owner: UUID5 | UUID7,
+    text: str,
+    title: str | None = None,
+    scopes: tuple[UUID5 | UUID7, ...] = (),
+    subject_type: str | None = None,
+) -> UUID5 | UUID7:
     document, chunk = uuid.uuid7(), uuid.uuid7()
     key = tuple(sorted(set(scopes or (owner,))))
     user = User.authorized(owner, read=key, write=key)
@@ -81,9 +85,10 @@ async def seed_chunk(
         session.add(
             Document(
                 id=document,
-                content_hash=uuid.uuid4().hex,
+                content_hash=uuid8(),
                 created_by=owner,
                 title=title,
+                subject_type=subject_type,
                 scopes=list(key),
             )
         )
@@ -100,7 +105,7 @@ async def seed_chunk(
     return chunk
 
 
-async def seed_scoped_row(owner: uuid.UUID, kind: str) -> None:
+async def seed_scoped_row(owner: UUID5 | UUID7, kind: str) -> None:
     async with User.private(owner) as session:
         if kind == "community":
             session.add(
@@ -123,11 +128,11 @@ async def seed_scoped_row(owner: uuid.UUID, kind: str) -> None:
                 )
             )
         else:
-            document = uuid.uuid4()
+            document = uuid5()
             session.add(
                 Document(
                     id=document,
-                    content_hash="c",
+                    content_hash=uuid8(),
                     created_by=owner,
                     scopes=[owner],
                     title="doc",

@@ -3,7 +3,7 @@ from .community import Community
 from .document import Document
 from .entity import EntityClaim, EntityContent
 from .fact import FactClaim, FactContent
-from .ontology import EntityKind, RelationKind
+from .ontology import EntityKind, RelationKind, RelationPolicy
 from .profile import Profile
 from .session_item import SessionItem
 from .watermark import Watermark
@@ -19,6 +19,7 @@ __all__ = [
     "FactContent",
     "Profile",
     "RelationKind",
+    "RelationPolicy",
     "SessionItem",
     "Watermark",
 ]

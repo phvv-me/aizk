@@ -3,12 +3,13 @@
 ## Content and claim, a union model
 
 Knowledge splits into two tables per kind. Content is the immutable structure, an entity's
-normalized name and type or a fact's subject, predicate, object, and statement, addressed by
-`uuid5` of its own normalized text. Two people independently extracting the same knowledge
-mint the same row with no lookup and no coordination. Claims are per-container stakes on that
-content, carrying creator provenance, the scope set, the bi-temporal ranges, and access
-counters. Dedup across the whole tenancy happens by construction, and nobody's claim leaks
-through anyone else's.
+normalized name and type or a fact's resolved subject ID, predicate, resolved object ID, and
+statement. A `uuid5` addresses those canonical fields. Using resolved endpoint IDs prevents two
+same-named entities with different ontology types from collapsing into one fact. Two people
+independently extracting the same knowledge mint the same row with no lookup and no coordination.
+Claims are per-container stakes on that content, carrying creator provenance, the scope set, the
+bi-temporal ranges, and access counters. Dedup across the whole tenancy happens by construction,
+and nobody's claim leaks through anyone else's.
 
 RLS hides shared content until the caller has a readable claim. PostgreSQL therefore cannot use
 `ON CONFLICT` for content IDs because conflict arbitration applies the table's `SELECT` policy.
@@ -48,7 +49,7 @@ gantt
 Value objects get `uuid5` and events get `uuid7`. Content is what it says, so its id derives
 from the text and a rerun converges on the same graph. A claim is the event of someone saying
 it, so its id carries a timestamp prefix and lands writes on one edge of the index. The one
-fixed id is the anonymous sentinel, uuid zero. Logto subjects and organizations use UUID5 under
+fixed id is a deterministic UUID5 anonymous sentinel. Logto subjects and organizations use UUID5 under
 the standard URL namespace with separate user and organization paths.
 
 ## Declarative everything
@@ -73,3 +74,14 @@ Patos `FrozenModel` owns immutable values that cross service boundaries, includi
 standing, queue payloads, and retrieval results. SQLModel table entities remain mutable because
 the ORM unit of work manages their database state. Keeping these two roles separate avoids a
 second request-model hierarchy without asking one base class to serve incompatible purposes.
+
+Reusable PostgreSQL typing and expression helpers live in the optional `patos[sql]` extra. AIZK
+imports the single `patos.sql` namespace for typed columns, JSONB reads, cosine distance, native
+enums, t-string expressions, typed `VALUES` relations, and database hashing. Domain models expose
+cohesive namespaces such as `Entity.Kind`, `Entity.Content`, `Fact.Claim`, `Fact.Live`, and
+`Relation.Policy` instead of a flat list of closely related classes.
+
+Document content identity is a native PostgreSQL UUID. `sql.uuid8` hashes the source with SHA-256
+inside PostgreSQL, takes its first 128 bits, and sets the RFC 9562 version and variant fields. The
+stored UUID carries 122 digest bits, uses PostgreSQL's compact UUID comparison and indexing, and is
+validated as Pydantic `UUID8` whenever it crosses the model boundary.

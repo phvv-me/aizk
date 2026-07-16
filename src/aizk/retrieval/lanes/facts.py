@@ -1,3 +1,4 @@
+from patos import sql
 from sqlalchemy import (
     ColumnElement,
     Float,
@@ -11,8 +12,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import CTE, Select
 
-from ...common import sql
-from ...store import Chunk, Document, FactContent, LiveFact
+from ...store import Chunk, Document, Fact
 from ..models.lane import Lane, QueryContext
 from .graph import endpoint_selects, multihop_part
 
@@ -48,10 +48,32 @@ class FactLane(Lane):
                 for part in part_subqueries
             )
         ).subquery("fact_parts")
-        fact_candidates = (
+        ranked_candidates = (
             select(ranked_parts.c.id, func.min(ranked_parts.c.part_rank).label("rank"))
             .group_by(ranked_parts.c.id)
             .order_by(func.min(ranked_parts.c.part_rank), ranked_parts.c.id)
+            .cte("ranked_fact_candidate")
+        )
+        statement_candidates = (
+            select(
+                ranked_candidates,
+                func.row_number()
+                .over(
+                    partition_by=(
+                        Fact.Live.perspective_key,
+                        func.lower(Fact.Live.statement),
+                    ),
+                    order_by=(ranked_candidates.c.rank, ranked_candidates.c.id),
+                )
+                .label("evidence_rank"),
+            )
+            .join(Fact.Live, Fact.Live.id == ranked_candidates.c.id)
+            .cte("statement_fact_candidate")
+        )
+        fact_candidates = (
+            select(statement_candidates.c.id, statement_candidates.c.rank)
+            .where(statement_candidates.c.evidence_rank == 1)
+            .order_by(statement_candidates.c.rank, statement_candidates.c.id)
             .limit(context.k * bindparam("fact_candidate_factor", type_=Integer))
             .cte("fact_candidate")
         )
@@ -59,18 +81,19 @@ class FactLane(Lane):
         fact_document = aliased(Document, name="fact_document")
         return (
             self.row(
-                evidence_id=LiveFact.id,
+                evidence_id=Fact.Live.id,
                 ordering=fact_candidates.c.rank,
-                line=LiveFact.line(),
-                fact_id=LiveFact.id,
-                source_chunk_id=LiveFact.source_chunk_id,
+                line=Fact.Live.line(),
+                scopes=Fact.Live.scopes,
+                fact_id=Fact.Live.id,
+                source_chunk_id=Fact.Live.source_chunk_id,
                 source_title=fact_document.title,
                 source_uri=fact_document.source_uri,
-                created_by=LiveFact.created_by,
+                created_by=Fact.Live.created_by,
             )
             .select_from(fact_candidates)
-            .join(LiveFact, LiveFact.id == fact_candidates.c.id)
-            .outerjoin(fact_source, fact_source.id == LiveFact.source_chunk_id)
+            .join(Fact.Live, Fact.Live.id == fact_candidates.c.id)
+            .outerjoin(fact_source, fact_source.id == Fact.Live.source_chunk_id)
             .outerjoin(fact_document, fact_document.id == fact_source.document_id)
         )
 
@@ -94,39 +117,39 @@ def dense_fact_cte(context: QueryContext) -> CTE:
     The materialized content cut isolates the vector index scan; live_fact then supplies
     visibility and access history in one join.
     """
-    fact_distance = FactContent.embedding @ context.vector
+    fact_distance = Fact.Content.embedding @ context.vector
     dense_fact_content = (
         select(
-            FactContent.id,
-            FactContent.subject_id,
-            FactContent.object_id,
+            Fact.Content.id,
+            Fact.Content.subject_id,
+            Fact.Content.object_id,
             fact_distance.label("distance"),
         )
-        .where(FactContent.embedding.is_not(None), fact_distance < context.floor)
+        .where(Fact.Content.embedding.is_not(None), fact_distance < context.floor)
         .order_by(fact_distance)
         .limit(context.fusion_depth)
         .cte("dense_fact_content")
         # prefix_with is SQLAlchemy's supported spelling for a MATERIALIZED CTE.
         .prefix_with("MATERIALIZED")
     )
-    last_seen = func.coalesce(LiveFact.last_accessed, func.lower(LiveFact.recorded))
+    last_seen = func.coalesce(Fact.Live.last_accessed, func.lower(Fact.Live.recorded))
     blended = (
         dense_fact_content.c.distance
         - bindparam("recall_recency_weight", type_=Float)
         * half_life_decay(
             sql.days_since(last_seen), bindparam("recall_recency_half_life_days", type_=Float)
         )
-        - bindparam("recall_frequency_weight", type_=Float) * log_frequency(LiveFact.access_count)
+        - bindparam("recall_frequency_weight", type_=Float) * log_frequency(Fact.Live.access_count)
     )
     return (
         select(
-            LiveFact.id,
+            Fact.Live.id,
             dense_fact_content.c.subject_id,
             dense_fact_content.c.object_id,
             dense_fact_content.c.distance,
             blended.label("blended"),
         )
-        .join(dense_fact_content, dense_fact_content.c.id == LiveFact.content_id)
+        .join(dense_fact_content, dense_fact_content.c.id == Fact.Live.content_id)
         .order_by(blended)
         .limit(context.k)
         .cte("dense_fact")
@@ -145,15 +168,15 @@ def neighbor_part(dense_facts: CTE, context: QueryContext) -> Select:
     would fall back to scanning every fact.
     """
     seed_entities = union(*endpoint_selects(dense_facts)).cte("seed_entity")
-    live_distance = LiveFact.embedding @ context.vector
+    live_distance = Fact.Live.embedding @ context.vector
     neighbor_sides = [
-        select(LiveFact.id, live_distance.label("ordering"))
+        select(Fact.Live.id, live_distance.label("ordering"))
         .join(seed_entities, endpoint == seed_entities.c.entity_id)
         .where(
-            LiveFact.embedding.is_not(None),
-            LiveFact.id.not_in(select(dense_facts.c.id)),
+            Fact.Live.embedding.is_not(None),
+            Fact.Live.id.not_in(select(dense_facts.c.id)),
         )
-        for endpoint in (LiveFact.subject_id, LiveFact.object_id)
+        for endpoint in (Fact.Live.subject_id, Fact.Live.object_id)
     ]
     neighbor_touch = union(*neighbor_sides).subquery("neighbor_touch")
     return (

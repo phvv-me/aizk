@@ -1,7 +1,6 @@
 import asyncio
-import uuid
 from collections.abc import Callable
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import cast
 
 import dbutil
@@ -9,36 +8,37 @@ import pytest
 from bg_doubles import FakeJob, RecordingPg, RecordingQueue
 from hypothesis import given
 from hypothesis import strategies as st
+from id_factory import uuid5, uuid5s
 from pgqueuer import PgQueuer
+from pydantic import UUID5
 
-import aizk.background.queue as queue_mod
 import aizk.background.schedule as schedule_mod
-from aizk.background.payloads import ChunkJob, ProfileJob, TaskJob
-from aizk.background.queue import EXTRACT_ENTRYPOINT, PROFILE_ENTRYPOINT
+from aizk.background.jobs.maintenance import BackupJob, ProfileProjectionJob, ScheduledJob
+from aizk.background.jobs.models import MaintenanceJob
+from aizk.background.jobs.projection import ChunkProjectionJob
 from aizk.background.schedule import fan_out, run_worker, scope_roster
-from aizk.background.tasks import BackupTask, ScheduledTask
 from aizk.config import settings
 from aizk.store import SessionItem
 from aizk.types import Scopes
 
-InstallSeam = Callable[[object], RecordingQueue]
+InstallSeam = Callable[[ModuleType], RecordingQueue]
 # Per-scope tasks that fan out through the queue
-fanned_task_classes = sorted(
-    (cls for cls in ScheduledTask.implementations() if cls is not BackupTask),
+fanned_job_classes = sorted(
+    (cls for cls in ScheduledJob.implementations() if cls is not BackupJob),
     key=lambda cls: cls.name,
 )
-task_classes = st.sampled_from(fanned_task_classes)
+job_classes = st.sampled_from(fanned_job_classes)
 crons = st.sampled_from(["0 3 * * *", "30 4 * * 0", "*/15 * * * *"])
 
 
-@given(task_cls=task_classes, users=st.lists(st.uuids(), max_size=6, unique=True))
+@given(job_type=job_classes, users=st.lists(uuid5s, max_size=6, unique=True))
 def test_fan_out_enqueues_one_deduped_job_per_user(
     monkeypatch: pytest.MonkeyPatch,
     queue_seam: InstallSeam,
-    task_cls: type[ScheduledTask],
-    users: list[uuid.UUID],
+    job_type: type[ScheduledJob],
+    users: list[UUID5],
 ) -> None:
-    recorder = queue_seam(queue_mod)
+    recorder = queue_seam(schedule_mod)
     roster_reads: list[None] = []
 
     async def fake_scope_roster() -> list[Scopes]:
@@ -46,129 +46,93 @@ def test_fan_out_enqueues_one_deduped_job_per_user(
         return [frozenset({user}) for user in users]
 
     monkeypatch.setattr(schedule_mod, "scope_roster", fake_scope_roster)
-    task = task_cls()
+    job = job_type()
 
-    asyncio.run(fan_out(task))
-    asyncio.run(fan_out(task))  # a fire while the last is still draining re-enqueues nothing
+    asyncio.run(fan_out(job))
+    asyncio.run(fan_out(job))
 
     assert roster_reads == [None, None]
     assert len(recorder.enqueues) == len(users)
     for call, pid in zip(recorder.enqueues, users, strict=True):
-        assert call.entrypoint == task.queue_entrypoint
-        assert call.dedupe_key == f"{task.name}:{pid}"
-        assert TaskJob.decode(call.payload).scopes == frozenset({pid})
+        assert call.entrypoint == job.entrypoint
+        assert call.priority == job.priority
+        assert call.dedupe_key == f"{job.name}:{pid}"
+        assert MaintenanceJob.decode(call.payload).scopes == frozenset({pid})
     assert recorder.opened == recorder.closed == 2
 
 
-@given(task_cls=task_classes, expression=crons, enabled=st.booleans())
+@given(job_type=job_classes, expression=crons, enabled=st.booleans())
 def test_register_wires_the_queue_always_and_the_cron_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
     pg_factory: type[RecordingPg],
     job_factory: type[FakeJob],
-    task_cls: type[ScheduledTask],
+    job_type: type[ScheduledJob],
     expression: str,
     enabled: bool,
 ) -> None:
     pg = pg_factory()
     body_calls: list[Scopes] = []
 
-    async def record_body(self: ScheduledTask, scopes: Scopes) -> None:
+    async def record_body(self: ScheduledJob, scopes: Scopes) -> None:
         body_calls.append(scopes)
 
-    monkeypatch.setattr(task_cls, "run", record_body)
-    fanned: list[ScheduledTask] = []
+    monkeypatch.setattr(job_type, "execute", record_body)
+    fanned: list[ScheduledJob] = []
 
-    async def fake_fan_out(task: ScheduledTask) -> None:
-        fanned.append(task)
+    async def fake_fan_out(job: ScheduledJob) -> None:
+        fanned.append(job)
 
-    monkeypatch.setattr(settings, f"{task_cls.name}_cron", expression)
-    monkeypatch.setattr(settings, f"{task_cls.name}_enabled", enabled)
-    task = task_cls()
-    task.register(cast(PgQueuer, pg), fake_fan_out)
+    monkeypatch.setattr(settings, f"{job_type.name}_cron", expression)
+    monkeypatch.setattr(settings, f"{job_type.name}_enabled", enabled)
+    job = job_type()
+    job.register(cast(PgQueuer, pg), fake_fan_out)
 
-    assert task.queue_entrypoint in pg.entrypoints
-    cron_registered = [entry for entry in pg.schedules if entry[0] == task.cron_entrypoint]
+    assert job.entrypoint in pg.entrypoints
+    cron_registered = [entry for entry in pg.schedules if entry[0] == job.cron_entrypoint]
     assert bool(cron_registered) is enabled
 
-    user = uuid.uuid4()
+    user = uuid5()
     key = frozenset({user})
-    job = job_factory(TaskJob(scopes=key).encode())
-    asyncio.run(pg.entrypoints[task.queue_entrypoint](job))
+    queued = job_factory(MaintenanceJob(scopes=key).encode())
+    asyncio.run(pg.entrypoints[job.entrypoint](queued))
     assert body_calls == [key]
 
     if enabled:
         (_, registered_expression, fire) = cron_registered[0]
         assert registered_expression == expression
         asyncio.run(fire(SimpleNamespace()))
-        assert fanned == [task]
+        assert fanned == [job]
 
 
-@pytest.mark.parametrize("profile_on_write", [True, False], ids=["chained", "skipped"])
-def test_run_worker_registers_every_entrypoint_and_chains_profiles_only_when_on(
+def test_run_worker_registers_every_entrypoint(
     monkeypatch: pytest.MonkeyPatch,
     pg_factory: type[RecordingPg],
-    job_factory: type[FakeJob],
-    profile_on_write: bool,
+    queue_seam: Callable[[ModuleType], RecordingQueue],
 ) -> None:
     pg = pg_factory()
-    closed: list[bool] = []
-
-    async def fake_connect(dsn: str) -> SimpleNamespace:
-        async def close() -> None:
-            closed.append(True)
-
-        return SimpleNamespace(close=close)
-
-    monkeypatch.setattr(queue_mod, "asyncpg", SimpleNamespace(connect=fake_connect))
-    monkeypatch.setattr(
-        schedule_mod, "PgQueuer", SimpleNamespace(from_asyncpg_connection=lambda conn: pg)
-    )
-
-    chunk, user, entity = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    process_calls: list[tuple[uuid.UUID, Scopes]] = []
-    profile_jobs: list[list[uuid.UUID]] = []
-    profile_calls: list[tuple[uuid.UUID, Scopes]] = []
-
-    async def fake_process_chunk(chunk_id: uuid.UUID, scopes: Scopes) -> list[uuid.UUID]:
-        process_calls.append((chunk_id, scopes))
-        return [entity]
-
-    async def fake_enqueue_profiles(entity_ids: list[uuid.UUID], scopes: Scopes) -> None:
-        profile_jobs.append(list(entity_ids))
-
-    async def fake_process_profile(entity_id: uuid.UUID, scopes: Scopes) -> None:
-        profile_calls.append((entity_id, scopes))
-
-    monkeypatch.setattr(schedule_mod, "process_chunk", fake_process_chunk)
-    monkeypatch.setattr(schedule_mod, "enqueue_profiles", fake_enqueue_profiles)
-    monkeypatch.setattr(schedule_mod, "process_profile", fake_process_profile)
-    monkeypatch.setattr(settings, "profile_on_write", profile_on_write)
+    recorder = queue_seam(schedule_mod)
+    recorder.worker_instance = pg
 
     asyncio.run(run_worker(batch_size=7))
 
-    assert {EXTRACT_ENTRYPOINT, PROFILE_ENTRYPOINT} <= set(pg.entrypoints)
-    for task_cls in ScheduledTask.implementations():
-        task = task_cls()
-        # Backup is process-wide and therefore has no per-scope queue entrypoint.
-        assert (task.queue_entrypoint in pg.entrypoints) is (task_cls is not BackupTask)
-        registered = any(entry[0] == task.cron_entrypoint for entry in pg.schedules)
-        assert registered is task.enabled
+    chunk_entrypoint = ChunkProjectionJob().entrypoint
+    profile_entrypoint = ProfileProjectionJob().entrypoint
+    assert {chunk_entrypoint, profile_entrypoint} <= set(pg.entrypoints)
+    assert pg.failure_policies[chunk_entrypoint] == "hold"
+    assert pg.failure_policies[profile_entrypoint] == "hold"
+    assert pg.concurrency_limits[chunk_entrypoint] == settings.graph_build_concurrency
+    assert pg.concurrency_limits[profile_entrypoint] == 1
+    for job_type in ScheduledJob.implementations():
+        job = job_type()
+        assert (job.entrypoint in pg.entrypoints) is (job_type is not BackupJob)
+        registered = any(entry[0] == job.cron_entrypoint for entry in pg.schedules)
+        assert registered is job.enabled
     assert pg.runs == [7]
-    assert closed == [True]
-
-    key = frozenset({user})
-    chunk_job = job_factory(ChunkJob(chunk_id=chunk, scopes=key).encode())
-    asyncio.run(pg.entrypoints[EXTRACT_ENTRYPOINT](chunk_job))
-    assert process_calls == [(chunk, key)]
-    assert profile_jobs == ([[entity]] if profile_on_write else [])
-
-    profile_job = job_factory(ProfileJob(entity_id=entity, scopes=key).encode())
-    asyncio.run(pg.entrypoints[PROFILE_ENTRYPOINT](profile_job))
-    assert profile_calls == [(entity, key)]
+    assert recorder.opened == recorder.closed == 1
 
 
 def test_scope_roster_unions_document_and_session_scopes(migrated_db: None) -> None:
-    doc_owner, session_owner = uuid.uuid4(), uuid.uuid4()
+    doc_owner, session_owner = uuid5(), uuid5()
 
     async def body() -> set[Scopes]:
         await dbutil.reset_db()

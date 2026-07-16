@@ -1,7 +1,7 @@
 from loguru import logger
 
 from ..config import settings
-from ..store import FactClaim
+from ..store import Fact
 from ..store.identity import User
 from ..types import Scopes
 
@@ -14,7 +14,7 @@ async def decay(
     count."""
     key = frozenset(scopes or (settings.system_user_id,))
     async with User.system(key) as session:
-        archived = await FactClaim.archive_stale(
+        archived = await Fact.Claim.archive_stale(
             session, key, half_life_days, settings.decay_floor
         )
     logger.info(

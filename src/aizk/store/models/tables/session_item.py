@@ -1,13 +1,12 @@
 from datetime import datetime
 from typing import ClassVar, Self, cast
 
+from patos import sql
 from sqlalchemy import ColumnElement, DateTime, Index, Text, UniqueConstraint, func, or_, select
 from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.selectable import Select
 from sqlmodel import Field
 
-from ....common import sql
-from ....common.sql import Column, TypedJSONB
 from ....types import Scopes
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
 
@@ -17,12 +16,12 @@ class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
 
     mutable: ClassVar[bool] = True
 
-    kind: Column[str] = Field(default="note")
-    text: Column[str] = Field(sa_type=Text)
-    provenance: Column[dict] = Field(
-        default_factory=dict, sa_type=TypedJSONB, sa_column_kwargs={"server_default": "{}"}
+    kind: sql.Column[str] = Field(default="note")
+    text: sql.Column[str] = Field(sa_type=Text)
+    provenance: sql.Column[dict] = Field(
+        default_factory=dict, sa_type=sql.TypedJSONB, sa_column_kwargs={"server_default": "{}"}
     )
-    promoted_at: Column[datetime | None] = Field(
+    promoted_at: sql.Column[datetime | None] = Field(
         default=None, index=True, sa_type=cast(type[datetime], DateTime(timezone=True))
     )
 

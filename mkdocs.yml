@@ -1,5 +1,5 @@
 site_name: aizk
-site_description: A self-hosted multi-tenant memory engine that turns a Zettelkasten into scoped agent-queryable memory over MCP
+site_description: Self-hosted shared memory for people, teams, and MCP agents
 site_url: https://phvv.me/aizk/
 repo_url: https://github.com/phvv-me/aizk
 repo_name: phvv-me/aizk
@@ -44,21 +44,28 @@ extra_css:
 
 nav:
   - Home: index.md
-  - Concepts: concepts.md
+  - Start:
+      - Quickstart: quickstart.md
+      - MCP clients: mcp-clients.md
+      - API: api.md
+  - Concepts:
+      - Plain-language guide: concepts.md
+      - Identity and sharing: engine/identity.md
+      - Scope lattice: engine/lattice.md
   - Engine:
       - engine/index.md
       - Write path: engine/write-path.md
       - Store: engine/store.md
-      - Identity: engine/identity.md
-      - Lattice: engine/lattice.md
       - Read path: engine/read-path.md
       - Autonomy: engine/autonomy.md
-  - Benchmarks: benchmarks.md
-  - Comparison: comparison.md
-  - Provenance: provenance.md
-  - Operations: operations.md
-  - API: api.md
-  - Release: release.md
+  - Evaluation:
+      - Benchmarks: benchmarks.md
+      - Comparison: comparison.md
+  - Operate:
+      - Operations: operations.md
+      - Security: security.md
+      - Release: release.md
+  - References: references.md
 
 markdown_extensions:
   - admonition

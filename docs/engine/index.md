@@ -30,7 +30,7 @@ The engine splits into six parts, each with its own page.
 
 The measured results live in [Benchmarks](../benchmarks.md), the honest side-by-side against
 grep, qmd, and the engines the papers came from lives in [Comparison](../comparison.md), and
-the map from every mechanism back to its paper lives in [Provenance](../provenance.md).
+the map from every mechanism back to its source lives in [References](../references.md).
 
 ## Two governing principles
 

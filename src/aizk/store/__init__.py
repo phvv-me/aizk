@@ -3,23 +3,15 @@ from sqlalchemy.engine import Connection
 
 from ..exceptions import NoTenantContext
 from . import events as events
-from .engine import (
-    as_system,
-    session_for,
-)
 from .mixins import TableBase
 from .models import (
     Chunk,
     Community,
     Document,
-    EntityClaim,
-    EntityContent,
-    EntityKind,
-    FactClaim,
-    FactContent,
-    LiveFact,
+    Entity,
+    Fact,
     Profile,
-    RelationKind,
+    Relation,
     SessionItem,
     Watermark,
 )
@@ -36,19 +28,13 @@ __all__ = [
     "Chunk",
     "Community",
     "Document",
-    "EntityClaim",
-    "EntityContent",
-    "EntityKind",
-    "FactClaim",
-    "FactContent",
-    "LiveFact",
+    "Entity",
+    "Fact",
     "NoTenantContext",
     "Profile",
-    "RelationKind",
+    "Relation",
     "SessionItem",
     "TableBase",
     "Watermark",
-    "as_system",
-    "session_for",
     "verify_rls",
 ]

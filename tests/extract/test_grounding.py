@@ -4,7 +4,8 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from aizk.extract.grounding import quote_interval
+from aizk.extract.models import ExtractedEntity, Extraction, TimedFact
+from aizk.graph.grounding import GroundedProjection, quote_interval
 
 body = st.text(
     alphabet=st.characters(codec="utf-8", exclude_categories=("Cs",)),
@@ -58,3 +59,90 @@ def test_whitespace_variants_map_back_to_source_offsets() -> None:
     assert interval is not None
     start, end = interval
     assert text[start:end] == "compression   engine\nuses"
+
+
+def test_projection_accepts_only_grounded_facts_with_canonical_endpoints() -> None:
+    source = "Aizk uses PostgreSQL and keeps source evidence."
+    projection = GroundedProjection.from_extraction(
+        Extraction(
+            entities=[
+                ExtractedEntity(name="Aizk", type="tool"),
+                ExtractedEntity(name="PostgreSQL", type="tool"),
+                ExtractedEntity(name="Unused", type="concept"),
+                ExtractedEntity(name=" ", type="concept"),
+            ],
+            facts=[
+                TimedFact(
+                    subject="aizk",
+                    predicate="uses",
+                    object="postgresql",
+                    statement="Aizk uses PostgreSQL.",
+                    quote="Aizk uses PostgreSQL",
+                )
+            ],
+        ),
+        source,
+    )
+
+    assert [entity.name for entity in projection.entities] == ["Aizk", "PostgreSQL"]
+    assert projection.facts[0].subject == "Aizk"
+    assert projection.facts[0].object_ == "PostgreSQL"
+    assert projection.quality.accepted_facts == 1
+    assert projection.quality.rejected_facts == 0
+
+
+def test_projection_reports_every_deterministic_rejection_reason() -> None:
+    source = "Aizk uses PostgreSQL."
+    projection = GroundedProjection.from_extraction(
+        Extraction(
+            entities=[
+                ExtractedEntity(name="Aizk", type="tool"),
+                ExtractedEntity(name="PostgreSQL", type="tool"),
+            ],
+            facts=[
+                TimedFact(subject="Aizk", predicate="uses", statement="missing"),
+                TimedFact(
+                    subject="Aizk",
+                    predicate="uses",
+                    statement="invented",
+                    quote="not in the source",
+                ),
+                TimedFact(
+                    subject="Ghost",
+                    predicate="uses",
+                    statement="unresolved",
+                    quote="Aizk uses PostgreSQL",
+                ),
+                TimedFact(
+                    subject="Aizk",
+                    predicate="uses",
+                    object="Aizk",
+                    statement="self",
+                    quote="Aizk uses PostgreSQL",
+                ),
+                TimedFact(
+                    subject="Aizk",
+                    predicate="related_to",
+                    object="PostgreSQL",
+                    statement="generic",
+                    quote="Aizk uses PostgreSQL",
+                ),
+            ],
+        ),
+        source,
+    )
+
+    assert projection.facts == []
+    assert projection.entities == []
+    assert projection.quality.model_dump() == {
+        "proposed_entities": 2,
+        "accepted_entities": 0,
+        "proposed_facts": 5,
+        "accepted_facts": 0,
+        "missing_quote": 1,
+        "unsupported_quote": 1,
+        "unresolved_endpoint": 1,
+        "self_relation": 1,
+        "generic_relation": 1,
+    }
+    assert projection.quality.rejected_facts == 5

@@ -1,3 +1,6 @@
+from collections.abc import Callable
+
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -7,18 +10,14 @@ from aizk.graph.naming import normalize_name
 names = st.text(min_size=1, max_size=30)
 
 
+@pytest.mark.parametrize("normalizer", [normalize, normalize_name], ids=["identity", "name"])
 @given(value=st.text())
-def test_normalize_collapses_whitespace_casefolds_and_is_idempotent(value: str) -> None:
-    once = normalize(value)
-    assert once == " ".join(value.split()).casefold()  # the exact fold, the spec
-    assert normalize(once) == once  # idempotent
+def test_normalizers_are_idempotent(normalizer: Callable[[str], str], value: str) -> None:
+    once = normalizer(value)
+    assert normalizer(once) == once
     assert "  " not in once and once == once.strip()
-
-
-@given(value=names)
-def test_normalize_name_is_idempotent(value: str) -> None:
-    once = normalize_name(value)
-    assert normalize_name(once) == once
+    if normalizer is normalize:
+        assert once == " ".join(value.split()).casefold()
 
 
 @given(label=st.text(alphabet=st.characters(categories=["Ll", "Lu"]), min_size=1, max_size=20))
@@ -49,9 +48,6 @@ def test_entity_id_is_deterministic_uuid5(name: str, type_: str) -> None:
     once = entity_id(name, type_)
     assert once == entity_id(name, type_)
     assert once.version == 5
-
-
-def test_entity_id_collapses_slug_equivalent_names() -> None:
     assert entity_id("team-memory-spine", "project") == entity_id("Team Memory Spine", "project")
 
 
@@ -64,10 +60,11 @@ def test_entity_id_collapses_slug_equivalent_names() -> None:
 def test_fact_id_is_deterministic_over_its_triple(
     subject: str, predicate: str, object_: str, statement: str
 ) -> None:
-    once = fact_id(subject, predicate, object_, statement)
-    assert once == fact_id(subject, predicate, object_, statement)
+    subject_id = entity_id(subject, "concept")
+    object_id = entity_id(object_, "concept") if object_ else None
+    once = fact_id(subject_id, predicate, object_id, statement)
+    assert once == fact_id(subject_id, predicate, object_id, statement)
     assert once.version == 5
-
-
-def test_distinct_triples_do_not_collide_on_the_delimiter() -> None:
-    assert fact_id("a b", "uses", "", "s") != fact_id("a", "b uses", "", "s")
+    assert fact_id(entity_id("a b", "concept"), "uses", None, "s") != fact_id(
+        entity_id("a", "concept"), "b uses", None, "s"
+    )

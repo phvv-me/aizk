@@ -1,11 +1,14 @@
 from .client import LogtoClient
-from .models import Claims, Discovery, Org, Role, Token
+from .models import Account, Claims, Discovery, Member, Org, OrganizationScope, Role, Token
 
 __all__ = [
+    "Account",
     "Claims",
-    "LogtoClient",
     "Discovery",
+    "LogtoClient",
+    "Member",
     "Org",
+    "OrganizationScope",
     "Role",
     "Token",
 ]

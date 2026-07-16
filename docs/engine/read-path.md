@@ -4,19 +4,21 @@
 maximal plan, every lane on in facts-first order, with no query-time route classification. A
 misrouted query loses community and RAPTOR evidence the reranker cannot recover, and the
 zero-shot router measured 44% accuracy on the eval strata, so PostgreSQL ranks all visible
-evidence in one statement and Python cuts the token budget after reranking.
+evidence in one statement and Python cuts the token budget after identity-aware reranking.
 
 ```mermaid
 flowchart LR
     Q[question and asker] --> E[embedding and entity seeds]
     E --> S[one SQLAlchemy statement]
     S --> H[dense and lexical evidence]
+    S --> P[current Area and Project catalogs]
     S --> G[graph walk, communities, RAPTOR]
     S --> M[working memory and profiles]
-    H --> B[cross-encoder rerank and prefix budget cut]
+    H --> B[direct-source authority, merit rerank, and prefix budget cut]
+    P --> B
     G --> B
     M --> B
-    B --> C[context pack]
+    B --> C[one prompt-ready string]
 ```
 
 ## Typed recall statement
@@ -31,6 +33,14 @@ a bounded candidate pool. Reciprocal rank fusion combines their positions rather
 compare incompatible raw scores. A result at rank `r` contributes `1 / (rrf_k + r)`, and a chunk
 found by both lanes receives both contributions. The document join happens only after fusion,
 which preserves index-friendly top-k scans.
+
+A third source lane recognizes when the question contains a document's complete title. Its chunks
+join the same candidate set and carry one direct-subject bit into final ordering. If one named title
+is contained inside another, only the maximal title keeps direct authority. This prevents `JLPT N2`
+from shadowing `JLPT N2 Window Weekly Plan`, while unrelated titles named together remain peers.
+Directly named sources come before incidental evidence, and the cross-encoder orders each identity
+group by answer quality. This rule does not route the query, disable a lane, or impose a fixed order
+among evidence kinds.
 
 Fact retrieval first asks the `FactContent` vector index for a bounded candidate set, then joins
 only those rows to current `FactClaim` records. This keeps immutable embeddings separate from
@@ -61,9 +71,18 @@ facts retain their author, role, epistemic kind, and perspective key in every hi
 facts share one consolidation partition. Experiences, observations, opinions, and preferences use
 one partition per creator so two collaborators can disagree without overwriting each other.
 
-Profiles rank by summary embedding rather than entity-name embedding. After the cross-encoder
-reranks the evidence lanes, a plain Python walk keeps the longest prefix of candidates whose
-chars-per-token cost fits the budget. Only selected facts receive access counter updates.
+Profiles rank by summary embedding rather than entity-name embedding. Source candidates expose the
+complete configured chunk size to the cross-encoder, so a late Risks or Next actions section is not
+silently truncated before scoring. After identity-aware merit ordering, a plain Python walk keeps
+the longest prefix of candidates whose chars-per-token cost fits the budget. The MCP boundary
+renders that internal pack as one string with evidence-section labels, source names, civil dates, and
+speaker attribution. Internal retrieval scores stay in `aizk eval trace` rather than leaking into
+the prompt. Only selected facts receive access counter updates.
+
+Area and Project catalogs are database-derived source candidates. The Project catalog includes
+only documents whose explicit state is Active or Waiting and renders each state beside its Area,
+so current work does not depend on an extractor interpreting tags, checkboxes, or old journal
+prose.
 
 ## Authorization
 

@@ -1,4 +1,3 @@
-import uuid
 from typing import cast
 
 import dbutil
@@ -11,11 +10,12 @@ from fastmcp.server.middleware.rate_limiting import RateLimitError
 from fastmcp.tools import ToolResult
 from hypothesis import given
 from hypothesis import strategies as st
+from id_factory import uuid5
 from mcp_probe import context_for
 
 from aizk.config import settings
 from aizk.mcp.auth import Auth
-from aizk.mcp.middleware import AnonymousRateLimit, IdentityMiddleware, bound_user
+from aizk.mcp.middleware import CallerRateLimit, IdentityMiddleware, bound_user
 from aizk.store.identity import User
 
 
@@ -33,7 +33,7 @@ def tool_context(user: User | None = None) -> ToolContext:
 
 @given(rate=st.floats(min_value=0.01, max_value=1000))
 def test_anonymous_bucket_is_sized_to_a_five_second_burst_never_below_one(rate: float) -> None:
-    limiter = AnonymousRateLimit(max_requests_per_second=rate).limiter
+    limiter = CallerRateLimit(max_requests_per_second=rate).limiter(uuid5())
     assert limiter.capacity == max(1, round(rate * 5))
     assert limiter.refill_rate == rate
 
@@ -41,8 +41,8 @@ def test_anonymous_bucket_is_sized_to_a_five_second_burst_never_below_one(rate: 
 def test_user_middleware_resolves_once_and_stashes_the_user(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    org = uuid.uuid4()
-    user_id = uuid.uuid4()
+    org = uuid5()
+    user_id = uuid5()
     resolved = User.authorized(
         user_id,
         read=(user_id, org),
@@ -78,7 +78,17 @@ def test_middleware_refuses_a_call_without_a_request_context() -> None:
 
     bare = cast("ToolContext", FakeContext())
     with pytest.raises(ToolError, match="no request context"):
-        dbutil.run(AnonymousRateLimit(max_requests_per_second=1.0).on_call_tool(bare, call_next))
+        dbutil.run(CallerRateLimit(max_requests_per_second=1.0).on_call_tool(bare, call_next))
+
+
+def test_rate_limit_refuses_a_context_without_a_resolved_user() -> None:
+    async def call_next(context: ToolContext) -> ToolResult:
+        raise AssertionError("the wrapped handler must never run")
+
+    with pytest.raises(ToolError, match="no user resolved"):
+        dbutil.run(
+            CallerRateLimit(max_requests_per_second=1.0).on_call_tool(tool_context(), call_next)
+        )
 
 
 def test_bound_user_ignores_a_foreign_state_value() -> None:
@@ -90,20 +100,34 @@ def test_bound_user_ignores_a_foreign_state_value() -> None:
     assert dbutil.run(body()) is None
 
 
-def test_rate_limit_lets_authenticated_calls_pass_uncharged() -> None:
-    limit = AnonymousRateLimit(max_requests_per_second=0.2)  # capacity floors at one token
-    context = tool_context(User.private(uuid.uuid4()))
+def test_rate_limit_isolates_authenticated_callers() -> None:
+    limit = CallerRateLimit(max_requests_per_second=0.2)
+    first = tool_context(User.private(uuid5()))
+    second = tool_context(User.private(uuid5()))
     expected = ToolResult(content=[])
 
     async def call_next(context: ToolContext) -> ToolResult:
         return expected
 
-    for _ in range(3):  # more calls than the lone burst token, yet none consume it
-        assert dbutil.run(limit.on_call_tool(context, call_next)) is expected
+    assert dbutil.run(limit.on_call_tool(first, call_next)) is expected
+    with pytest.raises(RateLimitError, match="caller rate limit"):
+        dbutil.run(limit.on_call_tool(first, call_next))
+    assert dbutil.run(limit.on_call_tool(second, call_next)) is expected
+
+
+def test_rate_limit_forgets_the_least_recently_used_caller_after_4096_buckets() -> None:
+    limit = CallerRateLimit(max_requests_per_second=1.0)
+    first_id = uuid5()
+    first = limit.limiter(first_id)
+
+    for _ in range(4096):
+        limit.limiter(uuid5())
+
+    assert limit.limiter(first_id) is not first
 
 
 def test_rate_limit_drains_one_shared_burst_then_refuses_the_stranger() -> None:
-    limit = AnonymousRateLimit(max_requests_per_second=0.2)  # capacity floors at one token
+    limit = CallerRateLimit(max_requests_per_second=0.2)
     context = tool_context(User.private(settings.anonymous_user_id))
     served: list[ToolContext] = []
     expected = ToolResult(content=[])
@@ -113,6 +137,6 @@ def test_rate_limit_drains_one_shared_burst_then_refuses_the_stranger() -> None:
         return expected
 
     assert dbutil.run(limit.on_call_tool(context, call_next)) is expected
-    with pytest.raises(RateLimitError, match="anonymous rate limit"):
+    with pytest.raises(RateLimitError, match="caller rate limit"):
         dbutil.run(limit.on_call_tool(context, call_next))
     assert served == [context]  # only the admitted call ever reached the wrapped handler

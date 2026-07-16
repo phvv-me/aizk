@@ -1,29 +1,51 @@
 # The write path
 
-Agents send text. There is no parser and no file-format layer, since the calling agent already
-reads PDFs and the like. aizk's responsibility starts at prose. A document is chunked
-(recursively for prose, AST-aware for code), embedded once, and then flows through a
-three-stage extraction line whose whole design goal is one LLM call per chunk where the old
-pipeline spent thirteen.
+Agents send text rather than filesystem objects. A small deterministic parser recognizes an
+optional level-one title, `Type` declaration, generic typed relation lines, and dated journal
+entries. It does not parse PDFs or own a file-format layer, since the calling agent supplies the
+paper's Markdown and original URL. A document is chunked recursively for prose, embedded once,
+and then flows through one configured extractor. The production LLM path uses the cheap relevance
+gate first. The experimental GLiNER path performs entity and relation extraction itself and
+therefore skips that separate gate.
+
+Explicit declarations and model extraction meet at the same `Extraction` value. A declared
+subject type is stored on the source document so later chunks retain it, while arbitrary relations
+become ordinary ontology facts. Project and Area have no dedicated ingestion branch.
 
 ```mermaid
 flowchart LR
     D[document] --> C[chunk + embed]
-    C --> G{GLiNER2 gate<br/>205M, ms}
+    C --> B{extract backend}
+    B -->|LLM| G{GLiNER2 large gate<br/>GPU, ms}
     G -->|nothing extractable| X[mark processed]
-    G -->|has entities| E[extract<br/>one combined call]
+    G -->|has entities| L[LLM extract<br/>one combined call]
+    B -->|GLiNER| E[grounded graph extract<br/>one encoder pass]
+    L --> K[consolidation cascade]
     E --> K[consolidation cascade]
     K --> W[claims + embeddings]
 ```
 
 ## The gate
 
-A 205M GLiNER2 encoder scores every chunk against the closed ontology's entity types in
-milliseconds on CPU. Chunks with nothing extractable skip the LLM entirely. On the dense
-research vault only 2.2% of chunks skip, so the gate earns its keep on sparser corpora while
-costing almost nothing here.
+GLiNER2 large scores every chunk against the closed ontology's entity descriptions in
+milliseconds on GPU. Chunks with nothing extractable skip the LLM entirely. An earlier base-model
+measurement on the dense research vault skipped only 2.2 percent of chunks, so the gate matters
+more on sparse corpora than on this one.
 
-## One combined call
+The gate and direct extractor share one HTTP service boundary and one concurrency throttle. The
+server never loads model weights. Missing endpoints fail the job so PgQueuer can retry and retain
+the failure for diagnosis.
+
+## Extraction backends
+
+`AIZK_EXTRACT_BACKEND=llm` is the production default. It emits bounded entities and facts through
+the strict ontology wire schema. `AIZK_EXTRACT_BACKEND=gliner` sends the same live entity and
+relation descriptions to the sidecar graph route. Its grounded character spans make source
+quotes deterministic. The large checkpoint and a 0.7 confidence threshold remove many weak edges,
+but its relation semantics and recall are not strong enough for production. Self-relations are
+dropped before consolidation.
+
+## One combined LLM call
 
 Entities, facts, and an optional per-fact date come back in a single strict-JSON response.
 vLLM's xgrammar backend compiles the schema once and caches it, so constrained decoding is

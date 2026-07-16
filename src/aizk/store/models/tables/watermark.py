@@ -1,14 +1,14 @@
-import uuid
-from collections.abc import Sequence
-from enum import StrEnum, auto
-from typing import ClassVar, cast
+from collections.abc import Mapping, Sequence
+from enum import auto
+from typing import ClassVar
 
-from sqlalchemy import BigInteger, Index, Text, UniqueConstraint, func
-from sqlalchemy import Enum as SAEnum
+from patos import sql
+from pydantic import UUID5
+from sqlalchemy import BigInteger, Index, Text, UniqueConstraint, column, func, update
+from sqlalchemy import Column as SAColumn
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Field, select
 
-from ....common.sql import Column, TypedJSONB
 from ....config import settings
 from ....types import Scopes
 from ...engine import Session
@@ -20,37 +20,35 @@ _GLOBAL_REF = "global"
 class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
     """Per-scope counter and payload for autonomous maintenance passes."""
 
-    mutable: ClassVar[bool] = True
-
-    class Kind(StrEnum):
+    class Kind(sql.PGEnum):
         """Maintenance state tracked by a watermark."""
 
         entity_dirty = auto()
         fact_count = auto()
         raptor_fact_count = auto()
         curation_pending = auto()
-        scorecard = auto()
         config = auto()
+
+    mutable: ClassVar[bool] = True
 
     __table_args__ = (
         Index("ix_watermark_scopes", "scopes", postgresql_using="gin"),
         UniqueConstraint("scopes", "kind", "ref", name="uq_watermark_scope_kind_ref"),
     )
 
-    kind: Column[Kind] = Field(
-        nullable=False,
-        sa_type=cast(type[Kind], SAEnum(Kind, name="watermark_kind")),
+    kind: sql.Column[Kind] = Field(
+        sa_column=SAColumn(Kind.type, nullable=False),
     )
-    ref: Column[str] = Field(default=_GLOBAL_REF, sa_type=Text)
-    counter: Column[int] = Field(
+    ref: sql.Column[str] = Field(default=_GLOBAL_REF, sa_type=Text)
+    counter: sql.Column[int] = Field(
         default=0,
         sa_column_kwargs={"server_default": "0"},
         sa_type=BigInteger,
     )
-    payload: Column[dict] = Field(
+    payload: sql.Column[dict] = Field(
         default_factory=dict,
         sa_column_kwargs={"server_default": "{}"},
-        sa_type=TypedJSONB,
+        sa_type=sql.TypedJSONB,
     )
 
     @classmethod
@@ -58,10 +56,10 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         cls,
         session: Session,
         scopes: Scopes,
-        kind: Watermark.Kind,
+        kind: Kind,
         ref: str = _GLOBAL_REF,
         by: int = 1,
-        created_by: uuid.UUID | None = None,
+        created_by: UUID5 | None = None,
     ) -> int:
         """Atomically increment a counter and return its new value."""
         statement = (
@@ -86,10 +84,10 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         cls,
         session: Session,
         scopes: Scopes,
-        kind: Watermark.Kind,
+        kind: Kind,
         refs: Sequence[str],
         by: int = 1,
-        created_by: uuid.UUID | None = None,
+        created_by: UUID5 | None = None,
     ) -> None:
         """Atomically increment many referenced counters in one statement."""
         if not refs:
@@ -121,7 +119,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         cls,
         session: Session,
         scopes: Scopes,
-        kind: Watermark.Kind,
+        kind: Kind,
         ref: str = _GLOBAL_REF,
     ) -> int:
         """Read a counter or zero when it has not been created."""
@@ -141,7 +139,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         cls,
         session: Session,
         scopes: Scopes,
-        kind: Watermark.Kind,
+        kind: Kind,
         ref: str = _GLOBAL_REF,
     ) -> dict:
         """Read a payload or an empty mapping when absent."""
@@ -157,15 +155,68 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         return payload or {}
 
     @classmethod
+    async def pending_refs(
+        cls,
+        session: Session,
+        scopes: Scopes,
+        kind: Kind,
+        limit: int,
+    ) -> dict[str, int]:
+        """Read the oldest positive referenced counters as one bounded work batch."""
+        rows = await session.exec(
+            select(cls.ref, cls.counter)
+            .where(
+                cls.scopes == sorted(scopes),
+                cls.kind == kind,
+                cls.counter > 0,
+            )
+            .order_by(cls.updated_at, cls.ref)
+            .limit(limit)
+        )
+        return dict(rows.all())
+
+    @classmethod
+    async def consume(
+        cls,
+        session: Session,
+        scopes: Scopes,
+        kind: Kind,
+        counters: Mapping[str, int],
+    ) -> None:
+        """Subtract one processed snapshot without erasing concurrent increments."""
+        if not counters:
+            return
+        consumed = sql.relation(
+            "consumed_watermark",
+            (
+                column("ref", Text),
+                column("counter", BigInteger),
+            ),
+            list(counters.items()),
+        )
+        await session.exec(
+            update(cls)
+            .where(
+                cls.scopes == sorted(scopes),
+                cls.kind == kind,
+                cls.ref == consumed.c.ref,
+            )
+            .values(
+                counter=func.greatest(cls.counter - consumed.c.counter, 0),
+                updated_at=func.now(),
+            )
+        )
+
+    @classmethod
     async def set_value(
         cls,
         session: Session,
         scopes: Scopes,
-        kind: Watermark.Kind,
+        kind: Kind,
         counter: int = 0,
         payload: dict | None = None,
         ref: str = _GLOBAL_REF,
-        created_by: uuid.UUID | None = None,
+        created_by: UUID5 | None = None,
     ) -> None:
         """Atomically replace a counter and payload."""
         values = {"counter": counter, "payload": payload or {}}

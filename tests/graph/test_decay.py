@@ -1,4 +1,3 @@
-import uuid
 from datetime import UTC, datetime, timedelta
 
 import dbutil
@@ -6,12 +5,14 @@ import pytest
 import seedgraph
 from hypothesis import given
 from hypothesis import strategies as st
+from id_factory import uuid5
+from pydantic import UUID5, UUID7
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import Range
 
 from aizk.config import settings
 from aizk.graph.decay import decay
-from aizk.store import FactClaim
+from aizk.store import Fact
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -21,10 +22,10 @@ counts = st.integers(min_value=0, max_value=1000)
 half_lives = st.floats(min_value=1.0, max_value=365.0, allow_nan=False, allow_infinity=False)
 
 
-def aged_claim(now: datetime, age_days: float, access_count: int) -> FactClaim:
-    return FactClaim(
-        content_id=uuid.uuid4(),
-        created_by=uuid.uuid4(),
+def aged_claim(now: datetime, age_days: float, access_count: int) -> Fact.Claim:
+    return Fact.Claim(
+        content_id=uuid5(),
+        created_by=uuid5(),
         last_accessed=now - timedelta(days=age_days),
         recorded=Range(now - timedelta(days=age_days), None),
         access_count=access_count,
@@ -40,6 +41,7 @@ def test_relevance_never_falls_as_access_count_rises(
     quiet = aged_claim(now, age, lo).relevance(now, half_life)
     busy = aged_claim(now, age, hi).relevance(now, half_life)
     assert busy >= quiet
+    assert aged_claim(now, 0.0, lo).relevance(now, half_life) == pytest.approx(1.0 + lo)
 
 
 @given(young=ages, old=ages, count=counts, half_life=half_lives)
@@ -59,7 +61,7 @@ def test_relevance_brackets_the_decay_floor() -> None:
     assert aged_claim(now, 0.0, 0).relevance(now, 90.0) >= settings.decay_floor
 
 
-async def claim_state(owner: uuid.UUID, claim: uuid.UUID) -> tuple[bool, bool]:
+async def claim_state(owner: UUID5 | UUID7, claim: UUID5 | UUID7) -> tuple[bool, bool]:
     async with dbutil.actor(owner) as session:
         row = await session.exec(
             text(
@@ -73,23 +75,23 @@ async def claim_state(owner: uuid.UUID, claim: uuid.UUID) -> tuple[bool, bool]:
 
 
 async def plant_aged(
-    owner: uuid.UUID,
-    subject: uuid.UUID,
+    owner: UUID5 | UUID7,
+    subject: UUID5 | UUID7,
     statement: str,
     age_days: float,
     count: int,
     accessed: bool,
-) -> uuid.UUID:
+) -> UUID5 | UUID7:
     now = datetime.now(UTC)
     async with dbutil.actor(owner) as session:
-        content = uuid.uuid4()
+        content = uuid5()
         session.add(
-            seedgraph.FactContent(
+            seedgraph.Fact.Content(
                 id=content, subject_id=subject, predicate="related_to", statement=statement
             )
         )
         await session.flush()
-        claim = FactClaim(
+        claim = Fact.Claim(
             content_id=content,
             created_by=owner,
             scopes=[owner],

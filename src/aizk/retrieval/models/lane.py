@@ -1,18 +1,16 @@
 import abc
-import uuid
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING
 
-from patos import FrozenModel
+from patos import FrozenModel, sql
 from pgvector.sqlalchemy import HALFVEC
+from pydantic import UUID5, UUID7
 from sqlalchemy import ColumnElement, Float, Integer, Text, bindparam, literal, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.selectable import Select
 
-from ...common import sql
-
 if TYPE_CHECKING:
-    from ...common.sql import Expr
+    from patos.sql import Expr
 
 
 class QueryContext(FrozenModel):
@@ -82,14 +80,16 @@ class Lane(FrozenModel, abc.ABC):
 
     def row(
         self,
-        evidence_id: ColumnElement[uuid.UUID],
+        evidence_id: ColumnElement[UUID5 | UUID7],
         ordering: ColumnElement[float],
         line: ColumnElement[str],
-        fact_id: ColumnElement[uuid.UUID] | None = None,
-        source_chunk_id: ColumnElement[uuid.UUID | None] | None = None,
-        source_title: ColumnElement[str | None] | None = None,
+        scopes: ColumnElement[list[UUID5]],
+        fact_id: ColumnElement[UUID7] | None = None,
+        source_chunk_id: ColumnElement[UUID7 | None] | None = None,
+        source_title: ColumnElement[str] | ColumnElement[str | None] | None = None,
         source_uri: ColumnElement[str | None] | None = None,
-        created_by: ColumnElement[uuid.UUID] | None = None,
+        created_by: ColumnElement[UUID5] | None = None,
+        direct: ColumnElement[bool] | None = None,
     ) -> Select:
         """This lane's candidates in the shared column shape every lane unions into."""
         return select(
@@ -98,19 +98,22 @@ class Lane(FrozenModel, abc.ABC):
             evidence_id.label("evidence_id"),
             ordering.label("ordering"),
             line.label("line"),
+            scopes.label("scopes"),
             sql.provided(fact_id).label("fact_id"),
             sql.provided(source_chunk_id).label("source_chunk_id"),
             sql.provided(source_title).label("source_title"),
             sql.provided(source_uri).label("source_uri"),
             sql.provided(created_by).label("created_by"),
+            (literal(False) if direct is None else direct).label("direct"),
         )
 
     def by_vector(
         self,
         embedding: Expr[list[float] | None],
         line: ColumnElement[str],
-        evidence_id: ColumnElement[uuid.UUID],
-        created_by: ColumnElement[uuid.UUID],
+        evidence_id: ColumnElement[UUID5 | UUID7],
+        created_by: ColumnElement[UUID5],
+        scopes: Expr[list[UUID5]],
         limit: ColumnElement[int],
         *guards: ColumnElement[bool],
         vector: ColumnElement,
@@ -119,7 +122,13 @@ class Lane(FrozenModel, abc.ABC):
         """This lane ranked by embedding distance, floored, ordered, and limited."""
         distance = embedding @ vector
         return (
-            self.row(evidence_id=evidence_id, ordering=distance, line=line, created_by=created_by)
+            self.row(
+                evidence_id=evidence_id,
+                ordering=distance,
+                line=line,
+                scopes=scopes,
+                created_by=created_by,
+            )
             .where(embedding.is_not(None), *guards, distance < floor)
             .order_by(distance)
             .limit(limit)

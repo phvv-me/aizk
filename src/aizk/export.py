@@ -10,15 +10,13 @@ from .config import settings
 from .store import (
     Chunk,
     Document,
-    EntityClaim,
-    EntityContent,
-    FactClaim,
-    FactContent,
+    Entity,
+    Fact,
 )
 from .store.engine import Session
 from .store.identity import User
 
-type Exported = Document | Chunk | EntityContent | EntityClaim | FactContent | FactClaim
+type Exported = Document | Chunk | Entity.Content | Entity.Claim | Fact.Content | Fact.Claim
 
 
 class ExportReport(FrozenModel):
@@ -64,10 +62,10 @@ async def export_scope(
         async with user as session:
             documents = await _write_table(session, output, Document)
             chunks = await _write_table(session, output, Chunk)
-            entity_content = await _write_table(session, output, EntityContent)
-            entity_claims = await _write_table(session, output, EntityClaim)
-            fact_content = await _write_table(session, output, FactContent)
-            fact_claims = await _write_table(session, output, FactClaim, history=True)
+            entity_content = await _write_table(session, output, Entity.Content)
+            entity_claims = await _write_table(session, output, Entity.Claim)
+            fact_content = await _write_table(session, output, Fact.Content)
+            fact_claims = await _write_table(session, output, Fact.Claim, history=True)
     logger.info(
         "exported {} documents, {} chunks, {} entity content, {} entity claims, "
         "{} fact content, {} fact claims to {} for user {}",

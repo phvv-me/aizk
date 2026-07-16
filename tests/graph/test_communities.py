@@ -1,31 +1,31 @@
-import uuid
 from collections.abc import Iterator
 
 import dbutil
 import networkx as nx
 import pytest
-from factories import build_live_fact
+from doubles import FakeLLM
+from factories import LiveFactFactory
 from hypothesis import given
 from hypothesis import strategies as st
+from id_factory import uuid5
+from pydantic import UUID5, UUID7
 from sqlmodel import select
 
 import aizk.graph.communities as communities_module
-from aizk.graph.communities import build_communities, detect
+from aizk.config import settings
+from aizk.graph.communities import CommunityBuilder, build_communities, detect
 from aizk.store import (
     Community,
-    EntityClaim,
-    EntityContent,
-    FactClaim,
-    FactContent,
-    LiveFact,
+    Entity,
+    Fact,
 )
 
 UNIT_VECTOR = [1.0] + [0.0] * 1023
 
 
 @pytest.fixture
-def owner(migrated_db: None) -> Iterator[uuid.UUID]:
-    pid = uuid.uuid4()
+def owner(migrated_db: None) -> Iterator[UUID5 | UUID7]:
+    pid = uuid5()
 
     async def setup() -> None:
         await dbutil.reset_db()
@@ -34,14 +34,14 @@ def owner(migrated_db: None) -> Iterator[uuid.UUID]:
     yield pid
 
 
-def edge(subject: uuid.UUID, object_: uuid.UUID) -> LiveFact:
-    return build_live_fact(subject_id=subject, object_id=object_)
+def edge(subject: UUID5 | UUID7, object_: UUID5 | UUID7) -> Fact.Live:
+    return LiveFactFactory.build(subject_id=subject, object_id=object_)
 
 
 @given(size=st.integers(min_value=3, max_value=6))
 def test_detect_keeps_a_clique_and_drops_under_floor(size: int) -> None:
-    clique = [uuid.uuid4() for _ in range(size)]
-    pair = [uuid.uuid4(), uuid.uuid4()]
+    clique = [uuid5() for _ in range(size)]
+    pair = [uuid5(), uuid5()]
     facts = [edge(a, b) for i, a in enumerate(clique) for b in clique[i + 1 :]]
     facts.append(edge(*pair))
 
@@ -50,25 +50,44 @@ def test_detect_keeps_a_clique_and_drops_under_floor(size: int) -> None:
     assert set().union(*kept) >= set(clique)
     assert all(member not in cluster for cluster in kept for member in pair)
     assert detect(facts, min_size=size + 3) == []
+    isolated = [LiveFactFactory.build(subject_id=uuid5(), object_id=None) for _ in range(3)]
+    assert detect(isolated, min_size=3) == []
 
 
-def test_detect_returns_nothing_without_edges() -> None:
-    facts = [build_live_fact(subject_id=uuid.uuid4(), object_id=None) for _ in range(3)]
-    assert detect(facts, min_size=3) == []
+def test_prompt_bounds_and_deduplicates_the_cluster_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    alpha, beta = uuid5(), uuid5()
+    monkeypatch.setattr(settings, "community_entities_k", 1)
+    monkeypatch.setattr(settings, "community_facts_k", 1)
+    builder = CommunityBuilder(
+        frozenset({uuid5()}),
+        {
+            alpha: "beta",
+            beta: "alpha",
+        },
+        [
+            LiveFactFactory.build(subject_id=alpha, object_id=beta, statement="new fact"),
+            LiveFactFactory.build(subject_id=alpha, object_id=beta, statement="new fact"),
+            LiveFactFactory.build(subject_id=alpha, object_id=beta, statement="old fact"),
+        ],
+    )
+
+    assert builder.prompt({alpha, beta}) == "Entities: alpha\n\nFacts:\n- new fact"
 
 
 @pytest.mark.parametrize("backend", ["networkx", "cugraph"])
 def test_detect_forwards_the_backend_keyword_only_off_the_default(
     monkeypatch: pytest.MonkeyPatch, backend: str
 ) -> None:
-    captured: dict[str, object] = {}
+    captured: dict[str, str] = {}
 
-    def fake_louvain(graph: nx.Graph, seed: int, **kwargs: object) -> list[set[uuid.UUID]]:
+    def fake_louvain(graph: nx.Graph, seed: int, **kwargs: str) -> list[set[UUID5 | UUID7]]:
         captured.update(kwargs)
         return [set(graph.nodes())]
 
     monkeypatch.setattr(communities_module, "louvain_communities", fake_louvain)
-    nodes = [uuid.uuid4() for _ in range(3)]
+    nodes = [uuid5() for _ in range(3)]
     facts = [edge(a, b) for i, a in enumerate(nodes) for b in nodes[i + 1 :]]
 
     clusters = detect(facts, min_size=3, backend=backend)
@@ -77,23 +96,23 @@ def test_detect_forwards_the_backend_keyword_only_off_the_default(
 
 
 @pytest.mark.usefixtures("fake_embedder")
-def test_build_lands_an_embedded_community(owner: uuid.UUID, fake_llm: object) -> None:
+def test_build_lands_an_embedded_community(owner: UUID5 | UUID7, fake_llm: FakeLLM) -> None:
     async def probe() -> tuple[int, list[Community]]:
-        nodes = [uuid.uuid4() for _ in range(3)]
+        nodes = [uuid5() for _ in range(3)]
         async with dbutil.actor(owner) as session:
             for index, node in enumerate(nodes):
                 session.add(
-                    EntityContent(
+                    Entity.Content(
                         id=node, name=f"node {index}", type="concept", embedding=UNIT_VECTOR
                     )
                 )
             await session.flush()
             session.add_all(
-                EntityClaim(content_id=node, created_by=owner, scopes=[owner]) for node in nodes
+                Entity.Claim(content_id=node, created_by=owner, scopes=[owner]) for node in nodes
             )
             contents = [
-                FactContent(
-                    id=uuid.uuid4(),
+                Fact.Content(
+                    id=uuid5(),
                     subject_id=subject,
                     object_id=object_,
                     predicate="related_to",
@@ -106,7 +125,7 @@ def test_build_lands_an_embedded_community(owner: uuid.UUID, fake_llm: object) -
             session.add_all(contents)
             await session.flush()
             session.add_all(
-                FactClaim(content_id=content.id, created_by=owner, scopes=[owner])
+                Fact.Claim(content_id=content.id, created_by=owner, scopes=[owner])
                 for content in contents
             )
         written = await build_communities(scopes=frozenset({owner}))

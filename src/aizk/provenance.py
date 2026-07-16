@@ -1,8 +1,8 @@
-import uuid
 from datetime import datetime
 from enum import StrEnum, auto
 
 from patos import FrozenModel
+from pydantic import UUID5
 from pydantic.types import JsonValue
 
 
@@ -27,7 +27,7 @@ class EpistemicKind(StrEnum):
             self.preference,
         }
 
-    def perspective_key(self, created_by: uuid.UUID) -> str:
+    def perspective_key(self, created_by: UUID5) -> str:
         """Return the consolidation partition for this kind and creator."""
         return f"speaker:{created_by}" if self.speaker_bound else "world"
 
@@ -42,6 +42,7 @@ class CaptureContext(FrozenModel):
     phase: str | None = None
     topic: str | None = None
     observed_at: datetime | None = None
+    expires_at: datetime | None = None
 
     def record(self) -> dict[str, JsonValue]:
         """Render non-null fields for JSONB storage."""
@@ -62,7 +63,7 @@ class CaptureContext(FrozenModel):
         ]
         return "\n".join([*context, text]) if context else text
 
-    def claim_attributes(self, kind: EpistemicKind, created_by: uuid.UUID) -> dict[str, JsonValue]:
+    def claim_attributes(self, kind: EpistemicKind, created_by: UUID5) -> dict[str, JsonValue]:
         """Build fact attributes that preserve epistemic and speaker provenance."""
         return self.record() | {
             "epistemic_kind": kind.value,

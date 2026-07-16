@@ -1,10 +1,10 @@
 from typing import ClassVar, cast
 
+from patos import sql
 from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.orm import declared_attr
 from sqlmodel import Field
 
-from ...common.sql import Column, CosineHalfvec
 from ...config import settings
 
 
@@ -13,8 +13,8 @@ class Embedded:
 
     __tablename__: ClassVar[str]
 
-    embedding: Column[list[float] | None] = Field(
-        default=None, sa_type=cast(type[list[float]], CosineHalfvec(settings.embed_dim))
+    embedding: sql.Column[list[float] | None] = Field(
+        default=None, sa_type=cast(type[list[float]], sql.CosineHalfvec(settings.embed_dim))
     )
 
     @declared_attr.directive

@@ -1,17 +1,23 @@
-import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
+from patos import sql
+from pydantic import UUID5, UUID7
 from sqlalchemy import (
     Boolean,
     ColumnElement,
     DateTime,
     Float,
     Index,
+    Integer,
     Table,
     Text,
+    Uuid,
     and_,
+    case,
     cast,
+    column,
     extract,
     func,
     or_,
@@ -23,10 +29,10 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import declared_attr
 from sqlmodel import Field, select
 
-from ....common.sql import Column, TypedJSONB
+from ....config import settings
 from ....types import Scopes
 from ...engine import Session
-from ...mixins import ClaimedContent, Embedded, Id, Scoped, TableBase
+from ...mixins import ClaimedContent, DeterministicId, Embedded, Id, Scoped, TableBase
 from .chunk import Chunk
 
 
@@ -35,14 +41,14 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 
     mutable: ClassVar[bool] = True
 
-    content_id: Column[uuid.UUID] = Field(
+    content_id: sql.Column[UUID5] = Field(
         foreign_key="fact_content.id",
         ondelete="CASCADE",
         nullable=False,
         index=True,
     )
-    valid: Column[Range[datetime] | None] = Field(default=None, sa_column=SAColumn(TSTZRANGE))
-    recorded: Column[Range[datetime]] = Field(
+    valid: sql.Column[Range[datetime] | None] = Field(default=None, sa_column=SAColumn(TSTZRANGE))
+    recorded: sql.Column[Range[datetime]] = Field(
         default=None,
         sa_column=SAColumn(
             TSTZRANGE,
@@ -50,28 +56,28 @@ class FactClaim(Id, Scoped, TableBase, table=True):
             server_default=func.tstzrange(func.now(), None, "[)"),
         ),
     )
-    last_accessed: Column[datetime | None] = Field(
+    last_accessed: sql.Column[datetime | None] = Field(
         default=None,
         sa_column=SAColumn(DateTime(timezone=True)),
     )
-    access_count: Column[int] = Field(default=0, sa_column_kwargs={"server_default": "0"})
-    attributes: Column[dict] = Field(
+    access_count: sql.Column[int] = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    attributes: sql.Column[dict] = Field(
         default_factory=dict,
         sa_column_kwargs={"server_default": "{}"},
-        sa_type=TypedJSONB,
+        sa_type=sql.TypedJSONB,
     )
-    perspective_key: Column[str] = Field(
+    perspective_key: sql.Column[str] = Field(
         default="world",
         index=True,
         sa_column_kwargs={"server_default": "world"},
     )
-    source_chunk_id: Column[uuid.UUID | None] = Field(
+    source_chunk_id: sql.Column[UUID7 | None] = Field(
         default=None,
         foreign_key="chunk.id",
         ondelete="SET NULL",
         index=True,
     )
-    promoted_from: Column[uuid.UUID | None] = Field(
+    promoted_from: sql.Column[UUID7 | None] = Field(
         default=None,
         foreign_key="fact_claim.id",
         ondelete="SET NULL",
@@ -147,7 +153,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         return 0.5 ** (age_days / half_life_days) * (1 + self.access_count)
 
     @classmethod
-    async def record_access(cls, session: Session, claim_ids: list[uuid.UUID]) -> None:
+    async def record_access(cls, session: Session, claim_ids: list[UUID7]) -> None:
         """Update recency and frequency for surfaced live facts in one statement."""
         if not claim_ids:
             return
@@ -162,13 +168,63 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         )
 
     @classmethod
+    async def revise(
+        cls,
+        session: Session,
+        revisions: Sequence[tuple[int, UUID7, datetime | None, datetime | None]],
+    ) -> dict[int, datetime | None]:
+        """Apply temporal corrections together and return each new claim's adjusted end."""
+        if not revisions:
+            return {}
+        inputs = sql.relation(
+            "fact_revision",
+            (
+                column("ordinal", Integer),
+                column("id", Uuid),
+                column("valid_from", DateTime(timezone=True)),
+                column("valid_to", DateTime(timezone=True)),
+            ),
+            list(revisions),
+        )
+        valid_from = cast(inputs.c.valid_from, DateTime(timezone=True))
+        input_valid_to = cast(inputs.c.valid_to, DateTime(timezone=True))
+        lower = func.lower(cls.valid)
+        backdated = and_(
+            valid_from.is_not(None),
+            lower.is_not(None),
+            valid_from < lower,
+        )
+        closing = func.greatest(func.coalesce(valid_from, func.now()), lower)
+        valid_to = case(
+            (backdated, func.least(input_valid_to, lower)),
+            else_=input_valid_to,
+        )
+        rows = await session.exec(
+            update(cls)
+            .where(cls.id == inputs.c.id)
+            .values(
+                valid=case(
+                    (backdated, cls.valid),
+                    else_=func.tstzrange(lower, closing, "[)"),
+                ),
+                recorded=case(
+                    (backdated, cls.recorded),
+                    else_=func.tstzrange(func.lower(cls.recorded), func.now(), "[)"),
+                ),
+            )
+            .returning(inputs.c.ordinal, valid_to)
+            .execution_options(**{settings.skip_live_gate: True})
+        )
+        return dict(rows.all())
+
+    @classmethod
     async def archive_stale(
         cls,
         session: Session,
         scopes: Scopes,
         half_life_days: float,
         floor: float,
-    ) -> list[uuid.UUID]:
+    ) -> list[UUID7]:
         """Close live claims below the relevance floor and return their IDs.
 
         The clock, the range close, and the decay stamp all come from the database's own
@@ -198,15 +254,15 @@ class FactClaim(Id, Scoped, TableBase, table=True):
             .returning(cls.id)
             .execution_options(synchronize_session=False)
         )
-        return list(result.scalars().all())
+        return [row[0] for row in result]
 
     @classmethod
     async def retract_from_documents(
         cls,
         session: Session,
-        document_ids: list[uuid.UUID],
+        document_ids: list[UUID7],
         reason: str,
-    ) -> list[uuid.UUID]:
+    ) -> list[UUID7]:
         """Close live claims derived from documents before their chunks change."""
         now = datetime.now(UTC)
         now_ts = cast(now, DateTime(timezone=True))
@@ -227,31 +283,31 @@ class FactClaim(Id, Scoped, TableBase, table=True):
             .returning(cls.id)
             .execution_options(synchronize_session=False)
         )
-        return list(result.scalars().all())
+        return [row[0] for row in result]
 
     @classmethod
     async def forget_from_documents(
-        cls, session: Session, document_ids: list[uuid.UUID]
-    ) -> list[uuid.UUID]:
+        cls, session: Session, document_ids: list[UUID7]
+    ) -> list[UUID7]:
         """Retract live claims derived from explicitly forgotten documents."""
         return await cls.retract_from_documents(session, document_ids, "forgotten")
 
 
-class FactContent(Id, Embedded, ClaimedContent, TableBase, table=True):
+class FactContent(DeterministicId, Embedded, ClaimedContent, TableBase, table=True):
     """Immutable, content-addressed graph edge shared by visible claims."""
 
-    subject_id: Column[uuid.UUID] = Field(
+    subject_id: sql.Column[UUID5] = Field(
         foreign_key="entity_content.id",
         ondelete="CASCADE",
         nullable=False,
         index=True,
     )
-    object_id: Column[uuid.UUID | None] = Field(
+    object_id: sql.Column[UUID5 | None] = Field(
         default=None,
         foreign_key="entity_content.id",
         ondelete="CASCADE",
         index=True,
     )
-    predicate: Column[str] = Field(sa_type=Text, foreign_key="relation_kind.name")
-    statement: Column[str] = Field(sa_type=Text)
+    predicate: sql.Column[str] = Field(sa_type=Text, foreign_key="relation_kind.name")
+    statement: sql.Column[str] = Field(sa_type=Text)
     claim_table: ClassVar[Table] = FactClaim.__table__

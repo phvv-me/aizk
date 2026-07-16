@@ -3,18 +3,19 @@ from collections.abc import Collection
 from typing import cast
 
 from loguru import logger
+from pydantic import UUID5, UUID7
 from sqlalchemy.orm import QueryableAttribute, selectinload
 from sqlmodel import select
 
 from ..exceptions import NotVisibleError
-from ..store import Chunk, Document, LiveFact
+from ..store import Chunk, Document, Fact
 from ..store.engine import Session
 from ..store.identity import User
 from ..types import Scopes
 from .dedupe import claim_entity, claim_fact
 
 
-async def source_document(session: Session, document_id: uuid.UUID) -> Document:
+async def source_document(session: Session, document_id: UUID7) -> Document:
     """The promoted document, with its chunks already loaded in their own document order."""
     chunks = cast(QueryableAttribute[list[Chunk]], Document.chunks)
     source = await session.get(Document, document_id, options=[selectinload(chunks)])
@@ -23,23 +24,24 @@ async def source_document(session: Session, document_id: uuid.UUID) -> Document:
     return source
 
 
-async def source_live_facts(session: Session, chunks: list[Chunk]) -> list[LiveFact]:
+async def source_live_facts(session: Session, chunks: list[Chunk]) -> list[Fact.Live]:
     """The live facts sourced from a document's own chunks, the only facts a promotion
     carries."""
     return list(
         await session.exec(
-            select(LiveFact).where(LiveFact.source_chunk_id.in_([chunk.id for chunk in chunks]))
+            select(Fact.Live).where(Fact.Live.source_chunk_id.in_([chunk.id for chunk in chunks]))
         )
     )
 
 
 def copied_chunks(
-    chunks: list[Chunk], user_id: uuid.UUID, target: list[uuid.UUID]
-) -> dict[uuid.UUID, Chunk]:
+    chunks: list[Chunk], document_id: UUID7, user_id: UUID5, target: list[UUID5]
+) -> dict[UUID7, Chunk]:
     """Fresh copies of a document's chunks in the target scope set, keyed by their source
     chunk id."""
     return {
         chunk.id: Chunk(
+            document_id=document_id,
             ord=chunk.ord,
             text=chunk.text,
             lexical=chunk.lexical,
@@ -55,7 +57,7 @@ def copied_chunks(
 
 
 async def claim_promoted_entities(
-    session: Session, facts: list[LiveFact], user_id: uuid.UUID, target: list[uuid.UUID]
+    session: Session, facts: list[Fact.Live], user_id: UUID5, target: list[UUID5]
 ) -> None:
     """Claim, in the target scope set, every entity a promoted fact's subject or object
     names."""
@@ -68,10 +70,10 @@ async def claim_promoted_entities(
 
 async def claim_promoted_facts(
     session: Session,
-    facts: list[LiveFact],
-    copies: dict[uuid.UUID, Chunk],
-    user_id: uuid.UUID,
-    target: list[uuid.UUID],
+    facts: list[Fact.Live],
+    copies: dict[UUID7, Chunk],
+    user_id: UUID5,
+    target: list[UUID5],
 ) -> None:
     """Claim every promoted fact's already-global content in the target scope set."""
     for fact in facts:
@@ -91,7 +93,7 @@ async def claim_promoted_facts(
         )
 
 
-async def promote(document_ids: Collection[uuid.UUID], scopes: Scopes, user: User) -> int:
+async def promote(document_ids: Collection[UUID7], scopes: Scopes, user: User) -> int:
     """Share visible documents into one authorized scope set as provenance-linked copies."""
     target = sorted(scopes)
     promoted = 0
@@ -108,12 +110,16 @@ async def promote(document_ids: Collection[uuid.UUID], scopes: Scopes, user: Use
                 continue
             chunks = source.chunks
             facts = await source_live_facts(session, chunks)
-            copies = copied_chunks(chunks, user.id, target)
+            promoted_id = uuid.uuid7()
+            copies = copied_chunks(chunks, promoted_id, user.id, target)
             session.add(
                 Document(
-                    kind=source.kind,
+                    id=promoted_id,
                     title=source.title,
+                    subject_type=source.subject_type,
                     source_uri=source.source_uri,
+                    observed_at=source.observed_at,
+                    expires_at=source.expires_at,
                     content_hash=source.content_hash,
                     created_by=user.id,
                     scopes=target,

@@ -11,7 +11,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.sql.selectable import CTE, Select
 
-from ...store import EntityContent, LiveFact
+from ...store import Entity, Fact
 from ..models.lane import QueryContext
 
 
@@ -52,33 +52,33 @@ def seed_mass(dense_facts: CTE, context: QueryContext) -> CTE:
     """
     mentions = context.entities
     mention_mass = bindparam("graph_mention_mass", type_=Float)
-    lowered = func.lower(EntityContent.name)
+    lowered = func.lower(Entity.Content.name)
     exact_mentions = select(
-        EntityContent.id.label("entity_id"),
+        Entity.Content.id.label("entity_id"),
         mention_mass.label("mass"),
     ).where(lowered == any_(mentions))
     if context.fuzzy:
         mention = func.unnest(mentions).table_valued("mention").render_derived()
         fuzzy_matches = (
             select(
-                EntityContent.id.label("entity_id"),
+                Entity.Content.id.label("entity_id"),
                 (mention_mass * func.similarity(lowered, mention.c.mention)).label("mass"),
             )
-            .select_from(mention.join(EntityContent, lowered.bool_op("%")(mention.c.mention)))
+            .select_from(mention.join(Entity.Content, lowered.bool_op("%")(mention.c.mention)))
             .where(lowered != mention.c.mention)
         )
         mention_entities = union_all(exact_mentions, fuzzy_matches).cte("mention_entity")
     else:
         mention_entities = exact_mentions.cte("mention_entity")
-    entity_distance = EntityContent.embedding @ context.vector
+    entity_distance = Entity.Content.embedding @ context.vector
     dense_entities = (
         select(
-            EntityContent.id.label("entity_id"),
+            Entity.Content.id.label("entity_id"),
             seed_mass_from(
                 bindparam("graph_entity_seed_weight", type_=Float), entity_distance
             ).label("mass"),
         )
-        .where(EntityContent.embedding.is_not(None))
+        .where(Entity.Content.embedding.is_not(None))
         .order_by(entity_distance)
         .limit(bindparam("graph_seed_entities", type_=Integer))
     )
@@ -117,11 +117,11 @@ def diffused_mass(seeds: CTE, ppr_hops: int) -> CTE:
             .cte(f"frontier_{hop}")
         )
         edges = union_all(
-            select(LiveFact.subject_id.label("src"), LiveFact.object_id.label("dst"))
-            .join(frontier, LiveFact.subject_id == frontier.c.entity_id)
-            .where(LiveFact.object_id.is_not(None)),
-            select(LiveFact.object_id, LiveFact.subject_id).join(
-                frontier, LiveFact.object_id == frontier.c.entity_id
+            select(Fact.Live.subject_id.label("src"), Fact.Live.object_id.label("dst"))
+            .join(frontier, Fact.Live.subject_id == frontier.c.entity_id)
+            .where(Fact.Live.object_id.is_not(None)),
+            select(Fact.Live.object_id, Fact.Live.subject_id).join(
+                frontier, Fact.Live.object_id == frontier.c.entity_id
             ),
         ).cte(f"edge_{hop}")
         degree = (
@@ -169,10 +169,10 @@ def connected_facts(mass: CTE) -> Select:
         ),
     )
     return (
-        select(LiveFact.id, (-connection).label("ordering"))
-        .join(subject_mass, subject_mass.c.entity_id == LiveFact.subject_id)
-        .outerjoin(object_mass, object_mass.c.entity_id == LiveFact.object_id)
-        .where(LiveFact.embedding.is_not(None))
+        select(Fact.Live.id, (-connection).label("ordering"))
+        .join(subject_mass, subject_mass.c.entity_id == Fact.Live.subject_id)
+        .outerjoin(object_mass, object_mass.c.entity_id == Fact.Live.object_id)
+        .where(Fact.Live.embedding.is_not(None))
         .order_by(connection.desc())
         .limit(bindparam("graph_facts_k", type_=Integer))
     )

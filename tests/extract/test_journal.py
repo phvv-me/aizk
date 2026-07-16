@@ -1,15 +1,11 @@
 from datetime import UTC, date, datetime
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from aizk.extract import ontology
-from aizk.extract.journal import (
-    declared_type,
-    has_journal_entries,
-    journal_facts,
-    title_entity,
-)
+from aizk.extract.declaration import SourceDeclaration, journal_facts
+from aizk.ontology import Ontology, System
 
 dates = st.dates(min_value=datetime(2000, 1, 1).date(), max_value=datetime(2099, 12, 31).date())
 line_text = st.text(alphabet=st.characters(blacklist_characters="\n"), min_size=1, max_size=40)
@@ -21,7 +17,7 @@ def test_dated_line_parses_to_one_observed_fact(day: date, body: str) -> None:
     assert len(facts) == 1
     fact = facts[0]
     assert fact.subject == "My Note"
-    assert fact.predicate == ontology.OBSERVES
+    assert fact.predicate == System.Relation.OBSERVES
     assert fact.statement == body.strip()
     assert fact.valid_from == datetime(day.year, day.month, day.day, tzinfo=UTC)
     assert fact.valid_to is None
@@ -49,28 +45,44 @@ def test_malformed_dates_and_prose_never_match() -> None:
     assert journal_facts("- 2021-3-1: bad month width", title="t") == []
 
 
-@given(
-    text=st.text(alphabet=st.characters(blacklist_characters="#"), max_size=40),
-    tagged=st.booleans(),
-)
-def test_project_tag_flips_the_title_entity_type(text: str, tagged: bool) -> None:
-    body = f"{text} #project" if tagged else text
-    assert declared_type(body) == (ontology.PROJECT if tagged else None)
-    entity = title_entity("Title", declared_type(body))
-    assert entity.type == (ontology.PROJECT if tagged else ontology.CONCEPT)
+def test_generic_source_declaration_parses_typed_relations() -> None:
+    declared = SourceDeclaration.from_text(
+        "# Aizk\n\n- Type Project\n- part_of [Area] [[Productivity|Productivity Area]]\n"
+        "- has_status [Status] Active"
+    )
+
+    assert declared.title == "Aizk"
+    assert declared.subject_type == "Project"
+    assert [
+        (relation.predicate, relation.object_type, relation.object_name)
+        for relation in declared.relations
+    ] == [
+        ("part_of", "Area", "Productivity"),
+        ("has_status", "Status", "Active"),
+    ]
 
 
-def test_area_tag_declares_area_and_wins_over_project() -> None:
-    assert declared_type("the research hub #area") == ontology.AREA
-    assert declared_type("#area with #project members listed") == ontology.AREA
-    assert title_entity("Research", declared_type("x #area")).type == ontology.AREA
+def test_management_words_without_type_remain_an_ordinary_note() -> None:
+    declared = SourceDeclaration.from_text("# Notes\n- Status Active\nThis project is great")
+
+    assert declared.subject_type is None
+    assert declared.relations == ()
 
 
-def test_structural_words_in_prose_never_flip() -> None:
-    assert declared_type("this project is great") is None
-    assert declared_type("see #projections for detail") is None
-    assert declared_type("the bay area is sunny") is None
+def test_ordinary_declaration_is_already_canonical_and_extracts_nothing(
+    migrated_db: None,
+) -> None:
+    declared = SourceDeclaration.from_text("# Notes\nOrdinary prose")
+    ontology = Ontology.current()
+
+    assert declared.canonical(ontology) is declared
+    assert declared.extraction(ontology, datetime(2026, 7, 16, tzinfo=UTC), None).facts == []
 
 
-def test_journal_line_regex_is_anchored_per_line() -> None:
-    assert has_journal_entries("- 2021-01-01: a\n- 2021-01-02: b") is True
+def test_typed_source_requires_a_title() -> None:
+    with pytest.raises(ValueError, match="level-one Markdown title"):
+        SourceDeclaration.from_text("- Type Project\n- has_status [Status] Active")
+
+
+def test_journal_lines_are_anchored_per_line() -> None:
+    assert len(journal_facts("- 2021-01-01: a\n- 2021-01-02: b", "title")) == 2

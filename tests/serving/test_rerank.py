@@ -6,9 +6,10 @@ import pytest
 from dbutil import run
 
 from aizk.config import Settings, settings
+from aizk.serving.base import http_client
 from aizk.serving.rerank import rerank
 
-reranker_module = import_module("aizk.serving.rerank.reranker")
+rerank_module = import_module("aizk.serving.rerank.client")
 
 
 @pytest.fixture
@@ -26,9 +27,9 @@ def rerank_endpoint(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
         return httpx.Response(200, json={"results": list(reversed(results))})
 
     client = httpx.AsyncClient(
-        transport=httpx.MockTransport(respond), base_url="http://rerank.test/v1"
+        transport=httpx.MockTransport(respond), base_url="http://rerank.test"
     )
-    monkeypatch.setattr(reranker_module, "client", lambda: client)
+    monkeypatch.setattr(rerank_module, "http_client", lambda *args: client)
     return requests
 
 
@@ -65,32 +66,56 @@ def test_rerank_short_circuits_on_no_texts(rerank_endpoint: list[dict]) -> None:
     assert rerank_endpoint == []
 
 
-def test_rerank_rejects_a_score_count_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("results", "message"),
+    [
+        ([{"index": 0, "relevance_score": 1.0}], "1 scores for 2 texts"),
+        (
+            [
+                {"index": 0, "relevance_score": 1.0},
+                {"index": 0, "relevance_score": 0.5},
+            ],
+            "invalid result indexes",
+        ),
+        (
+            [
+                {"index": 0, "relevance_score": 1.0},
+                {"index": 2, "relevance_score": 0.5},
+            ],
+            "invalid result indexes",
+        ),
+    ],
+    ids=["missing", "duplicate", "out-of-range"],
+)
+def test_rerank_rejects_invalid_result_sets(
+    results: list[dict], message: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     def respond(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"results": [{"index": 0, "relevance_score": 1.0}]})
+        return httpx.Response(200, json={"results": results})
 
     client = httpx.AsyncClient(
-        transport=httpx.MockTransport(respond), base_url="http://rerank.test/v1"
+        transport=httpx.MockTransport(respond), base_url="http://rerank.test"
     )
-    monkeypatch.setattr(reranker_module, "client", lambda: client)
+    monkeypatch.setattr(rerank_module, "http_client", lambda *args: client)
 
-    with pytest.raises(ValueError, match="1 scores for 2 texts"):
+    with pytest.raises(ValueError, match=message):
         run(rerank("query", ["one", "two"]))
 
 
 def test_client_carries_the_configured_key_and_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    reranker_module.client.cache_clear()
-    monkeypatch.setattr(settings, "rerank_url", "http://rerank.test/v1")
+    http_client.cache_clear()
+    monkeypatch.setattr(settings, "rerank_url", "http://rerank.test")
     monkeypatch.setattr(settings, "rerank_api_key", "secret")
 
-    client = reranker_module.client()
+    client = http_client(
+        settings.rerank_url,
+        settings.rerank_api_key,
+        settings.rerank_request_timeout,
+    )
 
-    assert str(client.base_url) == "http://rerank.test/v1/"
+    assert str(client.base_url) == "http://rerank.test/"
     assert client.headers["authorization"] == "Bearer secret"
-    reranker_module.client.cache_clear()
-
-
-def test_settings_defaults_keep_rerank_off_without_an_endpoint() -> None:
     assert Settings(_env_file=None).rerank_url == ""
+    http_client.cache_clear()

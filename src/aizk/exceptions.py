@@ -17,7 +17,3 @@ class OntologyError(ValueError):
 
 class OntologyNotReadyError(RuntimeError):
     """The ontology cache was read before `ops.setup()` ever refreshed it."""
-
-
-class ExtractionUnreachableError(RuntimeError):
-    """The graph-extraction chat endpoint refused the connection, not merely one slow call."""

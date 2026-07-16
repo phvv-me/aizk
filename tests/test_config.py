@@ -1,7 +1,19 @@
 import pytest
+from hypothesis import assume, given
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from aizk.config import Settings, configure_logging
+
+_COMPLETE_LOGTO = {
+    "logto_url": "https://auth.test",
+    "logto_client_id": "client",
+    "logto_client_secret": "secret",
+    "mcp_public_url": "https://aizk.test",
+    "oauth_client_id": "oauth-client",
+    "oauth_client_secret": "oauth-secret",
+}
+_LOGTO_DEPENDENCIES = tuple(name for name in _COMPLETE_LOGTO if name != "logto_url")
 
 
 def test_default_dsns_are_built_from_host_port_db_and_passwords() -> None:
@@ -12,24 +24,23 @@ def test_default_dsns_are_built_from_host_port_db_and_passwords() -> None:
     assert cfg.admin_database_url == "postgresql+asyncpg://aizk_admin:op@h:6000/mem"
 
 
-def test_explicit_dsn_wins_over_the_template() -> None:
-    explicit = "postgresql+asyncpg://u:p@managed.example:5432/db?ssl=require"
-    cfg = Settings(database_url=explicit, db_host="ignored")
-    assert cfg.database_url == explicit
-    assert cfg.admin_database_url.startswith("postgresql+asyncpg://aizk_admin:")
-
-
-def test_explicit_admin_dsn_is_also_preserved() -> None:
-    admin = "postgresql+asyncpg://aizk:pw@managed:5432/db"
-    cfg = Settings(admin_database_url=admin, db_host="ignored")
-    assert cfg.admin_database_url == admin
+@pytest.mark.parametrize(
+    ("field", "dsn"),
+    [
+        ("database_url", "postgresql+asyncpg://u:p@managed.example:5432/db?ssl=require"),
+        ("admin_database_url", "postgresql+asyncpg://aizk:pw@managed:5432/db"),
+    ],
+)
+def test_explicit_dsns_win_over_templates(field: str, dsn: str) -> None:
+    cfg = Settings.model_validate({field: dsn, "db_host": "ignored"})
+    assert getattr(cfg, field) == dsn
 
 
 def test_asyncpg_dsns_drop_the_driver_tag() -> None:
-    cfg = Settings(db_host="h", db_port=1, db_name="d")
+    cfg = Settings(db_host="h", db_port=1, db_name="d", app_password="app")
     assert "+asyncpg" not in cfg.asyncpg_dsn
     assert "+asyncpg" not in cfg.admin_asyncpg_dsn
-    assert cfg.asyncpg_dsn == "postgresql://aizk_app:aizk_app@h:1/d"
+    assert cfg.asyncpg_dsn == "postgresql://aizk_app:app@h:1/d"
 
 
 def test_app_role_reads_from_the_dsn_username() -> None:
@@ -43,21 +54,16 @@ def test_chunk_denylist_parses_to_an_immutable_language_set() -> None:
     assert isinstance(cfg.chunk_denylist_languages, frozenset)
 
 
-def test_logto_configuration_derives_the_resource_and_rejects_partial_auth() -> None:
+def test_complete_logto_configuration_derives_the_resource() -> None:
     assert Settings().mcp_resource_id == ""
-    with pytest.raises(ValidationError, match="mcp_public_url"):
-        Settings(logto_url="https://auth.test")
-
     cfg = Settings(
-        logto_url="https://auth.test",
-        logto_client_id="client",
-        logto_client_secret="secret",
-        mcp_public_url="https://aizk.test",
+        **_COMPLETE_LOGTO,
         logto_required_scopes={"control"},
-        logto_writable_roles={"admin", "editor"},
+        logto_write_permission="control",
     )
     assert cfg.mcp_resource_id == "https://aizk.test/mcp"
     assert cfg.logto_required_scopes == frozenset({"control"})
+    assert cfg.logto_write_permission == "control"
     assert not {
         "oidc_issuer",
         "oidc_jwks_url",
@@ -68,9 +74,38 @@ def test_logto_configuration_derives_the_resource_and_rejects_partial_auth() -> 
     } & set(type(cfg).model_fields)
 
 
+@given(missing=st.sets(st.sampled_from(_LOGTO_DEPENDENCIES), min_size=1))
+def test_logto_auth_fails_closed_when_any_dependency_is_missing(missing: set[str]) -> None:
+    configuration = _COMPLETE_LOGTO.copy()
+    configuration.update(dict.fromkeys(missing, ""))
+
+    with pytest.raises(ValidationError):
+        Settings.model_validate(configuration)
+
+
+@given(public_url=st.booleans(), require_auth=st.booleans())
+def test_public_deployment_cannot_fall_back_to_auth_off(
+    public_url: bool,
+    require_auth: bool,
+) -> None:
+    assume(public_url or require_auth)
+    configuration = {
+        "mcp_public_url": "https://aizk.test" if public_url else None,
+        "require_auth": require_auth,
+    }
+    with pytest.raises(ValidationError, match="requires logto_url"):
+        Settings.model_validate(configuration)
+
+
 def test_configure_logging_enables_and_disables_without_raising(settings: Settings) -> None:
     try:
         configure_logging("DEBUG")
         configure_logging("")
     finally:
         configure_logging(settings.log_level)
+
+
+def test_extraction_backend_is_closed_to_supported_implementations() -> None:
+    assert Settings(_env_file=None).extract_backend == "llm"
+    with pytest.raises(ValidationError, match="gliner"):
+        Settings.model_validate({"extract_backend": "unknown"})

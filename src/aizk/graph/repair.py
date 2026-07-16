@@ -1,22 +1,21 @@
-import uuid
-
 from loguru import logger
+from pydantic import UUID5
 from sqlalchemy import delete, or_, update
 from sqlalchemy.orm import aliased
 from sqlmodel import select
 
 from ..config import settings
-from ..extract import ontology
-from ..store import EntityClaim, EntityContent, FactClaim, FactContent
-from ..store.engine import Session, bypass_rls
+from ..ontology import System
+from ..store import Entity, Fact
+from ..store.engine import Session
 from ..store.identity import User
 from ..types import Scopes
 from .naming import normalize_name
 
 
 def redirect_entity(
-    redirect: dict[uuid.UUID, uuid.UUID | None], entity_id: uuid.UUID | None
-) -> tuple[uuid.UUID | None, bool]:
+    redirect: dict[UUID5, UUID5 | None], entity_id: UUID5 | None
+) -> tuple[UUID5 | None, bool]:
     """Resolve one subject or object id through the duplicate-to-canonical redirect map."""
     if entity_id is None:
         return None, False
@@ -26,7 +25,7 @@ def redirect_entity(
     return replacement, replacement is None
 
 
-def claim_row(claim: FactClaim, content_id: uuid.UUID) -> dict:
+def claim_row(claim: Fact.Claim, content_id: UUID5) -> dict:
     """One claim's full column set as a plain dict, content_id re-pointed at the corrected
     row."""
     return {
@@ -45,12 +44,12 @@ def claim_row(claim: FactClaim, content_id: uuid.UUID) -> dict:
     }
 
 
-async def snapshot_claims(session: Session, content_id: uuid.UUID) -> list[dict]:
+async def snapshot_claims(session: Session, content_id: UUID5) -> list[dict]:
     """Read and expunge a fact content's whole claim history ahead of its cascading delete."""
     claims = list(
         await session.exec(
-            select(FactClaim)
-            .where(FactClaim.content_id == content_id)
+            select(Fact.Claim)
+            .where(Fact.Claim.content_id == content_id)
             .execution_options(**{settings.skip_live_gate: True})
         )
     )
@@ -63,10 +62,10 @@ async def snapshot_claims(session: Session, content_id: uuid.UUID) -> list[dict]
 # Suite-wide coverage loses attribution across this ad-hoc admin engine. End-to-end tests assert
 # both redirect outcomes directly.
 async def repoint_fact_content(  # pragma: no cover
-    session: Session, content_id: uuid.UUID, redirect: dict[uuid.UUID, uuid.UUID | None]
+    session: Session, content_id: UUID5, redirect: dict[UUID5, UUID5 | None]
 ) -> None:
     """Correct one fact content's subject or object off a duplicate, migrating its claims."""
-    content = await session.get(FactContent, content_id)
+    content = await session.get(Fact.Content, content_id)
     assert content is not None  # read as an affected id in the same admin-bypassed connection
     corrected_subject, subject_dropped = redirect_entity(redirect, content.subject_id)
     corrected_object, object_dropped = redirect_entity(redirect, content.object_id)
@@ -77,7 +76,7 @@ async def repoint_fact_content(  # pragma: no cover
     await session.delete(content)
     await session.flush()
     session.add(
-        FactContent(
+        Fact.Content(
             id=content_id,
             subject_id=corrected_subject,
             object_id=corrected_object,
@@ -87,20 +86,20 @@ async def repoint_fact_content(  # pragma: no cover
         )
     )
     await session.flush()
-    session.add_all(FactClaim(**row) for row in saved)
+    session.add_all(Fact.Claim(**row) for row in saved)
 
 
-async def find_duplicates(session: Session) -> dict[uuid.UUID, uuid.UUID | None]:
+async def find_duplicates(session: Session) -> dict[UUID5, UUID5 | None]:
     """Group visible entity content by normalized name and type, return the canonical
     redirect map."""
     entities = sorted(
         await session.exec(
-            select(EntityContent).where(EntityContent.type != ontology.RAPTOR_SUMMARY)
+            select(Entity.Content).where(Entity.Content.type != System.Entity.RAPTOR_SUMMARY)
         ),
         key=lambda entity: entity.id.bytes,
     )
-    canonical: dict[tuple[str, str], uuid.UUID] = {}
-    redirect: dict[uuid.UUID, uuid.UUID | None] = {}
+    canonical: dict[tuple[str, str], UUID5] = {}
+    redirect: dict[UUID5, UUID5 | None] = {}
     for entity in entities:
         normalized = normalize_name(entity.name)
         keep = canonical.get((entity.type, normalized)) if normalized else None
@@ -113,15 +112,15 @@ async def find_duplicates(session: Session) -> dict[uuid.UUID, uuid.UUID | None]
 
 async def affected_fact_ids(
     session: Session,
-    redirect: dict[uuid.UUID, uuid.UUID | None],
-) -> list[uuid.UUID]:
+    redirect: dict[UUID5, UUID5 | None],
+) -> list[UUID5]:
     """Fact content naming at least one duplicate the redirect map will correct or drop."""
     return list(
         await session.exec(
-            select(FactContent.id).where(
+            select(Fact.Content.id).where(
                 or_(
-                    FactContent.subject_id.in_(redirect),
-                    FactContent.object_id.in_(redirect),
+                    Fact.Content.subject_id.in_(redirect),
+                    Fact.Content.object_id.in_(redirect),
                 )
             )
         )
@@ -129,41 +128,39 @@ async def affected_fact_ids(
 
 
 async def migrate_entity_claims(
-    session: Session, duplicate_id: uuid.UUID, canonical_id: uuid.UUID
+    session: Session, duplicate_id: UUID5, canonical_id: UUID5
 ) -> None:
     """Repoint a merged-away entity's own claims onto the canonical content before it is
     deleted."""
-    canonical_claim = aliased(EntityClaim)
+    canonical_claim = aliased(Entity.Claim)
     collides_with_canonical = (
         select(canonical_claim.id)
         .where(canonical_claim.content_id == canonical_id)
-        .where(canonical_claim.scopes == EntityClaim.scopes)
+        .where(canonical_claim.scopes == Entity.Claim.scopes)
         .exists()
     )
     await session.exec(
-        delete(EntityClaim)
-        .where(EntityClaim.content_id == duplicate_id, collides_with_canonical)
+        delete(Entity.Claim)
+        .where(Entity.Claim.content_id == duplicate_id, collides_with_canonical)
         .execution_options(synchronize_session=False)
     )
     await session.exec(
-        update(EntityClaim)
-        .where(EntityClaim.content_id == duplicate_id)
+        update(Entity.Claim)
+        .where(Entity.Claim.content_id == duplicate_id)
         .values(content_id=canonical_id)
         .execution_options(synchronize_session=False)
     )
 
 
-async def merge_duplicates(
-    affected_ids: list[uuid.UUID], redirect: dict[uuid.UUID, uuid.UUID | None]
-) -> int:
+async def merge_duplicates(affected_ids: list[UUID5], redirect: dict[UUID5, UUID5 | None]) -> int:
     """Repoint every affected fact, migrate each duplicate's claims, and delete the duplicate
     node."""
     merged = 0
-    async with bypass_rls() as session:
+    async with User.system().owner as session:
         for content_id in affected_ids:
             await repoint_fact_content(session, content_id, redirect)
         for duplicate_id, canonical_id in redirect.items():
-            entity = await session.get(EntityContent, duplicate_id)
+            entity = await session.get(Entity.Content, duplicate_id)
             if entity is not None:  # pragma: no cover - always true within a single pass
                 if canonical_id is not None:
                     await migrate_entity_claims(session, duplicate_id, canonical_id)

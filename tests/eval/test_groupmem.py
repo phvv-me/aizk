@@ -3,17 +3,22 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 
 import dbutil
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import UUID5, UUID7
 from pydantic_ai.models.test import TestModel
 from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 
-import aizk.eval.runner as runner_module
-from aizk.eval import (
+import eval.runner as runner_module
+from aizk.config import settings
+from aizk.extract.ingest import TextSource
+from aizk.retrieval import Candidate
+from aizk.store.identity import User
+from aizk.types import Scopes
+from eval import (
     BenchmarkAnswer,
     BenchmarkCorpusError,
     BenchmarkCorpusState,
@@ -25,10 +30,6 @@ from aizk.eval import (
     GroupMemBench,
     QuestionKind,
 )
-from aizk.extract.ingest import TextSource
-from aizk.retrieval import Candidate
-from aizk.store.identity import User
-from aizk.types import Scopes
 
 
 def groupmem_fixture(root: Path) -> None:
@@ -170,7 +171,7 @@ def test_prepare_batches_authored_sources_and_verifies_the_exact_corpus(
     captured_sources: list[TextSource] = []
     built_scopes: list[Scopes] = []
 
-    async def ingest(user: User, sources: list[TextSource]) -> list[uuid.UUID]:
+    async def ingest(user: User, sources: list[TextSource]) -> list[UUID5 | UUID7]:
         captured_sources.extend(sources)
         return [uuid.uuid7() for _ in sources]
 
@@ -196,6 +197,7 @@ def test_prepare_batches_authored_sources_and_verifies_the_exact_corpus(
         "groupmembench://fixture-corpus/Finance/"
     )
     assert built_scopes == [benchmark.scope(dataset)]
+    dbutil.run(benchmark.ensure_prepared(dataset))
 
     async def missing(self: BenchmarkRunner, dataset: BenchmarkDataset) -> BenchmarkCorpusState:
         return BenchmarkCorpusState(documents=0, pending_chunks=1)
@@ -207,8 +209,11 @@ def test_prepare_batches_authored_sources_and_verifies_the_exact_corpus(
         dbutil.run(benchmark.prepare(dataset))  # a short prepare fails the exact-count check
 
 
+@pytest.mark.parametrize(
+    ("keep", "purge_count"), [(False, 1), (True, 0)], ids=["purged", "retained"]
+)
 def test_run_purges_the_isolated_corpus_unless_retained(
-    monkeypatch: pytest.MonkeyPatch,
+    keep: bool, purge_count: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     purged: list[Scopes] = []
 
@@ -228,9 +233,9 @@ def test_run_purges_the_isolated_corpus_unless_retained(
     monkeypatch.setattr(BenchmarkRunner, "answer", answer)
     dataset = sample_dataset(sampled_questions=True)
 
-    dbutil.run(runner().run(dataset, prepare=False))  # keep defaults to False
+    dbutil.run(runner().run(dataset, prepare=False, keep=keep))
 
-    assert purged == [BenchmarkRunner.scope(dataset)]
+    assert purged == [BenchmarkRunner.scope(dataset)] * purge_count
 
 
 def test_answer_binds_scope_authority_and_asker_context(
@@ -256,7 +261,7 @@ def test_answer_binds_scope_authority_and_asker_context(
     answer = dbutil.run(benchmark.answer(dataset, dataset.questions[0]))
 
     assert answer == BenchmarkAnswer(answer="The current plan.")
-    assert calls[0][1:] == (None, 10)
+    assert calls[0][1:] == (settings.context_token_budget, 10)
     assert calls[0][0].id not in benchmark.scope(dataset)
     assert calls[0][0].label == "User_1"
     assert standings == [benchmark.scope(dataset)]
@@ -298,28 +303,19 @@ def test_pydantic_evals_aggregates_families_and_labels_diagnostics(
     assert not report.publishable and "diagnostic" in report.render()
 
 
-def test_reference_protocol_requires_the_released_models_and_retrieval_depth() -> None:
+def test_runner_model_configuration_and_reference_protocol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     model = TestModel(model_name="gpt-5")
     assert BenchmarkRunner(model, model, progress=False).reference_protocol
     assert not BenchmarkRunner(model, model, k=8, progress=False).reference_protocol
-
-
-def test_configured_runner_uses_the_explicit_eval_endpoint(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        runner_module,
-        "provider_settings",
-        lambda: SimpleNamespace(
-            llm_url="http://extract/v1",
-            llm_api_key="extract-key",
-            llm_model="extract-model",
-        ),
-    )
-    monkeypatch.setattr(runner_module.settings, "eval_url", "http://eval/v1")
-    monkeypatch.setattr(runner_module.settings, "eval_api_key", "eval-key")
-    monkeypatch.setattr(runner_module.settings, "eval_model", "answer-model")
-    monkeypatch.setattr(runner_module.settings, "eval_judge_model", "judge-model")
+    monkeypatch.setattr(runner_module.aizk_settings, "llm_url", "http://llm/v1")
+    monkeypatch.setattr(runner_module.aizk_settings, "llm_api_key", "llm-key")
+    monkeypatch.setattr(runner_module.aizk_settings, "llm_model", "extractor")
+    monkeypatch.setattr(runner_module.settings, "url", "http://eval/v1")
+    monkeypatch.setattr(runner_module.settings, "api_key", "eval-key")
+    monkeypatch.setattr(runner_module.settings, "model", "answer-model")
+    monkeypatch.setattr(runner_module.settings, "judge_model", "judge-model")
 
     benchmark = BenchmarkRunner.configured(k=7)
 
@@ -336,16 +332,6 @@ def test_corpus_state_queries_the_exact_prepared_scope(migrated_db: None) -> Non
         return await runner().corpus_state(sample_dataset())
 
     assert dbutil.run(read()) == BenchmarkCorpusState(documents=0, pending_chunks=0)
-
-
-def test_ensure_prepared_accepts_an_exact_complete_corpus(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def ready(self: BenchmarkRunner, dataset: BenchmarkDataset) -> BenchmarkCorpusState:
-        return BenchmarkCorpusState(documents=len(dataset.messages), pending_chunks=0)
-
-    monkeypatch.setattr(BenchmarkRunner, "corpus_state", ready)
-    dbutil.run(runner().ensure_prepared(sample_dataset()))
 
 
 def test_pydantic_evals_keeps_operational_failures_out_of_wrong_answers(

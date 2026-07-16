@@ -1,9 +1,10 @@
-import uuid
+from math import ceil
 
 from patos import FrozenModel
-from pydantic import Field
-from pydantic.types import UUID7
+from pydantic import UUID5, UUID7, Field
 
+from ...config import settings
+from ...types import Scopes
 from .lane import Lane
 
 
@@ -12,9 +13,8 @@ class Candidate(FrozenModel):
 
     The visible fields are the prompt-ready evidence and its provenance. The excluded
     `evidence_id` is the ranking identity the reranker keys its scores by between the
-    statement and the packing walk. Row ids are time-ordered UUID7 while `evidence_id`
-    and `created_by` stay plain UUIDs, since entity and fact content ids are
-    content-addressed UUID5 and the creator is a UUID5 of the OIDC subject.
+    statement and the packing walk. Claims and source rows use time-ordered UUID7
+    values. Deterministic graph content and `created_by` use UUID5 values.
     """
 
     lane: Lane.Kind = Field(description="prompt section containing this evidence")
@@ -29,7 +29,25 @@ class Candidate(FrozenModel):
     source_uri: str | None = Field(
         default=None, description="stable originating document location"
     )
-    created_by: uuid.UUID | None = Field(
+    created_by: UUID5 | None = Field(
         default=None, description="Logto-derived creator identity retained as provenance"
     )
-    evidence_id: uuid.UUID | None = Field(default=None, exclude=True)
+    scopes: Scopes = frozenset()
+    evidence_id: UUID5 | UUID7 | None = Field(default=None, exclude=True)
+    direct: bool = Field(
+        default=False,
+        exclude=True,
+        description="source title is named completely in the query",
+    )
+
+    @property
+    def token_count(self) -> int:
+        """Estimate the line's tokens with the configured packing heuristic."""
+        return ceil(len(self.line) / settings.recall_chars_per_token)
+
+    @property
+    def direct_title(self) -> str | None:
+        """Return the normalized source identity only when the query names it directly."""
+        return (
+            self.source_title.casefold() if self.direct and self.source_title is not None else None
+        )

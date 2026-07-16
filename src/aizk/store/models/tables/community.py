@@ -1,14 +1,13 @@
-import uuid
 from typing import ClassVar
 
+from patos import sql
+from pydantic import UUID5
 from sqlalchemy import Column as SAColumn
 from sqlalchemy import ColumnElement, Index, Text, UniqueConstraint, Uuid
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import declared_attr
 from sqlmodel import Field
 
-from ....common import sql
-from ....common.sql import Column
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
 
 
@@ -17,9 +16,9 @@ class Community(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
 
     deletable: ClassVar[bool] = True
 
-    label: Column[str] = Field(sa_type=Text)
-    summary: Column[str] = Field(sa_type=Text)
-    member_ids: Column[list[uuid.UUID]] = Field(
+    label: sql.Column[str] = Field(sa_type=Text)
+    summary: sql.Column[str] = Field(sa_type=Text)
+    member_ids: sql.Column[list[UUID5]] = Field(
         default_factory=list, sa_column=SAColumn(ARRAY(Uuid), nullable=False)
     )
 

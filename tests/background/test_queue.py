@@ -1,64 +1,46 @@
 import asyncio
-import uuid
-from collections.abc import AsyncGenerator, Callable
-from contextlib import asynccontextmanager
-from types import SimpleNamespace
+from collections.abc import Callable
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from asyncpg.exceptions import DuplicateObjectError, DuplicateTableError
 from bg_doubles import RecordingQueue
+from doubles import AsyncContext
 from hypothesis import given
 from hypothesis import strategies as st
+from id_factory import uuid5, uuid5s, uuid7, uuid7s
+from pydantic import UUID5, UUID7
 
+import aizk.background.jobs.projection as projection_mod
 import aizk.background.queue as queue_mod
+from aizk.background.jobs.models import ChunkJob
+from aizk.background.jobs.projection import ChunkProjectionJob
 from aizk.background.queue import (
-    EXTRACT_ENTRYPOINT,
-    PROFILE_ENTRYPOINT,
-    QUEUE_SEQUENCES,
-    QUEUE_TABLES,
+    enqueue_document,
     enqueue_pending,
-    enqueue_profiles,
     install_queue_schema,
-    process_chunk,
-    process_profile,
+    retry_failed_chunks,
 )
 from aizk.config import settings
-from aizk.store import Watermark, engine
+from aizk.store import Chunk, Watermark
 from aizk.store.identity import User
 from aizk.types import Scopes
 
-uuids = st.uuids()
-InstallSeam = Callable[[object], RecordingQueue]
-
-
-@given(entities=st.lists(uuids, max_size=5, unique=True), user=uuids)
-def test_enqueue_profiles_debounces_per_entity_and_skips_when_empty(
-    queue_seam: InstallSeam, entities: list[uuid.UUID], user: uuid.UUID
-) -> None:
-    recorder = queue_seam(queue_mod)
-
-    asyncio.run(enqueue_profiles(entities, frozenset({user})))
-    asyncio.run(enqueue_profiles(entities, frozenset({user})))
-
-    assert len(recorder.enqueues) == len(entities)
-    assert {call.dedupe_key for call in recorder.enqueues} == {
-        f"profile:{user}:{entity}" for entity in entities
-    }
-    assert all(call.entrypoint == PROFILE_ENTRYPOINT for call in recorder.enqueues)
-    assert recorder.opened == recorder.closed == (2 if entities else 0)
+InstallSeam = Callable[[ModuleType], RecordingQueue]
+type FakeChunk = Chunk | SimpleNamespace | None
 
 
 @given(
-    chunks=st.lists(uuids, max_size=5, unique=True),
-    user=st.none() | uuids,
+    chunks=st.lists(uuid7s, max_size=5, unique=True),
+    user=st.none() | uuid5s,
     limit=st.none() | st.integers(1, 4),
     source=st.none() | st.text(alphabet="abc", max_size=3),
 )
 def test_enqueue_pending_queues_one_deduped_job_per_chunk_and_counts_them(
     monkeypatch: pytest.MonkeyPatch,
     queue_seam: InstallSeam,
-    chunks: list[uuid.UUID],
-    user: uuid.UUID | None,
+    chunks: list[UUID7],
+    user: UUID5 | None,
     limit: int | None,
     source: str | None,
 ) -> None:
@@ -80,15 +62,17 @@ def test_enqueue_pending_queues_one_deduped_job_per_chunk_and_counts_them(
     assert seen_args == [(resolved, limit, source)]
     assert queued == len(chunks)
     assert {call.dedupe_key for call in recorder.enqueues} == {str(chunk) for chunk in chunks}
-    assert all(call.entrypoint == EXTRACT_ENTRYPOINT for call in recorder.enqueues)
+    assert all(call.entrypoint == ChunkProjectionJob().entrypoint for call in recorder.enqueues)
+    assert all(call.priority == 50 for call in recorder.enqueues)
     assert recorder.opened == recorder.closed == 1
+    assert ChunkProjectionJob().payload_type is ChunkJob
 
 
 def test_enqueue_pending_swallows_the_already_queued_duplicate(
     monkeypatch: pytest.MonkeyPatch, queue_seam: InstallSeam
 ) -> None:
     recorder = queue_seam(queue_mod)
-    chunk = SimpleNamespace(id=uuid.uuid4())
+    chunk = SimpleNamespace(id=uuid7())
 
     async def fake_pending(scopes: Scopes, limit: int | None, source: str | None):
         return [chunk]
@@ -100,28 +84,61 @@ def test_enqueue_pending_swallows_the_already_queued_duplicate(
     assert len(recorder.enqueues) == 1
 
 
+def test_retry_failed_chunks_uses_the_typed_pgqueuer_boundary(
+    queue_seam: InstallSeam,
+) -> None:
+    recorder = queue_seam(queue_mod)
+
+    assert asyncio.run(retry_failed_chunks(limit=7)) == 4
+    assert recorder.failed_requeues == [(ChunkProjectionJob.entrypoint, 7)]
+    assert recorder.opened == recorder.closed == 1
+
+
+def test_enqueue_document_targets_only_its_pending_chunks(
+    monkeypatch: pytest.MonkeyPatch, queue_seam: InstallSeam
+) -> None:
+    recorder = queue_seam(queue_mod)
+    document, owner = uuid7(), uuid5()
+    chunks = [SimpleNamespace(id=uuid7()), SimpleNamespace(id=uuid7())]
+    captured: list[tuple[Scopes, int | None, str | None, UUID7 | None]] = []
+
+    async def fake_pending(
+        scopes: Scopes,
+        limit: int | None,
+        source: str | None,
+        document_id: UUID7 | None = None,
+    ) -> list[SimpleNamespace]:
+        captured.append((scopes, limit, source, document_id))
+        return chunks
+
+    monkeypatch.setattr(queue_mod, "pending_chunks", fake_pending)
+
+    assert asyncio.run(enqueue_document(document, frozenset({owner}))) == 2
+    assert captured == [(frozenset({owner}), None, None, document)]
+    assert {call.dedupe_key for call in recorder.enqueues} == {str(chunk.id) for chunk in chunks}
+
+
 class FakeSession:
-    def __init__(self, chunk: object) -> None:
+    def __init__(self, chunk: FakeChunk) -> None:
         self.chunk = chunk
 
-    async def get(self, model: object, identifier: uuid.UUID) -> object:
+    async def get(self, model: type[Chunk], identifier: UUID7) -> FakeChunk:
         return self.chunk
 
 
 def patch_chunk_pipeline(
-    monkeypatch: pytest.MonkeyPatch, chunk: object, touched: set[uuid.UUID]
+    monkeypatch: pytest.MonkeyPatch, chunk: FakeChunk, touched: set[UUID5]
 ) -> list[tuple[Watermark.Kind, str]]:
     bumped: list[tuple[Watermark.Kind, str]] = []
 
-    @asynccontextmanager
-    async def fake_transaction(user: User) -> AsyncGenerator[FakeSession]:
-        yield FakeSession(chunk)
+    def fake_transaction(user: User) -> AsyncContext[FakeSession]:
+        return AsyncContext(FakeSession(chunk))
 
-    async def fake_extract(built_chunk: object) -> set[uuid.UUID]:
+    async def fake_extract(built_chunk: Chunk | SimpleNamespace) -> set[UUID5]:
         return touched
 
     async def fake_bump_many(
-        session: object,
+        session: FakeSession,
         scopes: Scopes,
         kind: Watermark.Kind,
         refs: list[str],
@@ -129,82 +146,52 @@ def patch_chunk_pipeline(
     ) -> None:
         bumped.extend((kind, ref) for ref in refs)
 
-    monkeypatch.setattr(engine, "transaction", fake_transaction)
-    monkeypatch.setattr(queue_mod, "extract_and_consolidate", fake_extract)
-    monkeypatch.setattr(queue_mod.Watermark, "bump_many", fake_bump_many)
+    monkeypatch.setattr(User, "app", property(fake_transaction))
+    monkeypatch.setattr(projection_mod, "extract_and_consolidate", fake_extract)
+    monkeypatch.setattr(projection_mod.Watermark, "bump_many", fake_bump_many)
     return bumped
 
 
-@given(touched=st.sets(uuids, max_size=4))
+@given(touched=st.sets(uuid5s, max_size=4))
 def test_process_chunk_dirties_exactly_the_entities_the_slice_touched(
-    monkeypatch: pytest.MonkeyPatch, touched: set[uuid.UUID]
+    monkeypatch: pytest.MonkeyPatch, touched: set[UUID5]
 ) -> None:
-    scope = uuid.uuid4()
-    chunk = SimpleNamespace(text="some text", scopes=[scope], id=uuid.uuid4())
+    scope = uuid5()
+    chunk = SimpleNamespace(text="some text", scopes=[scope], id=uuid7())
     bumped = patch_chunk_pipeline(monkeypatch, chunk, touched)
 
-    result = asyncio.run(process_chunk(uuid.uuid4(), frozenset({scope})))
+    asyncio.run(
+        ChunkProjectionJob().handle(ChunkJob(chunk_id=chunk.id, scopes=frozenset({scope})))
+    )
 
-    assert set(result) == touched
-    assert bumped == [(Watermark.Kind.entity_dirty, str(entity)) for entity in result]
+    assert bumped == [(Watermark.Kind.entity_dirty, str(entity)) for entity in touched]
 
 
 def test_process_chunk_skips_a_chunk_it_cannot_see(monkeypatch: pytest.MonkeyPatch) -> None:
-    extracted: list[object] = []
+    extracted: list[Chunk | SimpleNamespace] = []
 
-    def guard(built_chunk: object) -> set[uuid.UUID]:
+    def guard(built_chunk: Chunk | SimpleNamespace) -> set[UUID5]:
         extracted.append(built_chunk)
         raise AssertionError("extract must not run for an invisible chunk")
 
     bumped = patch_chunk_pipeline(monkeypatch, None, set())
-    monkeypatch.setattr(queue_mod, "extract_and_consolidate", guard)
+    monkeypatch.setattr(projection_mod, "extract_and_consolidate", guard)
 
-    assert asyncio.run(process_chunk(uuid.uuid4(), frozenset({uuid.uuid4()}))) == []
+    asyncio.run(
+        ChunkProjectionJob().handle(ChunkJob(chunk_id=uuid7(), scopes=frozenset({uuid5()})))
+    )
     assert bumped == [] and extracted == []
 
-    wrong_scope = SimpleNamespace(text="some text", scopes=[uuid.uuid4()], id=uuid.uuid4())
+    wrong_scope = SimpleNamespace(text="some text", scopes=[uuid5()], id=uuid7())
     bumped = patch_chunk_pipeline(monkeypatch, wrong_scope, set())
-    assert asyncio.run(process_chunk(uuid.uuid4(), frozenset({uuid.uuid4()}))) == []
+    asyncio.run(
+        ChunkProjectionJob().handle(ChunkJob(chunk_id=wrong_scope.id, scopes=frozenset({uuid5()})))
+    )
     assert bumped == []
 
 
-def test_process_profile_rebuilds_then_clears_the_dirty_mark(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    entity, user = uuid.uuid4(), uuid.uuid4()
-    built: list[tuple[uuid.UUID, Scopes]] = []
-    cleared: list[tuple[Watermark.Kind, int, str]] = []
-
-    async def fake_build_profile(entity_id: uuid.UUID, scopes: Scopes) -> None:
-        built.append((entity_id, scopes))
-
-    @asynccontextmanager
-    async def fake_transaction(user: User) -> AsyncGenerator[None]:
-        yield None
-
-    async def fake_set_value(
-        session: object,
-        scopes: Scopes,
-        kind: Watermark.Kind,
-        counter: int = 0,
-        payload: object = None,
-        ref: str = "global",
-    ) -> None:
-        cleared.append((kind, counter, ref))
-
-    monkeypatch.setattr(queue_mod, "build_profile", fake_build_profile)
-    monkeypatch.setattr(engine, "transaction", fake_transaction)
-    monkeypatch.setattr(queue_mod.Watermark, "set_value", fake_set_value)
-
-    key = frozenset({user})
-    asyncio.run(process_profile(entity, key))
-
-    assert built == [(entity, key)]
-    assert cleared == [(Watermark.Kind.entity_dirty, 0, str(entity))]
-
-
 @pytest.mark.parametrize("install_error", [None, DuplicateObjectError, DuplicateTableError])
-def test_install_queue_schema_grants_every_table_and_sequence_re_install_tolerated(
+def test_install_queue_schema_grants_only_discovered_objects_re_install_tolerated(
     monkeypatch: pytest.MonkeyPatch, install_error: type[Exception] | None
 ) -> None:
     grants: list[str] = []
@@ -221,8 +208,17 @@ def test_install_queue_schema_grants_every_table_and_sequence_re_install_tolerat
         return SimpleNamespace(execute=execute, close=close)
 
     class FakeQueries:
-        def __init__(self, driver: object) -> None:
+        def __init__(self, driver: SimpleNamespace) -> None:
             self.driver = driver
+            self.qbe = SimpleNamespace(
+                settings=SimpleNamespace(
+                    queue_table="custom_queue",
+                    queue_table_log="custom_log",
+                    statistics_table="custom_statistics",
+                    schedules_table="custom_schedules",
+                    queue_status_type="custom_queue_status",
+                )
+            )
 
         async def install(self) -> None:
             if install_error is not None:
@@ -239,9 +235,24 @@ def test_install_queue_schema_grants_every_table_and_sequence_re_install_tolerat
     asyncio.run(install_queue_schema())
 
     granted = " ".join(grants)
-    for name in (*QUEUE_TABLES, *QUEUE_SEQUENCES):
-        assert name in granted
-    assert all("writer" in grant for grant in grants)
+    role_grants = [statement for statement in grants if statement.startswith("GRANT")]
+    assert all("writer" in grant for grant in role_grants)
+    assert all("ALL TABLES" not in grant and "ALL SEQUENCES" not in grant for grant in role_grants)
+    assert all(
+        name in granted
+        for name in (
+            "custom_queue",
+            "custom_log",
+            "custom_statistics",
+            "custom_schedules",
+            "custom_queue_id_seq",
+            "custom_log_id_seq",
+            "custom_statistics_id_seq",
+            "custom_schedules_id_seq",
+        )
+    )
+    assert "custom_queue_unique_dedupe_key" in granted
+    assert all(status in granted for status in ("queued", "picked", "failed"))
     assert upgrades == ([True] if install_error is not None else [])
 
 
@@ -249,7 +260,7 @@ def test_queue_connection_opens_and_closes_exactly_once(queue_seam: InstallSeam)
     recorder = queue_seam(queue_mod)
 
     async def drive() -> None:
-        async with queue_mod.queue_connection():
+        async with queue_mod.Queue(dsn=settings.asyncpg_dsn):
             assert recorder.opened == 1
             assert recorder.closed == 0
 

@@ -4,6 +4,11 @@ Maintenance never runs in a caller request. A pgqueuer worker drains durable job
 scheduler fans scheduled passes out once per exact scope set. Each job binds authority for only
 that scope set before it opens an application session.
 
+Application jobs declare a typed payload, a stable entrypoint, priority, concurrency, and retry
+budget through the shared queue package. The package owns serialization, deduplication, database
+connections, and PgQueuer registration. New background behavior therefore states policy in one
+job class instead of repeating queue plumbing.
+
 The scheduler discovers its roster from stored documents and unpromoted working memory under the
 database administrator role. It does not need a user or organization table. Scope-keyed
 watermarks debounce passes whose corpus has not changed.
@@ -28,6 +33,12 @@ use `ON CONFLICT`.
 | self improve | score retrieval toggles and persist a significant winner | schedule |
 | backup | write and prune database backups | schedule |
 
+Profile projections run at priority 100 with a small fleet-wide concurrency limit. Chunk graph
+projections run at priority 50. Scheduled maintenance runs at priority 10 and allows one active
+job of each kind. A job retries from the database up to five times. Exhausted jobs remain held
+with their deduplication key, which prevents a poison job from being silently recreated until an
+operator or agent deliberately resolves or requeues it.
+
 An A-and-B job binds A and B as its read authority, so RLS supplies A, B, and bridge knowledge. It
 writes derived artifacts to the exact A-and-B scope set. Creator identity is provenance only and
 is not the maintenance partition.
@@ -35,8 +46,11 @@ is not the maintenance partition.
 ## Operations
 
 `aizk db setup` migrates to head, installs the queue schema, and grants the application role.
-`aizk db health` reports migration currency, row level security drift, row counts, queue depth,
-and serving endpoint reachability.
+Compose runs it in the one-shot `setup` service before either long-lived Aizk process starts. The
+public `server` has `AIZK_AUTO_SETUP=0` and no owner credential. The private `worker` owns queue
+execution, scheduled maintenance, and backups.
 
-The MCP server runs setup on startup unless `AIZK_AUTO_SETUP` is false. Operational commands are
-CLI-only and are not registered on the network MCP server.
+`aizk db health` reports migration currency, row security drift, row counts, queue depth, model
+identity, per-scope projection progress, and one bounded recall. Operational commands are CLI-only
+and are not registered on the network MCP server. In Compose, run the command inside `worker`
+because only that private process carries owner maintenance authority.

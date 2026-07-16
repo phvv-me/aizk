@@ -1,16 +1,15 @@
-import uuid
 from collections.abc import Collection
 from datetime import datetime
 from typing import Self
 
 import sqlalchemy
-from sqlalchemy import ColumnElement, and_, case, func, or_
+from patos import sql
+from pydantic import UUID5, UUID7
+from sqlalchemy import ColumnElement, and_, case, func, union_all
 from sqlalchemy.dialects.postgresql import Range
 from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
-from ....common import sql
-from ....common.sql import Column
 from ...mixins import ViewBase
 from ..tables.fact import FactClaim, FactContent
 
@@ -26,23 +25,23 @@ class LiveFact(ViewBase):
     from psql. Keep the view.
     """
 
-    id: Column[uuid.UUID]
-    content_id: Column[uuid.UUID]
-    subject_id: Column[uuid.UUID]
-    object_id: Column[uuid.UUID | None]
-    predicate: Column[str]
-    statement: Column[str]
-    embedding: Column[list[float] | None]
-    created_by: Column[uuid.UUID]
-    scopes: Column[list[uuid.UUID]]
-    valid: Column[Range[datetime] | None]
-    recorded: Column[Range[datetime]]
-    last_accessed: Column[datetime | None]
-    access_count: Column[int]
-    attributes: Column[dict]
-    perspective_key: Column[str]
-    source_chunk_id: Column[uuid.UUID | None]
-    promoted_from: Column[uuid.UUID | None]
+    id: sql.Column[UUID7]
+    content_id: sql.Column[UUID5]
+    subject_id: sql.Column[UUID5]
+    object_id: sql.Column[UUID5 | None]
+    predicate: sql.Column[str]
+    statement: sql.Column[str]
+    embedding: sql.Column[list[float] | None]
+    created_by: sql.Column[UUID5]
+    scopes: sql.Column[list[UUID5]]
+    valid: sql.Column[Range[datetime] | None]
+    recorded: sql.Column[Range[datetime]]
+    last_accessed: sql.Column[datetime | None]
+    access_count: sql.Column[int]
+    attributes: sql.Column[dict]
+    perspective_key: sql.Column[str]
+    source_chunk_id: sql.Column[UUID7 | None]
+    promoted_from: sql.Column[UUID7 | None]
 
     @classmethod
     def line(cls) -> ColumnElement[str]:
@@ -67,23 +66,42 @@ class LiveFact(ViewBase):
         return select(cls).where(cls.embedding.is_not(None))
 
     @classmethod
-    def touching(
-        cls, entity_ids: Collection[uuid.UUID]
-    ) -> Select[tuple[uuid.UUID, uuid.UUID | None, str]]:
-        """Subject, object, and statement of every live fact naming one of the given
-        entities as subject or object, oldest recorded first with the id as tiebreak.
+    def touching(cls, entity_ids: Collection[UUID5], limit: int) -> Select[tuple[UUID5, str]]:
+        """The newest bounded fact statements for every named entity.
 
         entity_ids: the entities whose surrounding facts to load.
+        limit: maximum statements retained for each entity profile.
         """
-        return (
-            select(cls.subject_id, cls.object_id, cls.statement)
-            .where(
-                or_(
-                    cls.subject_id.in_(entity_ids),
-                    cls.object_id.in_(entity_ids),
-                )
+        touches = union_all(
+            select(
+                cls.subject_id.label("entity_id"),
+                cls.statement,
+                func.lower(cls.recorded).label("recorded_at"),
+                cls.id,
+            ).where(cls.subject_id.in_(entity_ids)),
+            select(
+                cls.object_id.label("entity_id"),
+                cls.statement,
+                func.lower(cls.recorded).label("recorded_at"),
+                cls.id,
+            ).where(
+                cls.object_id.in_(entity_ids),
+                cls.object_id != cls.subject_id,
+            ),
+        ).subquery("profile_fact_touch")
+        ranked = sqlalchemy.select(
+            touches,
+            func.row_number()
+            .over(
+                partition_by=touches.c.entity_id,
+                order_by=(touches.c.recorded_at.desc(), touches.c.id.desc()),
             )
-            .order_by(func.lower(cls.recorded), cls.id)
+            .label("profile_rank"),
+        ).subquery("profile_fact_rank")
+        return (
+            select(ranked.c.entity_id, ranked.c.statement)
+            .where(ranked.c.profile_rank <= limit)
+            .order_by(ranked.c.entity_id, ranked.c.recorded_at, ranked.c.id)
         )
 
     @classmethod

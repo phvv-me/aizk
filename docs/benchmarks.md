@@ -1,18 +1,47 @@
 # Benchmarks and evaluation
 
-Aizk keeps three evaluation levels separate. A test proves a contract. The internal harness
-measures retrieval over memory already stored in one deployment. An external benchmark imports
-its own history into an isolated scope before it asks any question.
+Aizk keeps three evaluation levels separate. A test proves a contract. The production retrieval
+benchmark measures memory already stored in one deployment. An external benchmark imports its own
+history into an isolated scope before it asks any question.
 
 ## Internal evaluation
 
-`aizk eval bench` samples visible live facts or reads one question per line from a file. It reports
-hit rate, nDCG, MRR, optional answerability judging, and the multihop expansion breakdown.
-This is useful for regression checks on a real corpus. It is not an external benchmark score.
+`aizk eval bench` samples visible local facts, global summaries, and two-hop fact paths from the
+stored corpus. The LLM turns each source into a probe, and the benchmark scores the maximal plan that
+production recall always uses. It reports hit rate, nDCG, MRR, optional answerability judging, and
+median latency for each stratum. This is useful for regression checks on a real corpus. It is not
+an external benchmark score. Pass `--user` when the corpus lives outside the default system scope.
 
-`aizk eval sweep` measures quality, latency, host memory, GPU memory, and vector storage across a
-bounded configuration matrix. `aizk eval scale` grows an isolated synthetic corpus and records the
-point where latency or storage crosses its declared budget.
+`aizk eval plans` is the diagnostic study. It compares the production plan with retired forced
+plans and the retired router without changing production behavior. It can also replay graph
+seeding variants and the extraction gate. `aizk eval scale` grows an isolated synthetic corpus and
+records the point where latency or storage crosses its declared budget.
+
+`aizk eval trace` shows statement rank, cross-encoder score, final merit rank, and the packing cut
+without updating access history. `aizk eval management` discovers every visible Area and Project
+brief and runs twenty grounded questions for each one. The strict score requires the subject's own
+current brief to rank first, while hit rate still records whether it survived anywhere in the
+packed context. The report includes MRR plus end-to-end p50 and p95 latency. This makes the current
+brief itself the retrieval reference and exposes incidental evidence that would otherwise hide a
+correct answer below the first result.
+
+The final 2026-07-15 production management cell covered all eight Areas and all forty Projects,
+including paused, completed, cancelled, and archived work. It ran 960 questions with four
+concurrent recalls, an eight-candidate target, and the production 2,048-token budget. The intended
+current brief was present and first for 960 of 960 questions, every subject had MRR 1.0, p50 was
+1,778.5 ms, and p95 was 2,103.1 ms. The first run reached 960 hits but only 945 first-place results.
+Every miss came from one managed title being contained inside another, such as `JLPT N2` inside
+`JLPT N2 Window Weekly Plan`. Giving direct identity authority only to the maximal overlapping
+title fixed all fifteen cases without changing the maximal retrieval plan. This cell proves source
+identity and packing correctness. It does not by itself judge whether an answer model used every
+field in the brief correctly.
+
+Seven curated briefs from the vendored memory papers formed a second production cell. One focused
+question per paper ranked its own brief first for all seven papers. The set covered GroupMemBench,
+Does Memory Need Graphs, Hindsight, APEX-MEM, LongMemEval-V2, Memora, and Mem2ActBench. Sequential
+representative recalls later took about 1.0 to 2.3 seconds. The durable design conclusions were
+also written into the Zettelkasten, including the need to preserve speaker semantics, keep raw
+evidence beside graph projections, and score obsolete contamination and downstream use.
 
 The 2026-07-12 query regression used PostgreSQL 18, VectorChord 1.1.1, and 100,000 chunks plus
 100,000 live facts. Moving chunk reads through document RLS and starting dense facts from bounded
@@ -57,6 +86,37 @@ little headroom. The lane therefore ships with the 4B checkpoint, stays off with
 configured endpoint, and owes its real quality verdict to a benchmark with genuine question
 headroom rather than title self-retrieval.
 
+The 2026-07-14 crimson smoke cell exercised the deployed stack with three vendored papers, one
+repository guide, and five source files. Extraction completed all 220 chunks and produced 2,086
+entities, 2,033 facts, and 2,079 profiles. A manual review of eight cross-document questions found
+three strong answers, two partial answers, and three justified abstentions. The HAWQ-V3 and gauge
+theory questions recovered the core mechanisms. LongMemEval-V2 definition and comparison questions
+were weaker. Two abstentions followed incomplete retrieval, while one comparative abstention had
+enough source evidence and exposed an overly conservative reader. Median recall took 6.81 seconds
+and median answer generation took 1.42 seconds on the two RTX 3090 host. This is a real-stack
+diagnostic over a small corpus, not an external benchmark score.
+
+The first 2026-07-14 extractor smoke cell compared the selectable LLM and GLiNER backends on four
+recent dense research chunks from the live Crimson database. GLiNER ran in 10.9 to 15.5 seconds on
+CPU, while the LLM took 20.1 to 60.1 seconds on its GPU. The LLM produced 31 facts across the four
+chunks. GLiNER base produced eight and emitted none on two chunks. Exact triple agreement was zero,
+and manual inspection found several GLiNER relations that did not express the source meaning.
+
+A second cell moved GLiNER to the same GPU stack, fixed its missing long-text integration, and
+compared base, large, and the LLM on the latest four dense vault chunks. Base at a 0.5 threshold
+used 1.5 GB of VRAM and returned 11 relations in 2.76 seconds including first-request warmup. Large
+used 2.4 GB and returned 13 in 2.84 seconds. Large removed some obvious errors, but both checkpoints
+still emitted self-relations and predicates that contradicted the source. At 0.6, large returned six
+relations with one empty chunk and retained several wrong predicates. At 0.7, it returned two
+plausible relations with two empty chunks in 0.27 seconds after warmup. The LLM returned 32 much
+more coherent facts with no empty chunk in 75.51 seconds. Its strict quote substring check passed
+for every fact in three chunks and had at least one mismatch in the fourth.
+
+The result keeps the LLM as the production graph writer. GLiNER2 large on GPU is the shared cheap
+gate and remains a selectable experimental writer at the safer 0.7 threshold. The large model is
+nearly free beside the existing lanes, but speed cannot compensate for wrong graph edges. These
+cells are small diagnostics rather than published quality benchmarks.
+
 The same database held 10,000 entities and 100,000 live facts for the graph write-path check.
 Loading every full live fact for 32 subjects and reranking in Python took about 833 ms and spilled
 1,455 temporary blocks. A typed lateral query ranked each candidate through the subject index,
@@ -89,7 +149,7 @@ Manufacturing remain useful diagnostic domains, but their released questions are
 
 A publishable report therefore requires the complete 30,000-message corpus, every question in one
 filtered domain, the reference models, `k=10`, and no operational failures. A message or question
-limit always marks the report diagnostic. Reusing the local extraction model also marks it
+limit always marks the report diagnostic. Reusing the local LLM also marks it
 diagnostic. The report records both model names and never turns a network, generation, database,
 or evaluator failure into an ordinary wrong answer.
 

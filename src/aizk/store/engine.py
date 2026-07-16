@@ -1,9 +1,15 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack
+from enum import StrEnum, auto
 from functools import cache
+from types import TracebackType
+from typing import Self
 
 from sqlalchemy import NullPool
-from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from ..config import settings
@@ -12,7 +18,7 @@ from .identity import User
 
 
 class Session(AsyncSession):
-    """SQLModel session carrying the caller whose authority PostgreSQL enforces."""
+    """Expose the Aizk caller bound to one SQLModel session and its RLS settings."""
 
     @property
     def user(self) -> User:
@@ -23,64 +29,106 @@ class Session(AsyncSession):
         return user
 
 
-def build_engine(admin: bool = False) -> AsyncEngine:
-    """Build an engine for the app or owner database role."""
-    url = settings.admin_database_url if admin else settings.database_url
-    if admin:
-        return (
-            create_async_engine(url, poolclass=NullPool)
-            if settings.db_null_pool
-            else create_async_engine(url)
+class DatabaseRole(StrEnum):
+    """Choose forced tenant isolation or RLS-bypassing schema-owner maintenance."""
+
+    app = auto()
+    owner = auto()
+
+
+class SessionScope:
+    """Own the complete lifetime of one caller-bound async session and transaction."""
+
+    __slots__ = ("factory", "stack", "transactional", "user")
+
+    def __init__(
+        self,
+        factory: async_sessionmaker[Session],
+        user: User,
+        transactional: bool,
+    ) -> None:
+        self.factory = factory
+        self.user = user
+        self.transactional = transactional
+        self.stack: AsyncExitStack | None = None
+
+    async def __aenter__(self) -> Session:
+        """Open the session and begin its transaction when requested."""
+        if self.stack is not None:
+            raise RuntimeError("session scope is already open")
+        async with AsyncExitStack() as opening:
+            opened = await opening.enter_async_context(self.factory())
+            opened.info["user"] = self.user
+            opened.info.update(self.user.info())
+            if self.transactional:
+                await opening.enter_async_context(opened.begin())
+            self.stack = opening.pop_all()
+            return opened
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None:
+        """Commit or roll back the transaction and close the session."""
+        stack = self.stack
+        if stack is None:
+            raise RuntimeError("session scope is not open")
+        self.stack = None
+        return await stack.__aexit__(exc_type, exc, traceback)
+
+
+class Database:
+    """Cache one SQLAlchemy engine and typed session factory per PostgreSQL role."""
+
+    __slots__ = ("_sessions", "engine", "role")
+
+    def __init__(self, role: DatabaseRole) -> None:
+        self.role = role
+        self.engine = self._build_engine()
+        self._sessions = async_sessionmaker(
+            self.engine,
+            class_=Session,
+            expire_on_commit=False,
         )
-    if settings.db_null_pool:
+
+    @classmethod
+    @cache
+    def app(cls) -> Self:
+        """Return the restricted app engine that can access tenant rows only through RLS."""
+        return cls(DatabaseRole.app)
+
+    @classmethod
+    @cache
+    def owner(cls) -> Self:
+        """Return the privileged migration and maintenance engine that bypasses RLS."""
+        return cls(DatabaseRole.owner)
+
+    def _build_engine(self) -> AsyncEngine:
+        """Build this role's async engine and connection pool."""
+        if self.role is DatabaseRole.owner:
+            if settings.db_null_pool:
+                return create_async_engine(settings.admin_database_url, poolclass=NullPool)
+            return create_async_engine(settings.admin_database_url)
+        if settings.db_null_pool:
+            return create_async_engine(
+                settings.database_url,
+                poolclass=NullPool,
+                connect_args={"server_settings": {"vchordrq.prefilter": "on"}},
+            )
         return create_async_engine(
-            url,
-            poolclass=NullPool,
+            settings.database_url,
             connect_args={"server_settings": {"vchordrq.prefilter": "on"}},
+            pool_size=settings.db_pool_size,
+            max_overflow=settings.db_pool_max_overflow,
+            pool_pre_ping=False,
         )
-    return create_async_engine(
-        url,
-        connect_args={"server_settings": {"vchordrq.prefilter": "on"}},
-        pool_size=settings.db_pool_size,
-        max_overflow=settings.db_pool_max_overflow,
-        pool_pre_ping=False,
-    )
 
+    def session(self, user: User) -> SessionScope:
+        """Open a caller-bound session for sequential transaction scopes."""
+        return SessionScope(self._sessions, user, transactional=False)
 
-@cache
-def session_factory(admin: bool = False) -> async_sessionmaker[Session]:
-    """Reuse one typed session factory and connection pool per database role."""
-    return async_sessionmaker(
-        build_engine(admin),
-        class_=Session,
-        expire_on_commit=False,
-    )
-
-
-@asynccontextmanager
-async def session_for(user: User) -> AsyncIterator[Session]:
-    """Open one caller-bound session whose transactions may be short and sequential."""
-    async with session_factory()() as opened:
-        opened.info["user"] = user
-        opened.info.update(user.info())
-        yield opened
-
-
-@asynccontextmanager
-async def transaction(user: User) -> AsyncIterator[Session]:
-    """Run one short app-role transaction as the given caller."""
-    async with session_for(user) as opened, opened.begin():
-        yield opened
-
-
-def as_system() -> User:
-    """Run one app-role transaction as the service identity."""
-    return User.system()
-
-
-@asynccontextmanager
-async def bypass_rls() -> AsyncIterator[Session]:
-    """Run one owner-role transaction for structural maintenance."""
-    async with session_factory(admin=True).begin() as opened:
-        opened.info["user"] = User.system()
-        yield opened
+    def transaction(self, user: User) -> SessionScope:
+        """Run one transaction as the given caller under this database role."""
+        return SessionScope(self._sessions, user, transactional=True)

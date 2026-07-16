@@ -1,17 +1,19 @@
-import uuid
 from collections.abc import Iterator
 
 import dbutil
 import pytest
+from doubles import FakeLLM
 from hypothesis import given
 from hypothesis import strategies as st
+from id_factory import uuid5
 from pgvector import HalfVector
+from pydantic import UUID5, UUID7
 from sqlalchemy import text
 
 from aizk.graph.raptor import (
     Node,
+    RaptorBuilder,
     build_raptor,
-    cluster,
     cosine,
     redundant_parent,
     to_floats,
@@ -22,8 +24,8 @@ DIM = 1024
 
 
 @pytest.fixture
-def owner(migrated_db: None) -> Iterator[uuid.UUID]:
-    pid = uuid.uuid4()
+def owner(migrated_db: None) -> Iterator[UUID5 | UUID7]:
+    pid = uuid5()
 
     async def setup() -> None:
         await dbutil.reset_db()
@@ -47,24 +49,14 @@ small_vectors = st.lists(
 
 
 @given(vector=small_vectors)
-def test_cosine_of_a_vector_with_itself_is_one(vector: list[float]) -> None:
+def test_cosine_handles_reflexive_orthogonal_and_degenerate_vectors(vector: list[float]) -> None:
     assert cosine(vector, vector) == pytest.approx(1.0)
-
-
-def test_cosine_reads_orthogonal_and_degenerate_pairs() -> None:
     assert cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
     assert cosine([0.0, 0.0], [1.0, 1.0]) == 0.0
 
 
-def test_cluster_splits_groups_and_falls_back_to_singletons() -> None:
-    embeddings = [[1.0, 0.0], [0.9, 0.1], [0.0, 1.0], [0.1, 0.9]]
-    groups = cluster(embeddings, threshold=0.5)
-    assert {frozenset(group) for group in groups} == {frozenset({0, 1}), frozenset({2, 3})}
-    assert cluster([[1.0, 0.0], [0.0, 1.0]], threshold=0.9) == [[0], [1]]
-
-
 def test_redundant_parent_finds_a_near_duplicate_else_none() -> None:
-    kept = Node(entity_id=uuid.uuid4(), label="theme", summary="a paragraph", embedding=[1.0, 0.0])
+    kept = Node(entity_id=uuid5(), label="theme", summary="a paragraph", embedding=[1.0, 0.0])
     parents = [(kept, [1.0, 0.0])]
     assert redundant_parent(parents, [0.99, 0.01], threshold=0.95) is kept
     assert redundant_parent(parents, [0.0, 1.0], threshold=0.95) is None
@@ -76,12 +68,12 @@ def test_to_floats_unwraps_a_halfvector_and_passes_a_list_through() -> None:
     assert isinstance(unwrapped, list) and unwrapped == pytest.approx([1.0, 0.0])
 
 
-async def seed_communities(owner: uuid.UUID, axes: list[int]) -> None:
+async def seed_communities(owner: UUID5 | UUID7, axes: list[int]) -> None:
     async with dbutil.actor(owner) as session:
         for index, axis in enumerate(axes):
             session.add(
                 Community(
-                    id=uuid.uuid4(),
+                    id=uuid5(),
                     created_by=owner,
                     scopes=[owner],
                     label=f"c{index}",
@@ -91,9 +83,13 @@ async def seed_communities(owner: uuid.UUID, axes: list[int]) -> None:
             )
 
 
+def test_similarity_groups_preserves_one_vector(owner: UUID5 | UUID7) -> None:
+    assert dbutil.run(RaptorBuilder(frozenset({owner})).similarity_groups([basis(0)])) == [[0]]
+
+
 @pytest.mark.usefixtures("fake_embedder")
 def test_build_raptor_lifts_communities_into_a_part_of_tree(
-    owner: uuid.UUID, fake_llm: object
+    owner: UUID5 | UUID7, fake_llm: FakeLLM
 ) -> None:
     async def probe() -> tuple[int, int, int, list[tuple[int, int]]]:
         await seed_communities(owner, [0, 0, 1, 1])
@@ -158,10 +154,35 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
     ],
 )
 def test_build_raptor_writes_the_expected_summary_count(
-    owner: uuid.UUID, fake_llm: object, axes: list[int], expected: int
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, axes: list[int], expected: int
 ) -> None:
     async def probe() -> int:
         await seed_communities(owner, axes)
         return await build_raptor(scopes=frozenset({owner}))
 
     assert dbutil.run(probe()) == expected
+
+
+@pytest.mark.usefixtures("fake_embedder")
+def test_build_raptor_bounds_fanout_and_child_text(
+    owner: UUID5 | UUID7,
+    fake_llm: FakeLLM,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("aizk.graph.raptor.settings.raptor_branch_factor", 2)
+    monkeypatch.setattr("aizk.graph.raptor.settings.raptor_build_concurrency", 2)
+    monkeypatch.setattr("aizk.graph.raptor.settings.raptor_child_summary_chars", 10)
+
+    async def probe() -> None:
+        await seed_communities(owner, [0, 0, 0, 0, 0])
+        await build_raptor(scopes=frozenset({owner}))
+
+    dbutil.run(probe())
+    prompts = [
+        call.messages[-1]["content"]
+        for call in fake_llm.completions.calls
+        if call.response_model.__name__ == "RaptorReport"
+    ]
+    assert len(prompts) == 2
+    assert all(prompt.count("\n-") == 2 for prompt in prompts)
+    assert all("covers" not in prompt for prompt in prompts)

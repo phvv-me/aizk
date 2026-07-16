@@ -1,34 +1,40 @@
-import uuid
 from typing import ClassVar, cast
 
 import rls
 import sqlalchemy as sa
+from patos import sql
+from pydantic import UUID5
 from sqlalchemy import Table, Uuid
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Field
 
-from ...common.sql import Column
 from ...config import settings
 from ..identity import User
 
 
 class Scoped:
-    """A nonempty scope intersection with inherited PostgreSQL row security."""
+    """Authorize one nonempty scope intersection entirely inside PostgreSQL.
+
+    A caller may read a row only when every stored scope is readable. A caller
+    may write a row only when every stored scope is writable. Child rows that
+    set `read_through` inherit visibility from their parent and must store the
+    same scopes as that visible parent, which prevents cross-tenant child rows.
+    """
 
     __table__: ClassVar[Table]
     mutable: ClassVar[bool] = False
     deletable: ClassVar[bool] = False
     read_through: ClassVar[str | None] = None
 
-    created_by: Column[uuid.UUID] = Field(nullable=False, index=True)
-    scopes: Column[list[uuid.UUID]] = Field(
+    created_by: sql.Column[UUID5] = Field(nullable=False, index=True)
+    scopes: sql.Column[list[UUID5]] = Field(
         min_length=1,
-        sa_type=cast(type[list[uuid.UUID]], ARRAY(Uuid())),
+        sa_type=cast(type[list[UUID5]], ARRAY(Uuid())),
     )
 
     @staticmethod
-    def _authority(standing: ColumnElement, permission: str) -> ColumnElement[list[uuid.UUID]]:
+    def _authority(standing: ColumnElement, permission: str) -> ColumnElement[list[UUID5]]:
         """Turn one JSON scope permission into a native PostgreSQL UUID array."""
         values = (
             sa.func.jsonb_array_elements_text(standing.op("->")(permission))
@@ -45,8 +51,16 @@ class Scoped:
         writable = cls._authority(standing, "write")
         nonempty = sa.func.cardinality(scopes) > 0
         if parent_name := cls.read_through:
-            parent = sa.table(parent_name, sa.column("id", Uuid()))
+            parent = sa.table(
+                parent_name,
+                sa.column("id", Uuid()),
+                sa.column("scopes", ARRAY(Uuid())),
+            )
+            parent_id = cls.__table__.c[f"{parent_name}_id"]
             read = cls.__table__.c[f"{parent_name}_id"].in_(sa.select(parent.c.id))
+            parent_scope = sa.tuple_(parent_id, scopes).in_(
+                sa.select(parent.c.id, parent.c.scopes)
+            )
         else:
             readable = cls._authority(standing, "read")
             public = cls._authority(standing, "public")
@@ -60,7 +74,8 @@ class Scoped:
                     ),
                 ),
             )
-        write = sa.and_(nonempty, scopes.op("<@")(writable))
+            parent_scope = sa.true()
+        write = sa.and_(nonempty, scopes.op("<@")(writable), parent_scope)
         policies = [
             rls.Policy.select("scope_read", read, roles=(settings.app_role,)),
             rls.Policy.insert("scope_insert", write, roles=(settings.app_role,)),

@@ -1,8 +1,8 @@
-import uuid
-
 import dbutil
 import pytest
 import seedgraph
+from id_factory import uuid5
+from pydantic import UUID5, UUID7
 from sqlalchemy import func
 from sqlmodel import select
 
@@ -10,16 +10,24 @@ import aizk.graph.session_tier as session_tier_module
 from aizk.config import settings
 from aizk.graph.session_tier import promote_sessions
 from aizk.store import Chunk, SessionItem
+from aizk.types import Scopes
 
 pytestmark = pytest.mark.usefixtures("migrated_db", "fake_embedder")
 
 
-async def noop_enqueue(*args: object, **kwargs: object) -> int:
+async def noop_enqueue(
+    limit: int | None = None,
+    scopes: Scopes | None = None,
+    source: str | None = None,
+) -> int:
+    del limit, scopes, source
     return 0
 
 
-async def seed_item(owner: uuid.UUID, text: str, scopes: tuple[uuid.UUID, ...] = ()) -> uuid.UUID:
-    item_id = uuid.uuid4()
+async def seed_item(
+    owner: UUID5 | UUID7, text: str, scopes: tuple[UUID5 | UUID7, ...] = ()
+) -> UUID5 | UUID7:
+    item_id = uuid5()
     scopes = scopes or (owner,)
     await dbutil.admin_exec(
         "INSERT INTO session_item (id, created_by, scopes, kind, text) "
@@ -34,12 +42,12 @@ def test_promote_moves_due_items_into_the_graph_and_skips_unwritable_scopes(
 ) -> None:
     monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
     monkeypatch.setattr(settings, "session_promote_age_minutes", 0.0)
-    marker = uuid.uuid4().hex
+    marker = uuid5().hex
 
     async def body() -> tuple[int, int, bool, bool]:
         owner = await seedgraph.fresh_owner()
         # The background caller can read this scope but cannot promote into it.
-        readonly = uuid.uuid4()
+        readonly = uuid5()
         private = await seed_item(owner, f"a decision about {marker} worth keeping")
         blocked = await seed_item(owner, f"team note {marker}", scopes=(readonly,))
         promoted = await promote_sessions(frozenset({owner}))

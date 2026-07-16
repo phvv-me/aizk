@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections.abc import Callable
 from importlib import import_module
 
 import httpx
@@ -7,17 +8,17 @@ import pytest
 from dbutil import run
 
 from aizk.config import Settings, settings
-from aizk.eval.routes import Route
-from aizk.extract import ontology
-from aizk.serving.gate.contract import (
-    ChunkRequest,
-    ChunkResponse,
+from aizk.ontology import Ontology
+from aizk.serving.base import http_client, request_throttle
+from aizk.serving.gate import GateClient
+from aizk.serving.gate.models import (
     ClassifyRequest,
     ClassifyResponse,
     HealthResponse,
 )
+from eval.routes import Route
 
-gliner_module = import_module("aizk.serving.gate.gliner")
+gate_module = import_module("aizk.serving.gate.client")
 
 
 def sidecar(monkeypatch: pytest.MonkeyPatch, result: dict) -> list[tuple[str, dict]]:
@@ -31,66 +32,63 @@ def sidecar(monkeypatch: pytest.MonkeyPatch, result: dict) -> list[tuple[str, di
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(respond), base_url="http://gliner.test"
     )
-    monkeypatch.setattr(settings, "gliner_gate_url", "http://gliner.test")
-    monkeypatch.setattr(gliner_module, "client", lambda variant="": client)
+    monkeypatch.setattr(settings, "gliner_url", "http://gliner.test")
+    monkeypatch.setattr(gate_module, "http_client", lambda *args: client)
     return requests
 
 
 def test_client_resolves_the_default_and_variant_sidecars(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    gliner_module.client.cache_clear()
-    monkeypatch.setattr(settings, "gliner_gate_url", "http://gliner.test")
-    monkeypatch.setattr(settings, "gliner_gate_variants", {"gliner-relex": "http://relex.test"})
+    http_client.cache_clear()
+    monkeypatch.setattr(settings, "gliner_url", "http://gliner.test")
+    monkeypatch.setattr(settings, "gliner_variants", {"gliner-relex": "http://relex.test"})
 
-    default = gliner_module.client()
-    relex = gliner_module.client("gliner-relex")
+    default = gate_module.GateClient.configured().client
+    relex = gate_module.GateClient.configured("gliner-relex").client
 
-    assert str(default.base_url) == "http://gliner.test"
-    assert str(relex.base_url) == "http://relex.test"
-    assert default.timeout == httpx.Timeout(settings.gliner_gate_timeout)
-    gliner_module.client.cache_clear()
+    assert str(default.base_url) == "http://gliner.test/"
+    assert str(relex.base_url) == "http://relex.test/"
+    assert default.timeout == httpx.Timeout(settings.gliner_timeout)
+    assert Settings(_env_file=None).gliner_variants == {}
+    http_client.cache_clear()
 
 
-def test_call_raises_on_an_error_status(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_client_raises_on_an_error_status() -> None:
     def respond(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, json={"detail": "model fell over"})
 
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(respond), base_url="http://gliner.test"
     )
-    monkeypatch.setattr(gliner_module, "client", lambda variant="": client)
-
     with pytest.raises(httpx.HTTPStatusError):
         run(
-            gliner_module.call(
+            GateClient(client, asyncio.Semaphore(1)).post(
                 "/classify", ClassifyRequest(text="where", tasks={}), ClassifyResponse
             )
         )
 
 
-def test_classify_uses_an_enum_class_as_single_label_options(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    requests = sidecar(monkeypatch, {"route": Route.LOCAL.value})
-
-    assert run(gliner_module.classify("where", "route", Route)) is Route.LOCAL
-    assert requests == [
-        ("/classify", {"text": "where", "tasks": {"route": [route.value for route in Route]}})
-    ]
-
-
-def test_classify_uses_the_same_head_for_multiple_labels(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    requests = sidecar(monkeypatch, {"present": ["Tool", "Project"]})
-
-    assert run(
-        gliner_module.classify("text", "present", ["Tool", "Project"], multi=True, threshold=0.7)
-    ) == {"Tool", "Project"}
-    assert requests == [
+@pytest.mark.parametrize(
+    ("result", "classify", "expected", "payload"),
+    [
         (
-            "/classify",
+            {"route": Route.LOCAL.value},
+            lambda: run(gate_module.classify("where", "route", Route)),
+            Route.LOCAL,
+            {
+                "text": "where",
+                "tasks": {"route": [route.value for route in Route]},
+            },
+        ),
+        (
+            {"present": ["Tool", "Project"]},
+            lambda: run(
+                gate_module.classify(
+                    "text", "present", ["Tool", "Project"], multi=True, threshold=0.7
+                )
+            ),
+            {"Tool", "Project"},
             {
                 "text": "text",
                 "tasks": {
@@ -101,8 +99,26 @@ def test_classify_uses_the_same_head_for_multiple_labels(
                     }
                 },
             },
-        )
-    ]
+        ),
+    ],
+    ids=["single-enum", "multiple-labels"],
+)
+def test_classify_preserves_single_and_multi_label_contracts(
+    result: dict,
+    classify: Callable[[], Route | set[str]],
+    expected: Route | set[str],
+    payload: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests = sidecar(monkeypatch, result)
+
+    assert classify() == expected
+    assert requests == [("/classify", payload)]
+
+
+def test_classify_requires_a_multi_label_threshold() -> None:
+    with pytest.raises(ValueError, match="needs a threshold"):
+        run(gate_module.classify("text", "present", ["Tool"], multi=True))
 
 
 @pytest.mark.parametrize(
@@ -116,9 +132,9 @@ def test_classify_rejects_malformed_results(
 
     with pytest.raises(ValueError, match="invalid labels"):
         if multi:
-            run(gliner_module.classify("where", "route", Route, multi=True, threshold=0.7))
+            run(gate_module.classify("where", "route", Route, multi=True, threshold=0.7))
         else:
-            run(gliner_module.classify("where", "route", Route))
+            run(gate_module.classify("where", "route", Route))
 
 
 def test_named_entities_extracts_normalized_unique_entity_names(
@@ -128,13 +144,13 @@ def test_named_entities_extracts_normalized_unique_entity_names(
         monkeypatch, {"entities": {"Person": [" Ada ", "ada"], "Tool": ["Git", ""]}}
     )
 
-    assert run(gliner_module.named_entities("Ada uses Git")) == ["ada", "git"]
+    assert run(gate_module.named_entities("Ada uses Git")) == ["ada", "git"]
     assert requests == [
         (
             "/extract",
             {
                 "text": "Ada uses Git",
-                "entity_types": ontology.gate_labels(),
+                "entity_types": Ontology.current().gate_labels,
                 "threshold": settings.gliner_gate_threshold,
             },
         )
@@ -151,6 +167,7 @@ def test_relevant_excludes_the_configured_floor(
     calls: list[tuple[str, str, list[str], bool, float | None]] = []
 
     async def classify(
+        client: GateClient,
         text: str,
         task: str,
         labels: list[str],
@@ -158,39 +175,41 @@ def test_relevant_excludes_the_configured_floor(
         multi: bool = False,
         threshold: float | None = None,
     ) -> set[str]:
+        del client
         calls.append((text, task, labels, multi, threshold))
         return present
 
-    monkeypatch.setattr(gliner_module, "classify", classify)
+    monkeypatch.setattr(gate_module.GateClient, "classify", classify)
 
-    assert run(gliner_module.relevant("some text")) is expected
+    assert run(gate_module.relevant("some text")) is expected
     assert calls == [
         (
             "some text",
             "present",
-            ontology.gate_labels(),
+            Ontology.current().gate_labels,
             True,
             settings.gliner_gate_threshold,
         )
     ]
 
 
-def test_settings_default_to_the_bare_gliner2_sidecar_without_variants() -> None:
-    assert Settings(_env_file=None).gliner_gate_variants == {}
-
-
 def test_contract_round_trips_the_sidecar_only_wire_shapes() -> None:
-    request = ChunkRequest(text="hello world")
-    assert request.model_dump() == {"text": "hello world", "kind": "text", "chunk_size": 2048}
-    assert ChunkResponse.model_validate({"spans": ["a", "b"]}).spans == ["a", "b"]
-    health = HealthResponse(status="ok", device="cuda:0")
-    assert health.model_dump() == {"status": "ok", "device": "cuda:0"}
+    health = HealthResponse(
+        status="ok",
+        device="cuda:0",
+        checkpoint="fastino/gliner2-large-v1",
+    )
+    assert health.model_dump() == {
+        "status": "ok",
+        "device": "cuda:0",
+        "checkpoint": "fastino/gliner2-large-v1",
+    }
     assert ClassifyResponse.model_validate({"route": None}).label("missing") is None
 
 
 def test_call_queues_behind_the_per_variant_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "gliner_gate_concurrency", 2)
-    gliner_module.throttle.cache_clear()
+    monkeypatch.setattr(settings, "gliner_concurrency", 2)
+    request_throttle.cache_clear()
     in_flight = 0
     peak = 0
 
@@ -205,15 +224,16 @@ def test_call_queues_behind_the_per_variant_throttle(monkeypatch: pytest.MonkeyP
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(respond), base_url="http://gliner.test"
     )
-    monkeypatch.setattr(gliner_module, "client", lambda variant="": client)
+    monkeypatch.setattr(gate_module, "http_client", lambda *args: client)
 
     async def burst() -> None:
         request = ClassifyRequest(text="note", tasks={"present": ["Person"]})
+        gate = GateClient(client, request_throttle("http://gliner.test", 2))
         async with asyncio.TaskGroup() as group:
             for _ in range(10):
-                group.create_task(gliner_module.call("/classify", request, ClassifyResponse))
+                group.create_task(gate.post("/classify", request, ClassifyResponse))
 
     run(burst())
     assert peak <= 2
-    assert gliner_module.throttle() is gliner_module.throttle()
-    gliner_module.throttle.cache_clear()
+    assert request_throttle("http://gliner.test", 2) is request_throttle("http://gliner.test", 2)
+    request_throttle.cache_clear()

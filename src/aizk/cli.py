@@ -1,23 +1,24 @@
 import asyncio
 import os
 import sys
-import uuid
 from pathlib import Path
 
 from cyclopts import App
 from loguru import logger
 from mainboard.profiling import enable_spans
+from pydantic import UUID5
 
 from alembic import command
 
 from . import admin, ops
 from . import backup as backup_ops
-from .background.queue import enqueue_pending, install_queue_schema
+from .background.queue import enqueue_pending, install_queue_schema, retry_failed_chunks
 from .background.schedule import run_worker
 from .config import settings
 from .extract.ingest import ingest_text
-from .mcp.server import server
-from .retrieval import recall
+from .mcp.server import AizkMCP
+from .retrieval import ContextPack, recall
+from .store import Relation
 from .store.identity import User
 
 # Stop hooks provide the active transcript through this variable.
@@ -36,8 +37,7 @@ graph = App(name="graph", help="Graph maintenance: rebuild, decay, reembed, rapt
 ontology = App(name="ontology", help="Ontology: the entity types and relation predicates.")
 data = App(name="data", help="Data: ingest, export, audit, and promote documents.")
 db = App(name="db", help="Database and engine ops: setup, health, migrations, backup, restore.")
-eval = App(name="eval", help="Evaluation of retrieval quality and scale.")
-for _sub in (graph, ontology, data, db, eval):
+for _sub in (graph, ontology, data, db):
     app.command(_sub)
 
 
@@ -82,6 +82,13 @@ async def install_queue() -> None:
     print("done")
 
 
+@db.command(name="retry-failed-chunks")
+async def retry_failed_chunk_jobs(limit: int = 100) -> None:
+    """Requeue retained chunk projection failures after deploying a repair."""
+    count = await retry_failed_chunks(limit)
+    print(f"requeued {count} failed chunk jobs")
+
+
 @db.command(name="backup")
 async def backup(path: str) -> None:
     """Dump the whole database to a portable archive at `path`, the durable snapshot of
@@ -98,28 +105,46 @@ async def restore(path: str) -> None:
     print(f"restored {report.path} into {report.database}")
 
 
+@db.command(name="reset")
+async def reset_database(confirm: str) -> None:
+    """Erase only the Aizk database after its exact name is provided as confirmation."""
+    if confirm != settings.db_name:
+        raise ValueError(f"confirmation must exactly match {settings.db_name!r}")
+    report = await admin.reset_database()
+    print(f"reset {report.database} at {report.migrated_to}")
+
+
 @app.command
 async def serve_mcp() -> None:
-    """Run the aizk MCP server, and the background worker beside it, one process, one event
-    loop."""
+    """Run the HTTP MCP server and optionally its worker in the same local process."""
     if settings.profiling:
         enable_spans()
     if settings.auto_setup:
         applied = await ops.setup()
         logger.info("database ready at {}", applied.migrated_to)
     logger.info("serving aizk mcp over HTTP, worker={}", settings.serve_with_worker)
-    serving = server.run_http_async(host=settings.mcp_host, port=settings.mcp_port)
+    serving = AizkMCP.shared().run_http_async(host=settings.mcp_host, port=settings.mcp_port)
     if settings.serve_with_worker:
         await asyncio.gather(serving, run_worker())
     else:
         await serving
 
 
+@app.command(name="check-public")
+def check_public() -> None:
+    """Confirm that public authentication is complete before the MCP server starts.
+
+    The command succeeds only after `Settings.complete_auth` has validated the public
+    URL, Logto issuer, Logto Management API client, and OAuth web application.
+    """
+    print("public authentication configuration is complete")
+
+
 @app.command
 async def recall_context(
     query: str | None = None,
     k: int = 8,
-    user: uuid.UUID | None = None,
+    user: UUID5 | None = None,
 ) -> None:
     """Recall memory and print it for a SessionStart hook to inject as context."""
     candidates = await recall(
@@ -127,12 +152,12 @@ async def recall_context(
         user=User.system((user or settings.system_user_id,)),
         k=k,
     )
-    print("\n".join(f"[{c.lane}] {c.line}" for c in candidates) or "no context recalled")
+    print(ContextPack.from_candidates(candidates).text or "no context recalled")
 
 
 @app.command
 async def capture_session(
-    user: uuid.UUID | None = None,
+    user: UUID5 | None = None,
 ) -> None:
     """Capture the session's decisions into memory for a Stop hook to run at the end of a
     session."""
@@ -154,26 +179,8 @@ async def capture_session(
     print(f"captured session into document {document_id}")
 
 
-@eval.command(name="scale")
-async def scale(
-    sizes: str = "1000,10000",
-    k: int = 8,
-    repeats: int = 10,
-    recall_p95_ms: float = 200.0,
-) -> None:
-    """Run the scale benchmark and print the scaling curve with the knee flagged per
-    component."""
-    report = await admin.scale(
-        sizes=tuple(int(size) for size in sizes.split(",")),
-        k=k,
-        repeats=repeats,
-        recall_p95_ms=recall_p95_ms,
-    )
-    print(report.render())
-
-
 @data.command(name="ingest")
-async def ingest(path: str, scopes: str | None = None, user: uuid.UUID | None = None) -> None:
+async def ingest(path: str, scopes: str | None = None, user: UUID5 | None = None) -> None:
     """Ingest a file or directory of notes and code into memory, the document count back."""
     count = await admin.ingest(path, scopes=scopes, user_id=user)
     print(f"ingested {count} documents from {path}")
@@ -184,7 +191,7 @@ async def ingest_image(
     path: str,
     caption: str | None = None,
     scopes: str | None = None,
-    user: uuid.UUID | None = None,
+    user: UUID5 | None = None,
 ) -> None:
     """Ingest an image into the shared multimodal space so a text query can recall it."""
     document_id = await admin.ingest_image(path, caption=caption, scopes=scopes, user_id=user)
@@ -193,7 +200,7 @@ async def ingest_image(
 
 @graph.command(name="rebuild")
 async def rebuild(
-    limit: int | None = None, source: str | None = None, user: uuid.UUID | None = None
+    limit: int | None = None, source: str | None = None, user: UUID5 | None = None
 ) -> None:
     """Build the graph now over the user's pending chunks, the on-demand extraction."""
     entities, facts = await admin.rebuild(limit=limit, source=source, user_id=user)
@@ -201,28 +208,35 @@ async def rebuild(
 
 
 @graph.command(name="decay")
-async def decay(half_life_days: float = 90.0, user: uuid.UUID | None = None) -> None:
+async def decay(half_life_days: float = 90.0, user: UUID5 | None = None) -> None:
     """Run the decay pass now, archiving stale facts that leave recall but stay in history."""
     archived = await admin.decay(half_life_days=half_life_days, user_id=user)
     print(f"archived {archived} stale facts")
 
 
 @graph.command(name="reembed")
-async def reembed(user: uuid.UUID | None = None) -> None:
+async def reembed(user: UUID5 | None = None) -> None:
     """Re-embed every visible stored vector with the current embedder, a backend migration."""
     written = await admin.reembed(user_id=user)
     print(f"re-embedded {written} vectors")
 
 
 @graph.command(name="raptor")
-async def raptor(user: uuid.UUID | None = None) -> None:
+async def raptor(user: UUID5 | None = None) -> None:
     """Build the RAPTOR tree now, the recursive summary tiers above the communities."""
     written = await admin.raptor(user_id=user)
     print(f"built {written} summaries")
 
 
+@graph.command(name="communities")
+async def communities(user: UUID5 | None = None) -> None:
+    """Build graph communities and their global summaries now."""
+    written = await admin.communities(user_id=user)
+    print(f"built {written} communities")
+
+
 @graph.command(name="forget")
-async def forget(query: str, k: int = 8, user: uuid.UUID | None = None) -> None:
+async def forget(query: str, k: int = 8, user: UUID5 | None = None) -> None:
     """Retract the claims a query's own source notes contributed, the erasure counterpart to
     write."""
     result = await admin.forget(query, k=k, user_id=user)
@@ -232,7 +246,7 @@ async def forget(query: str, k: int = 8, user: uuid.UUID | None = None) -> None:
 
 
 @data.command(name="promote")
-async def promote(document: str, to_scopes: str, user: uuid.UUID | None = None) -> None:
+async def promote(document: str, to_scopes: str, user: UUID5 | None = None) -> None:
     """Promote a document and its chunks and facts into a wider scope-set as a new audited
     copy."""
     count = await admin.promote(document, to_scopes, user_id=user)
@@ -240,32 +254,36 @@ async def promote(document: str, to_scopes: str, user: uuid.UUID | None = None) 
 
 
 @data.command(name="export")
-async def export_scope(path: str, user: uuid.UUID | None = None) -> None:
+async def export_scope(path: str, user: UUID5 | None = None) -> None:
     """Export a user's visible memory to a JSONL file, the scoped portable dump."""
     report = await admin.export_scope(path, user_id=user)
     print(report.render())
 
 
 @data.command(name="audit")
-async def audit(limit: int = 20, user: uuid.UUID | None = None) -> None:
+async def audit(limit: int = 20, user: UUID5 | None = None) -> None:
     """List the most recent visible document writes with creator, scope set, and title."""
     for doc in await admin.audit(limit=limit, user_id=user):
         scopes = ",".join(str(s) for s in doc.scopes) or "private"
-        print(f"{doc.id}  {doc.kind}  [{scopes}]  {doc.title or '-'}")
+        print(f"{doc.id}  {doc.subject_type or 'source'}  [{scopes}]  {doc.title or '-'}")
 
 
 @ontology.command(name="define-entity")
 async def define_entity_kind(name: str, description: str, domain: str = "general") -> None:
-    """Add or refine an entity type in the live ontology, refreshing the extraction snapshot."""
+    """Add or refine an entity type in the live ontology and refresh its prompt."""
     await admin.define_entity_kind(name, description, domain)
     print(f"entity kind {name} defined")
 
 
 @ontology.command(name="define-relation")
-async def define_relation_kind(name: str, description: str, domain: str = "general") -> None:
-    """Add or refine a relation predicate in the live ontology, refreshing the extraction
-    snapshot."""
-    await admin.define_relation_kind(name, description, domain)
+async def define_relation_kind(
+    name: str,
+    description: str,
+    domain: str = "general",
+    policy: Relation.Policy = Relation.Policy.set,
+) -> None:
+    """Add or refine a relation predicate in the live ontology and refresh its prompt."""
+    await admin.define_relation_kind(name, description, domain, policy)
     print(f"relation kind {name} defined")
 
 
@@ -294,78 +312,6 @@ def profile_report() -> None:
         print(stat)
     if not stats:
         print("no spans recorded (set AIZK_PROFILING=1)")
-
-
-@eval.command(name="bench")
-async def bench(questions_file: str | None = None, k: int = 8) -> None:
-    """Run the eval harness over visible memory and report hit-at-k with a per-config split."""
-    report = await admin.bench(questions_file=questions_file, k=k)
-    print(report.render())
-
-
-@eval.command(name="sweep")
-async def sweep(questions_file: str | None = None, k: int = 8) -> None:
-    """Sweep the config grid and report quality, latency, and memory for each config."""
-    report = await admin.sweep(questions_file=questions_file, k=k)
-    print(report.render())
-
-
-@eval.command(name="plans")
-async def plans(
-    k: int = 8,
-    per_stratum: int = 8,
-    strata: str = "local,global,multihop",
-    seeding: bool = True,
-    gate_limit: int | None = None,
-    out: str | None = None,
-) -> None:
-    """Run the stratified plan study, printing the table and writing the JSON report."""
-    report = await admin.plan_study(
-        k=k,
-        per_stratum=per_stratum,
-        strata=tuple(name.strip() for name in strata.split(",") if name.strip()),
-        seeding=seeding,
-        gate_limit=gate_limit,
-    )
-    if out:
-        Path(out).write_text(report.model_dump_json(indent=2), encoding="utf-8")
-        print(f"wrote {out}")
-    print(report.render())
-
-
-@eval.command(name="gate")
-async def gate(limit: int = 50, user: uuid.UUID | None = None, out: str | None = None) -> None:
-    """Replay the extraction gate on stored chunks, saved calls against lost facts."""
-    report = await admin.gate_check(limit=limit, user_id=user)
-    if out:
-        Path(out).write_text(report.model_dump_json(indent=2), encoding="utf-8")
-        print(f"wrote {out}")
-    print(report.render())
-
-
-@eval.command(name="groupmem")
-async def groupmem(
-    root: str,
-    domain: str = "Finance",
-    kinds: str = "multi_hop,knowledge_update,temporal,user_implicit,term_ambiguity,abstention",
-    message_limit: int | None = None,
-    question_limit: int | None = None,
-    k: int = 10,
-    prepare: bool = True,
-    keep: bool = False,
-) -> None:
-    """Run GroupMemBench through the real team-memory import and answer pipeline."""
-    report = await admin.groupmem(
-        root,
-        domain=domain,
-        kinds=tuple(kind.strip() for kind in kinds.split(",") if kind.strip()),
-        message_limit=message_limit,
-        question_limit=question_limit,
-        k=k,
-        prepare=prepare,
-        keep=keep,
-    )
-    print(report.render())
 
 
 @db.command(name="setup")

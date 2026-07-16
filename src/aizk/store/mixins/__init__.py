@@ -1,13 +1,14 @@
 from .base import Json, MappedBase, TableBase
 from .claimed import ClaimedContent
 from .embedded import Embedded
-from .identity import Id, Timestamped
+from .identity import DeterministicId, Id, Timestamped
 from .scoped import Scoped
 from .view import ViewBase
 
 __all__ = [
-    "Embedded",
     "ClaimedContent",
+    "DeterministicId",
+    "Embedded",
     "Id",
     "Json",
     "MappedBase",

@@ -1,26 +1,30 @@
-import uuid
+import asyncio
 from collections import defaultdict
+from itertools import batched
 
 from loguru import logger
 from patos import FrozenModel
+from pydantic import UUID5, UUID7, TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 
 from ..config import settings
 from ..exceptions import NotVisibleError
-from ..extract.llm import structured
-from ..serving import embed
-from ..store import EntityClaim, EntityContent, LiveFact, Profile
+from ..serving.embed import embed
+from ..serving.extract import LLM
+from ..store import Entity, Fact, Profile, Watermark
 from ..store.engine import Session
 from ..store.identity import User
 from ..types import Scopes
 from .models import ProfileReport
 
+_uuid5_adapter = TypeAdapter(UUID5)
+
 
 class ProfileGrounding(FrozenModel):
     """One entity and the ordered current facts that ground its profile."""
 
-    subject_id: uuid.UUID
+    subject_id: UUID5
     name: str
     statements: tuple[str, ...]
 
@@ -28,7 +32,7 @@ class ProfileGrounding(FrozenModel):
 class ProfileDraft(FrozenModel):
     """A summarized profile ready for one bulk upsert."""
 
-    subject_id: uuid.UUID
+    subject_id: UUID5
     summary: str
     vector: tuple[float, ...]
 
@@ -42,28 +46,20 @@ class ProfileBuilder:
         self.scopes = frozenset(scopes)
 
     async def snapshot(
-        self, session: Session, subject_ids: list[uuid.UUID] | None = None
+        self, session: Session, subject_ids: list[UUID5] | None = None
     ) -> list[ProfileGrounding]:
         """Load entity names and all related current fact statements in two queries."""
-        roster = select(EntityContent.id, EntityContent.name).where(
-            EntityContent.id.in_(select(EntityClaim.content_id))
+        roster = select(Entity.Content.id, Entity.Content.name).where(
+            Entity.Content.id.in_(select(Entity.Claim.content_id))
         )
         if subject_ids is not None:
-            roster = roster.where(EntityContent.id.in_(subject_ids))
-        entities = dict((await session.exec(roster.order_by(EntityContent.id))).all())
-        if subject_ids is not None:
-            missing = set(subject_ids) - entities.keys()
-            if missing:
-                raise NotVisibleError(
-                    f"entities {sorted(missing)} are not visible to build profiles"
-                )
-        statements: dict[uuid.UUID, list[str]] = defaultdict(list)
+            roster = roster.where(Entity.Content.id.in_(subject_ids))
+        entities = dict((await session.exec(roster.order_by(Entity.Content.id))).all())
+        statements: dict[UUID5, list[str]] = defaultdict(list)
         if entities:
-            rows = await session.exec(LiveFact.touching(entities))
-            for subject_id, object_id, statement in rows:
-                statements[subject_id].append(statement)
-                if object_id in entities and object_id != subject_id:
-                    statements[object_id].append(statement)
+            rows = await session.exec(Fact.Live.touching(entities, settings.profile_facts_k))
+            for entity_id, statement in rows:
+                statements[entity_id].append(statement)
         return [
             ProfileGrounding(
                 subject_id=subject_id,
@@ -71,19 +67,27 @@ class ProfileBuilder:
                 statements=tuple(statements[subject_id]),
             )
             for subject_id, name in entities.items()
+            if statements[subject_id]
         ]
 
     async def summarize(self, groundings: list[ProfileGrounding]) -> list[ProfileDraft]:
         """Summarize every grounding and embed all resulting profiles in one batch."""
-        reports = [
-            await structured(
-                settings.profile_system,
-                f"Entity: {grounding.name}\n\nFacts:\n"
-                + "\n".join(f"- {statement}" for statement in grounding.statements),
-                ProfileReport,
+        llm = LLM.configured()
+        reports: list[ProfileReport] = []
+        for group in batched(groundings, settings.profile_build_concurrency, strict=False):
+            reports.extend(
+                await asyncio.gather(
+                    *(
+                        llm.generate(
+                            settings.profile_system,
+                            f"Entity: {grounding.name}\n\nFacts:\n"
+                            + "\n".join(f"- {statement}" for statement in grounding.statements),
+                            ProfileReport,
+                        )
+                        for grounding in group
+                    )
+                )
             )
-            for grounding in groundings
-        ]
         vectors = (
             await embed([report.summary for report in reports], mode="document") if reports else []
         )
@@ -96,9 +100,7 @@ class ProfileBuilder:
             for grounding, report, vector in zip(groundings, reports, vectors, strict=True)
         ]
 
-    async def store(
-        self, session: Session, drafts: list[ProfileDraft]
-    ) -> dict[uuid.UUID, uuid.UUID]:
+    async def store(self, session: Session, drafts: list[ProfileDraft]) -> dict[UUID5, UUID7]:
         """Upsert a complete profile batch and return IDs keyed by subject."""
         if not drafts:
             return {}
@@ -125,14 +127,16 @@ class ProfileBuilder:
 
 
 async def build_profile(
-    subject_id: uuid.UUID,
+    subject_id: UUID5,
     scopes: Scopes | None = None,
-) -> uuid.UUID:
+) -> UUID7:
     """Rebuild one entity profile through short read and write transactions."""
     key = frozenset(scopes or (settings.system_user_id,))
     builder = ProfileBuilder(key)
     async with User.system(key) as session:
         groundings = await builder.snapshot(session, [subject_id])
+    if not groundings:
+        raise NotVisibleError(f"entity {subject_id} is not visible or has no facts")
     drafts = await builder.summarize(groundings)
     async with User.system(key) as session:
         profile_ids = await builder.store(session, drafts)
@@ -154,4 +158,32 @@ async def refresh_profiles(
     async with User.system(key) as session:
         await builder.store(session, drafts)
     logger.info("refreshed {} profiles in scope {}", len(drafts), key)
+    return len(drafts)
+
+
+async def refresh_dirty_profiles(scopes: Scopes | None = None) -> int:
+    """Rebuild one bounded dirty-entity batch and consume only its observed increments."""
+    key = frozenset(scopes or (settings.system_user_id,))
+    builder = ProfileBuilder(key)
+    async with User.system(key) as session:
+        counters = await Watermark.pending_refs(
+            session,
+            key,
+            Watermark.Kind.entity_dirty,
+            settings.profile_batch_size,
+        )
+        groundings = await builder.snapshot(
+            session,
+            [_uuid5_adapter.validate_python(ref) for ref in counters],
+        )
+    drafts = await builder.summarize(groundings)
+    async with User.system(key) as session:
+        await builder.store(session, drafts)
+        await Watermark.consume(
+            session,
+            key,
+            Watermark.Kind.entity_dirty,
+            counters,
+        )
+    logger.info("refreshed {} dirty profiles in scope {}", len(drafts), key)
     return len(drafts)

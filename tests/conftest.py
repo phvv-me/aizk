@@ -1,10 +1,11 @@
 import asyncio
 import socket
-import uuid
+from collections.abc import Iterator
 from importlib import import_module
 from urllib.parse import urlsplit
 
 import a_env
+import dbutil
 import pytest
 from doubles import (
     FakeLLM,
@@ -12,6 +13,8 @@ from doubles import (
 )
 from hypothesis import HealthCheck
 from hypothesis import settings as hypothesis_settings
+from id_factory import uuid5
+from pydantic import UUID5
 from sqlalchemy import NullPool, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -25,17 +28,12 @@ assert a_env.configured()
 
 pytest_plugins = ["bg_doubles"]
 
-# DB properties use fewer examples and no deadline because each draw opens a connection.
+# Pure properties keep a generous per-example deadline. Database properties lower their example
+# count locally when every draw opens a transaction.
 hypothesis_settings.register_profile(
     "aizk",
-    deadline=None,
+    deadline=2000,
     max_examples=60,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
-hypothesis_settings.register_profile(
-    "aizk-db",
-    deadline=None,
-    max_examples=15,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 hypothesis_settings.load_profile("aizk")
@@ -71,14 +69,33 @@ def ensure_test_database() -> None:
     asyncio.run(bootstrap())
 
 
-if DB_UP:
+def drop_test_database() -> None:
+    async def drop() -> None:
+        maintenance = make_url(aizk_settings.admin_database_url).set(database="postgres")
+        engine = create_async_engine(maintenance, isolation_level="AUTOCOMMIT", poolclass=NullPool)
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(
+                    text(f'DROP DATABASE IF EXISTS "{aizk_settings.db_name}" WITH (FORCE)')
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(drop())
+
+
+@pytest.fixture(scope="session", autouse=True)
+def isolated_database() -> Iterator[None]:
+    """Create one migrated database per pytest process and remove it after the session."""
+    if not DB_UP:
+        yield
+        return
     ensure_test_database()
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line(
-        "markers", "integration: needs the live GPU model services, deselected by default"
-    )
+    try:
+        yield
+    finally:
+        dbutil.close_runner()
+        drop_test_database()
 
 
 @pytest.fixture
@@ -97,15 +114,15 @@ def fake_embedder(monkeypatch: pytest.MonkeyPatch) -> RecordingEmbedder:
     embedder = RecordingEmbedder()
     for name in (
         "aizk.admin",
-        "aizk.eval.scale",
+        "eval.scale",
         "aizk.extract.ingest",
-        "aizk.extract.ontology.cache",
         "aizk.graph.build",
         "aizk.graph.communities",
         "aizk.graph.insight",
         "aizk.graph.profiles",
         "aizk.graph.raptor",
         "aizk.graph.reembed",
+        "aizk.ontology.catalog",
         "aizk.retrieval.recall.orchestrator",
     ):
         module = import_module(name)
@@ -133,10 +150,10 @@ def fake_reranker(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
 @pytest.fixture
 def fake_llm(monkeypatch: pytest.MonkeyPatch) -> FakeLLM:
     fake = FakeLLM()
-    monkeypatch.setattr("aizk.extract.llm.triples.client_for", lambda *args, **kwargs: fake)
+    monkeypatch.setattr("aizk.serving.extract.client.llm_model", lambda *args: fake.model)
     return fake
 
 
 @pytest.fixture
-def user_id() -> uuid.UUID:
-    return uuid.uuid4()
+def user_id() -> UUID5:
+    return uuid5()

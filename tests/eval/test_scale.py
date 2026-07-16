@@ -9,9 +9,13 @@ import pytest
 from doubles import RecordingEmbedder
 from hypothesis import given
 from hypothesis import strategies as st
+from id_factory import uuid5s
+from pydantic import UUID5
 
 from aizk.config import settings
-from aizk.eval.scale import (
+from aizk.store import Chunk, Document, Entity, Fact
+from aizk.store.identity import User
+from eval.scale import (
     CHUNKS_PER_DOC,
     CHUNKS_PER_ENTITY,
     Budget,
@@ -27,12 +31,10 @@ from aizk.eval.scale import (
     run_scale_benchmark,
     unit_vector,
 )
-from aizk.store import Chunk, Document, EntityClaim, EntityContent, FactClaim, FactContent
-from aizk.store.identity import User
 
 
 def rows_for(
-    user_id: uuid.UUID,
+    user_id: UUID5,
     generated: Generated,
     scale: CorpusScale,
     dim: int,
@@ -94,12 +96,12 @@ def test_unit_vector_has_the_stored_width_and_unit_norm(dim: int, seed: int) -> 
 
 
 @given(
-    users=st.lists(st.uuids(version=4), min_size=2, max_size=2, unique=True),
+    users=st.lists(uuid5s, min_size=2, max_size=2, unique=True),
     size=st.integers(min_value=1, max_value=40),
     dim=st.sampled_from([256, 512, 1024]),
 )
 def test_corpus_batches_are_deterministic_and_structurally_sound(
-    users: list[uuid.UUID], size: int, dim: int
+    users: list[UUID5], size: int, dim: int
 ) -> None:
     user, other = users
     scale = CorpusScale.for_size(size)
@@ -108,7 +110,7 @@ def test_corpus_batches_are_deterministic_and_structurally_sound(
 
     documents = rows[Document]
     assert [row["id"] for row in documents] == [row["id"] for row in again[Document]]
-    owned_families = (Document, Chunk, EntityClaim, FactClaim)
+    owned_families = (Document, Chunk, Entity.Claim, Fact.Claim)
     assert all(row["created_by"] == user for table in owned_families for row in rows[table])
     assert len({row["content_hash"] for row in documents}) == scale.documents  # none dedupes away
     other_rows = rows_for(other, Generated(), scale, dim)
@@ -122,12 +124,12 @@ def test_corpus_batches_are_deterministic_and_structurally_sound(
     for index, chunk in enumerate(chunks):
         assert chunk["document_id"] == index_id(user, "document", index // CHUNKS_PER_DOC)
 
-    entity_ids = {row["id"] for row in rows[EntityContent]}
-    for fact in rows[FactContent]:
+    entity_ids = {row["id"] for row in rows[Entity.Content]}
+    for fact in rows[Fact.Content]:
         assert fact["subject_id"] in entity_ids
         assert fact["object_id"] is None or fact["object_id"] in entity_ids
-    fact_content_ids = {row["id"] for row in rows[FactContent]}
-    for claim in rows[FactClaim]:
+    fact_content_ids = {row["id"] for row in rows[Fact.Content]}
+    for claim in rows[Fact.Claim]:
         assert claim["content_id"] in fact_content_ids  # every claim stakes a real content row
 
 
@@ -140,14 +142,14 @@ def test_corpus_batches_grow_additively_without_key_collisions(size: int) -> Non
     base = rows_for(user, Generated(), first, 256)
     delta = rows_for(user, Generated(**first.model_dump()), second, 256)
 
-    for table in (Document, Chunk, EntityContent, FactContent, EntityClaim, FactClaim):
+    for table in (Document, Chunk, Entity.Content, Fact.Content, Entity.Claim, Fact.Claim):
         base_ids = {row["id"] for row in base[table]}
         delta_ids = {row["id"] for row in delta[table]}
         assert base_ids.isdisjoint(delta_ids)
-    entity_ids = {row["id"] for row in base[EntityContent]} | {
-        row["id"] for row in delta[EntityContent]
+    entity_ids = {row["id"] for row in base[Entity.Content]} | {
+        row["id"] for row in delta[Entity.Content]
     }
-    for fact in delta[FactContent]:
+    for fact in delta[Fact.Content]:
         assert fact["subject_id"] in entity_ids  # delta edges resolve across both batches
 
 

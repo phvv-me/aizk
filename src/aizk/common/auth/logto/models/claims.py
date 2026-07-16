@@ -16,8 +16,3 @@ class Claims(FrozenModel):
     name: str | None = None
     preferred_username: str | None = None
     username: str | None = None
-
-    @property
-    def label(self) -> str | None:
-        """Return the first available Logto display name."""
-        return self.name or self.preferred_username or self.username

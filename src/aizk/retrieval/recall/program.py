@@ -43,9 +43,11 @@ def ordered(lanes: list[Select]) -> Select:
         candidates.c.lane,
         candidates.c.evidence_id,
         candidates.c.line,
+        candidates.c.scopes,
         candidates.c.fact_id,
         candidates.c.source_chunk_id,
         candidates.c.source_title,
         candidates.c.source_uri,
         candidates.c.created_by,
+        candidates.c.direct,
     ).order_by(candidates.c.priority, candidates.c.ordering, candidates.c.evidence_id)

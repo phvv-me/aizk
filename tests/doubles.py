@@ -1,12 +1,20 @@
 import hashlib
 from dataclasses import dataclass, field
-from typing import Protocol
+from types import TracebackType
 
 from PIL.Image import Image
 from pydantic import BaseModel, JsonValue
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
+from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.profiles import ModelProfile
 
 from aizk.config import settings
-from aizk.extract import ontology
 from aizk.extract.models import BatchConsolidationVerdict, ConsolidationVerdict
 from aizk.graph.models import (
     CommunitySummary,
@@ -14,7 +22,26 @@ from aizk.graph.models import (
     ProfileReport,
     RaptorReport,
 )
+from aizk.ontology import WireExtraction
 from aizk.serving.embed import EmbedMode
+
+
+class AsyncContext[ValueT]:
+    """Minimal explicit async context around one test value."""
+
+    def __init__(self, value: ValueT) -> None:
+        self.value = value
+
+    async def __aenter__(self) -> ValueT:
+        return self.value
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        return None
 
 
 def deterministic_vector(text: str, dim: int) -> list[float]:
@@ -39,7 +66,7 @@ class RecordingEmbedder:
 
 def default_response(schema: type[BaseModel]) -> BaseModel:
     defaults: dict[str, BaseModel] = {
-        "LLMExtraction": ontology.current().llm_extraction(e=[], f=[]),
+        WireExtraction.__name__: WireExtraction(e=[], f=[]),
         BatchConsolidationVerdict.__name__: BatchConsolidationVerdict(verdicts=[]),
         ConsolidationVerdict.__name__: ConsolidationVerdict(action="ADD"),
         CommunitySummary.__name__: CommunitySummary(
@@ -50,21 +77,6 @@ def default_response(schema: type[BaseModel]) -> BaseModel:
         InsightReport.__name__: InsightReport(observations=[]),
     }
     return defaults[schema.__name__]
-
-
-@dataclass
-class FakeMessage:
-    parsed: BaseModel | None
-
-
-@dataclass
-class FakeChoice:
-    message: FakeMessage
-
-
-@dataclass
-class FakeParsedCompletion:
-    choices: list[FakeChoice]
 
 
 @dataclass(frozen=True)
@@ -78,63 +90,78 @@ class CompletionCall:
     extra_body: dict[str, JsonValue] | None
 
 
-class CompletionParser(Protocol):
-    async def parse(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, str]],
-        response_format: type[BaseModel],
-        temperature: float | None = None,
-        timeout: float | None = None,
-        max_tokens: int | None = None,
-        extra_body: dict[str, JsonValue] | None = None,
-    ) -> FakeParsedCompletion: ...
-
-
 class FakeCompletions:
     def __init__(self) -> None:
         self.responses: dict[str, BaseModel] = {}
         self.calls: list[CompletionCall] = []
-
-    async def parse(
-        self,
-        *,
-        model: str,
-        messages: list[dict[str, str]],
-        response_format: type[BaseModel],
-        temperature: float | None = None,
-        timeout: float | None = None,
-        max_tokens: int | None = None,
-        extra_body: dict[str, JsonValue] | None = None,
-    ) -> FakeParsedCompletion:
-        self.calls.append(
-            CompletionCall(
-                model=model,
-                messages=messages,
-                response_model=response_format,
-                temperature=temperature,
-                timeout=timeout,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            )
-        )
-        parsed = self.responses.get(response_format.__name__) or default_response(response_format)
-        return FakeParsedCompletion(choices=[FakeChoice(FakeMessage(parsed))])
-
-
-@dataclass
-class FakeChat:
-    completions: CompletionParser
+        self.raw: str | None = None
+        self.error: BaseException | None = None
 
 
 class FakeLLM:
     def __init__(self) -> None:
         self.completions = FakeCompletions()
-        self.chat = FakeChat(self.completions)
+        self.model = FunctionModel(
+            self.complete,
+            profile=ModelProfile(
+                supports_json_schema_output=True,
+                default_structured_output_mode="native",
+            ),
+        )
 
     def register(self, schema: type[BaseModel], response: BaseModel) -> None:
         self.completions.responses[schema.__name__] = response
+
+    def complete(self, messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        """Return the registered typed response and retain the effective model request."""
+        if self.completions.error is not None:
+            raise self.completions.error
+        output = info.model_request_parameters.output_object
+        if output is None:
+            raise ValueError("fake LLM requires native structured output")
+        if output.name is None:
+            raise ValueError("fake LLM requires a named output schema")
+        response_model = next(
+            schema
+            for schema in (
+                WireExtraction,
+                BatchConsolidationVerdict,
+                ConsolidationVerdict,
+                CommunitySummary,
+                ProfileReport,
+                RaptorReport,
+                InsightReport,
+            )
+            if schema.__name__ == output.name
+        )
+        model_settings = info.model_settings or {}
+        extra_body = model_settings.get("extra_body")
+        timeout = model_settings.get("timeout")
+        request = next(
+            message
+            for message in reversed(messages)
+            if isinstance(message, ModelRequest)
+            and any(isinstance(part, UserPromptPart) for part in message.parts)
+        )
+        user = next(part for part in request.parts if isinstance(part, UserPromptPart))
+        self.completions.calls.append(
+            CompletionCall(
+                model="fake",
+                messages=[
+                    {"role": "system", "content": info.instructions or ""},
+                    {"role": "user", "content": str(user.content)},
+                ],
+                response_model=response_model,
+                temperature=model_settings.get("temperature"),
+                timeout=float(timeout) if isinstance(timeout, int | float) else None,
+                max_tokens=model_settings.get("max_tokens"),
+                extra_body=extra_body if isinstance(extra_body, dict) else None,
+            )
+        )
+        response = self.completions.responses.get(output.name) or default_response(response_model)
+        return ModelResponse(
+            parts=[TextPart(content=self.completions.raw or response.model_dump_json())]
+        )
 
 
 @dataclass

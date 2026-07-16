@@ -1,7 +1,7 @@
-import uuid
-
 import dbutil
 import pytest
+from id_factory import uuid5, uuid7, uuid8
+from pydantic import UUID5, UUID7
 from sqlalchemy import text
 
 from aizk.config import settings
@@ -10,10 +10,8 @@ from aizk.graph.promote import promote
 from aizk.store import (
     Chunk,
     Document,
-    EntityClaim,
-    EntityContent,
-    FactClaim,
-    FactContent,
+    Entity,
+    Fact,
 )
 from aizk.store.identity import User
 
@@ -22,13 +20,13 @@ pytestmark = pytest.mark.usefixtures("migrated_db")
 UNIT_VECTOR = [1.0] + [0.0] * 1023
 
 
-async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
-    document, chunk, entity = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+async def seed_source(promoter: UUID5 | UUID7) -> UUID5 | UUID7:
+    document, chunk, entity = uuid7(), uuid7(), uuid5()
     async with dbutil.actor(promoter) as session:
         session.add(
             Document(
                 id=document,
-                content_hash="promote",
+                content_hash=uuid8(),
                 created_by=promoter,
                 scopes=[promoter],
                 title="source",
@@ -44,10 +42,11 @@ async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
                 scopes=[promoter],
             )
         )
-        session.add(EntityContent(id=entity, name="Leech", type="concept", embedding=UNIT_VECTOR))
+        session.add(Entity.Content(id=entity, name="Leech", type="concept", embedding=UNIT_VECTOR))
         await session.flush()
-        session.add(EntityClaim(content_id=entity, created_by=promoter, scopes=[promoter]))
-        content = FactContent(
+        session.add(Entity.Claim(content_id=entity, created_by=promoter, scopes=[promoter]))
+        content = Fact.Content(
+            id=uuid5(),
             subject_id=entity,
             predicate="related_to",
             statement="the source fact",
@@ -56,7 +55,7 @@ async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
         session.add(content)
         await session.flush()
         session.add(
-            FactClaim(
+            Fact.Claim(
                 content_id=content.id,
                 created_by=promoter,
                 scopes=[promoter],
@@ -67,8 +66,8 @@ async def seed_source(promoter: uuid.UUID) -> uuid.UUID:
 
 
 async def visible_copy(
-    reader: uuid.UUID, source: uuid.UUID, orgs: tuple[uuid.UUID, ...] = ()
-) -> uuid.UUID | None:
+    reader: UUID5 | UUID7, source: UUID5 | UUID7, orgs: tuple[UUID5 | UUID7, ...] = ()
+) -> UUID5 | UUID7 | None:
     user = User.authorized(reader, read=(reader, *orgs))
     async with user as session:
         return (
@@ -81,11 +80,11 @@ async def visible_copy(
 
 def test_promote_copies_once_into_scope_and_an_outsider_stays_blind() -> None:
     async def probe() -> tuple[
-        int, int, uuid.UUID | None, uuid.UUID | None, uuid.UUID | None, list
+        int, int, UUID5 | UUID7 | None, UUID5 | UUID7 | None, UUID5 | UUID7 | None, list
     ]:
         await dbutil.reset_db()
-        promoter, member, outsider = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-        team_org = f"team-{uuid.uuid4()}"
+        promoter, member, outsider = uuid5(), uuid5(), uuid5()
+        team_org = f"team-{uuid5()}"
         team_scope = settings.scope_id(team_org)
         source = await seed_source(promoter)
         user = User.authorized(
@@ -121,8 +120,8 @@ def test_promote_copies_once_into_scope_and_an_outsider_stays_blind() -> None:
 def test_promote_of_an_invisible_document_raises() -> None:
     async def probe() -> None:
         await dbutil.reset_db()
-        promoter = uuid.uuid4()
+        promoter = uuid5()
         with pytest.raises(NotVisibleError, match="no visible document"):
-            await promote([uuid.uuid4()], frozenset({promoter}), User.private(promoter))
+            await promote([uuid5()], frozenset({promoter}), User.private(promoter))
 
     dbutil.run(probe())

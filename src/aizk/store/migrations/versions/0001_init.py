@@ -3,9 +3,9 @@
 
 from collections.abc import Sequence
 
-import inflection
 import rls
 import sqlalchemy as sa
+from inflection import underscore
 from pgvector.sqlalchemy import HALFVEC
 from rls.alembic import AlterRLSOp
 from sqlalchemy import Select
@@ -27,20 +27,27 @@ ENTITY_KINDS: tuple[tuple[str, str, str, bool], ...] = (
         "general",
         False,
     ),
-    # Project and Area come only from explicit document declarations.
+    # Management concepts are ordinary ontology kinds. Explicit declarations are only
+    # the deterministic fast path and model extraction may infer them from prose.
     (
         "Project",
         "A concrete effort with a start and an end that produces a result, the unit a projects "
         "rollup treats as a node and its member notes as parts.",
         "general",
-        True,
+        False,
     ),
     (
         "Area",
         "An ongoing domain of responsibility or identity with no end date, the container that "
         "holds projects and the notes that outlive any one of them.",
         "general",
-        True,
+        False,
+    ),
+    (
+        "Status",
+        "A managed effort's explicit lifecycle state, such as active, paused, or completed.",
+        "general",
+        False,
     ),
     ("Tool", "A named library, framework, or piece of software.", "general", False),
     ("Person", "A specific individual.", "general", False),
@@ -128,6 +135,12 @@ RELATION_KINDS: tuple[tuple[str, str, str, bool], ...] = (
     ),
     ("depends_on", "One thing requires another to exist or function.", "general", False),
     ("part_of", "One thing is a component of another.", "general", False),
+    (
+        "has_status",
+        "A managed effort has one current lifecycle state.",
+        "general",
+        False,
+    ),
     ("contradicts", "One statement conflicts with another.", "general", False),
     ("supersedes", "One statement replaces an earlier one.", "general", False),
     ("implements", "A piece of code realizes a pattern, method, or decision.", "coding", False),
@@ -163,11 +176,12 @@ RELATION_KINDS: tuple[tuple[str, str, str, bool], ...] = (
     ("motivated_by", "A goal or habit is driven by a reason.", "personal", False),
 )
 
-
-def canonical(name: str) -> str:
-    """Fold an ontology name to snake_case, the same rule `OntologyKind.canonical` applies."""
-    return inflection.parameterize(inflection.underscore(name), separator="_")
-
+_RELATION_POLICIES = {
+    "has_status": "state",
+    "observes": "event",
+    "part_of": "set",
+    "supersedes": "event",
+}
 
 revision: str = "0001_init"
 down_revision: str | None = None
@@ -261,8 +275,14 @@ def scoped_rls(
     writable = _scope_authority(standing, "write")
     nonempty = sa.func.cardinality(scopes) > 0
     if read_through:
-        parent = sa.table(read_through, sa.column("id", sa.Uuid()))
-        read = table.c[f"{read_through}_id"].in_(sa.select(parent.c.id))
+        parent = sa.table(
+            read_through,
+            sa.column("id", sa.Uuid()),
+            sa.column("scopes", ARRAY(sa.Uuid())),
+        )
+        parent_id = table.c[f"{read_through}_id"]
+        read = parent_id.in_(sa.select(parent.c.id))
+        parent_scope = sa.tuple_(parent_id, scopes).in_(sa.select(parent.c.id, parent.c.scopes))
     else:
         readable = _scope_authority(standing, "read")
         public = _scope_authority(standing, "public")
@@ -276,7 +296,8 @@ def scoped_rls(
                 ),
             ),
         )
-    write = sa.and_(nonempty, scopes.op("<@")(writable))
+        parent_scope = sa.true()
+    write = sa.and_(nonempty, scopes.op("<@")(writable), parent_scope)
     policies = [
         rls.Policy.select("scope_read", read, roles=(APP_ROLE,)),
         rls.Policy.insert("scope_insert", write, roles=(APP_ROLE,)),
@@ -384,10 +405,12 @@ def upgrade() -> None:
         sa.Column("created_by", sa.Uuid(), nullable=False),
         sa.Column("scopes", ARRAY(sa.Uuid()), server_default=sa.text("'{}'"), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("kind", sa.String(), nullable=False),
         sa.Column("title", sa.String(), nullable=True),
+        sa.Column("subject_type", sa.Text(), nullable=True),
         sa.Column("source_uri", sa.String(), nullable=True),
-        sa.Column("content_hash", sa.String(), nullable=False),
+        sa.Column("observed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("content_hash", sa.Uuid(), nullable=False),
         sa.Column("promoted_from", sa.Uuid(), nullable=True),
         sa.ForeignKeyConstraint(["promoted_from"], ["document.id"]),
         sa.PrimaryKeyConstraint("id"),
@@ -395,7 +418,18 @@ def upgrade() -> None:
     )
     op.create_index("ix_document_content_hash", "document", ["content_hash"])
     op.create_index("ix_document_created_by", "document", ["created_by"])
+    op.create_index("ix_document_expires_at", "document", ["expires_at"])
+    op.create_index("ix_document_observed_at", "document", ["observed_at"])
     op.create_index("ix_document_scopes", "document", ["scopes"], postgresql_using="gin")
+    op.create_index(
+        "uq_document_subject_title_scope",
+        "document",
+        ["subject_type", "title", "scopes"],
+        unique=True,
+        postgresql_where=(
+            sa.column("subject_type").is_not(None) & sa.column("title").is_not(None)
+        ),
+    )
 
     op.create_table(
         "chunk",
@@ -436,7 +470,15 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("domain", sa.Text(), nullable=False),
         sa.Column("structural", sa.Boolean(), server_default=sa.false(), nullable=False),
+        sa.Column("embedding", HALFVEC(EMBED_DIM), nullable=True),
         sa.PrimaryKeyConstraint("name"),
+    )
+    op.create_foreign_key(
+        "fk_document_subject_type_entity_kind",
+        "document",
+        "entity_kind",
+        ["subject_type"],
+        ["name"],
     )
     op.create_table(
         "relation_kind",
@@ -450,6 +492,12 @@ def upgrade() -> None:
         sa.Column("description", sa.Text(), nullable=False),
         sa.Column("domain", sa.Text(), nullable=False),
         sa.Column("structural", sa.Boolean(), server_default=sa.false(), nullable=False),
+        sa.Column(
+            "policy",
+            sa.Enum("set", "state", "event", name="relation_policy"),
+            server_default="set",
+            nullable=False,
+        ),
         sa.PrimaryKeyConstraint("name"),
     )
     entity_kind_table = sa.table(
@@ -463,7 +511,7 @@ def upgrade() -> None:
         entity_kind_table,
         [
             {
-                "name": canonical(name),
+                "name": underscore(name),
                 "description": description,
                 "domain": domain,
                 "structural": structural,
@@ -477,15 +525,20 @@ def upgrade() -> None:
         sa.column("description", sa.Text()),
         sa.column("domain", sa.Text()),
         sa.column("structural", sa.Boolean()),
+        sa.column(
+            "policy",
+            sa.Enum("set", "state", "event", name="relation_policy", create_type=False),
+        ),
     )
     op.bulk_insert(
         relation_kind_table,
         [
             {
-                "name": canonical(name),
+                "name": underscore(name),
                 "description": description,
                 "domain": domain,
                 "structural": structural,
+                "policy": _RELATION_POLICIES.get(underscore(name), "set"),
             }
             for name, description, domain, structural in RELATION_KINDS
         ],
@@ -502,6 +555,17 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.execute(vector_index_ddl("ix_entity_content_embedding", "entity_content", INDEX_BACKEND))
+    op.create_index(
+        "ix_entity_content_name_lower",
+        "entity_content",
+        [sa.text("lower(name)")],
+    )
+    op.create_index(
+        "ix_entity_content_name_trgm",
+        "entity_content",
+        [sa.text("lower(name) gin_trgm_ops")],
+        postgresql_using="gin",
+    )
 
     op.create_table(
         "entity_claim",
@@ -681,7 +745,6 @@ def upgrade() -> None:
                 "fact_count",
                 "raptor_fact_count",
                 "curation_pending",
-                "scorecard",
                 "config",
                 name="watermark_kind",
             ),

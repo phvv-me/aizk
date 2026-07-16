@@ -1,9 +1,12 @@
+from collections import OrderedDict
+
 import mcp.types as mt
 from fastmcp.exceptions import ToolError
 from fastmcp.server.context import Context
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.middleware.rate_limiting import RateLimitError, TokenBucketRateLimiter
 from fastmcp.tools import ToolResult
+from pydantic import UUID5
 
 from ..store.identity import User
 from .auth import Auth
@@ -44,16 +47,31 @@ class IdentityMiddleware(Middleware):
         return await call_next(context)
 
 
-class AnonymousRateLimit(Middleware):
-    """Token-bucket rate limiting applied only to unauthenticated tool calls."""
+class CallerRateLimit(Middleware):
+    """Bound every caller to an independent token bucket.
+
+    The verified Aizk user ID is the bucket key. Auth-off and anonymous requests
+    therefore share their configured fallback identity while authenticated users
+    cannot consume one another's allowance. The cache bounds per-process state.
+    """
 
     def __init__(self, max_requests_per_second: float) -> None:
-        # the bucket holds a five-second burst so a stranger's short read sequence flows while the
-        # sustained rate stays capped at the configured requests per second
-        self.limiter = TokenBucketRateLimiter(
-            capacity=max(1, round(max_requests_per_second * 5)),
-            refill_rate=max_requests_per_second,
-        )
+        self.max_requests_per_second = max_requests_per_second
+        self._limiters: OrderedDict[UUID5, TokenBucketRateLimiter] = OrderedDict()
+
+    def limiter(self, user_id: UUID5) -> TokenBucketRateLimiter:
+        """Return one bounded five-second burst bucket for a stable caller ID."""
+        try:
+            limiter = self._limiters.pop(user_id)
+        except KeyError:
+            limiter = TokenBucketRateLimiter(
+                capacity=max(1, round(self.max_requests_per_second * 5)),
+                refill_rate=self.max_requests_per_second,
+            )
+            if len(self._limiters) >= 4096:
+                self._limiters.popitem(last=False)
+        self._limiters[user_id] = limiter
+        return limiter
 
     async def on_call_tool(
         self,
@@ -61,8 +79,8 @@ class AnonymousRateLimit(Middleware):
         call_next: CallNext[mt.CallToolRequestParams, ToolResult],
     ) -> ToolResult:
         user = await bound_user(request_context(context))
-        if user is not None and not user.is_anonymous():
-            return await call_next(context)
-        if not await self.limiter.consume():
-            raise RateLimitError("anonymous rate limit exceeded, authenticate for more")
+        if user is None:
+            raise ToolError("no user resolved before rate limiting")
+        if not await self.limiter(user.id).consume():
+            raise RateLimitError("caller rate limit exceeded")
         return await call_next(context)

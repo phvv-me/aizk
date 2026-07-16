@@ -1,5 +1,6 @@
 import hashlib
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import dbutil
@@ -7,34 +8,48 @@ import pytest
 from doubles import RecordingEmbedder
 from hypothesis import given
 from hypothesis import strategies as st
+from id_factory import uuid5
+from pydantic import UUID5, UUID7, UUID8
 from sqlalchemy import text as sql
 from sqlmodel import select
 
 from aizk.config import Settings
 from aizk.extract.ingest import (
+    DocumentStore,
     TextSource,
-    content_hash,
     contextual_lexical,
     ingest_path,
     ingest_text,
     ingest_texts,
 )
+from aizk.provenance import CaptureContext
 from aizk.store import (
     Chunk,
     Document,
-    EntityClaim,
-    EntityContent,
-    FactClaim,
-    FactContent,
+    Entity,
+    Fact,
 )
 from aizk.store.identity import User
 
 
+def expected_digest(text: str) -> UUID8:
+    value = int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:16])
+    return uuid.UUID(int=(value & ~(0xF << 76) & ~(0x3 << 62)) | (8 << 76) | (0x2 << 62))
+
+
+@pytest.mark.usefixtures("migrated_db")
 @given(text=st.text())
-def test_content_hash_is_the_stable_sha256_of_the_utf8_bytes(text: str) -> None:
-    digest = content_hash(text)
-    assert digest == hashlib.sha256(text.encode("utf-8")).hexdigest()
-    assert content_hash(text) == digest
+def test_document_store_hashes_utf8_text_with_postgres_pgcrypto(text: str) -> None:
+    async def body() -> tuple[list[UUID8], list[UUID8]]:
+        async with User.system() as session:
+            store = DocumentStore(session)
+            return await store.hash_texts([text, text]), await store.hash_texts([])
+
+    digests, empty = dbutil.run(body())
+    first, second = digests
+    assert first == expected_digest(text)
+    assert second == first
+    assert empty == []
 
 
 def test_contextual_lexical_prepends_the_title_when_enabled(
@@ -60,7 +75,7 @@ def test_contextual_lexical_is_null_when_off_or_titleless(
 def test_ingest_texts_batches_stores_and_skips_the_blank_source(settings: Settings) -> None:
     real = "a batched note carrying enough prose to become one embedded chunk of memory"
 
-    async def body() -> list[uuid.UUID | None]:
+    async def body() -> list[UUID5 | UUID7 | None]:
         await dbutil.reset_db()
         blank = await ingest_texts(User.system(), [TextSource(text="   ")])
         return [*blank, *(await ingest_texts(User.system(), [TextSource(text=real)]))]
@@ -74,9 +89,9 @@ def test_ingest_texts_batches_stores_and_skips_the_blank_source(settings: Settin
 def test_ingest_text_dedupes_before_embedding(
     settings: Settings, fake_embedder: RecordingEmbedder
 ) -> None:
-    title = f"note {uuid.uuid4().hex}"
+    title = f"note {uuid5().hex}"
 
-    async def body() -> tuple[uuid.UUID | None, uuid.UUID | None, int, int, int]:
+    async def body() -> tuple[UUID5 | UUID7 | None, UUID5 | UUID7 | None, int, int, int]:
         await dbutil.reset_db()
         note = "a remembered note about the bi-temporal memory spine across time"
         first = await ingest_text(User.system(), note, title=title)
@@ -103,7 +118,9 @@ def test_ingest_text_uses_source_uri_as_message_identity(settings: Settings) -> 
     shared = "the same short group message has enough content to become one prose chunk"
     corrected = f"{shared} after correction"
 
-    async def body() -> tuple[uuid.UUID | None, uuid.UUID | None, uuid.UUID | None, list[str]]:
+    async def body() -> tuple[
+        UUID5 | UUID7 | None, UUID5 | UUID7 | None, UUID5 | UUID7 | None, list[UUID8]
+    ]:
         await dbutil.reset_db()
         first = await ingest_text(User.system(), shared, source_uri="groupmem://room/msg-1")
         second = await ingest_text(User.system(), shared, source_uri="groupmem://room/msg-2")
@@ -116,12 +133,122 @@ def test_ingest_text_uses_source_uri_as_message_identity(settings: Settings) -> 
     first, second, refreshed, hashes = dbutil.run(body())
     assert first != second
     assert refreshed == first
-    assert hashes == [content_hash(corrected), content_hash(shared)]
+    assert hashes == [expected_digest(corrected), expected_digest(shared)]
+
+
+@pytest.mark.usefixtures("migrated_db", "fake_embedder")
+def test_ingest_text_refreshes_changed_retrieval_metadata(settings: Settings) -> None:
+    reviewed = datetime(2026, 7, 15, tzinfo=UTC)
+
+    async def body() -> tuple[
+        UUID7 | None,
+        UUID7 | None,
+        str,
+        str,
+        datetime | None,
+    ]:
+        await dbutil.reset_db()
+        original = await ingest_text(
+            User.system(),
+            "# Old title\n- Type Area\nAn older source body.",
+            source_uri="vault:///Zettelkasten/Definitions.md",
+        )
+        refreshed = await ingest_text(
+            User.system(),
+            (
+                "# Definitions\n- Type Project\n- part_of [Area] Productivity\n"
+                "A corrected source body."
+            ),
+            source_uri="vault:///Zettelkasten/Definitions.md",
+            capture=CaptureContext(observed_at=reviewed),
+        )
+        async with dbutil.actor(settings.system_user_id) as session:
+            document = (await session.exec(select(Document))).one()
+        return (
+            original,
+            refreshed,
+            document.title,
+            document.subject_type,
+            document.observed_at,
+        )
+
+    original, refreshed, title, subject_type, observed_at = dbutil.run(body())
+    assert refreshed == original
+    assert (title, subject_type, observed_at) == (
+        "Definitions",
+        "project",
+        reviewed,
+    )
+
+
+@pytest.mark.usefixtures("migrated_db")
+def test_ingest_text_updates_validity_without_reembedding(
+    settings: Settings,
+    fake_embedder: RecordingEmbedder,
+) -> None:
+    text = "# Aizk\n- Type Project\n- has_status [Status] Active\nThe brief stays stable."
+    reviewed = datetime(2026, 7, 15, tzinfo=UTC)
+
+    async def body() -> tuple[UUID7 | None, UUID7 | None, Document]:
+        await dbutil.reset_db()
+        original = await ingest_text(
+            User.system(),
+            text,
+            source_uri="vault:///Zettelkasten/Aizk.md",
+        )
+        calls = len(fake_embedder.calls)
+        refreshed = await ingest_text(
+            User.system(),
+            text,
+            source_uri="vault:///Zettelkasten/Aizk.md",
+            capture=CaptureContext(observed_at=reviewed),
+        )
+        assert len(fake_embedder.calls) == calls
+        async with dbutil.actor(settings.system_user_id) as session:
+            document = (await session.exec(select(Document))).one()
+        return original, refreshed, document
+
+    original, refreshed, document = dbutil.run(body())
+
+    assert refreshed == original
+    assert document.subject_type == "project"
+    assert document.observed_at == reviewed
+
+
+@pytest.mark.usefixtures("migrated_db", "fake_embedder")
+def test_managed_brief_title_survives_a_changed_source_uri(
+    settings: Settings, fake_embedder: RecordingEmbedder
+) -> None:
+    text = "# Research\n- Type Area\nThe canonical brief stays one document."
+
+    async def body() -> tuple[UUID7 | None, UUID7 | None, list[Document]]:
+        await dbutil.reset_db()
+        original = await ingest_text(
+            User.system(),
+            text,
+            source_uri="vault/Zettelkasten/Research.md",
+        )
+        calls = len(fake_embedder.calls)
+        refreshed = await ingest_text(
+            User.system(),
+            text,
+            source_uri="vault:///Zettelkasten/Research.md",
+        )
+        assert len(fake_embedder.calls) == calls
+        async with dbutil.actor(settings.system_user_id) as session:
+            documents = list(await session.exec(select(Document)))
+        return original, refreshed, documents
+
+    original, refreshed, documents = dbutil.run(body())
+
+    assert refreshed == original
+    assert len(documents) == 1
+    assert documents[0].source_uri == "vault:///Zettelkasten/Research.md"
 
 
 @pytest.mark.usefixtures("migrated_db", "fake_embedder")
 def test_refresh_retracts_claims_mined_from_removed_source_text(settings: Settings) -> None:
-    async def body() -> tuple[bool, dict, uuid.UUID | None]:
+    async def body() -> tuple[bool, dict, UUID5 | UUID7 | None]:
         await dbutil.reset_db()
         document_id = await ingest_text(
             User.system(),
@@ -133,19 +260,19 @@ def test_refresh_retracts_claims_mined_from_removed_source_text(settings: Settin
             chunk_id = (
                 await session.exec(select(Chunk.id).where(Chunk.document_id == document_id))
             ).one()
-            entity_id = uuid.uuid7()
-            content_id = uuid.uuid7()
-            session.add(EntityContent(id=entity_id, name="retired plan", type="concept"))
+            entity_id = uuid5()
+            content_id = uuid5()
+            session.add(Entity.Content(id=entity_id, name="retired plan", type="concept"))
             await session.flush()
             session.add(
-                EntityClaim(
+                Entity.Claim(
                     content_id=entity_id,
                     created_by=settings.system_user_id,
                     scopes=[settings.system_user_id],
                 )
             )
             session.add(
-                FactContent(
+                Fact.Content(
                     id=content_id,
                     subject_id=entity_id,
                     predicate="related_to",
@@ -153,7 +280,7 @@ def test_refresh_retracts_claims_mined_from_removed_source_text(settings: Settin
                 )
             )
             await session.flush()
-            claim = FactClaim(
+            claim = Fact.Claim(
                 content_id=content_id,
                 created_by=settings.system_user_id,
                 scopes=[settings.system_user_id],
@@ -170,8 +297,8 @@ def test_refresh_retracts_claims_mined_from_removed_source_text(settings: Settin
         async with dbutil.actor(settings.system_user_id) as session:
             historical = (
                 await session.exec(
-                    select(FactClaim)
-                    .where(FactClaim.id == claim_id)
+                    select(Fact.Claim)
+                    .where(Fact.Claim.id == claim_id)
                     .execution_options(**{settings.skip_live_gate: True})
                 )
             ).one()
@@ -203,16 +330,16 @@ def test_ingest_path_routes_each_lane_dedupes_and_skips_the_rest(
         again = await ingest_path(User.system(), tmp_path)
         async with dbutil.actor(settings.system_user_id) as session:
             rows = await session.exec(
-                sql("SELECT kind FROM document WHERE source_uri LIKE :pat ORDER BY kind"),
+                sql("SELECT title FROM document WHERE source_uri LIKE :pat ORDER BY title"),
                 params={"pat": f"%{tmp_path.name}%"},
             )
-            kinds = list(rows.scalars().all())
-        return first, again, kinds
+            titles = list(rows.scalars().all())
+        return first, again, titles
 
-    first, again, kinds = dbutil.run(body())
+    first, again, titles = dbutil.run(body())
     assert first == 2
     assert again == 0
-    assert kinds == ["code", "note"]
+    assert titles == ["code", "note"]
 
 
 @pytest.mark.usefixtures("migrated_db", "fake_embedder")
@@ -255,6 +382,6 @@ def test_reingesting_a_changed_file_refreshes_its_standing_document(
     assert changed == 1  # the refresh counts as written
     assert unchanged == 0  # and the refreshed content then dedupes
     assert len(docs) == 1  # one standing document, never a duplicate row
-    assert docs[0][1] == content_hash(note.read_text(encoding="utf-8"))
+    assert docs[0][1] == expected_digest(note.read_text(encoding="utf-8"))
     assert all("REWRITTEN" in text for text, _ in chunks)  # old spans fully replaced
     assert all(processed_at is None for _, processed_at in chunks)  # re-extraction pending

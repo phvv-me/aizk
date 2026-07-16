@@ -1,11 +1,13 @@
-import rls
-from inflection import parameterize, underscore
-from sqlalchemy import Boolean, Text
-from sqlalchemy.dialects.postgresql import insert
-from sqlmodel import Field, select
+from enum import auto
+from typing import cast
 
-from ....common.sql import Column
-from ...engine import Session
+import rls
+from patos import sql
+from sqlalchemy import Boolean, Text
+from sqlalchemy import Column as SAColumn
+from sqlmodel import Field
+
+from ....config import settings
 from ...mixins import TableBase, Timestamped
 
 
@@ -19,42 +21,39 @@ class OntologyKind:
 
     __rls__ = rls.Open()
 
-    name: Column[str] = Field(sa_type=Text, primary_key=True)
-    description: Column[str] = Field(sa_type=Text)
-    domain: Column[str] = Field(sa_type=Text)
-    structural: Column[bool] = Field(
+    name: sql.Column[str] = Field(sa_type=Text, primary_key=True)
+    description: sql.Column[str] = Field(sa_type=Text)
+    domain: sql.Column[str] = Field(sa_type=Text)
+    structural: sql.Column[bool] = Field(
         default=False, sa_type=Boolean, sa_column_kwargs={"server_default": "false"}
     )
-
-    @staticmethod
-    def canonical(name: str) -> str:
-        """Canonicalize vocabulary names to snake case."""
-        return parameterize(underscore(name), separator="_")
-
-    @classmethod
-    async def define(cls, session: Session, name: str, description: str, domain: str) -> None:
-        """Create or refine one canonical vocabulary entry."""
-        await session.exec(
-            insert(cls)
-            .values(name=cls.canonical(name), description=description, domain=domain)
-            .on_conflict_do_update(
-                index_elements=["name"], set_={"description": description, "domain": domain}
-            )
-        )
-
-    @classmethod
-    async def extractable_names(cls, session: Session) -> list[str]:
-        """Return the sorted vocabulary the extractor may emit."""
-        return list(
-            await session.exec(
-                select(cls.name).where(cls.structural.is_(False)).order_by(cls.name)
-            )
-        )
 
 
 class EntityKind(OntologyKind, Timestamped, TableBase, table=True):
     """The live catalog of entity types `EntityContent.type` foreign-keys against."""
 
+    embedding: sql.Column[list[float] | None] = Field(
+        default=None,
+        sa_type=cast(type[list[float]], sql.CosineHalfvec(settings.embed_dim)),
+    )
+
+
+class RelationPolicy(sql.PGEnum):
+    """How facts under one relation coexist or replace prior values."""
+
+    set = auto()
+    state = auto()
+    event = auto()
+
 
 class RelationKind(OntologyKind, Timestamped, TableBase, table=True):
     """The live catalog of relation types `FactContent.predicate` foreign-keys against."""
+
+    policy: sql.Column[RelationPolicy] = Field(
+        default=RelationPolicy.set,
+        sa_column=SAColumn(
+            RelationPolicy.type,
+            nullable=False,
+            server_default=RelationPolicy.set,
+        ),
+    )

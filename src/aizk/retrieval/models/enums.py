@@ -1,7 +1,13 @@
 from patos import FrozenModel
 
 from ...config import settings
-from ..lanes import FactLane, OverviewLane, SourceLane, VectorLane
+from ..lanes import (
+    EntityCatalogLane,
+    FactLane,
+    OverviewLane,
+    SourceLane,
+    VectorLane,
+)
 from .lane import Lane
 
 _overview_first = (
@@ -74,6 +80,7 @@ class Plan(FrozenModel):
         lanes: list[Lane] = [
             FactLane(priority=priority[Lane.Kind.FACTS], hops=self.hops),
             SourceLane(priority=priority[Lane.Kind.SOURCES]),
+            EntityCatalogLane(priority=priority[Lane.Kind.SOURCES]),
             VectorLane(kind=Lane.Kind.WORKING_MEMORY, priority=priority[Lane.Kind.WORKING_MEMORY]),
             VectorLane(kind=Lane.Kind.PROFILE, priority=priority[Lane.Kind.PROFILE]),
         ]

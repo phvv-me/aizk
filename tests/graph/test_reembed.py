@@ -1,16 +1,15 @@
-import uuid
-
 import dbutil
 import pytest
 import seedgraph
+from pydantic import UUID5, UUID7
 
 from aizk.graph.reembed import reembed
-from aizk.store import EntityContent, FactContent
+from aizk.store import Entity, Fact
 
 pytestmark = pytest.mark.usefixtures("migrated_db", "fake_embedder")
 
 
-async def seed_one_of_each(owner: uuid.UUID) -> tuple[uuid.UUID, uuid.UUID]:
+async def seed_one_of_each(owner: UUID5 | UUID7) -> tuple[UUID5 | UUID7, UUID5 | UUID7]:
     await seedgraph.seed_scoped_row(owner, "chunk")
     await seedgraph.seed_scoped_row(owner, "community")
     await seedgraph.seed_scoped_row(owner, "profile")
@@ -26,8 +25,8 @@ def test_reembed_rewrites_every_embedded_table() -> None:
         entity_id, fact_id = await seed_one_of_each(owner)
         total = await reembed(frozenset({owner}))
         async with dbutil.actor(owner) as session:
-            entity_row = await session.get(EntityContent, entity_id)
-            fact_row = await session.get(FactContent, fact_id)
+            entity_row = await session.get(Entity.Content, entity_id)
+            fact_row = await session.get(Fact.Content, fact_id)
             assert entity_row is not None and fact_row is not None
             return total, entity_row.embedding is not None, fact_row.embedding is not None
 

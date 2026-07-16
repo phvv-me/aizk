@@ -1,31 +1,68 @@
-import uuid
+from datetime import datetime
+from functools import cache
+from typing import Annotated, Self
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.context import Context
+from pydantic import UUID7, Field, StringConstraints
 
 from .. import graph, retrieval
+from ..background.queue import enqueue_document
 from ..config import settings
 from ..extract import ingest as extract_ingest
 from ..provenance import CaptureContext
-from ..retrieval import Candidate
+from ..retrieval import ContextPack
 from ..store.identity import User
 from ..types import ScopeNames
 from .auth import Auth
-from .middleware import AnonymousRateLimit, IdentityMiddleware, bound_user
+from .middleware import CallerRateLimit, IdentityMiddleware, bound_user
 from .models import ShareResult, WriteResult
+
+type _RecallQuery = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=settings.mcp_recall_query_max_chars
+    ),
+]
+type _RememberText = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=settings.mcp_remember_max_chars
+    ),
+]
+type _SourceURI = Annotated[str, StringConstraints(max_length=settings.mcp_source_uri_max_chars)]
+type _ScopeNames = Annotated[ScopeNames, Field(max_length=settings.mcp_scope_names_max)]
+type _Documents = Annotated[
+    list[UUID7], Field(min_length=1, max_length=settings.mcp_share_documents_max)
+]
+type _RecallBudget = Annotated[int, Field(gt=0, le=settings.mcp_recall_budget_max_tokens)]
 
 
 class AizkMCP(FastMCP):
-    """FastMCP wired for aizk, serving only the client verbs a key-holder reaches."""
+    """Expose Aizk's authenticated memory tools through FastMCP.
+
+    Identity middleware resolves one Logto-backed `User` before each call. A
+    per-caller token bucket limits sustained work, and PostgreSQL row security
+    remains the final authorization boundary for every retrieved or written row.
+    """
 
     def __init__(self, name: str) -> None:
         self.authentication = Auth()
         super().__init__(name, auth=self.authentication.provider())
         self.add_middleware(IdentityMiddleware(self.authentication))
         self.add_middleware(
-            AnonymousRateLimit(max_requests_per_second=settings.anon_rate_per_second)
+            CallerRateLimit(max_requests_per_second=settings.mcp_request_rate_per_second)
         )
+
+    @classmethod
+    @cache
+    def shared(cls) -> Self:
+        """Build the process-wide MCP application only when the serving command needs it."""
+        application = cls("aizk")
+        for tool in (status, recall, remember, share):
+            application.tool(tool)
+        return application
 
     async def user(self, context: Context, identified: bool = False) -> User:
         """Return the request's resolved caller and optionally require authentication."""
@@ -36,49 +73,98 @@ class AizkMCP(FastMCP):
         return user
 
 
-server = AizkMCP("aizk")
+async def status(context: Context) -> User:
+    """Return the caller's organizations, roles, and permissions as supplied by Logto."""
+    return await AizkMCP.shared().user(context, identified=True)
 
 
-@server.tool
-async def recall(query: str, context: Context, budget: int | None = None) -> tuple[Candidate, ...]:
-    """Recall everything the memory holds on a question as ready, ranked evidence lines."""
+async def recall(
+    query: _RecallQuery,
+    context: Context,
+    budget: _RecallBudget = settings.context_token_budget,
+) -> str:
+    """Return visible evidence for one question as clear, ordered Markdown.
+
+    query: natural-language question whose length is bounded by deployment settings.
+    budget: optional evidence cap. Omit it unless repeated responses are too long.
+    """
     if not (query := query.strip()):
         raise ToolError("recall query cannot be blank")
-    return await retrieval.recall(query, await server.user(context), token_budget=budget)
+    user = await AizkMCP.shared().user(context)
+    candidates = await retrieval.recall(query, user, token_budget=budget)
+    memory = ContextPack.from_candidates(candidates, user.scope_labels).text
+    involved = frozenset(scope for candidate in candidates for scope in candidate.scopes)
+    standing = []
+    if user.id in involved:
+        standing.append("- private  write")
+    for organization in sorted(user.organizations, key=lambda item: item.name):
+        if organization.id not in involved:
+            continue
+        access = ["write" if organization.writable else "read"]
+        if organization.public:
+            access.append("public")
+        if organization.roles:
+            access.append(f"roles {', '.join(organization.roles)}")
+        if organization.permissions:
+            access.append(f"permissions {', '.join(organization.permissions)}")
+        standing.append(f"- {organization.name}  {', '.join(access)}")
+    return f"## Scopes\n\n{'\n'.join(standing)}\n\n{memory}" if memory else ""
 
 
-@server.tool
 async def remember(
-    text: str, context: Context, scopes: ScopeNames | None = None, kind: str = "note"
+    text: _RememberText,
+    context: Context,
+    source_uri: _SourceURI | None = None,
+    observed_at: datetime | None = None,
+    expires_at: datetime | None = None,
+    scopes: _ScopeNames | None = None,
 ) -> WriteResult:
-    """Remember a piece of text as working memory, the cheap capture recall reads at once."""
-    user = await server.user(context, identified=True)
-    item_id = await extract_ingest.remember_session(
-        user,
-        text,
-        kind=kind,
-        created_by=user.id,
-        scopes=user.write_scope(scopes),
-        capture=CaptureContext(speaker_label=user.label),
-    )
-    return WriteResult(id=item_id)
+    """Store one source document and enqueue its derived graph projection.
 
-
-@server.tool
-async def reference(uri: str, context: Context, scopes: ScopeNames | None = None) -> WriteResult:
-    """Record a reference to a paper, url, or file so it is recallable later."""
-    user = await server.user(context, identified=True)
-    document_id = await extract_ingest.record_reference(
-        user, uri, created_by=user.id, scopes=user.write_scope(scopes)
-    )
+    text: self-describing Markdown or plain text that remains the source authority.
+    source_uri: original website or paper PDF URL. Omit it for authored notes.
+    observed_at: optional time when the statement became applicable. Normally omitted.
+    expires_at: optional time after which the statement is no longer current. Normally omitted.
+    scopes: optional authorized Logto organization names. Omission means private memory.
+    """
+    if not text.strip():
+        raise ToolError("memory text cannot be blank")
+    try:
+        declaration = extract_ingest.SourceDeclaration.from_text(text)
+    except ValueError as invalid:
+        raise ToolError(str(invalid)) from invalid
+    user = await AizkMCP.shared().user(context, identified=True)
+    target = user.write_scope(scopes)
+    try:
+        document_id = await extract_ingest.ingest_text(
+            user,
+            text,
+            title=declaration.title,
+            source_uri=source_uri,
+            created_by=user.id,
+            scopes=target,
+            capture=CaptureContext(
+                speaker_label=user.label,
+                observed_at=observed_at,
+                expires_at=expires_at,
+            ),
+        )
+    except ValueError as invalid:
+        raise ToolError(str(invalid)) from invalid
+    if document_id is None:
+        raise ToolError("memory ingestion did not create a document")
+    await enqueue_document(document_id, target)
     return WriteResult(id=document_id)
 
 
-@server.tool
 async def share(
-    documents: list[uuid.UUID], context: Context, scopes: ScopeNames | None = None
+    documents: _Documents, context: Context, scopes: _ScopeNames | None = None
 ) -> ShareResult:
-    """Share visible notes into one scope set as provenance-linked copies."""
-    user = await server.user(context, identified=True)
+    """Copy visible documents into one authorized destination without moving sources.
+
+    documents: visible document IDs to copy, bounded per call.
+    scopes: optional authorized Logto organization names. Omission means private memory.
+    """
+    user = await AizkMCP.shared().user(context, identified=True)
     shared = await graph.promote(documents, user.write_scope(scopes), user)
-    return ShareResult(shared=shared, scopes=tuple(scopes or ()))
+    return ShareResult(shared=shared)

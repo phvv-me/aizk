@@ -36,3 +36,6 @@ archive/ts/node_modules/
 archive/ts/.svelte-kit/
 archive/ts/.chefe/
 archive/ts/pnpm-lock.yaml
+
+# lote SQLite runtime sidecars
+.lote/*.sqlite-*

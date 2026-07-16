@@ -1,16 +1,14 @@
-import uuid
-
 from patos import FrozenModel
+from pydantic import UUID7
 
 
 class WriteResult(FrozenModel):
-    """The id one write verb wrote, the common return for remember and reference."""
+    """Identify the durable source document created or updated by `remember`."""
 
-    id: uuid.UUID
+    id: UUID7
 
 
 class ShareResult(FrozenModel):
-    """How many documents one share call copied and their destination names."""
+    """Report how many provenance-linked document copies `share` created."""
 
     shared: int
-    scopes: tuple[str, ...]

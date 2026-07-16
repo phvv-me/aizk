@@ -1,9 +1,10 @@
 import json
-import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import dbutil
+from id_factory import uuid5, uuid8
+from pydantic import UUID5, UUID7, JsonValue
 from sqlalchemy.dialects.postgresql import Range
 
 from aizk.config import settings
@@ -11,10 +12,8 @@ from aizk.export import ExportReport, export_scope
 from aizk.store import (
     Chunk,
     Document,
-    EntityClaim,
-    EntityContent,
-    FactClaim,
-    FactContent,
+    Entity,
+    Fact,
 )
 from aizk.store.identity import User
 
@@ -30,19 +29,21 @@ EXPORTED_TABLES = {
 
 FACT_CLAIM_WINDOW_KEYS = {"valid", "recorded"}
 
+type JSONRecord = dict[str, JsonValue]
 
-async def seed_graph(owner: uuid.UUID, tag: str) -> dict[str, uuid.UUID]:
+
+async def seed_graph(owner: UUID5 | UUID7, tag: str) -> dict[str, UUID5 | UUID7]:
     ids = {
-        name: uuid.uuid4()
+        name: uuid5()
         for name in ("document", "chunk", "entity_content", "entity_claim", "fact_content", "old")
     }
-    ids["live"] = uuid.uuid4()
+    ids["live"] = uuid5()
     now = datetime.now(UTC)
     async with dbutil.actor(owner) as session:
         session.add(
             Document(
                 id=ids["document"],
-                content_hash=uuid.uuid4().hex,
+                content_hash=uuid8(),
                 created_by=owner,
                 scopes=[owner],
                 title=tag,
@@ -58,9 +59,9 @@ async def seed_graph(owner: uuid.UUID, tag: str) -> dict[str, uuid.UUID]:
                 scopes=[owner],
             )
         )
-        session.add(EntityContent(id=ids["entity_content"], name=tag, type="concept"))
+        session.add(Entity.Content(id=ids["entity_content"], name=tag, type="concept"))
         session.add(
-            FactContent(
+            Fact.Content(
                 id=ids["fact_content"],
                 subject_id=ids["entity_content"],
                 predicate="related_to",
@@ -70,7 +71,7 @@ async def seed_graph(owner: uuid.UUID, tag: str) -> dict[str, uuid.UUID]:
         # Flush content before its claim because this edge has no ORM relationship ordering.
         await session.flush()
         session.add(
-            EntityClaim(
+            Entity.Claim(
                 id=ids["entity_claim"],
                 content_id=ids["entity_content"],
                 created_by=owner,
@@ -78,7 +79,7 @@ async def seed_graph(owner: uuid.UUID, tag: str) -> dict[str, uuid.UUID]:
             )
         )
         session.add(
-            FactClaim(
+            Fact.Claim(
                 id=ids["old"],
                 content_id=ids["fact_content"],
                 created_by=owner,
@@ -88,19 +89,19 @@ async def seed_graph(owner: uuid.UUID, tag: str) -> dict[str, uuid.UUID]:
             )
         )
         session.add(
-            FactClaim(
+            Fact.Claim(
                 id=ids["live"], content_id=ids["fact_content"], created_by=owner, scopes=[owner]
             )
         )
     return ids
 
 
-def id_values(records: list[dict[str, object]]) -> set[str]:
+def id_values(records: list[JSONRecord]) -> set[str]:
     keys = ("id", "content_id", "document_id", "subject_id")
     return {str(record[key]) for record in records for key in keys if record.get(key)}
 
 
-def read_jsonl(path: Path) -> list[dict[str, object]]:
+def read_jsonl(path: Path) -> list[JSONRecord]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
@@ -109,16 +110,16 @@ def test_export_streams_the_acting_slice_with_history_and_defaults_to_system(
 ) -> None:
     async def run() -> tuple[
         ExportReport,
-        list[dict[str, object]],
+        list[JSONRecord],
         set[str],
         set[str],
         ExportReport,
-        list[dict[str, object]],
+        list[JSONRecord],
         set[str],
     ]:
         await dbutil.reset_db()
-        mine = uuid.uuid4()
-        other = uuid.uuid4()
+        mine = uuid5()
+        other = uuid5()
         my_ids = await seed_graph(mine, "mine")
         other_ids = await seed_graph(other, "other")
         system_ids = await seed_graph(settings.system_user_id, "system")

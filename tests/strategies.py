@@ -1,44 +1,26 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol, cast
 
 from hypothesis import strategies as st
+from id_factory import uuid7s
 from sqlalchemy.dialects.postgresql import Range
 
 from aizk.config import Settings
-from aizk.extract import ontology
 from aizk.extract.models import ConsolidationVerdict, ExtractedEntity, Extraction, TimedFact
+from aizk.ontology import WireEntity, WireExtraction, WireFact
 from aizk.retrieval import Candidate, Lane
 
-
-class WireEntity(Protocol):
-    n: str
-    t: str
-
-
-class WireFact(Protocol):
-    s: str
-    p: str
-    o: str
-
-
-class WireExtraction(Protocol):
-    e: list[WireEntity]
-    f: list[WireFact]
-
-
 # Fixed readable values keep collection independent of the live ontology.
-ENTITY_TYPE_LIST = ("concept", "decision", "pattern", "project", "paper", "tool")
-PREDICATE_LIST = ("related_to", "because", "depends_on", "cites", "uses")
+_ENTITY_TYPES = ("concept", "decision", "pattern", "project", "paper", "tool")
+_PREDICATES = ("related_to", "because", "depends_on", "cites", "uses")
 
-entity_types = st.sampled_from(ENTITY_TYPE_LIST)
-predicates = st.sampled_from(PREDICATE_LIST)
+_entity_types = st.sampled_from(_ENTITY_TYPES)
+predicates = st.sampled_from(_PREDICATES)
 
 # Printable text keeps shrunk failures readable.
 short_text = st.text(min_size=1, max_size=40)
 
-scores = st.floats(allow_nan=False, allow_infinity=False, allow_subnormal=False)
-
-aware_datetimes = st.datetimes(
+_aware_datetimes = st.datetimes(
     min_value=datetime(2000, 1, 1),
     max_value=datetime(2100, 1, 1),
     timezones=st.just(UTC),
@@ -73,37 +55,30 @@ def recalled_candidates(draw: st.DrawFn) -> tuple[Candidate, ...]:
 
 
 def extracted_entities() -> st.SearchStrategy[ExtractedEntity]:
-    return st.builds(ExtractedEntity, name=short_text, type=entity_types, attributes=st.just({}))
+    return st.builds(ExtractedEntity, name=short_text, type=_entity_types, attributes=st.just({}))
 
 
-def llm_entities() -> st.SearchStrategy[WireEntity]:
-    snapshot = ontology.current()
-    strategy = st.builds(
-        snapshot.llm_entity, n=short_text, t=st.sampled_from(snapshot.entity_names)
-    )
-    return cast("st.SearchStrategy[WireEntity]", strategy)
+def wire_entities() -> st.SearchStrategy[WireEntity]:
+    return st.builds(WireEntity, n=short_text, t=st.sampled_from(_ENTITY_TYPES))
 
 
-def llm_facts() -> st.SearchStrategy[WireFact]:
-    snapshot = ontology.current()
-    strategy = st.builds(
-        snapshot.llm_fact,
+def wire_facts() -> st.SearchStrategy[WireFact]:
+    return st.builds(
+        WireFact,
         s=short_text,
-        p=st.sampled_from(snapshot.relation_names),
+        p=predicates,
         o=st.just("") | short_text,
         statement=short_text,
         date=st.none() | short_text,
     )
-    return cast("st.SearchStrategy[WireFact]", strategy)
 
 
-def llm_extractions() -> st.SearchStrategy[WireExtraction]:
-    strategy = st.builds(
-        ontology.current().llm_extraction,
-        e=st.lists(llm_entities(), max_size=4),
-        f=st.lists(llm_facts(), max_size=4),
+def wire_extractions() -> st.SearchStrategy[WireExtraction]:
+    return st.builds(
+        WireExtraction,
+        e=st.lists(wire_entities(), max_size=4),
+        f=st.lists(wire_facts(), max_size=4),
     )
-    return cast("st.SearchStrategy[WireExtraction]", strategy)
 
 
 def extractions() -> st.SearchStrategy[Extraction]:
@@ -120,8 +95,8 @@ def timed_facts() -> st.SearchStrategy[TimedFact]:
         subject=short_text,
         predicate=predicates,
         statement=short_text,
-        valid_from=st.none() | aware_datetimes,
-        valid_to=st.none() | aware_datetimes,
+        valid_from=st.none() | _aware_datetimes,
+        valid_to=st.none() | _aware_datetimes,
     )
 
 
@@ -131,18 +106,16 @@ def consolidation_verdicts() -> st.SearchStrategy[ConsolidationVerdict]:
         st.builds(
             ConsolidationVerdict,
             action=st.just("UPDATE"),
-            supersedes=st.none() | st.uuids(version=5),
+            supersedes=st.none() | uuid7s,
         ),
     )
 
 
+@dataclass(frozen=True, slots=True)
 class TemporalState:
-    def __init__(
-        self, is_latest: bool, valid_from_days: float | None, valid_to_days: float | None
-    ) -> None:
-        self.is_latest = is_latest
-        self.valid_from_days = valid_from_days
-        self.valid_to_days = valid_to_days
+    is_latest: bool
+    valid_from_days: float | None
+    valid_to_days: float | None
 
     def window(self, now: datetime) -> tuple[datetime | None, datetime | None]:
         start = (
@@ -191,5 +164,5 @@ def fact_timeline(draw: st.DrawFn, max_versions: int = 4) -> tuple[list[Temporal
         )
         for index in range(count)
     ]
-    probe = draw(aware_datetimes)
+    probe = draw(_aware_datetimes)
     return states, probe

@@ -8,6 +8,14 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Added
 
+- Self-describing sources can declare any database-backed ontology kind with `- Type <kind>` and
+  any typed relation with `- <predicate> [<object kind>] <object name>`. Project, Area, Status,
+  Paper, and future kinds now share one path. Query-relevant entity catalogs derive from declared
+  sources and live fact endpoints, retain exact scope sets, and join current state relations.
+- Store models expose cohesive `Entity`, `Fact`, and `Relation` namespaces. Watermark and system
+  constants follow the same nested interface through `Watermark.Kind`, `System.Entity`, and
+  `System.Relation`.
+
 - Recall ranks with four new signals, each validated on a planted synthetic corpus before
   landing. Multihop questions expand through an in-statement personalized PageRank seeded by
   the entities the query names (GLiNER2 extracts the mentions, an exact lowercased name match
@@ -18,7 +26,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   Dense lanes carry a relevance floor (`recall_max_distance`) that keeps off-corpus questions
   from packing garbage, and the sources lane caps hits per document
   (`recall_per_document`) so one repetitive note cannot crowd out every other source.
-- Query mentions also match entity names by trigram similarity (`pg_trgm`, migration 0003),
+- Query mentions also match entity names by trigram similarity through the fused initial schema,
   with fuzzy-matched seeds carrying mass scaled by their similarity so a misspelled or
   inflected mention still seeds its entity without outweighing an exact match. Every ranking
   constant in the recall program is now a setting: seed weights, the mass window, the
@@ -39,16 +47,18 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   came from evaluating Google LangExtract head-to-head, which lost to the house extractor
   on yield, latency, and vocabulary enforcement but demonstrated char-interval grounding
   worth stealing.
-- The GLiNER2 gate moved behind an optional sidecar service (`services/gliner`, a FastAPI
-  app whose routes mirror the local model's call surface), so with `AIZK_GLINER_GATE_URL`
-  set the server process never imports torch; empty keeps the in-process model, now loaded
-  lazily. The image is the official `pytorch/pytorch:2.13.0-cuda13.2-cudnn9-runtime` base,
-  whose bundled gcc satisfies `torch.compile`'s inductor. `GLINER_QUANTIZE` (fp16) and
-  `GLINER_COMPILE` (`torch.compile(dynamic=True)`) both default on, measured on the 4090 at
-  2.8/4.0/3.9 ms for route classify, the 2k-chunk relevance gate, and mentions (from
-  6.0/9.2/7.0 baseline) with byte-identical outputs across all configurations. GLiNER2's
-  custom DeBERTa multitask architecture has no vLLM/SGLang serving path, so torch behind
-  FastAPI is the current optimum.
+- GLiNER2 moved behind one required GPU sidecar whose routes cover classification, mentions,
+  relevance, and grounded graph extraction. The server process never imports torch, and an
+  unavailable model fails visibly. `AIZK_EXTRACT_BACKEND` selects the production LLM extractor or
+  the experimental GLiNER graph route without changing graph-building code. The service batches
+  overlapping word windows through GLiNER2's public `batch_extract` API and restores source spans.
+  A controlled Crimson comparison found the large checkpoint nearly as fast as base and somewhat
+  more precise, but still much weaker than the LLM on relation meaning. Large therefore serves the
+  cheap gate while the LLM remains the default writer.
+- Background jobs now share a typed PgQueuer boundary for payload validation, deduplication,
+  priorities, fleet-wide concurrency, and database-backed retries. Profile projection work runs
+  ahead of chunk projection, scheduled passes stay below both, and exhausted failures remain held
+  with their deduplication keys instead of being silently recreated.
 - An optional cross-encoder rerank pass between candidate retrieval and packing: with
   `AIZK_RERANK_URL` set, recall runs the same lane program cut before packing, rescoring the
   evidence lanes through `/v1/rerank` (a vLLM `Qwen3-Reranker-4B` compose service), and a
@@ -85,16 +95,22 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Changed
 
-- Hybrid retrieval is built as one SQLAlchemy statement from mapped tables, pgvector operators,
-  PostgreSQL functions, CTEs, windows, and unions. The stored recall function and its SQL template
-  are gone. The whole program lives in one `build_recall_statement` function in one
-  `retrieval/query.py` module that reads top to bottom in retrieval order, with `packed=False`
-  cutting the same program before the budget walk for the rerank path. The retrieval package
-  is exactly two modules: `query.py` (the statement, `ContextLane`, `Route`, `explain`) and
-  `recall.py` (orchestration, the packer twin, and `Candidate`, now the single evidence
-  model — `Block` is gone, `ContextPack` carries `candidates`, and packing internals are
-  excluded from serialization). `Candidate` validates `fact_id` and `source_chunk_id` as
-  UUID7, the row-id invariant; content-addressed ids stay plain UUIDs by design.
+- Reusable PostgreSQL columns, native enums, JSONB and pgvector operators, typed values relations,
+  template expressions, and database hashing moved to the optional `patos[sql]` package. AIZK now
+  imports one `patos.sql` namespace and no longer owns a general SQL helper package. Database
+  hashing uses SHA-256 through `sql.uuid8`. Document content identities are native PostgreSQL UUID
+  values carrying 122 digest bits with valid RFC 9562 version and variant fields. Pydantic `UUID8`
+  validates the invariant at the application boundary.
+- Fact UUID5 identities now use resolved subject and object IDs rather than endpoint names. Equal
+  names under distinct ontology kinds therefore remain distinct. State updates close every
+  occupied live value under the same relation, while set relations such as `part_of` coexist.
+
+- Hybrid retrieval is one maximal SQLAlchemy plan built from typed lane statements. Every query
+  includes local evidence, global summaries, and graph paths so routing cannot discard evidence.
+  The cross-encoder orders the combined candidates on merit, and packing takes a simple token
+  budget prefix. The old query-time router remains only as an evaluation instrument. `Candidate`
+  validates `fact_id` and `source_chunk_id` as
+  UUID7, the row-id invariant. Content-addressed and external identities use UUID5.
 - Text ingestion supports stable source URIs and batches a corpus through one embedder pipeline.
 - Graph writing and graph repair now live outside the extraction pipeline. Retrieval database
   reads now live outside recall orchestration.
@@ -155,9 +171,8 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Migrations
 
-- `0001_init` remains the deployed legacy baseline. `0002_scope_lattice` copies owner provenance
-  into `created_by`, removes mutable ownership, adds speaker perspective, and installs nonempty
-  personal, organization, and organization-intersection RLS without losing existing rows.
+- Every pre-release revision is fused into `0001_init`. A pre-release Aizk database is backed up
+  and rebuilt from that baseline while the separate Logto database remains intact.
 
 ## 0.0.1 - 2026-07-04
 

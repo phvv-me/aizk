@@ -13,7 +13,7 @@
 
 [🇧🇷](https://phvv.me/aizk/pt-BR/) [🇲🇽](https://phvv.me/aizk/es/) [🇯🇵](https://phvv.me/aizk/ja/) [🇨🇳](https://phvv.me/aizk/zh/)
 
-A self-hosted multi-tenant memory engine that turns a Zettelkasten into scoped agent-queryable memory over MCP
+A self-hosted shared memory engine for people, teams, and MCP agents
 
 ## What this is
 
@@ -26,12 +26,12 @@ speaks MCP, so Claude or any other MCP-capable assistant calls it directly. Full
 
 ## Quickstart
 
-One command brings up the whole engine, Postgres, the embedding and extraction containers,
-and one aizk container that is the MCP server, the background worker, and the scheduled auto-backup
-at once. It migrates and comes up ready over HTTP with nothing else to run.
+One command brings up PostgreSQL, the model services, and one hardened Aizk image. Compose runs
+that image as a one-shot migration service, a forced-RLS MCP server, and a private background
+worker. The public process never receives the database-owner credential.
 
 ```sh
-docker compose -f deploy/docker-compose.yml up -d
+docker compose --env-file .env -f deploy/docker-compose.yml up -d
 ```
 
 Then call its tools from any MCP client.
@@ -45,18 +45,21 @@ async with Client("http://localhost:8080/mcp") as client:
     print(result.data)
 ```
 
-Every docker-compose knob and every `Settings` default live in one file, `deploy/.env.example`,
-copy it to `deploy/.env` and edit, both compose and the app read the same `AIZK_`-prefixed
-variables. Running
-the server, worker, or backup outside the container is a plain `pip install aizk` and the matching
-`aizk` command. See [Operations](https://phvv.me/aizk/operations/) for deployment and backups.
+Every Compose setting and every `Settings` default is documented in `deploy/.env.example`. Copy it
+to `.env`, generate independent database passwords, and run Compose from the package root. Every
+host port binds to loopback. The optional public profile opens an outbound Cloudflare Tunnel only
+after its Logto and OAuth preflight succeeds. See
+[Operations](https://phvv.me/aizk/operations/) for storage and backups, and
+[Security](https://phvv.me/aizk/security/) for the production release gate.
+See [Onboarding](ONBOARDING.md) to add a collaborator, create a shared organization, and connect
+Claude Code, Codex, or OpenCode.
 
 ## The flows
 
 ```mermaid
 flowchart LR
-    A[agent] -->|remember, ingest| W[write path<br/>chunk, extract, consolidate]
-    A -->|recall, get_context| Re[read path<br/>fused retrieval]
+    A[agent] -->|remember| W[write path<br/>chunk, extract, consolidate]
+    A -->|recall| Re[read path<br/>fused retrieval]
     W --> P[(Postgres<br/>knowledge graph + row level security)]
     Re --> P
     P --> Re --> A
@@ -67,3 +70,7 @@ one scoped, bi-temporal claim per owner. Reading fuses five retrieval lanes behi
 round trip, filtered to exactly what the caller's own scopes make visible before a row is ever
 considered. The full breakdown of both, with a diagram for each stage, lives in
 [Engine](https://phvv.me/aizk/engine/).
+
+Self-describing Markdown may declare any live ontology kind with `- Type <kind>` and any typed
+relation with `- <predicate> [<object kind>] <object name>`. Projects and areas use this generic
+ontology path rather than dedicated metadata fields.

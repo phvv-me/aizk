@@ -3,30 +3,87 @@
 # orphan the existing aizk-* containers and the aizk_db-data volume onto a new `deploy` project.
 name: aizk
 
+x-aizk-env: &aizk-env
+  - path: ../.env
+    required: false
+  - path: ${AIZK_SECRET_ENV_FILE:-${HOME}/.aizk/.env}
+    required: false
+
+x-aizk-runtime: &aizk-runtime
+  image: aizk-runtime
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+    additional_contexts:
+      patos: ../../patos
+      rls: ../../rls
+  env_file: *aizk-env
+  environment: &aizk-runtime-environment
+    AIZK_DB_HOST: db
+    AIZK_DB_PORT: "5432"
+    AIZK_EMBED_URL: http://vllm-emb:8000/v1
+    AIZK_LLM_URL: http://vllm-llm:8000/v1
+    AIZK_RERANK_URL: http://vllm-rerank:8000
+    AIZK_GLINER_URL: http://gliner:8000
+    AIZK_EMBED_MODEL: ${AIZK_EMBED_MODEL:-qwen3-vl-emb}
+    AIZK_LLM_MODEL: ${AIZK_LLM_MODEL:-extractor}
+    AIZK_LLM_EXTRACT_MAX_TOKENS: ${AIZK_LLM_EXTRACT_MAX_TOKENS:-1024}
+    AIZK_LLM_RESPONSE_MAX_TOKENS: ${AIZK_LLM_RESPONSE_MAX_TOKENS:-512}
+    AIZK_RERANK_MODEL: ${AIZK_RERANK_MODEL:-qwen3-reranker}
+    AIZK_GRAPH_BUILD_CONCURRENCY: ${AIZK_GRAPH_BUILD_CONCURRENCY:-48}
+    AIZK_QUEUE_BATCH_SIZE: ${AIZK_QUEUE_BATCH_SIZE:-64}
+    AIZK_DISPLAY_TIMEZONE: ${AIZK_DISPLAY_TIMEZONE:-Asia/Tokyo}
+  cap_drop: ["ALL"]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=1g
+  pids_limit: 512
+  restart: unless-stopped
+
 services:
+  # Named volumes start owned by root. This one-shot service grants only the unprivileged Aizk
+  # runtime user access to its two writable directories, then exits before any server starts.
+  volume-init:
+    <<: *aizk-runtime
+    user: "0:0"
+    cap_add: ["CHOWN", "DAC_READ_SEARCH", "FOWNER"]
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        install -d -o 10001 -g 10001 -m 0700 /oauth /backups
+        && chown -R 10001:10001 /oauth /backups
+        && chmod 0700 /oauth /backups
+    env_file: []
+    environment: {}
+    volumes:
+      - ${AIZK_BACKUP_VOLUME:-backups}:/backups
+      - ${AIZK_OAUTH_VOLUME:-oauth}:/oauth
+    restart: "no"
+
   db:
-    image: tensorchord/vchord-suite:pg18-latest
-    # the compose-level ${VAR:-default} substitutions below are filled from the project's own
-    # .env (compose auto-loads it from this file's directory, no env_file needed for these), the
-    # single file `.env.example` documents field for field alongside `config/settings.py`'s own
-    # defaults, so a password or port changed once here is the same edit `Settings` picks up.
+    image: tensorchord/vchord-suite:pg18-latest@sha256:c6e5e77a1180199f91b040b6e85c6d10b0ded6d49fb614dfd2e7272ffb91af08
+    # The compose-level ${VAR:-default} substitutions below come from packages/aizk/.env through
+    # the documented --env-file .env option. Compose anchors automatic discovery to this file's
+    # deploy directory, so omitting that option would silently select these defaults instead.
+    # The single deploy/.env.example documents the same fields as config/settings.py.
     environment:
       # POSTGRES_USER stays the fixed "aizk_admin" literal, not a var: it is the owning role every
       # migration and `initdb/roles.sh` connects as, and `Settings.admin_database_url` hardcodes
       # the same literal role name, only the password travels through the environment.
       POSTGRES_USER: aizk_admin
-      POSTGRES_PASSWORD: ${AIZK_ADMIN_PASSWORD:-aizk}
+      POSTGRES_PASSWORD: ${AIZK_ADMIN_PASSWORD:?set AIZK_ADMIN_PASSWORD}
       POSTGRES_DB: ${AIZK_DB_NAME:-aizk}
+      POSTGRES_INITDB_ARGS: --data-checksums
+      AIZK_APP_PASSWORD: ${AIZK_APP_PASSWORD:?set AIZK_APP_PASSWORD}
+      AIZK_LOGTO_DB_PASSWORD: ${AIZK_LOGTO_DB_PASSWORD:?set AIZK_LOGTO_DB_PASSWORD}
     # unlike the interpolations above, which compose resolves on the host before the container
     # ever starts, `roles.sh` runs its own shell inside the container and needs AIZK_APP_PASSWORD
     # as a real environment variable there to read; env_file passes the whole .env through as
     # container env for exactly that, `required: false` so a checkout with no .env yet (only the
     # committed .env.example) still starts clean on every field's own default.
-    env_file:
-      - path: .env
-        required: false
     ports:
-      - "${AIZK_DB_PORT:-5433}:5432"
+      - "127.0.0.1:${AIZK_DB_PORT:-5433}:5432"
     # the image's own CMD (`docker inspect tensorchord/vchord-suite:pg18-latest`) already carries
     # shared_preload_libraries and search_path, and a compose `command:` replaces CMD outright
     # rather than appending to it, so both are repeated here verbatim alongside the request GUC.
@@ -46,10 +103,42 @@ services:
       - search_path="$$user", public, bm25_catalog, tokenizer_catalog
       - -c
       - app.scopes=
+      - -c
+      - shared_buffers=${AIZK_PG_SHARED_BUFFERS:-16GB}
+      - -c
+      - effective_cache_size=${AIZK_PG_EFFECTIVE_CACHE_SIZE:-128GB}
+      - -c
+      - work_mem=${AIZK_PG_WORK_MEM:-16MB}
+      - -c
+      - maintenance_work_mem=${AIZK_PG_MAINTENANCE_WORK_MEM:-2GB}
+      - -c
+      - effective_io_concurrency=${AIZK_PG_EFFECTIVE_IO_CONCURRENCY:-200}
+      - -c
+      - maintenance_io_concurrency=${AIZK_PG_MAINTENANCE_IO_CONCURRENCY:-200}
+      - -c
+      - random_page_cost=${AIZK_PG_RANDOM_PAGE_COST:-1.1}
+      - -c
+      - checkpoint_timeout=${AIZK_PG_CHECKPOINT_TIMEOUT:-15min}
+      - -c
+      - max_wal_size=${AIZK_PG_MAX_WAL_SIZE:-8GB}
+      - -c
+      - min_wal_size=${AIZK_PG_MIN_WAL_SIZE:-2GB}
+      - -c
+      - wal_compression=${AIZK_PG_WAL_COMPRESSION:-on}
+      - -c
+      - track_io_timing=${AIZK_PG_TRACK_IO_TIMING:-on}
+      - -c
+      - log_lock_waits=${AIZK_PG_LOG_LOCK_WAITS:-on}
+      - -c
+      - log_min_duration_statement=${AIZK_PG_LOG_MIN_DURATION_STATEMENT:-1000ms}
+      - -c
+      - autovacuum_vacuum_scale_factor=${AIZK_PG_AUTOVACUUM_VACUUM_SCALE_FACTOR:-0.05}
+      - -c
+      - autovacuum_analyze_scale_factor=${AIZK_PG_AUTOVACUUM_ANALYZE_SCALE_FACTOR:-0.02}
     volumes:
       # pg18+ images store data under a major-version-specific subdirectory (pg_ctlcluster-style),
       # so the mount point is the parent dir now, not .../data directly
-      - db-data:/var/lib/postgresql
+      - ${AIZK_POSTGRES_DATA_VOLUME:-db-data}:/var/lib/postgresql
       # runs once against a fresh volume, before any migration ever connects: creates the
       # restricted aizk_app role and its schema-wide default privileges, so 0001_init never has
       # to create the role itself. Postgres runs every /docker-entrypoint-initdb.d/ script exactly
@@ -58,7 +147,7 @@ services:
       # than hardcoding the role's password inline.
       - ./initdb/roles.sh:/docker-entrypoint-initdb.d/roles.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U aizk_admin -d aizk"]
+      test: ["CMD-SHELL", "pg_isready -U aizk_admin -d ${AIZK_DB_NAME:-aizk}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -66,8 +155,7 @@ services:
   # vLLM serves Qwen3-VL-Embedding-2B over an OpenAI-compatible /v1/embeddings, so the model loads
   # in this container, never inside aizk. --runner pooling is the current flag (--task embed was
   # removed), is_matryoshka lets a request set dimensions=1024 to truncate the native 2048-d output.
-  # FP8 is the Ada 4090's native path, so the weights load quantized and leave room for the chat
-  # model to co-reside on the same 24 GB card. Every
+  # The default bf16 path works on Ada and Ampere GPUs. Every
   # serving knob below is an .env var with an inline default, so flipping precision or model is an
   # .env edit and never a yaml one. Bound to localhost only because vLLM ships unauthenticated;
   # never expose it on a public address. AIZK_EMBED_CHECKPOINT (the HF weights to load) and
@@ -76,12 +164,9 @@ services:
   vllm-emb:
     image: vllm/vllm-openai:v0.24.0
     command:
-      - "--model"
       - "${AIZK_EMBED_CHECKPOINT:-Qwen/Qwen3-VL-Embedding-2B}"
       - "--runner"
       - "pooling"
-      - "--quantization"
-      - "${AIZK_EMBED_QUANTIZATION:-fp8}"
       - "--gpu-memory-utilization"
       - "${AIZK_EMBED_GPU_MEM_UTIL:-0.30}"
       # aizk chunks are 2048 chars (<=700 tokens), so a 2048 context is ample; the model's 262K
@@ -122,57 +207,21 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["${AIZK_EMBED_GPU_DEVICE:-0}"]
               capabilities: ["gpu"]
 
-  # vLLM serves the graph-extraction chat model over an OpenAI-compatible /v1/chat/completions,
-  # the second co-resident model on the same 4090, reached by aizk's `structured` seam at llm_url.
-  # A default-on service now, not an opt-in profile: extraction replaced Ollama with this
-  # co-resident vLLM lane sized to fit beside the embedder on one 24 GB card. Model defaults to
-  # Gemma 4 E2B (the Efficient series, 2.3B
-  # effective, Apache 2.0), the official Google w4a16 QAT checkpoint in compressed-tensors format
-  # (`google/gemma-4-E2B-it-qat-w4a16-ct`), ungated, day-0 vLLM support, JSON/function-calling
-  # trained. E4B (`google/gemma-4-E4B-it-qat-w4a16-ct`) was the first choice but ruled out twice
-  # over: its process footprint measured a fixed ~9.23 GiB against only ~9.59 GiB physically free
-  # once the embedder and reranker hold their own share, a margin under 400 MiB that persisted
-  # identically across five tuning attempts (gpu-memory-utilization 0.35/0.32/0.34, max-num-seqs
-  # 48/16/12, with and without PYTORCH_CUDA_ALLOC_CONF=expandable_segments); and separately, even
-  # standalone with the whole GPU to itself, E4B could not reliably answer the combined call's
-  # strict-mode JSON schema at all on this vLLM version (v0.24.0) — every attempt (a trivial
-  # one-sentence input included) ran to extract_max_tokens without ever emitting valid JSON,
-  # while the identical call against E2B worked cleanly across 3000+ real chunks. E2B's 7.23 GiB
-  # footprint fits with room to spare and its structured output was fully reliable throughout.
-  # Qwen3.5-4B was ruled out earlier still: it ships no official GPTQ-Int4 at 4B, and its
-  # Gated-DeltaNet hybrid architecture adds a fixed-size Mamba cache block per concurrent sequence
-  # on top of the ordinary KV cache, which capped real concurrency near 12-13 sequences on this
-  # shared card regardless of max-model-len; Gemma 4's local/global attention hybrid carries no
-  # such extra per-sequence floor, so ordinary `--gpu-memory-utilization`/`--max-model-len` tuning
-  # behaves predictably. vLLM auto-detects the compressed-tensors quant config from the
-  # checkpoint, so AIZK_LLM_QUANTIZATION is still named explicitly, matching how every other
-  # service here names its own quantization instead of relying on autodetection silently.
-  # --enable-prefix-caching and --enable-chunked-prefill raise throughput under aizk's own
-  # concurrent chunk load; --max-num-seqs matches settings.graph_build_concurrency so this
-  # pipeline's own concurrency is what saturates vLLM's continuous batching, and structured output
-  # already runs through vLLM's default xgrammar backend with no flag needed. Gemma 4 answers
-  # directly with no thinking preamble unless a `<|think|>` token is placed in the system prompt,
-  # the opposite default of Qwen3's hybrid-thinking models, so AIZK_LLM_CHAT_TEMPLATE_KWARGS stays
-  # at its empty default, no extra_body needed to keep the combined call's output compact.
-  # AIZK_LLM_CHECKPOINT/AIZK_LLM_MODEL split the same way as the embedder's, checkpoint path
-  # versus served alias, and the alias must match `config/settings.py`'s own llm_model default.
+  # vLLM serves schema-constrained graph extraction. Every sizing knob stays in the shared env
+  # file, which supports either a small co-resident model or a dedicated-GPU model with no second
+  # Compose file. The served alias must match AIZK_LLM_MODEL.
   vllm-llm:
     image: vllm/vllm-openai:v0.24.0
-    # PyTorch's own suggested fix for allocator fragmentation under a tight shared budget; kept
-    # even though E2B has room to spare, since it cost nothing during the E4B tuning search and
-    # buys headroom back for anyone who switches AIZK_LLM_CHECKPOINT to the larger model.
     environment:
+      HF_XET_HIGH_PERFORMANCE: "${AIZK_HF_XET_HIGH_PERFORMANCE:-0}"
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
     command:
-      - "--model"
       - "${AIZK_LLM_CHECKPOINT:-google/gemma-4-E2B-it-qat-w4a16-ct}"
       - "--quantization"
       - "${AIZK_LLM_QUANTIZATION:-compressed-tensors}"
-      # 0.45 (10.8 GB) still clears E2B's measured 7.23 GiB footprint with margin and makes
-      # room for the reranker's 0.20 share, keeping the three lanes inside one card.
       - "--gpu-memory-utilization"
       - "${AIZK_LLM_GPU_MEM_UTIL:-0.45}"
       - "--max-model-len"
@@ -180,11 +229,11 @@ services:
       - "--max-num-seqs"
       - "${AIZK_LLM_MAX_NUM_SEQS:-48}"
       - "--kv-cache-dtype"
-      - "${AIZK_LLM_KV_CACHE_DTYPE:-fp8}"
+      - "${AIZK_LLM_KV_CACHE_DTYPE:-bfloat16}"
       - "--enable-prefix-caching"
       - "--enable-chunked-prefill"
       - "--served-model-name"
-      - "${AIZK_LLM_MODEL:-gemma4-e2b-llm}"
+      - "${AIZK_LLM_MODEL:-extractor}"
       - "--trust-remote-code"
     ports:
       - "127.0.0.1:${AIZK_LLM_PORT:-8002}:8000"
@@ -207,7 +256,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["${AIZK_LLM_GPU_DEVICE:-0}"]
               capabilities: ["gpu"]
 
   # vLLM serves Qwen3-Reranker-4B over /v1/rerank, the cross-encoder second pass recall
@@ -224,14 +273,13 @@ services:
   vllm-rerank:
     image: vllm/vllm-openai:v0.24.0
     command:
-      - "--model"
       - "${AIZK_RERANK_CHECKPOINT:-Qwen/Qwen3-Reranker-4B}"
       - "--runner"
       - "pooling"
       - "--quantization"
       - "${AIZK_RERANK_QUANTIZATION:-fp8}"
       - "--gpu-memory-utilization"
-      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.20}"
+      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.25}"
       - "--max-model-len"
       - "${AIZK_RERANK_MAX_MODEL_LEN:-2048}"
       - "--max-num-seqs"
@@ -260,24 +308,28 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["${AIZK_RERANK_GPU_DEVICE:-0}"]
               capabilities: ["gpu"]
 
-  # The gliner sidecar serves the GLiNER2 gate (extraction gating, route classification,
-  # query mentions) so the server process never imports torch. Its custom DeBERTa multitask
-  # architecture has no vLLM serving path, so this is a plain torch FastAPI service from
-  # services/gliner. The 205M model holds ~1.2 GB on the card, inside the margin the vLLM
-  # utilization shares below leave free; GLINER_DEVICE=cpu moves it off the GPU entirely.
+  # The gliner sidecar serves relevance, route classification, query mentions, and optional graph
+  # extraction so the server process never imports torch. Its custom DeBERTa multitask architecture
+  # has no vLLM serving path, so this is a plain torch FastAPI service from services/gliner. The
+  # 340M large checkpoint serves every task on GPU with fp16, FlashDeberta, and optional compiled
+  # tensor subgraphs. Dense documents use overlapping long-context extraction.
   gliner:
     build:
-      # context is the package root so the image copies the shared wire contract from
-      # src/aizk/serving/gate/contract.py beside services/gliner/app.py; the root
-      # .dockerignore keeps the context small
+      # context is the package root so the image copies the gate and extraction wire models beside
+      # services/gliner/app.py. The root .dockerignore keeps the context small.
       context: ..
       dockerfile: services/gliner/Dockerfile
     environment:
       GLINER_DEVICE: ${AIZK_GLINER_DEVICE:-cuda}
-      GLINER_CHECKPOINT: ${AIZK_GLINER_CHECKPOINT:-fastino/gliner2-base-v1}
+      GLINER_CHECKPOINT: ${AIZK_GLINER_CHECKPOINT:-fastino/gliner2-large-v1}
+      GLINER_QUANTIZE: ${AIZK_GLINER_QUANTIZE:-true}
+      GLINER_COMPILE: ${AIZK_GLINER_COMPILE:-false}
+      GLINER_LONG_CHUNK_SIZE: ${AIZK_GLINER_LONG_CHUNK_SIZE:-384}
+      GLINER_LONG_CHUNK_OVERLAP: ${AIZK_GLINER_LONG_CHUNK_OVERLAP:-64}
+      GLINER_BATCH_SIZE: ${AIZK_GLINER_BATCH_SIZE:-8}
     ports:
       - "127.0.0.1:${AIZK_GLINER_PORT:-8006}:8000"
     depends_on:
@@ -293,7 +345,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 180s
-    ipc: host
     volumes:
       - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.aizk/hf-cache
     deploy:
@@ -301,56 +352,141 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ["${AIZK_GLINER_GPU_DEVICE:-0}"]
               capabilities: ["gpu"]
+  # Migrations and queue installation run once before either long-lived process starts. This
+  # service carries the database-owner credential and exits before public traffic is accepted.
+  setup:
+    <<: *aizk-runtime
+    command: ["db", "setup"]
+    depends_on:
+      cloudflared:
+        condition: service_healthy
+        required: false
+      db:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+        required: false
+      volume-init:
+        condition: service_completed_successfully
+    restart: "no"
 
-  # the whole engine in one container: `serve-mcp` gathers the pgqueuer worker on its own event
-  # loop (serve_with_worker defaults on), so this single service is the MCP server, the background
-  # maintenance passes, and the scheduled auto-backup at once. Reaches the db and the model
-  # containers by their compose service names, so the localhost defaults that serve host-run dev
-  # are overridden here to the container-internal addresses, never edited in code.
+  # The public process receives only the forced-RLS app credential. Owner maintenance, queue
+  # execution, and plaintext backups stay in the private worker below.
   server:
-    build:
-      # context is the package root (parent of deploy/) so the build sees src/ and pyproject.toml;
-      # the .dockerignore at that root still applies since it is resolved against the context
-      context: ..
-      dockerfile: deploy/Dockerfile
-      # Patos and RLS are developed beside Aizk and may be newer than their PyPI releases.
-      # BuildKit sends only those packages as extra contexts instead of the whole monorepo.
-      additional_contexts:
-        patos: ../../patos
-        rls: ../../rls
+    <<: *aizk-runtime
+    depends_on:
+      public-check:
+        condition: service_completed_successfully
+        required: false
+      setup:
+        condition: service_completed_successfully
+      gliner:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+        required: false
+    environment:
+      <<: *aizk-runtime-environment
+      AIZK_ADMIN_DATABASE_URL: ""
+      AIZK_ADMIN_PASSWORD: ""
+      AIZK_BACKUP_DATABASE_URL: ""
+      AIZK_BACKUP_ENABLED: "0"
+      AIZK_AUTO_SETUP: "0"
+      AIZK_SERVE_WITH_WORKER: "0"
+      AIZK_TUNNEL_TOKEN: ""
+      AIZK_MCP_HOST: 0.0.0.0
+      AIZK_MCP_PORT: "8080"
+      FASTMCP_HOME: /oauth
+    ports:
+      - "127.0.0.1:${AIZK_MCP_PUBLISH_PORT:-8080}:8080"
+    volumes:
+      - ${AIZK_OAUTH_VOLUME:-oauth}:/oauth
+
+  # The private worker owns privileged maintenance and backups but publishes no port. An exploit
+  # in the MCP server therefore cannot obtain the owner connection through its environment.
+  worker:
+    <<: *aizk-runtime
+    command: ["worker"]
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      gliner:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+        required: false
+    environment:
+      <<: *aizk-runtime-environment
+      AIZK_BACKUP_ENABLED: "1"
+      AIZK_BACKUP_DIR: /backups
+    volumes:
+      - ${AIZK_BACKUP_VOLUME:-backups}:/backups
+
+  # Logto remains the identity and organization authority in the optional public deployment.
+  logto:
+    image: svhd/logto:1.41.0
+    profiles: ["public"]
     depends_on:
       db:
         condition: service_healthy
-    env_file:
-      - path: .env
-        required: false
+    entrypoint: ["sh", "-c", "npm run cli db alt deploy && exec npm start"]
     environment:
-      # reach Postgres by service name on its own internal 5432, not the host-mapped 5433. The db
-      # host and port are all that changes, admin_asyncpg_dsn (and so the backup connection) and
-      # the app DSN both rebuild from them, so pg_client_launcher stays empty and pg_dump runs
-      # right here against db:5432 with the image's own version-matched client.
-      AIZK_DB_HOST: db
-      AIZK_DB_PORT: "5432"
-      # the three model containers, each listening on its own internal 8000
-      AIZK_EMBED_URL: http://vllm-emb:8000/v1
-      AIZK_LLM_URL: http://vllm-llm:8000/v1
-      AIZK_RERANK_URL: http://vllm-rerank:8000/v1
-      AIZK_GLINER_GATE_URL: http://gliner:8000
-      # serve streamable HTTP on all interfaces inside the container, published below; a reverse
-      # proxy or tunnel terminates TLS in front of it, see docs/operations.md
-      AIZK_MCP_HOST: 0.0.0.0
-      AIZK_MCP_PORT: "8080"
-      # the integrated auto-backup, the scheduled BackupTask dumping to the mounted volume nightly
-      AIZK_BACKUP_ENABLED: "1"
-      AIZK_BACKUP_DIR: /backups
+      - TRUST_PROXY_HEADER=1
+      - DB_URL=postgres://logto:${AIZK_LOGTO_DB_PASSWORD:?set AIZK_LOGTO_DB_PASSWORD}@db:5432/logto
+      - ENDPOINT=${AIZK_LOGTO_ENDPOINT:-http://localhost:3001}
+      - ADMIN_ENDPOINT=${AIZK_LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
     ports:
-      - "${AIZK_MCP_PUBLISH_PORT:-8080}:8080"
-    volumes:
-      - backups:/backups
+      - "127.0.0.1:${AIZK_LOGTO_PORT:-3001}:3001"
+      - "127.0.0.1:${AIZK_LOGTO_ADMIN_PORT:-3002}:3002"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/oidc/.well-known/openid-configuration').then(r => { if (!r.ok) process.exit(1) })"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # This one-shot gate makes the public server fail closed when authentication is absent or
+  # partial. The shared tunnel must be ready first because it publishes Logto's canonical issuer.
+  public-check:
+    <<: *aizk-runtime
+    profiles: ["public"]
+    command: ["check-public"]
+    depends_on:
+      cloudflared:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+    environment:
+      <<: *aizk-runtime-environment
+      AIZK_REQUIRE_AUTH: "1"
+    restart: "no"
+
+  # The outbound Cloudflare Tunnel publishes Logto and MCP through the public profile. Logto
+  # starts first, then the tunnel's native readiness endpoint proves an active Cloudflare
+  # connection before any process resolves the canonical public OIDC issuer through it.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.6.1
+    profiles: ["public"]
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token ${AIZK_TUNNEL_TOKEN:-}
+    depends_on:
+      logto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
     restart: unless-stopped
 
 volumes:
   db-data:
   backups:
+  oauth:

@@ -31,8 +31,8 @@ flowchart TD
 - **Read.** The complete row scope must be contained by the token's readable standing. A public
   organization admits only its singleton and never widens an intersection.
 - **Write.** The complete row scope must be contained by writable standing. A personal singleton
-  is the default destination. Organization roles configured as editor or admin let a write name
-  one organization or an explicit intersection.
+  is the default destination. Effective organization permissions returned by Logto let a write
+  name one organization or an explicit intersection.
 - **Retrieval.** No query-time scope selector exists. The database returns every row contained by
   the User's complete readable standing, so standing in A and B includes A, B, and A-and-B.
 - **Provenance.** `created_by` records who or which service produced a row. It grants no read,

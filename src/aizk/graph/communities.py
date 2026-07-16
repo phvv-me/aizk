@@ -1,23 +1,36 @@
-import uuid
+import asyncio
+from collections.abc import Sequence
+from itertools import batched
 
 from loguru import logger
+from mainboard.profiling import span
 from networkx.algorithms.community.louvain import louvain_communities
 from networkx.classes import Graph
+from patos import FrozenModel
+from pydantic import UUID5
 from sqlalchemy import delete
 from sqlmodel import select
 
 from ..config import settings
-from ..extract.llm import structured
-from ..serving import embed
-from ..store import Community, EntityContent, LiveFact
+from ..serving.embed import embed
+from ..serving.extract import LLM
+from ..store import Community, Entity, Fact
 from ..store.identity import User
 from ..types import Scopes
 from .models import CommunitySummary
 
 
+class CommunityFact(FrozenModel):
+    """The narrow live-fact projection community detection and prompts consume."""
+
+    subject_id: UUID5
+    object_id: UUID5 | None
+    statement: str
+
+
 def detect(
-    facts: list[LiveFact], min_size: int, backend: str = "networkx"
-) -> list[set[uuid.UUID]]:
+    facts: Sequence[CommunityFact | Fact.Live], min_size: int, backend: str = "networkx"
+) -> list[set[UUID5]]:
     """Detect entity communities over the latest-fact graph by Louvain modularity."""
     graph = Graph()
     graph.add_edges_from(
@@ -40,38 +53,54 @@ class CommunityBuilder:
     def __init__(
         self,
         scopes: Scopes,
-        entities: dict[uuid.UUID, EntityContent],
-        facts: list[LiveFact],
+        entities: dict[UUID5, str],
+        facts: Sequence[CommunityFact | Fact.Live],
     ) -> None:
         self.scopes = frozenset(scopes)
         self.entities = entities
         self.facts = facts
 
-    def prompt(self, cluster: set[uuid.UUID]) -> str:
+    def prompt(self, cluster: set[UUID5]) -> str:
         """Render one cluster's entity roster and internal facts."""
-        names = [self.entities[member].name for member in cluster if member in self.entities]
-        statements = [
-            fact.statement
-            for fact in self.facts
-            if fact.subject_id in cluster and (fact.object_id is None or fact.object_id in cluster)
+        names = sorted(self.entities[member] for member in cluster if member in self.entities)[
+            : settings.community_entities_k
         ]
+        statements = list(
+            dict.fromkeys(
+                fact.statement
+                for fact in self.facts
+                if fact.subject_id in cluster
+                and (fact.object_id is None or fact.object_id in cluster)
+            )
+        )[: settings.community_facts_k]
         roster = "Entities: " + ", ".join(names)
         facts = "Facts:\n" + "\n".join(f"- {statement}" for statement in statements)
         return f"{roster}\n\n{facts}"
 
-    async def rows(self, clusters: list[set[uuid.UUID]]) -> list[Community]:
+    async def rows(self, clusters: list[set[UUID5]]) -> list[Community]:
         """Build all summary rows before the generation replacement begins."""
-        reports = [
-            await structured(
-                settings.community_summary_system,
-                self.prompt(cluster),
-                CommunitySummary,
+        llm = LLM.configured()
+        reports: list[CommunitySummary] = []
+        with span("community_summaries", memory=True):
+            for group in batched(clusters, settings.community_build_concurrency, strict=False):
+                reports.extend(
+                    await asyncio.gather(
+                        *(
+                            llm.generate(
+                                settings.community_summary_system,
+                                self.prompt(cluster),
+                                CommunitySummary,
+                            )
+                            for cluster in group
+                        )
+                    )
+                )
+        with span("community_embeddings", memory=True):
+            vectors = (
+                await embed([report.summary for report in reports], mode="document")
+                if reports
+                else []
             )
-            for cluster in clusters
-        ]
-        vectors = (
-            await embed([report.summary for report in reports], mode="document") if reports else []
-        )
         return [
             Community(
                 created_by=settings.system_user_id,
@@ -91,28 +120,40 @@ async def build_communities(
     """Detect communities over the entity graph, summarize each, store the rows, return the
     count."""
     key = frozenset(scopes or (settings.system_user_id,))
-    async with User.system(key) as session:
-        facts = list(await session.exec(LiveFact.embedded()))
-        entity_ids = {
-            entity_id
-            for fact in facts
-            for entity_id in (fact.subject_id, fact.object_id)
-            if entity_id is not None
-        }
-        entities = {
-            entity.id: entity
-            for entity in await session.exec(
-                select(EntityContent).where(EntityContent.id.in_(entity_ids))
-            )
-        }
-    clusters = detect(facts, settings.community_min_size, settings.community_backend)
+    with span("community_snapshot", memory=True):
+        async with User.system(key) as session:
+            facts = [
+                CommunityFact.model_validate(row, from_attributes=True)
+                for row in await session.exec(
+                    select(Fact.Live.subject_id, Fact.Live.object_id, Fact.Live.statement)
+                    .where(Fact.Live.embedding.is_not(None))
+                    .order_by(Fact.Live.id.desc())
+                )
+            ]
+            entity_ids = {
+                entity_id
+                for fact in facts
+                for entity_id in (fact.subject_id, fact.object_id)
+                if entity_id is not None
+            }
+            entities = {
+                entity_id: name
+                for entity_id, name in await session.exec(
+                    select(Entity.Content.id, Entity.Content.name).where(
+                        Entity.Content.id.in_(entity_ids)
+                    )
+                )
+            }
+    with span("community_detection", memory=True):
+        clusters = detect(facts, settings.community_min_size, settings.community_backend)
     rows = await CommunityBuilder(key, entities, facts).rows(clusters)
-    async with User.system(key) as session:
-        await session.exec(
-            delete(Community)
-            .where(Community.scopes == sorted(key))
-            .execution_options(synchronize_session=False)
-        )
-        session.add_all(rows)
+    with span("community_replacement", memory=True):
+        async with User.system(key) as session:
+            await session.exec(
+                delete(Community)
+                .where(Community.scopes == sorted(key))
+                .execution_options(synchronize_session=False)
+            )
+            session.add_all(rows)
     logger.info("replaced {} communities in scope {}", len(rows), key)
     return len(rows)

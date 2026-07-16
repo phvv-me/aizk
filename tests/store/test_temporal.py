@@ -1,47 +1,23 @@
-import uuid
-from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 import dbutil
 import pytest
-from hypothesis import given
-from hypothesis import strategies as st
-from sqlalchemy.dialects.postgresql import Range
+from id_factory import uuid5
+from pydantic import UUID5, UUID7
 from sqlmodel import select
 
 from aizk.config import settings
 from aizk.graph.ids import entity_id, fact_id
-from aizk.store import FactClaim
-
-if TYPE_CHECKING:
-    from aizk.store.engine import Session
+from aizk.store import Fact
+from aizk.store.engine import Session
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 
-def build_claim(recorded: Range, valid: Range | None, access_count: int = 0) -> FactClaim:
-    return FactClaim(
-        content_id=uuid.uuid4(),
-        created_by=uuid.uuid4(),
-        recorded=recorded,
-        valid=valid,
-        access_count=access_count,
-    )
-
-
-@given(access_count=st.integers(min_value=0, max_value=20))
-def test_relevance_rises_with_access_and_decays_with_age(access_count: int) -> None:
-    now = datetime(2024, 1, 1, tzinfo=UTC)
-    fresh = build_claim(Range(now, None), None, access_count=access_count)
-    assert fresh.relevance(now, half_life_days=90.0) == pytest.approx(1.0 + access_count)
-    old = build_claim(Range(now - timedelta(days=180), None), None, access_count=access_count)
-    assert old.relevance(now, half_life_days=90.0) < fresh.relevance(now, half_life_days=90.0)
-
-
-async def seed_live_claim(owner: uuid.UUID, statement: str, days_old: float) -> uuid.UUID:
+async def seed_live_claim(owner: UUID5 | UUID7, statement: str, days_old: float) -> UUID5 | UUID7:
     subject = entity_id("subj", "concept")
-    content = fact_id("subj", "related_to", "", statement)
-    claim = uuid.uuid4()
+    content = fact_id(subject, "related_to", None, statement)
+    claim = uuid5()
     await dbutil.admin_exec(
         "INSERT INTO entity_content (id, name, type) VALUES (:i, 'subj', 'concept') "
         "ON CONFLICT (id) DO NOTHING",
@@ -64,38 +40,42 @@ async def seed_live_claim(owner: uuid.UUID, statement: str, days_old: float) -> 
 def test_forget_from_documents_retracts_with_the_forgotten_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    document_ids = [uuid.uuid4(), uuid.uuid4()]
-    captured: dict[str, object] = {}
+    document_ids = [uuid5(), uuid5()]
+    captured_ids: list[UUID5 | UUID7] = []
+    captured_reasons: list[str] = []
 
     async def fake_retract(
-        cls: type, session: object, ids: list[uuid.UUID], reason: str
-    ) -> list[uuid.UUID]:
-        captured["ids"], captured["reason"] = ids, reason
+        cls: type[Fact.Claim], session: Session, ids: list[UUID5 | UUID7], reason: str
+    ) -> list[UUID5 | UUID7]:
+        del cls, session
+        captured_ids.extend(ids)
+        captured_reasons.append(reason)
         return ids[:1]
 
-    monkeypatch.setattr(FactClaim, "retract_from_documents", classmethod(fake_retract))
+    monkeypatch.setattr(Fact.Claim, "retract_from_documents", classmethod(fake_retract))
 
-    retracted = dbutil.run(FactClaim.forget_from_documents(cast("Session", None), document_ids))
+    retracted = dbutil.run(Fact.Claim.forget_from_documents(cast("Session", None), document_ids))
 
     assert retracted == document_ids[:1]
-    assert captured == {"ids": document_ids, "reason": "forgotten"}
+    assert captured_ids == document_ids
+    assert captured_reasons == ["forgotten"]
 
 
 def test_archive_stale_closes_forgotten_claims_only() -> None:
     async def body() -> None:
         await dbutil.reset_db()
-        owner = uuid.uuid4()
+        owner = uuid5()
         await seed_live_claim(owner, "ancient", days_old=400)
         await seed_live_claim(owner, "recent", days_old=1)
         async with dbutil.actor(owner) as session:
-            archived = await FactClaim.archive_stale(
+            archived = await Fact.Claim.archive_stale(
                 session, frozenset({owner}), half_life_days=90.0, floor=0.25
             )
         assert len(archived) == 1
         async with dbutil.actor(owner) as session:
             live = set(
                 await session.exec(
-                    select(FactClaim.id).execution_options(**{settings.skip_live_gate: True})
+                    select(Fact.Claim.id).execution_options(**{settings.skip_live_gate: True})
                 )
             )
         assert archived[0] in live  # still present in history, just no longer open

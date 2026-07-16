@@ -24,20 +24,25 @@ A standard Logto organization access token represents one organization. It carri
 caller belongs to both organization A and organization B in one MCP bearer token.
 
 Instead of changing the token, MCP `Auth` validates the ordinary Aizk resource token and passes its
-claims to `LogtoClient`. The client calls `GET /api/users/{userId}/organizations`, whose official
-response includes every current organization and that member's complete `organizationRoles`
-array. A short coalesced TTL cache bounds request volume and membership staleness. A failed lookup
-returns no shared authority. The personal scope remains valid because it comes from the verified
-subject, not from the failed organization lookup.
+claims to `LogtoClient`. The client reads the user profile and global roles, then calls
+`GET /api/users/{userId}/organizations` for current memberships. For each organization it reads
+the complete member directory and calls `GET /api/organizations/{id}/users/{userId}/scopes` for
+effective permissions. A short coalesced TTL cache bounds request volume and membership staleness.
+A failed permission lookup closes write access for that organization. The personal scope remains
+valid because it comes from the verified subject, not from the failed organization lookup.
 
 Only the trusted Logto endpoint is configured. `LogtoClient` obtains the issuer, JWKS URI, token
 endpoint, and accepted signing algorithms from its validated discovery document. The public MCP
 base URL remains configured because it is the server's own trust boundary and cannot safely be
 learned from an unverified token. Aizk derives its audience by adding `/mcp` to that URL.
 
-The writable role names remain a small Aizk setting today. `editor` and `admin` grant write
-standing while every returned membership grants read standing. Direct organization permissions
-can replace that mapping later without changing the scope lattice or adding identity tables.
+Role names have no authorization meaning inside AIZK. Every returned membership grants read
+standing. Logto's effective organization permissions determine write standing through the one
+deployment-configured write permission. The MCP `status` tool returns the same resolved `User`.
+Its Pydantic organization models preserve Logto names, descriptions, custom data, members, roles,
+and effective permissions. Cached properties index writable and public organizations without
+creating identity tables. Status omits emails, phone numbers, linked identities, and internal IDs
+because they do not help an agent choose a memory scope.
 
 ## Scope sets are the collaboration model
 
@@ -56,11 +61,17 @@ Writes choose one destination separately and require its complete scope set to b
 caller's writable standing.
 
 The application represents this once as `User.scopes`. Its `read`, `write`, and `public` fields are
-frozen sets validated by Pydantic. `User.bind()` carries the caller across a workflow,
-`User.current()` reads it, and each database `Session.user` exposes the caller bound to that
-transaction. Background work uses `User.system(scopes)` over an explicit scope set. Owner-role
-maintenance stays in `bypass_rls()` because database administration is a connection privilege,
-not a more powerful user token.
+frozen sets validated by Pydantic. `async with user` opens one short app-role transaction, applies
+the user's RLS settings transaction-locally, and exposes the caller as `Session.user`. `user.app`
+provides the same explicit transaction object. `user.session()` exists only for workflows that
+need several explicit transactions or savepoints on one session. `user.exec[Model]` runs one typed
+statement and validates its rows into the selected Pydantic model.
+
+Background work uses `User.system(scopes)` over an explicit scope set. Only that system identity
+may open `user.owner`, which connects through the database owner for migrations, backups, or the
+scope roster. Owner authority is a connection privilege and never a stronger bearer token. The
+public MCP process receives no usable owner URL or password, so request handling cannot choose
+this path even after an application defect.
 
 `User.write_scope()` defaults to the personal singleton. MCP writes may pass Logto organization
 names to select one organization or an explicit intersection. The method resolves those trusted
@@ -79,7 +90,7 @@ public.
 The client lists organizations through the Management API and retains only entries whose
 `customData.public` value is exactly true. It uses an M2M application with the Management API
 `all` permission and HTTP Basic client authentication. Failure closes access by yielding no public
-organizations. FastMCP's remote provider still requires a valid bearer, so public means visible to
+organizations. FastMCP's OAuth proxy still requires a valid bearer, so public means visible to
 every authenticated caller rather than an unauthenticated internet endpoint. The anonymous User
 exists for local auth-off operation and policy tests.
 
@@ -100,5 +111,9 @@ same canonical scope key.
 
 - [Python integration](https://docs.logto.io/quick-starts/python)
 - [Get organizations for a user](https://openapi.logto.io/dev/operation/operation-listuserorganizations)
+- [Get user](https://openapi.logto.io/operation/operation-getuser)
+- [Get roles for user](https://openapi.logto.io/operation/operation-listuserroles)
+- [Get organization members](https://openapi.logto.io/operation/operation-listorganizationusers)
+- [Get effective organization permissions for a user](https://openapi.logto.io/operation/operation-listorganizationuserscopes)
 - [Management API](https://docs.logto.io/integrate-logto/interact-with-management-api)
 - [Organization webhook events](https://docs.logto.io/developers/webhooks/webhooks-events)
