@@ -33,6 +33,14 @@ implementation or that another project endorses Aizk.
 | action-memory boundary | compared with [Mem2ActBench](https://aclanthology.org/2026.acl-long.370/) | makes no action-selection claim from a retrieval-only score | `docs/benchmarks.md` |
 | dense and lexical fusion | adapted from [Reciprocal Rank Fusion](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/) | fuses typed source ranks inside one SQL recall program | `retrieval/recall/program.py`, `retrieval/lanes/sources.py` |
 | merit ordering and maximal recall | original measured Aizk result | keeps every lane available and lets one cross-encoder rank candidates together | `retrieval/recall/orchestrator.py`, `retrieval/rerank/rescore.py` |
+| public evidence provenance | original Aizk interface design | collapses internal lanes into source, derived, and session evidence and attaches exact Logto scope descriptions | `retrieval/models/result.py`, `retrieval/templates/recall.md.j2` |
+
+RAPTOR supports hierarchical summaries at several abstraction levels. GraphRAG supports community
+summaries for broad corpus questions. HippoRAG supports graph-based associative retrieval. GAM and
+A-MEM support consolidated and interconnected memory representations. These papers justify trying
+different internal representations, but none argues that an agent should receive Aizk's lane names.
+The three public provenance classes are therefore an original interface choice based on what the
+consumer needs to judge evidence rather than how the engine found it.
 
 ## Sharing, identity, and security
 
@@ -62,7 +70,7 @@ identity or membership mirror.
 | vector index | [VectorChord](https://github.com/tensorchord/VectorChord) and [pgvector](https://github.com/pgvector/pgvector) | low-memory production vector search with a portable fallback |
 | ORM and validation | [SQLModel](https://sqlmodel.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/), and [Pydantic](https://docs.pydantic.dev/) | typed models, PostgreSQL statements, and wire contracts |
 | durable jobs | [PgQueuer](https://github.com/JanBjorge/PgQueuer) | graph projection and scheduled maintenance without a bespoke workflow ledger |
-| MCP transport and OAuth | [FastMCP](https://github.com/jlowin/fastmcp) | the three public tools and the Logto OIDC proxy |
+| MCP transport and OAuth | [FastMCP](https://github.com/jlowin/fastmcp) | the four public tools and the Logto OIDC proxy |
 | model serving | [vLLM](https://github.com/vllm-project/vllm) | replaceable OpenAI-compatible embedding, reranking, and extraction endpoints |
 | typed LLM calls and judging | [Pydantic AI](https://ai.pydantic.dev/) and [Pydantic Evals](https://ai.pydantic.dev/evals/) | schema-constrained extraction and isolated evaluation |
 | chunking | [Chonkie](https://github.com/chonkie-inc/chonkie) | bounded prose and source windows |

@@ -24,7 +24,7 @@ from .background.queue import install_queue_schema
 from .background.status import TasksStatus, tasks_overview
 from .config import settings
 from .ontology import Ontology
-from .retrieval import ContextPack, recall
+from .retrieval import RecallResult, recall
 from .store import Chunk, Document, Entity, Fact, Profile, TableBase, verify_rls
 from .store.ddl import CreateExtension, Grant, GrantTarget
 from .store.identity import User
@@ -355,13 +355,13 @@ async def recall_health(corpus: ScopeHealth) -> RecallHealth:
                 User.system(corpus.scopes),
                 token_budget=512,
             )
-        pack = ContextPack.from_candidates(candidates)
+        result = RecallResult.from_candidates(candidates)
         return RecallHealth(
             query=_RECALL_PROBE_QUERY,
             scopes=corpus.scopes,
             candidates=len(candidates),
             top_source=candidates[0].source_title if candidates else None,
-            sample=pack.text[:500],
+            sample=result.to_markdown()[:500],
             latency_ms=round((perf_counter() - started) * 1000, 1),
         )
     except (TimeoutError, httpx.HTTPError, OpenAIError, DBAPIError) as error:

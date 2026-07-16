@@ -13,7 +13,7 @@ from aizk.config import settings as aizk_settings
 from aizk.extract.ingest import TextSource, ingest_texts
 from aizk.graph import build_graph
 from aizk.provenance import CaptureContext
-from aizk.retrieval import ContextPack, recall
+from aizk.retrieval import RecallResult, recall
 from aizk.serving.base import llm_model
 from aizk.store import Chunk, Document
 from aizk.store.identity import User
@@ -209,7 +209,7 @@ class BenchmarkRunner:
             token_budget=self.token_budget,
             k=self.k,
         )
-        context = ContextPack.from_candidates(candidates).text
+        context = RecallResult.from_candidates(candidates).to_markdown()
         prompt = (
             f"Asking user\n{question.asking_user}\n\nQuestion\n{question.question}\n\n"
             f"Recalled memory\n{context}"

@@ -12,7 +12,7 @@ from ..background.queue import enqueue_document
 from ..config import settings
 from ..extract import ingest as extract_ingest
 from ..provenance import CaptureContext
-from ..retrieval import ContextPack
+from ..retrieval import RecallResult
 from ..store.identity import User
 from ..types import ScopeNames
 from .auth import Auth
@@ -92,23 +92,14 @@ async def recall(
         raise ToolError("recall query cannot be blank")
     user = await AizkMCP.shared().user(context)
     candidates = await retrieval.recall(query, user, token_budget=budget)
-    memory = ContextPack.from_candidates(candidates, user.scope_labels).text
-    involved = frozenset(scope for candidate in candidates for scope in candidate.scopes)
-    standing = []
-    if user.id in involved:
-        standing.append("- private  write")
-    for organization in sorted(user.organizations, key=lambda item: item.name):
-        if organization.id not in involved:
-            continue
-        access = ["write" if organization.writable else "read"]
-        if organization.public:
-            access.append("public")
-        if organization.roles:
-            access.append(f"roles {', '.join(organization.roles)}")
-        if organization.permissions:
-            access.append(f"permissions {', '.join(organization.permissions)}")
-        standing.append(f"- {organization.name}  {', '.join(access)}")
-    return f"## Scopes\n\n{'\n'.join(standing)}\n\n{memory}" if memory else ""
+    scope_details = {user.id: RecallResult.Scope(name="private")} | {
+        organization.id: RecallResult.Scope(
+            name=organization.name,
+            description=organization.description,
+        )
+        for organization in user.organizations
+    }
+    return RecallResult.from_candidates(candidates, scope_details).to_markdown()
 
 
 async def remember(

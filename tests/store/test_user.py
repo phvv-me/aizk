@@ -115,7 +115,7 @@ def test_user_indexes_current_organization_directory_and_standing() -> None:
     unnamed = OrganizationMember()
     public = OrganizationStanding(
         id=public_id,
-        name="AIZK Docs",
+        name="Docs",
         public=True,
         members=(named, username_only, unnamed),
     )

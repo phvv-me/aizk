@@ -17,7 +17,7 @@ from .background.schedule import run_worker
 from .config import settings
 from .extract.ingest import ingest_text
 from .mcp.server import AizkMCP
-from .retrieval import ContextPack, recall
+from .retrieval import RecallResult, recall
 from .store import Relation
 from .store.identity import User
 
@@ -152,7 +152,7 @@ async def recall_context(
         user=User.system((user or settings.system_user_id,)),
         k=k,
     )
-    print(ContextPack.from_candidates(candidates).text or "no context recalled")
+    print(RecallResult.from_candidates(candidates).to_markdown() or "no context recalled")
 
 
 @app.command

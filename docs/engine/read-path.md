@@ -74,10 +74,12 @@ one partition per creator so two collaborators can disagree without overwriting 
 Profiles rank by summary embedding rather than entity-name embedding. Source candidates expose the
 complete configured chunk size to the cross-encoder, so a late Risks or Next actions section is not
 silently truncated before scoring. After identity-aware merit ordering, a plain Python walk keeps
-the longest prefix of candidates whose chars-per-token cost fits the budget. The MCP boundary
-renders that internal pack as one string with evidence-section labels, source names, civil dates, and
-speaker attribution. Internal retrieval scores stay in `aizk eval trace` rather than leaking into
-the prompt. Only selected facts receive access counter updates.
+the longest prefix of candidates whose chars-per-token cost fits the budget. The MCP boundary first
+builds a typed `RecallResult`. Each evidence object carries source text, public provenance, and
+exact Logto scope objects with names and descriptions. A Jinja template then renders one string.
+The public provenance classes are source excerpt, derived memory, and recent session memory.
+Internal lane names and retrieval scores stay in `aizk eval trace` rather than leaking into the
+prompt. Only selected facts receive access counter updates.
 
 Area and Project catalogs are database-derived source candidates. The Project catalog includes
 only documents whose explicit state is Active or Waiting and renders each state beside its Area,

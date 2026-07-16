@@ -14,7 +14,7 @@ from sqlmodel import select
 
 from aizk.config import settings
 from aizk.ontology import System
-from aizk.retrieval import Candidate, ContextPack, Plan, recall
+from aizk.retrieval import Candidate, Plan, RecallResult, recall
 from aizk.serving.extract import LLM
 from aizk.store import Community, Entity, Fact
 from aizk.store.identity import User
@@ -433,7 +433,7 @@ async def measure_arm(
             latencies.append((time.perf_counter() - start) * 1000.0)
             scores[f"q{index}"] = question_scores(question, result)
             if eval_settings.judge:
-                context = ContextPack.from_candidates(result).text
+                context = RecallResult.from_candidates(result).to_markdown()
                 verdicts.append(await judge_answerable(question.question, context))
     qrels = Qrels(
         {

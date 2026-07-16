@@ -40,11 +40,12 @@ dependencies = [
     { name = "httpx" },
     { name = "identify" },
     { name = "inflection" },
+    { name = "jinja2" },
     { name = "loguru" },
     { name = "mainboard" },
     { name = "networkx" },
     { name = "openai" },
-    { name = "patos" },
+    { name = "patos", extra = ["sql"] },
     { name = "pgqueuer" },
     { name = "pgvector" },
     { name = "pydantic-ai-slim", extra = ["openai"] },
@@ -60,7 +61,6 @@ dependencies = [
 dev = [
     { name = "fire" },
     { name = "hypothesis" },
-    { name = "jinja2" },
     { name = "mypy" },
     { name = "numpy" },
     { name = "polyfactory" },
@@ -91,7 +91,7 @@ requires-dist = [
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "identify", specifier = ">=2.6.19,<3" },
     { name = "inflection", specifier = ">=0.5.1,<0.6" },
-    { name = "jinja2", marker = "extra == 'dev'", specifier = ">=3.1.6,<4" },
+    { name = "jinja2", specifier = ">=3.1.6,<4" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
     { name = "mainboard", specifier = ">=0.0.8,<0.1" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.5" },
@@ -100,7 +100,7 @@ requires-dist = [
     { name = "networkx", specifier = ">=3.6.1,<4" },
     { name = "numpy", marker = "extra == 'dev'", specifier = ">=2.4.6,<2.5" },
     { name = "openai", specifier = ">=2.45,<3" },
-    { name = "patos", specifier = ">=0.0.8,<0.1" },
+    { name = "patos", extras = ["sql"], specifier = ">=0.0.9,<0.1" },
     { name = "pgqueuer", specifier = ">=1.1.1,<2" },
     { name = "pgvector", specifier = ">=0.5,<0.6" },
     { name = "polyfactory", marker = "extra == 'dev'", specifier = ">=2.22,<3" },
@@ -1948,14 +1948,21 @@ wheels = [
 
 [[package]]
 name = "patos"
-version = "0.0.8"
+version = "0.0.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cf/03/8446cc77e8ae1abe3db0edcdfbdca6d6af57ddb083702224a27ca4225251/patos-0.0.8.tar.gz", hash = "sha256:6d8bb54e7b672035df429ee005446d868ce4d112dc9633d534b77d2f367a63af", size = 495122, upload-time = "2026-07-04T01:14:41.732Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/d0/43ec25469b259ff9bf495fdce657a3b027f6d5c51acacdbdcc229f4f15c6/patos-0.0.9.tar.gz", hash = "sha256:28e851e63963c95a3d596be5fb66f6eb495ccfd3d7aec6ba644742c420c970bc", size = 506997, upload-time = "2026-07-16T06:08:01.001Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/4e/c80ad2162e5f66c40b9b53ff1d8d9bbcfda80b01502a6709d62a81db39c8/patos-0.0.8-py3-none-any.whl", hash = "sha256:69e3563ee976dc1805fe1d125300eb2b45ab14803ea6a0e8569696ec70fd74ae", size = 27681, upload-time = "2026-07-04T01:14:40.277Z" },
+    { url = "https://files.pythonhosted.org/packages/08/7f/2d87a158e5f20bc235b15841323a47d0642c464af589e54186c3356e518d/patos-0.0.9-py3-none-any.whl", hash = "sha256:86367b1a4b1262fce8322d5b252c169a61bb233dfe9497e36a182d4c4bfa8479", size = 33755, upload-time = "2026-07-16T06:07:59.653Z" },
+]
+
+[package.optional-dependencies]
+sql = [
+    { name = "inflection" },
+    { name = "pgvector" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
 [[package]]

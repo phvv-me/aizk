@@ -1,0 +1,13 @@
+{% if result.shared_scopes %}## Scopes
+
+{% for scope in result.shared_scopes %}- `{{ scope.name }}`{% if scope.description %} {{ scope.description }}{% endif %}
+{% endfor %}
+{% endif %}> {{ result.notice }}
+
+## Evidence
+
+{% for item in result.evidence %}{{ loop.index }}. **{{ item.provenance.label }}**{% if item.scope_label %} from scope `{{ item.scope_label }}`{% endif %}
+
+    {{ item.text | replace('\n', '\n    ') }}{% if not loop.last %}
+
+{% endif %}{% endfor %}

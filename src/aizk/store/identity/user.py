@@ -155,11 +155,6 @@ class User(rls.Context, prefix="app"):
         """Return the best human-readable caller identity supplied by Logto."""
         return self.name or self.username
 
-    @property
-    def scope_labels(self) -> dict[UUID5, str]:
-        """Map every readable scope identifier to the name safe to show an agent."""
-        return {self.id: "private"} | {item.id: item.name for item in self.organizations}
-
     @cached_property
     def public_organizations(self) -> tuple[OrganizationStanding, ...]:
         """Return organizations Logto marks public through their custom data."""

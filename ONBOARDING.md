@@ -41,7 +41,7 @@ depends on. Prefer full names and source references over context-free shorthand.
 
 Raw capture belongs in the source repository or inbox. Distill durable interpretation, decisions,
 measurements, and negative results into Aizk. Full PDF-to-Markdown papers are a useful exception
-because primary evidence must survive summarization. Store them with `kind="paper"` and a stable
+because primary evidence must survive summarization. Store them with their original PDF URL as the
 source URI, then add separate notes for your interpretation. Keep large code and generated logs out,
 using only small snippets that explain a durable result.
 
@@ -69,20 +69,22 @@ permission determines which organizations appear as writable in `status`.
 Removing a member or changing a role takes effect in Aizk after its authority cache expires, which
 is at most 60 seconds with the production setting.
 
-## Read public AIZK guidance
+## Read and maintain public guidance
 
-`AIZK Docs` is the one public organization. It contains AIZK onboarding and shared note-taking
-concepts such as atomicity, currentness, provenance, project briefs, and useful links. Every
-authenticated user can recall this guidance without joining the organization or naming it. Ask
-AIZK how to write a durable note or how to onboard a collaborator. Recall searches everything the
-caller may read.
+`Docs` is the general public documentation organization. Logto describes it as public docs on
+tools, libraries, languages, and more, including AIZK concepts, onboarding, and note-taking
+guidance. Every authenticated user can recall this information without joining the organization or
+naming it because recall searches the caller's complete visible memory.
 
-Only users for whom `status` lists `AIZK Docs` in `writable_organizations` may write its
-documentation. A writer must name the organization as the destination so a new document does not
-become private by accident. Readers never need to name it. Never put project notes, credentials,
-personal information, or material with limited distribution into `AIZK Docs`. Use a private
-organization for collaboration. Create another public organization only when its entire contents
-are intended for every authenticated AIZK user.
+Use `Docs` for reviewed public guidance learned while reading documentation. Keep it current when a
+tool changes, an example fails, or a better practice is verified. Prefer one maintained note for one
+stable subject and preserve the original website or PDF URL in `source_uri`. Do not copy secrets,
+private project details, speculative claims, or entire documentation sites into it.
+
+Only users for whom `status` reports `Docs` with `writable` set to true may write there. A writer
+must pass `scopes=["Docs"]` so the note does not become private by accident. Readers never select a
+scope. Create another public organization only when all of its contents should be visible to every
+authenticated AIZK user.
 
 ## Give the agent shared-memory instructions
 
