@@ -555,7 +555,7 @@ services:
   # The SvelteKit server renders every browser page and holds the confidential Logto web
   # application. It exchanges its session for API bearer tokens and calls the api service
   # directly. No database credential enters this process.
-  web:
+  frontend:
     image: aizk-web
     profiles: ["public"]
     build:
@@ -604,6 +604,11 @@ services:
   # only capability upload PUTs to the api service, and every remaining path to SvelteKit.
   # Cloudflare reaches caddy:8081 over Compose; no Caddy host port is published.
   caddy:
+    networks:
+      default:
+        aliases:
+          # the externally managed cloudflared tunnel ingress still targets web:8081
+          - web
     image: aizk-caddy
     profiles: ["public"]
     build:
@@ -615,7 +620,7 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
-      web:
+      frontend:
         condition: service_healthy
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
