@@ -1,0 +1,1162 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "aizk",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/me": {
+      "get": {
+        "summary": "Me",
+        "description": "Return the caller's label and current organization standing from Logto.",
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/overview": {
+      "get": {
+        "summary": "Overview",
+        "description": "Return knowledge totals, usage, recent sources, and artifact processing states.",
+        "operationId": "overview",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/recall": {
+      "post": {
+        "summary": "Recall",
+        "description": "Answer one recall question with merit-ordered Markdown evidence.",
+        "operationId": "recall",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Query"
+                  },
+                  "budget": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0.0
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Budget"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "query"
+                ],
+                "title": "RecallRequest",
+                "description": "One browser recall question with an optional evidence budget."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Answer"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/remember": {
+      "post": {
+        "summary": "Remember",
+        "description": "Store text now or preserve one URI original, returning its write receipt.",
+        "operationId": "remember",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "text": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Text"
+                  },
+                  "source_uri": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Source Uri"
+                  },
+                  "scopes": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "preserve_source": {
+                    "type": "boolean",
+                    "title": "Preserve Source",
+                    "default": false
+                  }
+                },
+                "type": "object",
+                "title": "RememberRequest",
+                "description": "One browser memory write, text now or a preserved source URI."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/WriteResult"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ArtifactReceipt"
+                    }
+                  ],
+                  "title": "Response Remember"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/uploads": {
+      "post": {
+        "summary": "Request Upload",
+        "description": "Mint one single-use short-TTL capability PUT URL for a declared file.",
+        "operationId": "request_upload",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Filename"
+                  },
+                  "media_type": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Media Type"
+                  },
+                  "size": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0.0,
+                    "title": "Size"
+                  },
+                  "scopes": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "companion_text": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Companion Text"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "filename",
+                  "media_type",
+                  "size"
+                ],
+                "title": "UploadRequest",
+                "description": "One declared original a caller intends to upload as preserved memory."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadGrant"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/uploads/{capability}": {
+      "put": {
+        "summary": "Receive Upload",
+        "description": "Accept one capability's raw bytes through the malware-scanned intake path.",
+        "operationId": "receive_upload",
+        "parameters": [
+          {
+            "name": "capability",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Capability"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactReceipt"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/organizations": {
+      "get": {
+        "summary": "Organizations",
+        "description": "List the caller's authorized memberships from Logto.",
+        "operationId": "organizations",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationDirectory"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create Organization",
+        "description": "Create one private organization owned by the verified caller.",
+        "operationId": "create_organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "title": "Name"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Description"
+                  }
+                },
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "title": "OrganizationRequest",
+                "description": "One new private collaboration space."
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationChange"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/organizations/{name}/members": {
+      "post": {
+        "summary": "Add Member",
+        "description": "Add one exact-email account to an organization the caller may manage.",
+        "operationId": "add_member",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationChange"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "One exact-email member addition with its organization role.",
+                "properties": {
+                  "email": {
+                    "minLength": 1,
+                    "title": "Email",
+                    "type": "string"
+                  },
+                  "role": {
+                    "minLength": 1,
+                    "title": "Role",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email",
+                  "role"
+                ],
+                "title": "MemberRequest",
+                "type": "object"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/organizations/{name}/members/{member_id}": {
+      "put": {
+        "summary": "Set Member Role",
+        "description": "Replace one member's role after a live permission check.",
+        "operationId": "set_member_role",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationChange"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "One replacement organization role for a current member.",
+                "properties": {
+                  "role": {
+                    "minLength": 1,
+                    "title": "Role",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "role"
+                ],
+                "title": "RoleRequest",
+                "type": "object"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Member",
+        "description": "Remove one member after a live permission check.",
+        "operationId": "remove_member",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "member_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Member Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationChange"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Answer": {
+        "properties": {
+          "markdown": {
+            "type": "string",
+            "title": "Markdown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "markdown"
+        ],
+        "title": "Answer",
+        "description": "One recall answer rendered as merit-ordered Markdown evidence."
+      },
+      "ArtifactReceipt": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Artifact Id"
+          },
+          "content_id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Content Id"
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "content_id",
+          "state"
+        ],
+        "title": "ArtifactReceipt",
+        "description": "Identify one accepted original and its asynchronous processing state."
+      },
+      "ArtifactStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "processing",
+          "ready",
+          "failed"
+        ]
+      },
+      "ArtifactView": {
+        "properties": {
+          "source_uri": {
+            "type": "string",
+            "title": "Source Uri",
+            "default": ""
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ArtifactStatus"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_uri",
+          "date",
+          "scopes",
+          "name",
+          "status",
+          "detail"
+        ],
+        "title": "ArtifactView",
+        "description": "Human-facing progress for one visible original without storage internals."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "KnowledgeTotals": {
+        "properties": {
+          "sources": {
+            "type": "integer",
+            "title": "Sources",
+            "default": 0
+          },
+          "findings": {
+            "type": "integer",
+            "title": "Findings",
+            "default": 0
+          },
+          "subjects": {
+            "type": "integer",
+            "title": "Subjects",
+            "default": 0
+          },
+          "themes": {
+            "type": "integer",
+            "title": "Themes",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "sources",
+          "findings",
+          "subjects",
+          "themes"
+        ],
+        "title": "KnowledgeTotals",
+        "description": "Human-facing totals for the knowledge visible to one caller."
+      },
+      "Me": {
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "organizations": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationProfile"
+            },
+            "type": "array",
+            "title": "Organizations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "organizations"
+        ],
+        "title": "Me",
+        "description": "The signed-in caller's label and current organization standing from Logto."
+      },
+      "OrganizationChange": {
+        "properties": {
+          "organization": {
+            "type": "string",
+            "title": "Organization"
+          },
+          "member": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member"
+          }
+        },
+        "type": "object",
+        "required": [
+          "organization"
+        ],
+        "title": "OrganizationChange",
+        "description": "One completed Logto organization mutation safe to show in the web UI."
+      },
+      "OrganizationDirectory": {
+        "properties": {
+          "organizations": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationView"
+            },
+            "type": "array",
+            "title": "Organizations",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "organizations"
+        ],
+        "title": "OrganizationDirectory",
+        "description": "Current caller memberships loaded from Logto without a tenant-wide user listing."
+      },
+      "OrganizationMemberView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "roles"
+        ],
+        "title": "OrganizationMemberView",
+        "description": "One member identifier disclosed only inside an authorized organization directory."
+      },
+      "OrganizationProfile": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions"
+          },
+          "writable": {
+            "type": "boolean",
+            "title": "Writable"
+          },
+          "public": {
+            "type": "boolean",
+            "title": "Public"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "roles",
+          "permissions",
+          "writable",
+          "public"
+        ],
+        "title": "OrganizationProfile",
+        "description": "One organization membership exactly as `GET /api/me` discloses it."
+      },
+      "OrganizationView": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
+          },
+          "members": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationMemberView"
+            },
+            "type": "array",
+            "title": "Members",
+            "default": []
+          },
+          "can_manage_members": {
+            "type": "boolean",
+            "title": "Can Manage Members",
+            "default": false
+          },
+          "can_delete_members": {
+            "type": "boolean",
+            "title": "Can Delete Members",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "roles",
+          "members",
+          "can_manage_members",
+          "can_delete_members"
+        ],
+        "title": "OrganizationView",
+        "description": "One current membership and its exact live administration capabilities."
+      },
+      "Overview": {
+        "properties": {
+          "totals": {
+            "$ref": "#/components/schemas/KnowledgeTotals"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageTotals"
+          },
+          "recent_sources": {
+            "items": {
+              "$ref": "#/components/schemas/RecentSource"
+            },
+            "type": "array",
+            "title": "Recent Sources"
+          },
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactView"
+            },
+            "type": "array",
+            "title": "Artifacts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "totals",
+          "usage",
+          "recent_sources",
+          "artifacts"
+        ],
+        "title": "Overview",
+        "description": "Knowledge totals, usage, recent sources, and artifact processing states."
+      },
+      "RecentSource": {
+        "properties": {
+          "source_uri": {
+            "type": "string",
+            "title": "Source Uri",
+            "default": ""
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_uri",
+          "date",
+          "scopes",
+          "title",
+          "kind"
+        ],
+        "title": "RecentSource",
+        "description": "Presentation metadata for one source without exposing internal identifiers."
+      },
+      "State": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "queued",
+          "processing",
+          "ready",
+          "failed"
+        ],
+        "title": "State",
+        "description": "Durable processing state independent from PgQueuer's delivery state."
+      },
+      "UploadGrant": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "expires_seconds": {
+            "type": "integer",
+            "title": "Expires Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url",
+          "expires_seconds"
+        ],
+        "title": "UploadGrant",
+        "description": "One live single-use capability PUT URL and its remaining lifetime."
+      },
+      "UsageTotals": {
+        "properties": {
+          "recalls": {
+            "type": "integer",
+            "title": "Recalls",
+            "default": 0
+          },
+          "remembers": {
+            "type": "integer",
+            "title": "Remembers",
+            "default": 0
+          },
+          "files": {
+            "type": "integer",
+            "title": "Files",
+            "default": 0
+          },
+          "uploaded_bytes": {
+            "type": "integer",
+            "title": "Uploaded Bytes",
+            "default": 0
+          },
+          "downloaded_bytes": {
+            "type": "integer",
+            "title": "Downloaded Bytes",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "recalls",
+          "remembers",
+          "files",
+          "uploaded_bytes",
+          "downloaded_bytes"
+        ],
+        "title": "UsageTotals",
+        "description": "Caller-owned operation and transfer totals suitable for cost awareness."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "WriteResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "WriteResult",
+        "description": "Identify the durable source document created or updated by `remember`."
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "A Logto access token for the aizk resource",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

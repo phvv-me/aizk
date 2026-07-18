@@ -1,10 +1,10 @@
-from .client import EmbedClient, embed, embed_images
-from .models import EmbedImage, EmbedMode
+from .client import EmbedClient, Embedder
+from .models import EmbedImage, EmbedMode, ImageBytes
 
 __all__ = [
     "EmbedClient",
+    "Embedder",
     "EmbedImage",
     "EmbedMode",
-    "embed",
-    "embed_images",
+    "ImageBytes",
 ]

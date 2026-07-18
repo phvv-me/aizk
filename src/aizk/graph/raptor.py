@@ -6,15 +6,15 @@ from loguru import logger
 from mainboard.profiling import span
 from networkx.algorithms.community.modularity_max import greedy_modularity_communities
 from networkx.classes import Graph
-from patos import sql
+from patos import FlexModel, sql
 from pgvector import HalfVector
-from pydantic import UUID5
-from sqlalchemy import Integer, column, delete
+from pydantic import UUID5, Field
+from sqlalchemy import Integer, column, delete, func, literal, or_
 from sqlmodel import select
 
 from ..config import settings
 from ..ontology import System
-from ..serving.embed import embed
+from ..serving.embed import Embedder
 from ..serving.extract import LLM
 from ..store import Community, Entity, Fact
 from ..store.identity import User
@@ -43,7 +43,7 @@ def modularity_groups(graph: Graph) -> list[list[int]]:
     """Partition one prepared similarity graph, preserving isolated nodes."""
     if graph.number_of_edges() == 0:
         return [[index] for index in graph.nodes]
-    with span("raptor_modularity", memory=True):
+    with span("raptor_modularity"):
         return [sorted(group) for group in greedy_modularity_communities(graph)]
 
 
@@ -61,18 +61,16 @@ def redundant_parent(
     )
 
 
-class RaptorBuilder:
+class RaptorBuilder(FlexModel):
     """Plan a complete RAPTOR generation before its atomic database replacement."""
 
-    __slots__ = ("claims", "contents", "edge_claims", "edges", "llm", "scopes")
-
-    def __init__(self, scopes: Scopes) -> None:
-        self.scopes = frozenset(scopes)
-        self.contents: list[Entity.Content] = []
-        self.claims: list[Entity.Claim] = []
-        self.edges: list[Fact.Content] = []
-        self.edge_claims: list[Fact.Claim] = []
-        self.llm = LLM.configured()
+    scopes: Scopes
+    llm: LLM
+    embed: Embedder
+    contents: list[Entity.Content] = Field(default_factory=list)
+    claims: list[Entity.Claim] = Field(default_factory=list)
+    edges: list[Fact.Content] = Field(default_factory=list)
+    edge_claims: list[Fact.Claim] = Field(default_factory=list)
 
     def claim(self, content: Entity.Content, level: int, summary: str) -> Entity.Claim:
         """Build one exact-scope summary claim."""
@@ -148,7 +146,7 @@ class RaptorBuilder:
         left = vectors.alias("raptor_left")
         right = vectors.alias("raptor_right")
         distance = left.c.embedding @ right.c.embedding
-        with span("raptor_similarity_query", memory=True):
+        with span("raptor_similarity_query"):
             async with User.system(self.scopes) as session:
                 pairs = await session.exec(
                     select(left.c.ordinal, right.c.ordinal)
@@ -165,7 +163,7 @@ class RaptorBuilder:
         parents: list[tuple[Node, list[float]]],
     ) -> tuple[Node, bool]:
         """Summarize one cluster and stage a new parent unless this level already has it."""
-        with span("raptor_summary", memory=True):
+        with span("raptor_summary"):
             report = await self.llm.generate(
                 settings.raptor_rollup_system,
                 "Child summaries:\n"
@@ -175,8 +173,8 @@ class RaptorBuilder:
                 ),
                 RaptorReport,
             )
-        with span("raptor_embedding", memory=True):
-            [vector] = await embed([report.summary], mode="document")
+        with span("raptor_embedding"):
+            [vector] = await self.embed.embed([report.summary], mode="document")
         parent = redundant_parent(parents, vector, settings.raptor_redundancy_threshold)
         created = parent is None
         if parent is None:
@@ -233,7 +231,7 @@ class RaptorBuilder:
         written = 0
         level = 1
         while len(nodes) > settings.raptor_root_max and level <= settings.raptor_max_levels:
-            with span("raptor_clustering", memory=True):
+            with span("raptor_clustering"):
                 groups = await self.similarity_groups([node.embedding for node in nodes])
                 groups = [
                     list(branch)
@@ -247,26 +245,97 @@ class RaptorBuilder:
             level += 1
         return written
 
-    async def replace(self, stale: list[UUID5]) -> None:
-        """Atomically delete the stale generation and insert the complete staged one."""
+    async def replace(self) -> None:
+        """Replace one scope's generation atomically while sharing content across scopes.
+
+        A transaction-scoped advisory lock keyed by the canonical scope serializes
+        concurrent builds, and the stale generation is reselected under that lock so a
+        racing build can never resurrect or double-delete another generation's rows.
+        """
+        scope_list = sorted(self.scopes)
         async with User.system().owner as opened:
+            lock_key = func.hashtextextended(
+                literal("raptor|" + ",".join(str(scope) for scope in scope_list)), 0
+            )
+            await opened.exec(select(func.pg_advisory_xact_lock(lock_key)))
+            stale = list(
+                await opened.exec(
+                    select(Entity.Claim.content_id)
+                    .join(Entity.Content, Entity.Content.id == Entity.Claim.content_id)
+                    .where(
+                        Entity.Claim.scopes == scope_list,
+                        Entity.Content.type == System.Entity.RAPTOR_SUMMARY,
+                    )
+                )
+            )
+            stale_edges: list[UUID5] = []
             if stale:
-                await opened.exec(delete(Entity.Content).where(Entity.Content.id.in_(stale)))
-            opened.add_all(self.contents)
-            await opened.flush()
+                stale_edges = list(
+                    await opened.exec(
+                        select(Fact.Claim.content_id)
+                        .join(Fact.Content, Fact.Content.id == Fact.Claim.content_id)
+                        .where(
+                            Fact.Claim.scopes == scope_list,
+                            Fact.Content.predicate == _PART_OF,
+                            or_(
+                                Fact.Content.subject_id.in_(stale),
+                                Fact.Content.object_id.in_(stale),
+                            ),
+                        )
+                    )
+                )
+                if stale_edges:
+                    await opened.exec(
+                        delete(Fact.Claim).where(
+                            Fact.Claim.scopes == scope_list,
+                            Fact.Claim.content_id.in_(stale_edges),
+                        )
+                    )
+                await opened.exec(
+                    delete(Entity.Claim).where(
+                        Entity.Claim.scopes == scope_list,
+                        Entity.Claim.content_id.in_(stale),
+                    )
+                )
+            await Entity.Content.mint_all(opened, self.contents)
             opened.add_all(self.claims)
-            opened.add_all(self.edges)
             await opened.flush()
+            await Fact.Content.mint_all(opened, self.edges)
             opened.add_all(self.edge_claims)
+            await opened.flush()
+            if stale_edges:
+                claimed = (
+                    select(Fact.Claim.id).where(Fact.Claim.content_id == Fact.Content.id).exists()
+                )
+                await opened.exec(
+                    delete(Fact.Content).where(
+                        Fact.Content.id.in_(stale_edges),
+                        ~claimed,
+                    )
+                )
+            if stale:
+                claimed_entity = (
+                    select(Entity.Claim.id)
+                    .where(Entity.Claim.content_id == Entity.Content.id)
+                    .exists()
+                )
+                await opened.exec(
+                    delete(Entity.Content).where(
+                        Entity.Content.id.in_(stale),
+                        ~claimed_entity,
+                    )
+                )
 
 
 async def build_raptor(
+    llm: LLM,
+    embed: Embedder,
     scopes: Scopes | None = None,
 ) -> int:
     """Build and atomically replace one exact scope's recursive summary tree."""
     key = frozenset(scopes or (settings.system_user_id,))
-    builder = RaptorBuilder(key)
-    with span("raptor_snapshot", memory=True):
+    builder = RaptorBuilder(scopes=key, llm=llm, embed=embed)
+    with span("raptor_snapshot"):
         async with User.system(key) as session:
             communities = list(
                 await session.exec(
@@ -276,19 +345,9 @@ async def build_raptor(
                     )
                 )
             )
-            stale = list(
-                await session.exec(
-                    select(Entity.Claim.content_id)
-                    .join(Entity.Content, Entity.Content.id == Entity.Claim.content_id)
-                    .where(
-                        Entity.Claim.scopes == sorted(key),
-                        Entity.Content.type == System.Entity.RAPTOR_SUMMARY,
-                    )
-                )
-            )
-    with span("raptor_planning", memory=True):
+    with span("raptor_planning"):
         written = await builder.build(communities)
-    with span("raptor_replacement", memory=True):
-        await builder.replace(stale)
+    with span("raptor_replacement"):
+        await builder.replace()
     logger.info("raptor tree wrote {} summaries in scope {}", written, key)
     return written

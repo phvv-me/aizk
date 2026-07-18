@@ -21,9 +21,20 @@ def test_created_at_expression_compiles_to_lower_recorded() -> None:
 
 
 def test_view_ddl_round_trips_create_and_drop() -> None:
-    ddl = postgresql_sql(CreateView("live_fact", Fact.Live.__view_select__()))
+    view = CreateView(
+        Fact.Live.__view_select__(),
+        "live_fact",
+        postgresql_with={"security_invoker": True},
+    )
+    ddl = postgresql_sql(view)
     assert ddl.startswith("CREATE VIEW live_fact WITH (security_invoker = true) AS")
-    assert postgresql_sql(DropView("live_fact")) == "DROP VIEW IF EXISTS live_fact"
+    assert postgresql_sql(DropView(view.table, if_exists=True)) == "DROP VIEW IF EXISTS live_fact"
+
+
+def test_view_ddl_without_options_uses_native_sqlalchemy_rendering() -> None:
+    view = CreateView(Fact.Live.__view_select__(), "plain_live_fact")
+
+    assert postgresql_sql(view).startswith("CREATE VIEW plain_live_fact AS")
 
 
 def test_abstract_store_types_remain_unmapped_and_unregistered() -> None:

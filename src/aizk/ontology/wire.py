@@ -29,10 +29,13 @@ class WireFact(FrozenModel):
         max_length=384,
         description="self-contained sentence that stands without source text",
     )
-    quote: str | None = Field(
-        default=None,
+    quote: str = Field(
+        min_length=1,
         max_length=256,
-        description="shortest verbatim excerpt copied exactly from the text supporting this fact",
+        description=(
+            "one contiguous supporting substring copied character for character from the text, "
+            "with no ellipses or joined passages"
+        ),
     )
     date: str | None = Field(default=None, max_length=64)
     k: EpistemicKind = EpistemicKind.world

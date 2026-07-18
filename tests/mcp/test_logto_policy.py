@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from typing import Literal, cast
 
 import dbutil
@@ -6,8 +7,8 @@ import pytest
 from pydantic import AnyHttpUrl, TypeAdapter
 from pydantic.types import JsonValue
 
-from aizk.common.auth.logto import LogtoClient, LogtoPolicy
 from aizk.config import settings
+from aizk.integrations.logto import LogtoClient, LogtoPolicy
 
 type JsonObject = dict[str, JsonValue]
 type HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
@@ -57,10 +58,11 @@ class LogtoState:
         state.role_scopes = {"role-user": [state.resource_scopes[0]]}
         state.organization_scopes = [
             {
-                "id": "scope-write",
-                "name": settings.logto_write_permission,
-                "description": settings.logto_write_permission_description,
+                "id": f"scope-{name.replace(':', '-')}",
+                "name": name,
+                "description": description,
             }
+            for name, description in settings.logto_organization_permissions.items()
         ]
         state.organization_roles = [
             {
@@ -68,9 +70,11 @@ class LogtoState:
                 "name": name,
                 "description": description,
                 "type": "User",
-                "scopes": [state.organization_scopes[0]]
-                if name in settings.logto_writable_roles
-                else [],
+                "scopes": [
+                    scope
+                    for scope in state.organization_scopes
+                    if scope["name"] in settings.logto_role_permissions[name]
+                ],
             }
             for name, description in settings.logto_organization_roles.items()
         ]
@@ -82,6 +86,11 @@ class FakeLogto:
         self.state = state
         self.mutable = mutable
         self.calls: list[tuple[HttpMethod, str, JsonObject | None]] = []
+        self.invalidations = 0
+        self.caches = SimpleNamespace(invalidate_all=self.invalidate_all)
+
+    def invalidate_all(self) -> None:
+        self.invalidations += 1
 
     async def pages[T](self, path: str, adapter: TypeAdapter[tuple[T, ...]]) -> tuple[T, ...]:
         if path == "api/resources":
@@ -130,7 +139,26 @@ class FakeLogto:
         elif path.startswith("api/roles/"):
             self.mutate_role(method, path, body)
         elif path == "api/organization-scopes":
-            self.state.organization_scopes.append({"id": "scope-write", **body})
+            name = cast("str", body["name"])
+            self.state.organization_scopes.append(
+                {"id": f"scope-{name.replace(':', '-')}", **body}
+            )
+        elif path.startswith("api/organization-scopes/"):
+            scope_id = path.rsplit("/", 1)[-1]
+            if method == "DELETE":
+                self.state.organization_scopes = [
+                    scope for scope in self.state.organization_scopes if scope["id"] != scope_id
+                ]
+                for role in self.state.organization_roles:
+                    role["scopes"] = [
+                        scope
+                        for scope in cast("list[JsonObject]", role["scopes"])
+                        if scope["id"] != scope_id
+                    ]
+            else:
+                next(
+                    scope for scope in self.state.organization_scopes if scope["id"] == scope_id
+                ).update(body)
         elif path == "api/organization-roles" and method == "POST":
             name = cast("str", body["name"])
             scope_ids = cast("list[str]", body["organizationScopeIds"])
@@ -198,6 +226,7 @@ def test_policy_audit_is_clean_without_changing_unrelated_roles() -> None:
     assert report.clean
     assert report.changes == ()
     assert fake.calls == []
+    assert fake.invalidations == 0
 
 
 def test_policy_apply_repairs_every_managed_layer_and_is_idempotent() -> None:
@@ -228,7 +257,12 @@ def test_policy_apply_repairs_every_managed_layer_and_is_idempotent() -> None:
             "name": "viewer",
             "description": settings.logto_organization_roles["viewer"],
             "type": "User",
-            "scopes": [{"id": "scope-write", "name": settings.logto_write_permission}],
+            "scopes": [
+                {
+                    "id": "scope-write-memory",
+                    "name": settings.logto_write_permission,
+                }
+            ],
         },
         {
             "id": "org-role-custom",
@@ -241,10 +275,14 @@ def test_policy_apply_repairs_every_managed_layer_and_is_idempotent() -> None:
     fake = FakeLogto(state)
 
     report = dbutil.run(policy(fake).apply())
+    mutating_passes = fake.invalidations
     second = dbutil.run(policy(fake).apply())
 
-    assert report.clean and len(report.changes) == 10
+    assert report.clean and len(report.changes) == 12
     assert second == type(second)(clean=True)
+    # Every mutating pass evicts the cached authority snapshots; the clean apply keeps them.
+    assert mutating_passes > 0
+    assert fake.invalidations == mutating_passes
     assert {role["name"] for role in state.roles} == {settings.logto_user_role, "external"}
     assert next(role for role in state.roles if role["name"] == "external")["id"] == "external"
     custom = next(role for role in state.organization_roles if role["name"] == "custom")
@@ -272,8 +310,31 @@ def test_policy_reports_existing_user_role_and_permission_drift() -> None:
     assert report.changes == (
         "update default user role aizk-user",
         "grant API permissions to aizk-user",
-        "grant write:memory to admin",
+        "grant organization permissions to admin",
     )
+
+
+def test_policy_removes_the_retired_invitation_permission() -> None:
+    state = LogtoState.clean()
+    invitation: JsonObject = {
+        "id": "scope-invite-member",
+        "name": "invite:member",
+        "description": "Invite a person",
+    }
+    state.organization_scopes.append(invitation)
+    admin = next(role for role in state.organization_roles if role["name"] == "admin")
+    cast("list[JsonObject]", admin["scopes"]).append(invitation)
+    fake = FakeLogto(state)
+
+    report = dbutil.run(policy(fake).apply())
+
+    assert report.clean
+    assert report.changes == (
+        "revoke invite:member from admin",
+        "delete retired organization permission invite:member",
+    )
+    assert invitation not in state.organization_scopes
+    assert invitation not in cast("list[JsonObject]", admin["scopes"])
 
 
 def test_policy_stops_when_the_management_api_never_reflects_writes() -> None:
@@ -283,3 +344,4 @@ def test_policy_stops_when_the_management_api_never_reflects_writes() -> None:
         dbutil.run(policy(fake).apply())
 
     assert len(fake.calls) == 8
+    assert fake.invalidations == 8

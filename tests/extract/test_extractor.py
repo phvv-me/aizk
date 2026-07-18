@@ -1,9 +1,7 @@
 import asyncio
 import json
-from contextlib import AbstractContextManager
 from importlib import import_module
 from typing import cast
-from unittest.mock import patch
 
 import httpx
 import pytest
@@ -15,7 +13,6 @@ from pydantic import BaseModel, ValidationError
 from pydantic_ai.exceptions import UnexpectedModelBehavior
 from strategies import predicates, wire_extractions
 
-import aizk.serving.extract.client as llm_module
 from aizk.config import Settings, settings
 from aizk.extract.extractor import Extractor, GLiNERExtractor, LLMExtractor
 from aizk.extract.models import (
@@ -29,13 +26,6 @@ from aizk.serving.extract import LLM, GLiNER, GraphResponse, Relation, Span
 
 extract_client_module = import_module("aizk.serving.extract.client")
 extractor_module = import_module("aizk.extract.extractor")
-
-
-def route_llm_to(fake: FakeLLM) -> AbstractContextManager[None]:
-    return cast(
-        "AbstractContextManager[None]",
-        patch.object(llm_module, "llm_model", lambda *args: fake.model),
-    )
 
 
 def existing_match(statement: str) -> FactMatch:
@@ -61,7 +51,7 @@ def test_llm_forwards_the_typed_generation_contract(
     monkeypatch.setattr(settings, "llm_chat_template_kwargs", {"enable_thinking": False})
     schema = WireExtraction
     asyncio.run(
-        LLM.configured().generate(
+        LLM.from_settings(settings).generate(
             "SYS",
             "USER",
             schema,
@@ -96,7 +86,12 @@ def test_wire_schemas_bound_graph_expansion_and_preserve_uuid_strings(
     item = (
         WireEntity(n="entity", t="concept")
         if collection == "e"
-        else WireFact(s="subject", p="uses", statement="subject uses a tool")
+        else WireFact(
+            s="subject",
+            p="uses",
+            statement="subject uses a tool",
+            quote="subject uses a tool",
+        )
     )
     payload = {"e": [], "f": [], collection: [item] * (limit + int(exceeds))}
     if exceeds:
@@ -114,11 +109,11 @@ def test_wire_schemas_bound_graph_expansion_and_preserve_uuid_strings(
 def test_extraction_surfaces_model_contract_failures(fake_llm: FakeLLM, failure: str) -> None:
     if failure == "invalid-json":
         fake_llm.completions.raw = "not valid JSON"
-        call = LLM.configured().generate("s", "u", WireExtraction)
+        call = LLM.from_settings(settings).generate("s", "u", WireExtraction)
         expected = UnexpectedModelBehavior
     else:
         fake_llm.completions.error = RuntimeError("output budget exhausted")
-        call = LLMExtractor().extract("dense source")
+        call = LLMExtractor(llm=fake_llm.llm).extract("dense source")
         expected = RuntimeError
 
     with pytest.raises(expected):
@@ -129,8 +124,7 @@ def test_extraction_surfaces_model_contract_failures(fake_llm: FakeLLM, failure:
 def test_extractor_converts_the_wire_schema(wire: WireExtraction) -> None:
     fake = FakeLLM()
     fake.register(WireExtraction, cast("BaseModel", wire))
-    with route_llm_to(fake):
-        extraction = asyncio.run(LLMExtractor().extract("text"))
+    extraction = asyncio.run(LLMExtractor(llm=fake.llm).extract("text"))
     assert [entity.name for entity in extraction.entities] == [entity.n for entity in wire.e]
     assert [entity.type for entity in extraction.entities] == [entity.t for entity in wire.e]
     assert [fact.subject for fact in extraction.facts] == [fact.s for fact in wire.f]
@@ -143,7 +137,7 @@ def test_extractor_uses_the_live_ontology_prompt_for_every_bounded_source_window
 ) -> None:
     monkeypatch.setattr(extractor_module, "chunk_text", lambda text, size: ["first", "second"])
 
-    asyncio.run(LLMExtractor().extract("whole source"))
+    asyncio.run(LLMExtractor(llm=fake_llm.llm).extract("whole source"))
 
     assert [call.messages[1]["content"] for call in fake_llm.completions.calls] == [
         "<document>\nfirst\n</document>",
@@ -160,11 +154,13 @@ def test_default_extraction_configuration_and_selectable_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert Settings().llm_chat_template_kwargs == {}
-    assert isinstance(Extractor.configured(), LLMExtractor)
+    llm = FakeLLM().llm
+    gliner = GLiNER.from_settings(settings)
+    assert isinstance(Extractor.configured(settings, llm, gliner), LLMExtractor)
     monkeypatch.setattr(settings, "extract_backend", "gliner")
-    assert isinstance(Extractor.configured(), GLiNERExtractor)
+    assert isinstance(Extractor.configured(settings, llm, gliner), GLiNERExtractor)
     monkeypatch.setattr(settings, "extract_backend", "llm")
-    assert isinstance(Extractor.configured(), LLMExtractor)
+    assert isinstance(Extractor.configured(settings, llm, gliner), LLMExtractor)
 
 
 def test_gliner_extractor_builds_grounded_facts_and_closes_relation_entities() -> None:
@@ -197,7 +193,7 @@ def test_gliner_extractor_builds_grounded_facts_and_closes_relation_entities() -
         },
     )
 
-    extraction = GLiNERExtractor().convert(text, result)
+    extraction = GLiNERExtractor(gliner=GLiNER.from_settings(settings)).convert(text, result)
 
     assert {(entity.name, entity.type) for entity in extraction.entities} == {
         ("Ada", "person"),
@@ -219,7 +215,7 @@ def test_gliner_extractor_falls_back_to_a_relation_sentence_without_source_groun
     tail = Span(text="Git", start=4, end=7, confidence=0.7)
     result = GraphResponse(relation_extraction={"uses": [Relation(head=head, tail=tail)]})
 
-    extraction = GLiNERExtractor().convert("", result)
+    extraction = GLiNERExtractor(gliner=GLiNER.from_settings(settings)).convert("", result)
 
     assert extraction.facts[0].statement == "Ada uses Git."
     assert extraction.facts[0].quote is None
@@ -237,7 +233,7 @@ def test_gliner_extractor_reserves_its_entity_budget_for_relation_endpoints() ->
         relation_extraction={"uses": [Relation(head=head, tail=tail)]},
     )
 
-    extraction = GLiNERExtractor().convert("", result)
+    extraction = GLiNERExtractor(gliner=GLiNER.from_settings(settings)).convert("", result)
     names = {entity.name for entity in extraction.entities}
 
     assert len(extraction.entities) == 16
@@ -252,7 +248,7 @@ def test_gliner_extractor_calls_its_service() -> None:
             assert text == "Ada uses PostgreSQL"
             return expected
 
-    extractor = GLiNERExtractor(cast("GLiNER", FakeGLiNER()))
+    extractor = GLiNERExtractor(gliner=cast("GLiNER", FakeGLiNER()))
 
     assert extractor.requires_gate is False
     assert asyncio.run(extractor.extract("Ada uses PostgreSQL")) == extractor.convert(
@@ -275,7 +271,7 @@ def test_gliner_client_sends_the_live_ontology_schema(monkeypatch: pytest.Monkey
     monkeypatch.setattr(settings, "gliner_extract_threshold", 0.42)
     monkeypatch.setattr(extract_client_module, "http_client", lambda *args: client)
 
-    result = asyncio.run(GLiNER.configured().extract("Ada uses PostgreSQL"))
+    result = asyncio.run(GLiNER.from_settings(settings).extract("Ada uses PostgreSQL"))
 
     assert result == GraphResponse()
     assert requests == [
@@ -289,7 +285,7 @@ def test_gliner_client_sends_the_live_ontology_schema(monkeypatch: pytest.Monkey
 
 
 def test_consolidator_short_circuits_an_empty_batch(fake_llm: FakeLLM) -> None:
-    assert asyncio.run(Consolidator().resolve([])) == []
+    assert asyncio.run(Consolidator(llm=fake_llm.llm).resolve([])) == []
     assert fake_llm.completions.calls == []
 
 
@@ -304,8 +300,7 @@ def test_consolidator_drops_a_hallucinated_supersedes(predicate: str) -> None:
             verdicts=[ConsolidationVerdict(action="UPDATE", supersedes=uuid7())]
         ),
     )
-    with route_llm_to(fake):
-        verdicts = asyncio.run(Consolidator().resolve([(candidate, [existing])]))
+    verdicts = asyncio.run(Consolidator(llm=fake.llm).resolve([(candidate, [existing])]))
     assert verdicts[0].action == "UPDATE"
     assert verdicts[0].supersedes is None
 
@@ -323,10 +318,10 @@ def test_consolidator_normalizes_model_verdicts(fake_llm: FakeLLM, response: str
     matches = [existing] if response == "known-update" else []
     expected = verdicts or [ConsolidationVerdict(action="ADD")]
 
-    assert asyncio.run(Consolidator().resolve([(candidate, matches)])) == expected
+    assert asyncio.run(Consolidator(llm=fake_llm.llm).resolve([(candidate, matches)])) == expected
 
 
 def test_llm_reuses_its_only_endpoint_client() -> None:
-    first = LLM.configured()
-    second = LLM.configured()
+    first = LLM.from_settings(settings)
+    second = LLM.from_settings(settings)
     assert first.agent.model is second.agent.model

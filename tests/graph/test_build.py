@@ -1,7 +1,8 @@
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, NoReturn, cast
+from types import SimpleNamespace
+from typing import NoReturn, cast
 
 import dbutil
 import httpx
@@ -12,13 +13,12 @@ from doubles import FakeLLM, RecordingEmbedder, deterministic_vector
 from id_factory import uuid5, uuid7, uuid8
 from openai import APIConnectionError, APITimeoutError
 from pydantic import UUID5, UUID7, ValidationError
-from sqlalchemy import func, update
+from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlmodel import select
 
 import aizk.graph.build as build
-import aizk.serving.extract.client as llm_module
 from aizk.config import settings
 from aizk.extract.models import (
     BatchConsolidationVerdict,
@@ -35,12 +35,13 @@ from aizk.graph.build import (
     source_extraction,
     write_graph_slice,
 )
-from aizk.graph.consolidation import FactMatch
+from aizk.extract.extractor import LLMExtractor
+from aizk.graph.consolidation import Consolidator, FactMatch
 from aizk.graph.ids import entity_id, fact_id
+from aizk.graph.naming import normalize_name
 from aizk.graph.repair import dedup_entities, redirect_entity
 from aizk.graph.writer import FactCandidate, FactPlan, GraphWriter, PreparedEntity
 from aizk.ontology import Ontology, System, WireEntity, WireExtraction, WireFact
-from aizk.ontology import catalog as ontology_catalog
 from aizk.provenance import CaptureContext, EpistemicKind
 from aizk.serving.embed import EmbedMode
 from aizk.store import (
@@ -51,8 +52,7 @@ from aizk.store import (
 )
 from aizk.store.identity import User
 
-if TYPE_CHECKING:
-    from aizk.store.engine import Session
+from aizk.store.engine import Session
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -76,7 +76,7 @@ class FixedEmbedder(RecordingEmbedder):
 
 
 async def resolve(writer: GraphWriter, name: str, type: str) -> UUID5 | UUID7 | None:
-    [vector] = await build.embed([name], mode="document")
+    [vector] = await build.EmbedClient.from_settings(settings).embed([name], mode="document")
     return await writer.resolve(PreparedEntity(name=name, type=type, vector=tuple(vector)))
 
 
@@ -86,8 +86,10 @@ async def consolidate(
     resolved: dict[str, UUID5 | UUID7],
     chunk: UUID5 | UUID7,
 ) -> None:
-    candidates = await writer.new_candidates(facts, resolved)
-    vectors = await build.embed(
+    candidates = await writer.new_candidates(
+        facts, {normalize_name(name): entity for name, entity in resolved.items()}
+    )
+    vectors = await build.EmbedClient.from_settings(settings).embed(
         [candidate.fact.statement for candidate in candidates], mode="document"
     )
     plans = await writer.plan_facts(candidates, vectors)
@@ -108,22 +110,57 @@ class FakeGate:
 @pytest.fixture
 def fake_gate(monkeypatch: pytest.MonkeyPatch) -> FakeGate:
     gate = FakeGate()
-    monkeypatch.setattr(build, "relevant", gate.relevant)
+    monkeypatch.setattr(build.GateClient, "from_settings", classmethod(lambda cls, config: gate))
     return gate
 
 
 @pytest.fixture
 def fixed_embedder(monkeypatch: pytest.MonkeyPatch) -> FixedEmbedder:
     embedder = FixedEmbedder(E0)
-    monkeypatch.setattr(build, "embed", embedder.embed)
-    monkeypatch.setattr(ontology_catalog, "embed", embedder.embed)
+    monkeypatch.setattr(
+        build.EmbedClient, "from_settings", classmethod(lambda cls, config: embedder)
+    )
     return embedder
 
 
-def install_raising_client(monkeypatch: pytest.MonkeyPatch, error: BaseException) -> None:
+def graph_writer(
+    session: Session,
+    created_by: UUID5 | UUID7,
+    scopes: frozenset[UUID5 | UUID7],
+    llm: FakeLLM | None = None,
+    capture: CaptureContext | None = None,
+    source_text: str = "",
+) -> GraphWriter:
+    """A writer over a fake consolidation model, the test-side composition root."""
+    return GraphWriter(
+        session=session,
+        created_by=created_by,
+        scopes=scopes,
+        consolidator=Consolidator(llm=(llm or FakeLLM()).llm),
+        capture=capture or CaptureContext(),
+        source_text=source_text,
+    )
+
+
+def clients_for(
+    llm: FakeLLM | None = None,
+    embed: RecordingEmbedder | None = None,
+    gate: FakeGate | None = None,
+) -> build.GraphClients:
+    """A graph client bundle over fakes, mirroring what the runtime threads in."""
+    model = (llm or FakeLLM()).llm
+    return build.GraphClients(
+        extractor=LLMExtractor(llm=model),
+        gate=gate or FakeGate(),
+        embed=embed or RecordingEmbedder(),
+        llm=model,
+    )
+
+
+def raising_llm(error: BaseException) -> FakeLLM:
     llm = FakeLLM()
     llm.completions.error = error
-    monkeypatch.setattr(llm_module, "llm_model", lambda *args: llm.model)
+    return llm
 
 
 def test_build_graph_loads_ontology_for_a_fresh_process(
@@ -131,7 +168,7 @@ def test_build_graph_loads_ontology_for_a_fresh_process(
 ) -> None:
     monkeypatch.setattr(Ontology, "_cached", None)
 
-    assert dbutil.run(build_graph(limit=0)) == (0, 0)
+    assert dbutil.run(build_graph(clients_for(embed=fixed_embedder), limit=0)) == (0, 0)
     assert Ontology.current().entity_names
 
 
@@ -162,7 +199,7 @@ def test_redirect_entity_resolves_null_absent_replaced_and_dropped() -> None:
     assert redirect_entity(redirect, dropped) == (None, True)
 
 
-@pytest.mark.parametrize("scenario", ["insert", "exact", "fuzzy", "path"])
+@pytest.mark.parametrize("scenario", ["insert", "exact", "path"])
 def test_resolve_mints_reuses_folds_or_drops(
     scenario: str, fake_embedder: RecordingEmbedder
 ) -> None:
@@ -177,17 +214,8 @@ def test_resolve_mints_reuses_folds_or_drops(
                     type="author",
                     content_id=entity_id("Exact Fixture", "author"),
                 )
-            if scenario == "fuzzy":
-                await seedgraph.add_entity(
-                    session,
-                    owner,
-                    "Existing",
-                    type="concept",
-                    embedding=deterministic("document:Newcomer"),
-                    content_id=entity_id("Existing", "concept"),
-                )
         async with dbutil.actor(owner) as session:
-            writer = GraphWriter(session, owner, frozenset({owner}))
+            writer = graph_writer(session, owner, frozenset({owner}))
             if scenario == "insert":
                 first = await resolve(writer, "Brand New", "concept")
                 second = await resolve(writer, "Brand New", "concept")
@@ -195,31 +223,31 @@ def test_resolve_mints_reuses_folds_or_drops(
                 return first
             if scenario == "exact":
                 return await resolve(writer, "Exact Fixture", "author")
-            if scenario == "fuzzy":
-                return await resolve(writer, "Newcomer", "concept")
             return await resolve(writer, "notes/graph_rag.md", "concept")
 
     expected = {
         "insert": entity_id("Brand New", "concept"),
         "exact": entity_id("Exact Fixture", "author"),
-        "fuzzy": entity_id("Existing", "concept"),
         "path": None,
     }
     assert dbutil.run(body()) == expected[scenario]
 
 
-def test_nonstructural_entities_can_fuzzy_fold(fixed_embedder: FixedEmbedder) -> None:
+def test_semantically_similar_entities_keep_distinct_identities(
+    fixed_embedder: FixedEmbedder,
+) -> None:
     async def body() -> tuple[UUID5 | UUID7 | None, UUID5 | UUID7 | None]:
         owner = await seedgraph.fresh_owner()
         async with dbutil.actor(owner) as session:
-            writer = GraphWriter(session, owner, frozenset({owner}))
+            writer = graph_writer(session, owner, frozenset({owner}))
             research = await resolve(writer, "Research", "area")
             business = await resolve(writer, "Business", "area")
         return research, business
 
     research, business = dbutil.run(body())
     assert research == entity_id("Research", "area")
-    assert business == research
+    assert business == entity_id("Business", "area")
+    assert business != research
 
 
 def test_exact_names_with_distinct_types_remain_distinct_entities(
@@ -238,7 +266,7 @@ def test_exact_names_with_distinct_types_remain_distinct_entities(
             )
         async with dbutil.actor(owner) as session:
             resolved = await resolve(
-                GraphWriter(session, owner, frozenset({owner})),
+                graph_writer(session, owner, frozenset({owner})),
                 "research",
                 System.Entity.CONCEPT,
             )
@@ -303,24 +331,68 @@ def test_consolidate_applies_verdict(scenario: str, fixed_embedder: FixedEmbedde
         )
         async with dbutil.actor(owner) as session:
             await consolidate(
-                GraphWriter(session, owner, frozenset({owner})), [fact], resolved, chunk
+                graph_writer(session, owner, frozenset({owner})),
+                [fact],
+                resolved,
+                chunk,
             )
         async with dbutil.actor(owner) as session:
             total = (
-                await session.exec(
-                    select(func.count()).select_from(Fact.Claim).execution_options(**GATE_OFF)
-                )
+                await session.exec(select(Fact.Claim.id.count()).execution_options(**GATE_OFF))
             ).one()
             live = (
                 await session.exec(
-                    select(func.count())
-                    .select_from(Fact.Live)
-                    .where(Fact.Live.subject_id == subject)
+                    select(Fact.Live.id.count()).where(Fact.Live.subject_id == subject)
                 )
             ).one()
         return total or 0, live or 0
 
     assert dbutil.run(body()) == {"add": (1, 1), "noop": (1, 1), "update": (2, 1)}[scenario]
+
+
+def test_duplicate_state_candidate_updates_once(fixed_embedder: FixedEmbedder) -> None:
+    now = datetime.now(UTC)
+
+    async def body() -> tuple[int, int]:
+        owner = await seedgraph.fresh_owner()
+        chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
+        async with dbutil.actor(owner) as session:
+            subject = await seedgraph.add_entity(session, owner, "Productivity")
+            archived = await seedgraph.add_entity(session, owner, "Archived")
+            maintained = await seedgraph.add_entity(session, owner, "Maintained")
+            await seedgraph.add_fact(
+                session,
+                owner,
+                subject,
+                statement="Status Archived",
+                predicate="has_status",
+                object_id=archived,
+                embedding=E0,
+                valid=Range(now - timedelta(days=2), None),
+            )
+        fact = TimedFact(
+            subject="Productivity",
+            predicate="has_status",
+            object="Maintained",
+            statement="Productivity has status Maintained.",
+            valid_from=now - timedelta(days=1),
+        )
+        model_fact = fact.model_copy(update={"statement": "has_status [Status] Maintained"})
+        async with dbutil.actor(owner) as session:
+            await consolidate(
+                graph_writer(session, owner, frozenset({owner})),
+                [fact, model_fact],
+                {"Productivity": subject, "Maintained": maintained},
+                chunk,
+            )
+        async with dbutil.actor(owner) as session:
+            total = (
+                await session.exec(select(Fact.Claim.id.count()).execution_options(**GATE_OFF))
+            ).one()
+            live = (await session.exec(select(Fact.Live.id.count()))).one()
+        return total or 0, live or 0
+
+    assert dbutil.run(body()) == (2, 1)
 
 
 @pytest.mark.parametrize(
@@ -344,7 +416,7 @@ def test_fact_claims_carry_quote_offsets_when_the_quote_aligns(
             subject = await seedgraph.add_entity(session, owner, "Subject")
         fact = TimedFact(subject="Subject", predicate="uses", statement="grounded", quote=quote)
         async with dbutil.actor(owner) as session:
-            writer = GraphWriter(session, owner, frozenset({owner}), source_text=LONG_PROSE)
+            writer = graph_writer(session, owner, frozenset({owner}), source_text=LONG_PROSE)
             await consolidate(writer, [fact], {"Subject": subject}, chunk)
         async with dbutil.actor(owner) as session:
             return (
@@ -374,21 +446,19 @@ def test_consolidate_is_idempotent_and_reads_an_empty_pool(fixed_embedder: Fixed
             subject = await seedgraph.add_entity(session, owner, "Subject")
         fact = TimedFact(subject="Subject", predicate="uses", statement="only")
         async with dbutil.actor(owner) as session:
-            writer = GraphWriter(session, owner, frozenset({owner}))
+            writer = graph_writer(session, owner, frozenset({owner}))
             empty = await writer.plan_facts([], [])
             await consolidate(writer, [fact], {"Subject": subject}, chunk)
         async with dbutil.actor(owner) as session:
             await consolidate(
-                GraphWriter(session, owner, frozenset({owner})),
+                graph_writer(session, owner, frozenset({owner})),
                 [fact],
                 {"Subject": subject},
                 chunk,
             )
         async with dbutil.actor(owner) as session:
             total = (
-                await session.exec(
-                    select(func.count()).select_from(Fact.Claim).execution_options(**GATE_OFF)
-                )
+                await session.exec(select(Fact.Claim.id.count()).execution_options(**GATE_OFF))
             ).one()
         return empty, total or 0
 
@@ -446,13 +516,14 @@ def test_concurrent_slices_revalidate_one_logical_fact_slot(
                     chunk,
                     [ExtractedEntity(name="Subject", type="concept")],
                     [fact],
+                    clients_for(embed=fixed_embedder),
                 )
 
         await asyncio.gather(
             *(write(chunk_id, fact) for chunk_id, fact in zip(chunk_ids, facts, strict=True))
         )
         async with dbutil.actor(owner) as session:
-            return (await session.exec(select(func.count()).select_from(Fact.Live))).one()
+            return (await session.exec(select(Fact.Live.id.count()))).one()
 
     assert dbutil.run(body()) == 1
 
@@ -475,11 +546,11 @@ def test_speaker_bound_claims_coexist_inside_one_shared_scope(
         )
         for speaker, label in ((alice, "Alice"), (bob, "Bob")):
             async with dbutil.actor(scope) as session:
-                writer = GraphWriter(
+                writer = graph_writer(
                     session,
                     speaker,
                     frozenset({scope}),
-                    CaptureContext(speaker_label=label, speaker_role="Analyst"),
+                    capture=CaptureContext(speaker_label=label, speaker_role="Analyst"),
                 )
                 await consolidate(writer, [opinion], {"Subject": subject}, chunk)
         async with dbutil.actor(scope) as session:
@@ -530,13 +601,14 @@ def test_consolidate_defers_borderline_facts_to_the_batch(
         ]
         async with dbutil.actor(owner) as session:
             await consolidate(
-                GraphWriter(session, owner, frozenset({owner})), facts, {"Subject": subject}, chunk
+                graph_writer(session, owner, frozenset({owner}), llm=fake_llm),
+                facts,
+                {"Subject": subject},
+                chunk,
             )
         async with dbutil.actor(owner) as session:
             return (
-                await session.exec(
-                    select(func.count()).select_from(Fact.Claim).execution_options(**GATE_OFF)
-                )
+                await session.exec(select(Fact.Claim.id.count()).execution_options(**GATE_OFF))
             ).one()
 
     assert dbutil.run(body()) == 3  # one seeded plus the two borderline candidates
@@ -579,7 +651,7 @@ def test_backdated_update_becomes_history_without_retiring_newer_state(bounded: 
                 object_id=older_object,
                 identity=fact_id(subject, fact.predicate, older_object, fact.statement),
             )
-            await GraphWriter(session, owner, frozenset({owner})).apply_plans(
+            await graph_writer(session, owner, frozenset({owner})).apply_plans(
                 [
                     FactPlan(
                         candidate=candidate,
@@ -654,6 +726,7 @@ def test_write_graph_slice_stops_after_four_stale_plans(
                             statement="candidate",
                         )
                     ],
+                    clients_for(embed=fixed_embedder),
                 )
 
     dbutil.run(body())
@@ -666,7 +739,7 @@ def test_prepare_entities_passes_through_a_confident_type_unchanged(
 
     async def body() -> str:
         async with User.system().session() as session:
-            return (await prepare_entities(session, [entity]))[0].type
+            return (await prepare_entities(session, [entity], fake_embedder))[0].type
 
     assert dbutil.run(body()) == "author"
 
@@ -693,7 +766,7 @@ def test_prepare_entities_matches_a_declared_kind_for_a_concept_suggestion(
             entity = ExtractedEntity(
                 name="Something", type=System.Entity.CONCEPT, suggested_type=description
             )
-            resolved = (await prepare_entities(session, [entity]))[0].type
+            resolved = (await prepare_entities(session, [entity], fake_embedder))[0].type
         return resolved, name
 
     resolved_type, existing_name = dbutil.run(body())
@@ -709,7 +782,7 @@ def test_prepare_entities_keeps_a_novel_tenant_suggestion_as_concept(
     async def body() -> tuple[str, int, int]:
         owner = await seedgraph.fresh_owner()
         async with dbutil.actor(owner) as session:
-            before = await session.scalar(select(func.count()).select_from(Entity.Kind))
+            before = await session.scalar(select(Entity.Kind.name.count()))
         async with dbutil.actor(owner).session() as session:
             resolved = (
                 await prepare_entities(
@@ -721,10 +794,11 @@ def test_prepare_entities_keeps_a_novel_tenant_suggestion_as_concept(
                             suggested_type=str(uuid5()),
                         )
                     ],
+                    fake_embedder,
                 )
             )[0].type
         async with dbutil.actor(owner) as session:
-            after = await session.scalar(select(func.count()).select_from(Entity.Kind))
+            after = await session.scalar(select(Entity.Kind.name.count()))
         return resolved, before or 0, after or 0
 
     resolved, before, after = dbutil.run(body())
@@ -759,7 +833,7 @@ def test_prepare_entities_falls_back_to_concept_without_ontology_vectors(
                     .execution_options(synchronize_session=False)
                 )
             try:
-                return (await prepare_entities(session, [entity]))[0].type
+                return (await prepare_entities(session, [entity], fake_embedder))[0].type
             finally:
                 async with session.begin():
                     for name, vector in originals:
@@ -800,8 +874,9 @@ def test_build_graph_writes_a_slice_then_resumes(
     async def body() -> tuple[tuple[int, int], tuple[int, int]]:
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, LONG_PROSE)
-        first = await build_graph(scopes=frozenset({owner}))
-        second = await build_graph(scopes=frozenset({owner}))
+        clients = clients_for(fake_llm, fake_embedder, fake_gate)
+        first = await build_graph(clients, scopes=frozenset({owner}))
+        second = await build_graph(clients, scopes=frozenset({owner}))
         return first, second
 
     first, second = dbutil.run(body())
@@ -841,7 +916,9 @@ def test_build_graph_normalizes_unknown_types_and_drops_unknown_predicates(
     async def body() -> tuple[int, int]:
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, LONG_PROSE)
-        return await build_graph(scopes=frozenset({owner}))
+        return await build_graph(
+            clients_for(fake_llm, fake_embedder, fake_gate), scopes=frozenset({owner})
+        )
 
     assert dbutil.run(body()) == (2, 1)
 
@@ -868,7 +945,11 @@ def test_build_graph_source_filter_drops_a_path_and_skips_a_ghost_subject(
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, LONG_PROSE, title="alpha source")
         await seedgraph.seed_chunk(owner, LONG_PROSE, title="beta other")
-        return await build_graph(scopes=frozenset({owner}), source="alpha")
+        return await build_graph(
+            clients_for(fake_llm, fake_embedder, fake_gate),
+            scopes=frozenset({owner}),
+            source="alpha",
+        )
 
     assert dbutil.run(body()) == (1, 1)  # Ada minted once, path dropped, ghost fact skipped
 
@@ -894,7 +975,7 @@ def test_build_graph_skips_a_gated_out_chunk(fake_gate: FakeGate) -> None:
     async def body() -> tuple[tuple[int, int], bool]:
         owner = await seedgraph.fresh_owner()
         chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
-        result = await build_graph(scopes=frozenset({owner}))
+        result = await build_graph(clients_for(gate=fake_gate), scopes=frozenset({owner}))
         async with dbutil.actor(owner) as session:
             done = await session.get(seedgraph.Chunk, chunk)
         return result, done is not None and done.processed_at is not None
@@ -923,12 +1004,12 @@ def test_model_extraction_skips_the_separate_gate_for_a_self_gating_backend(
     async def fail_gate(text: str) -> NoReturn:
         raise AssertionError(f"unexpected gate for {text}")
 
-    monkeypatch.setattr(
-        build.Extractor,
-        "configured",
-        classmethod(lambda cls: SelfGatingExtractor()),
+    clients = build.GraphClients(
+        extractor=SelfGatingExtractor(),
+        gate=cast("build.RelevanceGate", SimpleNamespace(relevant=fail_gate)),
+        embed=RecordingEmbedder(),
+        llm=FakeLLM().llm,
     )
-    monkeypatch.setattr(build, "relevant", fail_gate)
     owner = uuid5()
     chunk = Chunk(
         id=uuid5(),
@@ -939,7 +1020,7 @@ def test_model_extraction_skips_the_separate_gate_for_a_self_gating_backend(
         scopes=[owner],
     )
 
-    entities, facts = asyncio.run(build.model_extraction(chunk, None))
+    entities, facts = asyncio.run(build.model_extraction(chunk, None, clients))
 
     assert entities == [entity]
     assert facts[0].valid_from is not None
@@ -956,7 +1037,7 @@ def test_build_graph_marks_short_and_untitled_chunks_done(
     async def body() -> tuple[tuple[int, int], bool]:
         owner = await seedgraph.fresh_owner()
         chunk = await seedgraph.seed_chunk(owner, text, title=title)
-        result = await build_graph(scopes=frozenset({owner}))
+        result = await build_graph(clients_for(embed=fake_embedder), scopes=frozenset({owner}))
         async with dbutil.actor(owner) as session:
             done = await session.get(seedgraph.Chunk, chunk)
         return result, done is not None and done.processed_at is not None
@@ -972,13 +1053,13 @@ def test_journal_line_logs_a_dated_project_fact(fake_embedder: RecordingEmbedder
     async def body() -> tuple[int, int, int]:
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, journal_text, title="My Project", subject_type="project")
-        entities, facts = await build_graph(scopes=frozenset({owner}))
+        entities, facts = await build_graph(
+            clients_for(embed=fake_embedder), scopes=frozenset({owner})
+        )
         async with dbutil.actor(owner) as session:
             projects = (
                 await session.exec(
-                    select(func.count())
-                    .select_from(Entity.Content)
-                    .where(Entity.Content.type == "project")
+                    select(Entity.Content.id.count()).where(Entity.Content.type == "project")
                 )
             ).one()
         return entities, facts, projects or 0
@@ -999,13 +1080,13 @@ def test_short_typed_document_writes_its_declared_entity(
             title="Research",
             subject_type="area",
         )
-        entities, facts = await build_graph(scopes=frozenset({owner}))
+        entities, facts = await build_graph(
+            clients_for(embed=fake_embedder), scopes=frozenset({owner})
+        )
         async with dbutil.actor(owner) as session:
             areas = (
                 await session.exec(
-                    select(func.count())
-                    .select_from(Entity.Content)
-                    .where(Entity.Content.type == "area")
+                    select(Entity.Content.id.count()).where(Entity.Content.type == "area")
                 )
             ).one()
         return entities, facts, areas or 0
@@ -1013,72 +1094,42 @@ def test_short_typed_document_writes_its_declared_entity(
     assert dbutil.run(body()) == (1, 0, 1)
 
 
-def test_build_graph_propagates_an_extraction_timeout(
-    fake_gate: FakeGate, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    install_raising_client(
-        monkeypatch, APITimeoutError(request=httpx.Request("POST", "http://llm.invalid"))
-    )
-
-    async def body() -> None:
-        owner = await seedgraph.fresh_owner()
-        await seedgraph.seed_chunk(owner, LONG_PROSE)
-        await build_graph(scopes=frozenset({owner}))
-
-    with pytest.raises(APITimeoutError):
-        dbutil.run(body())
-
-
-def test_build_graph_raises_when_the_endpoint_is_unreachable(
-    fake_gate: FakeGate, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    install_raising_client(
-        monkeypatch, APIConnectionError(request=httpx.Request("POST", "http://llm.invalid"))
-    )
-
-    async def body() -> None:
-        owner = await seedgraph.fresh_owner()
-        await seedgraph.seed_chunk(owner, LONG_PROSE)
-        await build_graph(scopes=frozenset({owner}))
-
-    with pytest.raises(APIConnectionError):
-        dbutil.run(body())
-
-
-def test_build_graph_propagates_an_invalid_extraction(
-    fake_gate: FakeGate, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with pytest.raises(ValidationError) as caught:
+def raising_error(kind: str) -> BaseException:
+    """Build one extraction-time failure that must propagate out of the single-chunk build."""
+    request = httpx.Request("POST", "http://llm.invalid")
+    if kind == "timeout":
+        return APITimeoutError(request=request)
+    if kind == "connection":
+        return APIConnectionError(request=request)
+    if kind == "runtime":
+        return RuntimeError("unexpected")
+    try:
         WireExtraction(e="truncated", f=[])
-    install_raising_client(monkeypatch, caught.value)
+    except ValidationError as invalid:
+        return invalid
+    raise AssertionError("a truncated WireExtraction payload must not validate")
+
+
+@pytest.mark.parametrize("kind", ["timeout", "connection", "validation", "runtime"])
+def test_build_graph_propagates_a_single_chunk_extraction_failure(
+    kind: str, fake_gate: FakeGate
+) -> None:
+    error = raising_error(kind)
+    clients = clients_for(raising_llm(error), gate=fake_gate)
 
     async def body() -> None:
         owner = await seedgraph.fresh_owner()
         await seedgraph.seed_chunk(owner, LONG_PROSE)
-        await build_graph(scopes=frozenset({owner}))
+        await build_graph(clients, scopes=frozenset({owner}))
 
-    with pytest.raises(ValidationError):
-        dbutil.run(body())
-
-
-def test_build_graph_finishes_peers_then_raises_an_unexpected_chunk_error(
-    fake_gate: FakeGate, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    install_raising_client(monkeypatch, RuntimeError("unexpected"))
-
-    async def body() -> tuple[int, int]:
-        owner = await seedgraph.fresh_owner()
-        await seedgraph.seed_chunk(owner, LONG_PROSE)
-        return await build_graph(scopes=frozenset({owner}))
-
-    with pytest.raises(RuntimeError, match="unexpected"):
+    with pytest.raises(type(error)):
         dbutil.run(body())
 
 
 def test_build_graph_and_dedup_default_to_the_system_user_on_an_empty_graph() -> None:
     async def body() -> tuple[tuple[int, int], int]:
         await dbutil.reset_db()
-        return await build_graph(), await dedup_entities()
+        return await build_graph(clients_for()), await dedup_entities()
 
     (entities, facts), merged = dbutil.run(body())
     assert (entities, facts) == (0, 0)
@@ -1132,8 +1183,8 @@ def test_dedup_drops_a_path_like_entity_and_its_dangling_facts(
             )
         await dedup_entities(scopes=frozenset({owner}))
         async with dbutil.actor(owner) as session:
-            facts = (await session.exec(select(func.count()).select_from(Fact.Content))).one()
-            entities = (await session.exec(select(func.count()).select_from(Entity.Content))).one()
+            facts = (await session.exec(select(Fact.Content.id.count()))).one()
+            entities = (await session.exec(select(Entity.Content.id.count()))).one()
         return facts or 0, entities or 0
 
     facts, entities = dbutil.run(body())
@@ -1266,16 +1317,33 @@ def test_source_declaration_accepts_each_relation_independently(
     assert [(fact.predicate, fact.object_) for fact in facts] == expected
 
 
-def test_graph_writer_skips_a_fact_whose_subject_did_not_resolve() -> None:
-    owner = uuid5()
+@pytest.mark.parametrize("scenario", ["subject-missing", "both-resolved", "object-missing"])
+def test_graph_writer_candidate_resolves_endpoints_or_skips_a_dangling_fact(
+    scenario: str,
+) -> None:
+    owner, subject, object_id = uuid5(), uuid5(), uuid5()
 
-    class UnusedSession:
-        pass
-
-    writer = GraphWriter(cast("Session", UnusedSession()), owner, frozenset({owner}))
-    fact = TimedFact(subject="Missing", predicate="uses", statement="Missing uses memory.")
-
-    assert writer.candidate(fact, {}) is None
+    writer = graph_writer(Session(), owner, frozenset({owner}))
+    if scenario == "subject-missing":
+        fact = TimedFact(subject="Missing", predicate="uses", statement="Missing uses memory.")
+        assert writer.candidate(fact, {}) is None
+    elif scenario == "object-missing":
+        fact = TimedFact(
+            subject="Known", predicate="uses", object="Missing", statement="Known uses Missing."
+        )
+        assert writer.candidate(fact, {"known": subject}) is None
+    else:
+        fact = TimedFact(
+            subject="MoE Expert Compression",
+            predicate="uses",
+            object="RTX 3090",
+            statement="MoE expert compression uses the RTX 3090.",
+        )
+        candidate = writer.candidate(
+            fact, {"moe expert compression": subject, "rtx 3090": object_id}
+        )
+        assert candidate is not None
+        assert (candidate.subject_id, candidate.object_id) == (subject, object_id)
 
 
 def test_raise_failures_groups_multiple_unexpected_chunk_errors() -> None:
@@ -1332,7 +1400,7 @@ def test_forward_update_retires_the_prior_claim_and_opens_the_correction() -> No
                 object_id=newer_object,
                 identity=fact_id(subject, fact.predicate, newer_object, fact.statement),
             )
-            await GraphWriter(session, owner, frozenset({owner})).apply_plans(
+            await graph_writer(session, owner, frozenset({owner})).apply_plans(
                 [
                     FactPlan(
                         candidate=candidate,
@@ -1382,7 +1450,7 @@ def test_update_without_event_time_closes_a_future_claim_as_empty() -> None:
                 predicate="related_to",
                 statement="the replacement state",
             )
-            await GraphWriter(session, owner, frozenset({owner})).apply_plans(
+            await graph_writer(session, owner, frozenset({owner})).apply_plans(
                 [
                     FactPlan(
                         candidate=FactCandidate(
@@ -1445,6 +1513,7 @@ def test_write_graph_slice_retries_a_transient_db_conflict(
                 chunk,
                 [ExtractedEntity(name="Ada", type="author")],
                 [],
+                clients_for(embed=fixed_embedder),
             )
 
     touched = dbutil.run(body())

@@ -1,10 +1,11 @@
 from loguru import logger
+from patos import FrozenFlexModel
 from pydantic import UUID5
 from sqlmodel import select
 
 from ..config import settings
 from ..ontology import System
-from ..serving.embed import embed
+from ..serving.embed import Embedder
 from ..serving.extract import LLM
 from ..store import Entity, Fact
 from ..store.engine import Session
@@ -73,11 +74,12 @@ async def write_observation(
     return True
 
 
-class InsightBuilder:
+class InsightBuilder(FrozenFlexModel):
     """Derive and store significant observations in short database phases."""
 
-    def __init__(self, scopes: Scopes) -> None:
-        self.scopes = frozenset(scopes)
+    scopes: Scopes
+    llm: LLM
+    embed: Embedder
 
     async def grounding(self) -> list[str] | None:
         """The latest fact statements to reflect on, null when too few exist to ground on."""
@@ -118,7 +120,7 @@ class InsightBuilder:
         grounding = await self.grounding()
         if grounding is None:
             return 0
-        report = await LLM.configured().generate(
+        report = await self.llm.generate(
             settings.insight_system,
             "Facts:\n" + "\n".join(f"- {statement}" for statement in grounding),
             InsightReport,
@@ -130,12 +132,19 @@ class InsightBuilder:
                 self.scopes,
             )
             return 0
-        vectors = await embed([observation.statement for observation in kept], mode="document")
+        vectors = await self.embed.embed(
+            [observation.statement for observation in kept], mode="document"
+        )
         return await self.store(kept, vectors)
 
 
 async def derive_insights(
+    llm: LLM,
+    embed: Embedder,
     scopes: Scopes | None = None,
 ) -> int:
     """Derive observations from a user's graph and write the significant ones back."""
-    return await InsightBuilder(frozenset(scopes or (settings.system_user_id,))).build()
+    builder = InsightBuilder(
+        scopes=frozenset(scopes or (settings.system_user_id,)), llm=llm, embed=embed
+    )
+    return await builder.build()

@@ -55,7 +55,7 @@ Logto organization permissions must contain `write:memory` for `status` to repor
 as `writable`. Membership without that organization
 permission remains read-only. AIZK never infers permissions from role names such as editor or admin.
 
-The deployment reconciles this policy from `deploy/logto.conf`. It creates the organization
+The deployment reconciles this policy from `src/deploy/logto.conf`. It creates the organization
 permission under **Organization template**, assigns it to editor and admin, and leaves viewer
 without it. It also keeps `aizk-user` as the only managed global human role and makes that role a
 default for new users. The policy values are regular `AIZK_` settings, so `.env` may override them
@@ -75,10 +75,11 @@ names.
 Logto changes become visible after the AIZK authority cache expires, which takes at most 60 seconds
 in the production deployment.
 
-The current deployment has no self-registration flow. Administrators invite every user. Public
-organizations are visible to every authenticated user, not to anonymous internet traffic. A future
-self-service Logto signup may grant the default global `aizk-user` role and private memory, but it
-must not grant organization membership or shared write access automatically.
+The browser provides email-first Logto signup when the deployment enables self-registration.
+Administrators can instead disable signup and invite every user. Public organizations are visible
+to every authenticated user, not to anonymous internet traffic. Self-service accounts receive the
+default global `aizk-user` role and private memory, but no organization membership or shared write
+access.
 
 ## Agent instructions
 
@@ -95,6 +96,8 @@ for Codex and OpenCode. It should merge with existing instructions rather than o
 - Omit scopes for private memory. Name an organization only when sharing is intended.
 - Remember only durable, self-contained conclusions, decisions, measurements, and maintained briefs.
 - Use `source_uri` only for the original website or paper PDF URL.
+- Prefer text. Preserve a file only when the exact original may be needed later.
+- Pass companion text with `preserve_source=true` when both belong to one document.
 - Use `observed_at` only for a material applicability date.
 - Use `expires_at` only for a known time after which the information stops being true.
 - Never use expiration as a reminder or because documentation may change someday.
@@ -138,6 +141,10 @@ repository note files.
 - Recall first, then remember durable conclusions, decisions, measurements, negative results, and
   maintained briefs as self-contained Markdown with one coherent purpose.
 - Omit `source_uri` for authored notes. Use it only for the original website or paper PDF URL.
+- Prefer text. Preserve a file only when the exact original may be needed later, such as a
+  contract, form, paper, signed record, or presentation.
+- Pass both text and `source_uri` with `preserve_source=true` when the text is companion context for
+  the same file. Files are limited to 10 MiB.
 - Omit `observed_at` unless a known applicability date matters.
 - Omit `expires_at` unless the information has a known time after which it stops being true.
 - Never use expiration as a reminder, maintenance interval, uncertainty marker, or prediction that
@@ -155,10 +162,10 @@ repository note files.
 - Keep large code, generated logs, PDFs, and datasets in their source repositories.
 ```
 
-The maintained repository copy will also be available at
-`https://raw.githubusercontent.com/phvv-me/aizk/main/skills/aizk/SKILL.md` after the release containing
-this guide is published. The recalled template is authoritative during bootstrap and avoids a
-dependency on that release having completed.
+The Life monorepo keeps its maintained agent copy at `.agents/skills/aizk/SKILL.md`. External
+collaborators should bootstrap from the public Docs organization by asking AIZK how to complete
+onboarding. The recalled guidance is authoritative and does not depend on a particular repository
+layout.
 
 ## Verify access
 
@@ -209,9 +216,12 @@ derived current facts while AIZK retains their temporal history. It creates no r
 no maintenance task. When durable knowledge changes without a known cutoff, omit `expires_at` and
 let an agent update or correct the source when the change is observed.
 
-Keep raw files, large code, generated logs, PDFs, and datasets in their source repositories. Remember
-durable interpretation, decisions, measurements, negative results, useful paper text, and only small
-code snippets that explain a finding.
+Keep large code, generated logs, and datasets in their source repositories. Prefer remembered text
+for durable interpretation, decisions, measurements, negative results, useful paper content, and
+small code snippets. Preserve an original file only when its exact bytes may be needed later, such
+as a contract, form, paper, signed record, or presentation. Files are limited to 10 MiB. Companion
+text belongs to the same document when `preserve_source=true`. If conversion is unsupported, AIZK
+still recalls the filename, size, media type, URI, conversion state, and companion context.
 
 ## Shared memory
 

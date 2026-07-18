@@ -2,7 +2,6 @@ import hashlib
 from dataclasses import dataclass, field
 from types import TracebackType
 
-from PIL.Image import Image
 from pydantic import BaseModel, JsonValue
 from pydantic_ai.messages import (
     ModelMessage,
@@ -24,6 +23,7 @@ from aizk.graph.models import (
 )
 from aizk.ontology import WireExtraction
 from aizk.serving.embed import EmbedMode
+from aizk.serving.extract import LLM
 
 
 class AsyncContext[ValueT]:
@@ -53,15 +53,10 @@ class RecordingEmbedder:
     def __init__(self, dim: int = settings.embed_dim) -> None:
         self.embed_url, self.embed_model, self.embed_dim = "fake://embed.test/v1", "fake", dim
         self.calls: list[tuple[list[str], str]] = []
-        self.image_calls: list[list[str]] = []
 
     async def embed(self, texts: list[str], mode: EmbedMode = "document") -> list[list[float]]:
         self.calls.append((list(texts), mode))
         return [deterministic_vector(f"{mode}:{text}", self.embed_dim) for text in texts]
-
-    async def embed_images(self, images: list[str | Image]) -> list[list[float]]:
-        self.image_calls.append([str(image) for image in images])
-        return [deterministic_vector(f"image:{image}", self.embed_dim) for image in images]
 
 
 def default_response(schema: type[BaseModel]) -> BaseModel:
@@ -107,6 +102,17 @@ class FakeLLM:
                 supports_json_schema_output=True,
                 default_structured_output_mode="native",
             ),
+        )
+
+    @property
+    def llm(self) -> LLM:
+        """A real `LLM` service running over this fake model, ready to inject."""
+        return LLM(
+            model=self.model,
+            temperature=settings.llm_temperature,
+            timeout=settings.llm_timeout,
+            response_max_tokens=settings.llm_response_max_tokens,
+            chat_template_kwargs=settings.llm_chat_template_kwargs,
         )
 
     def register(self, schema: type[BaseModel], response: BaseModel) -> None:

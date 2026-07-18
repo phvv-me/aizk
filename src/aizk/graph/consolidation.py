@@ -30,13 +30,10 @@ def cosine_similarity(a: Sequence[float], b: Sequence[float]) -> float:
     return dot / magnitude if magnitude else 0.0
 
 
-class Consolidator:
+class Consolidator(FrozenModel):
     """Resolve fact candidates with deterministic rules and one model fallback batch."""
 
-    __slots__ = ("llm",)
-
-    def __init__(self, llm: LLM | None = None) -> None:
-        self.llm = llm or LLM.configured()
+    llm: LLM
 
     def decide(
         self,

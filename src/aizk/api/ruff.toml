@@ -1,0 +1,12 @@
+extend = "../../../pyproject.toml"
+
+# Transport overlay. The browser API reads the store only through model
+# classmethods and User.exec, so statement building and raw session APIs are
+# banned here on top of the package-wide rules (docs/architecture.md).
+[lint.flake8-tidy-imports.banned-api]
+"sqlalchemy.select".msg = "Use sqlmodel.select for every query."
+"sqlmodel.select".msg = "Transports do not build statements. Put the query on a store model classmethod."
+"sqlmodel.Session".msg = "Transports do not open sessions. Read through User.exec or a model method."
+"sqlmodel.ext.asyncio.session.AsyncSession".msg = "Transports do not open sessions. Read through User.exec or a model method."
+"aizk.store.engine.Session".msg = "Transports do not open sessions. Read through User.exec or a model method."
+"aizk.store.engine.Database".msg = "Transports do not touch the engine. Read through User.exec or a model method."

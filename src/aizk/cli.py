@@ -1,26 +1,39 @@
 import asyncio
+import json
 import os
 import sys
+from collections.abc import Awaitable
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
+import uvicorn
 from cyclopts import App
 from loguru import logger
-from mainboard.profiling import enable_spans
-from pydantic import UUID5
+from mainboard.profiling import Profiler
+from pydantic import UUID5, UUID7
 
 from alembic import command
 
 from . import admin, ops
 from . import backup as backup_ops
-from .background.queue import enqueue_pending, install_queue_schema, retry_failed_chunks
+from .api.app import AizkAPI
+from .artifacts.uploads import InertIntake, UploadBox
+from .auth import Auth
+from .background.jobs.projection import enqueue_pending, retry_failed_chunks
+from .background.queue import install_queue_schema
 from .background.schedule import run_worker
-from .common.auth.logto import LogtoClient, LogtoPolicy
 from .config import settings
 from .extract.ingest import ingest_text
+from .integrations.logto import LogtoClient, LogtoPolicy
 from .mcp.server import AizkMCP
 from .retrieval import RecallResult, recall
+from .runtime import Runtime
 from .store import Relation
 from .store.identity import User
+from .usage import observe, sink
+
+if TYPE_CHECKING:
+    from .artifacts.service import ArtifactIntake
 
 # Stop hooks provide the active transcript through this variable.
 _TRANSCRIPT_ENV = "AIZK_SESSION_TRANSCRIPT"
@@ -41,6 +54,18 @@ db = App(name="db", help="Database and engine ops: setup, health, migrations, ba
 logto = App(name="logto", help="Logto authorization policy audit and reconciliation.")
 for _sub in (graph, ontology, data, db, logto):
     app.command(_sub)
+
+
+async def _run_profiled[Result](operation: Awaitable[Result]) -> Result:
+    """Run one process lifetime with low-impact spans and target-process GPU telemetry."""
+    if not settings.profiling:
+        return await operation
+    profiler = Profiler(features=Profiler.Feature.SPANS | Profiler.Feature.DEVICE)
+    try:
+        with profiler:
+            return await operation
+    finally:
+        logger.info("{}", profiler.report())
 
 
 @db.command(name="migrate")
@@ -70,11 +95,14 @@ async def check_rls() -> None:
 
 
 @app.command
-async def worker(batch_size: int = settings.queue_batch_size) -> None:
+async def worker(batch_size: int | None = None) -> None:
     """Run the autonomous engine, the queue and the scheduler together, until interrupted."""
-    if settings.profiling:
-        enable_spans()
-    await run_worker(batch_size=batch_size)
+    async with Runtime.assemble(settings) as runtime:
+        observe(runtime.database)
+        try:
+            await _run_profiled(run_worker(runtime, batch_size=batch_size))
+        finally:
+            await sink.drain()
 
 
 @db.command(name="install-queue")
@@ -119,17 +147,55 @@ async def reset_database(confirm: str) -> None:
 @app.command
 async def serve_mcp() -> None:
     """Run the HTTP MCP server and optionally its worker in the same local process."""
-    if settings.profiling:
-        enable_spans()
     if settings.auto_setup:
         applied = await ops.setup()
         logger.info("database ready at {}", applied.migrated_to)
     logger.info("serving aizk mcp over HTTP, worker={}", settings.serve_with_worker)
-    serving = AizkMCP.shared().run_http_async(host=settings.mcp_host, port=settings.mcp_port)
-    if settings.serve_with_worker:
-        await asyncio.gather(serving, run_worker())
-    else:
-        await serving
+    async with Runtime.assemble(settings) as runtime:
+        observe(runtime.database)
+        server = AizkMCP(
+            runtime.auth,
+            runtime.store,
+            runtime.uploads,
+            runtime.artifacts.intake,
+            runtime.settings,
+        )
+        serving = server.run_http_async(host=settings.mcp_host, port=settings.mcp_port)
+        try:
+            if settings.serve_with_worker:
+                await _run_profiled(asyncio.gather(serving, run_worker(runtime)))
+            else:
+                await _run_profiled(serving)
+        finally:
+            await sink.drain()
+
+
+@app.command
+async def serve_api() -> None:
+    """Run the browser JSON API service over HTTP, mirroring the MCP serving command."""
+    if settings.auto_setup:
+        applied = await ops.setup()
+        logger.info("database ready at {}", applied.migrated_to)
+    logger.info("serving aizk api over HTTP at {}:{}", settings.api_host, settings.api_port)
+    async with Runtime.assemble(settings) as runtime:
+        observe(runtime.database)
+        service = AizkAPI(runtime.auth, runtime.uploads, runtime.artifacts.intake)
+        server = uvicorn.Server(
+            uvicorn.Config(service.app(), host=settings.api_host, port=settings.api_port)
+        )
+        try:
+            await _run_profiled(server.serve())
+        finally:
+            await sink.drain()
+
+
+@app.command(name="openapi")
+def openapi(path: Path = Path("src/web/openapi.json")) -> None:
+    """Write the browser API's OpenAPI schema where the web client generator reads it."""
+    inert = InertIntake()
+    service = AizkAPI(Auth(), UploadBox(intake=inert), cast("ArtifactIntake", inert))
+    path.write_text(json.dumps(service.app().openapi(), indent=2) + "\n", encoding="utf-8")
+    print(f"wrote {path}")
 
 
 @app.command(name="check-public")
@@ -142,10 +208,18 @@ def check_public() -> None:
     print("public authentication configuration is complete")
 
 
+@app.command(name="check-web")
+def check_web() -> None:
+    """Confirm that the browser UI and its confidential Logto application are configured."""
+    if settings.web_public_url is None:
+        raise RuntimeError("web deployment requires web_public_url")
+    print(f"web authentication is complete at {settings.web_callback_url}")
+
+
 @logto.command(name="audit")
 async def audit_logto() -> None:
     """Report drift between Logto and the policy configured through `AIZK_` settings."""
-    client = LogtoClient()
+    client = LogtoClient(settings)
     try:
         report = await LogtoPolicy(client).audit()
     finally:
@@ -158,7 +232,7 @@ async def audit_logto() -> None:
 @logto.command(name="apply")
 async def apply_logto() -> None:
     """Reconcile Logto with the configured AIZK authorization policy and print each mutation."""
-    client = LogtoClient()
+    client = LogtoClient(settings)
     try:
         report = await LogtoPolicy(client).apply()
     finally:
@@ -178,7 +252,7 @@ async def recall_context(
         user=User.system((user or settings.system_user_id,)),
         k=k,
     )
-    print(RecallResult.from_candidates(candidates).to_markdown() or "no context recalled")
+    print(await RecallResult.from_candidates(candidates).to_markdown() or "no context recalled")
 
 
 @app.command
@@ -212,52 +286,52 @@ async def ingest(path: str, scopes: str | None = None, user: UUID5 | None = None
     print(f"ingested {count} documents from {path}")
 
 
-@data.command(name="ingest-image")
-async def ingest_image(
-    path: str,
-    caption: str | None = None,
-    scopes: str | None = None,
-    user: UUID5 | None = None,
-) -> None:
-    """Ingest an image into the shared multimodal space so a text query can recall it."""
-    document_id = await admin.ingest_image(path, caption=caption, scopes=scopes, user_id=user)
-    print(document_id)
-
-
 @graph.command(name="rebuild")
 async def rebuild(
     limit: int | None = None, source: str | None = None, user: UUID5 | None = None
 ) -> None:
     """Build the graph now over the user's pending chunks, the on-demand extraction."""
-    entities, facts = await admin.rebuild(limit=limit, source=source, user_id=user)
+    async with Runtime.assemble(settings) as runtime:
+        entities, facts = await _run_profiled(
+            admin.rebuild(runtime.graph, limit=limit, source=source, user_id=user)
+        )
     print(f"built {entities} entities and {facts} facts")
+
+
+@graph.command(name="diagnose-extraction")
+async def diagnose_extraction(chunk: UUID7) -> None:
+    """Explain extraction and exact grounding for one stored chunk without writing."""
+    async with Runtime.assemble(settings) as runtime:
+        report = await admin.diagnose_extraction(runtime.extractor, chunk)
+    print(report.model_dump_json(indent=2))
 
 
 @graph.command(name="decay")
 async def decay(half_life_days: float = 90.0, user: UUID5 | None = None) -> None:
     """Run the decay pass now, archiving stale facts that leave recall but stay in history."""
-    archived = await admin.decay(half_life_days=half_life_days, user_id=user)
+    archived = await _run_profiled(admin.decay(half_life_days=half_life_days, user_id=user))
     print(f"archived {archived} stale facts")
 
 
 @graph.command(name="reembed")
 async def reembed(user: UUID5 | None = None) -> None:
     """Re-embed every visible stored vector with the current embedder, a backend migration."""
-    written = await admin.reembed(user_id=user)
+    written = await _run_profiled(admin.reembed(user_id=user))
     print(f"re-embedded {written} vectors")
 
 
 @graph.command(name="raptor")
 async def raptor(user: UUID5 | None = None) -> None:
     """Build the RAPTOR tree now, the recursive summary tiers above the communities."""
-    written = await admin.raptor(user_id=user)
+    async with Runtime.assemble(settings) as runtime:
+        written = await _run_profiled(admin.raptor(runtime.llm, runtime.embed, user_id=user))
     print(f"built {written} summaries")
 
 
 @graph.command(name="communities")
 async def communities(user: UUID5 | None = None) -> None:
     """Build graph communities and their global summaries now."""
-    written = await admin.communities(user_id=user)
+    written = await _run_profiled(admin.communities(user_id=user))
     print(f"built {written} communities")
 
 
@@ -265,7 +339,7 @@ async def communities(user: UUID5 | None = None) -> None:
 async def forget(query: str, k: int = 8, user: UUID5 | None = None) -> None:
     """Retract the claims a query's own source notes contributed, the erasure counterpart to
     write."""
-    result = await admin.forget(query, k=k, user_id=user)
+    result = await _run_profiled(admin.forget(query, k=k, user_id=user))
     print(f"retracted {result.claims} claims from {len(result.documents)} notes")
     for title in result.documents:
         print(f"  - {title}")
@@ -327,17 +401,6 @@ async def tasks_status() -> None:
     """Report the autonomous engine's pending, running, failed, last-run, and lag counts."""
     status = await admin.tasks_status()
     print(status.model_dump_json(indent=2))
-
-
-@app.command
-def profile_report() -> None:
-    """Report the process-wide span timing stats mainboard.profiling collected, slowest
-    first."""
-    stats = admin.profile_report()
-    for stat in stats:
-        print(stat)
-    if not stats:
-        print("no spans recorded (set AIZK_PROFILING=1)")
 
 
 @db.command(name="setup")

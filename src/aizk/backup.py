@@ -7,10 +7,11 @@ from typing import BinaryIO
 
 from patos import FrozenModel
 from pydantic import SecretStr
-from sqlalchemy import func, select
+from sqlalchemy import func
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.sql import ClauseElement
+from sqlmodel import select
 
 from .config import settings
 
@@ -122,7 +123,14 @@ async def restore_database(path: str, database: str | None = None) -> RestoreRep
     connection = BackupConnection.configured(database)
     clean = [] if database is not None else ["--clean", "--if-exists"]
     await run_pg_tool(
-        ["pg_restore", *clean, "--dbname", connection.url],
+        [
+            "pg_restore",
+            "--exit-on-error",
+            "--single-transaction",
+            *clean,
+            "--dbname",
+            connection.url,
+        ],
         environment=connection.environment,
         stdin_path=path,
     )

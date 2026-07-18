@@ -1,11 +1,11 @@
 from datetime import datetime
-from typing import ClassVar, Self, cast
+from typing import ClassVar, Self
 
 from patos import sql
-from sqlalchemy import ColumnElement, DateTime, Index, Text, UniqueConstraint, func, or_, select
+from sqlalchemy import ColumnElement, Index, String, UniqueConstraint, func, or_
 from sqlalchemy.orm import declared_attr
-from sqlalchemy.sql.selectable import Select
-from sqlmodel import Field
+from sqlmodel import select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from ....types import Scopes
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
@@ -16,14 +16,10 @@ class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
 
     mutable: ClassVar[bool] = True
 
-    kind: sql.Column[str] = Field(default="note")
-    text: sql.Column[str] = Field(sa_type=Text)
-    provenance: sql.Column[dict] = Field(
-        default_factory=dict, sa_type=sql.TypedJSONB, sa_column_kwargs={"server_default": "{}"}
-    )
-    promoted_at: sql.Column[datetime | None] = Field(
-        default=None, index=True, sa_type=cast(type[datetime], DateTime(timezone=True))
-    )
+    kind = sql.Field(str, default="note", sa_type=String, server_default=None)
+    text = sql.Field(str)
+    provenance = sql.Field(dict, default_factory=dict, sa_type=sql.TypedJSONB)
+    promoted_at = sql.Field(datetime | None, index=True)
 
     @declared_attr.directive
     def __table_args__(cls) -> tuple[Index | UniqueConstraint, ...]:
@@ -42,7 +38,9 @@ class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
         return sql.concat(t"- [{kind}] {speaker}{text}")
 
     @classmethod
-    def due_for_promotion(cls, scopes: Scopes, age_minutes: float, threshold: int) -> Select[Self]:
+    def due_for_promotion(
+        cls, scopes: Scopes, age_minutes: float, threshold: int
+    ) -> SelectOfScalar[Self]:
         """Select the aged and overflow working items oldest first, decided in the database.
 
         An item is due once it outlives `age_minutes`, and the oldest items past the
@@ -53,7 +51,7 @@ class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
             select(
                 cls,
                 func.row_number().over(order_by=cls.created_at).label("position"),
-                func.count().over().label("total"),
+                cls.id.count().over().label("total"),
             )
             .where(cls.promoted_at.is_(None), cls.scopes == sorted(scopes))
             .subquery("working")

@@ -12,6 +12,7 @@ flowchart LR
     S --> W[write path]
     S --> R[read path]
     W --> P[(Postgres<br/>graph + RLS)]
+    W --> O[(object storage<br/>artifact bytes)]
     R --> P
     B[background worker] --> P
     W -.-> V[vLLM<br/>extract]
@@ -21,8 +22,8 @@ flowchart LR
 
 The engine splits into six parts, each with its own page.
 
-- [Write path](write-path.md), how text becomes a knowledge graph at one LLM call per chunk
-- [Store](store.md), the content and claim union model and the bi-temporal core
+- [Write path](write-path.md), how text and guarded artifacts become a knowledge graph
+- [Store](store.md), the content and claim union model, artifacts, and the bi-temporal core
 - [Identity](identity.md), the Logto boundary and multi-organization authority lookup
 - [Lattice](lattice.md), the scope-set visibility model row level security enforces
 - [Read path](read-path.md), five retrieval lanes fused into one recall call
@@ -34,9 +35,11 @@ the map from every mechanism back to its source lives in [References](../referen
 
 ## Two governing principles
 
-**Agentic first.** Every capability is a tool the agent calls. The logic lives once in the
-engine and is exposed over MCP, so a scope name never crosses tenants and there are no UIs.
+**Agentic first.** The memory contract lives once in the engine and is exposed over MCP. The
+optional browser gives a person the same authorized recall, artifact intake, statistics, and
+organization management without creating a second knowledge path.
 
 **Minimize own work.** aizk builds only the differentiated core, the RLS temporal graph, and
-rents everything else. Identity and organization authorization are Logto, serving is vLLM, the
-queue is pgqueuer, and the ORM is SQLModel.
+rents everything else. Identity and organization authorization are Logto, serving is vLLM,
+conversion is Docling, object bytes are SeaweedFS, malware scanning is ClamAV, the queue is
+PgQueuer, and the ORM is SQLModel.

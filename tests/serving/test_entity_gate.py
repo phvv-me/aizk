@@ -21,6 +21,10 @@ from eval.routes import Route
 gate_module = import_module("aizk.serving.gate.client")
 
 
+def gate() -> GateClient:
+    return GateClient.from_settings(settings)
+
+
 def sidecar(monkeypatch: pytest.MonkeyPatch, result: dict) -> list[tuple[str, dict]]:
     """Route the gate client to an in-memory sidecar answering one canned result."""
     requests: list[tuple[str, dict]] = []
@@ -44,8 +48,8 @@ def test_client_resolves_the_default_and_variant_sidecars(
     monkeypatch.setattr(settings, "gliner_url", "http://gliner.test")
     monkeypatch.setattr(settings, "gliner_variants", {"gliner-relex": "http://relex.test"})
 
-    default = gate_module.GateClient.configured().client
-    relex = gate_module.GateClient.configured("gliner-relex").client
+    default = GateClient.from_settings(settings).client
+    relex = GateClient.from_settings(settings, "gliner-relex").client
 
     assert str(default.base_url) == "http://gliner.test/"
     assert str(relex.base_url) == "http://relex.test/"
@@ -63,7 +67,7 @@ def test_client_raises_on_an_error_status() -> None:
     )
     with pytest.raises(httpx.HTTPStatusError):
         run(
-            GateClient(client, asyncio.Semaphore(1)).post(
+            GateClient(client=client, throttle=asyncio.Semaphore(1), gate_threshold=settings.gliner_gate_threshold, gate_floor=settings.gliner_gate_floor).post(
                 "/classify", ClassifyRequest(text="where", tasks={}), ClassifyResponse
             )
         )
@@ -74,7 +78,7 @@ def test_client_raises_on_an_error_status() -> None:
     [
         (
             {"route": Route.LOCAL.value},
-            lambda: run(gate_module.classify("where", "route", Route)),
+            lambda: run(gate().classify("where", "route", Route)),
             Route.LOCAL,
             {
                 "text": "where",
@@ -84,9 +88,7 @@ def test_client_raises_on_an_error_status() -> None:
         (
             {"present": ["Tool", "Project"]},
             lambda: run(
-                gate_module.classify(
-                    "text", "present", ["Tool", "Project"], multi=True, threshold=0.7
-                )
+                gate().classify("text", "present", ["Tool", "Project"], multi=True, threshold=0.7)
             ),
             {"Tool", "Project"},
             {
@@ -116,11 +118,6 @@ def test_classify_preserves_single_and_multi_label_contracts(
     assert requests == [("/classify", payload)]
 
 
-def test_classify_requires_a_multi_label_threshold() -> None:
-    with pytest.raises(ValueError, match="needs a threshold"):
-        run(gate_module.classify("text", "present", ["Tool"], multi=True))
-
-
 @pytest.mark.parametrize(
     ("result", "multi"),
     [({"route": None}, False), ({"route": ["unknown"]}, True)],
@@ -132,9 +129,9 @@ def test_classify_rejects_malformed_results(
 
     with pytest.raises(ValueError, match="invalid labels"):
         if multi:
-            run(gate_module.classify("where", "route", Route, multi=True, threshold=0.7))
+            run(gate().classify("where", "route", Route, multi=True, threshold=0.7))
         else:
-            run(gate_module.classify("where", "route", Route))
+            run(gate().classify("where", "route", Route))
 
 
 def test_named_entities_extracts_normalized_unique_entity_names(
@@ -144,7 +141,7 @@ def test_named_entities_extracts_normalized_unique_entity_names(
         monkeypatch, {"entities": {"Person": [" Ada ", "ada"], "Tool": ["Git", ""]}}
     )
 
-    assert run(gate_module.named_entities("Ada uses Git")) == ["ada", "git"]
+    assert run(gate().named_entities("Ada uses Git")) == ["ada", "git"]
     assert requests == [
         (
             "/extract",
@@ -181,7 +178,7 @@ def test_relevant_excludes_the_configured_floor(
 
     monkeypatch.setattr(gate_module.GateClient, "classify", classify)
 
-    assert run(gate_module.relevant("some text")) is expected
+    assert run(gate().relevant("some text")) is expected
     assert calls == [
         (
             "some text",
@@ -228,7 +225,7 @@ def test_call_queues_behind_the_per_variant_throttle(monkeypatch: pytest.MonkeyP
 
     async def burst() -> None:
         request = ClassifyRequest(text="note", tasks={"present": ["Person"]})
-        gate = GateClient(client, request_throttle("http://gliner.test", 2))
+        gate = GateClient(client=client, throttle=request_throttle("http://gliner.test", 2), gate_threshold=settings.gliner_gate_threshold, gate_floor=settings.gliner_gate_floor)
         async with asyncio.TaskGroup() as group:
             for _ in range(10):
                 group.create_task(gate.post("/classify", request, ClassifyResponse))

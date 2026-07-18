@@ -1,6 +1,7 @@
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from doubles import FakeLLM
 from id_factory import uuid5, uuid7
 from pydantic import UUID5, UUID7
 
@@ -43,7 +44,7 @@ def test_decide_by_rule_handles_empty_and_borderline_similarity_bands() -> None:
     auto = settings.consolidation_auto_merge_threshold
     below = floor - 0.05
     band = (floor + auto) / 2
-    rules = Consolidator()
+    rules = Consolidator(llm=FakeLLM().llm)
     assert rules.decide(Relation.Policy.state, None, []) == ConsolidationVerdict(action="ADD")
     assert rules.decide(Relation.Policy.state, None, [match(below)]) == ConsolidationVerdict(
         action="NOOP"
@@ -58,7 +59,7 @@ def test_decide_by_rule_handles_empty_and_borderline_similarity_bands() -> None:
 
 def test_decide_by_rule_auto_merge_noop_update_and_add() -> None:
     auto = settings.consolidation_auto_merge_threshold
-    rules = Consolidator()
+    rules = Consolidator(llm=FakeLLM().llm)
     obj = uuid5()
     best = match(auto, object_id=obj)
     assert rules.decide(Relation.Policy.state, obj, [best]) == ConsolidationVerdict(action="NOOP")

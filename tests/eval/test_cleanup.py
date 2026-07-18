@@ -1,6 +1,6 @@
 import dbutil
 from id_factory import uuid5
-from sqlmodel import func, select
+from sqlmodel import select
 
 from aizk.ontology import System
 from aizk.store import Entity, Fact
@@ -40,14 +40,14 @@ def test_purge_scope_preserves_shared_content_until_its_last_claim_is_removed(
 
         await purge_scope(frozenset({first}))
         async with User.system().owner as opened:
-            assert await opened.scalar(select(func.count()).select_from(Entity.Content)) == 1
-            assert await opened.scalar(select(func.count()).select_from(Fact.Content)) == 1
-            assert await opened.scalar(select(func.count()).select_from(Entity.Claim)) == 1
-            assert await opened.scalar(select(func.count()).select_from(Fact.Claim)) == 1
+            assert await opened.scalar(select(Entity.Content.id.count())) == 1
+            assert await opened.scalar(select(Fact.Content.id.count())) == 1
+            assert await opened.scalar(select(Entity.Claim.id.count())) == 1
+            assert await opened.scalar(select(Fact.Claim.id.count())) == 1
 
         await purge_scope(frozenset({second}))
         async with User.system().owner as opened:
-            assert await opened.scalar(select(func.count()).select_from(Entity.Content)) == 0
-            assert await opened.scalar(select(func.count()).select_from(Fact.Content)) == 0
+            assert await opened.scalar(select(Entity.Content.id.count())) == 0
+            assert await opened.scalar(select(Fact.Content.id.count())) == 0
 
     dbutil.run(body())

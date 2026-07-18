@@ -1,21 +1,18 @@
 from datetime import datetime
 
 from loguru import logger
-from patos import FrozenModel, sql
+from patos import FlexModel, FrozenModel, sql
 from pgvector.sqlalchemy import HALFVEC
-from pydantic import UUID5, UUID7
+from pydantic import UUID5, UUID7, Field, field_validator
 from sqlalchemy import (
     Integer,
     Text,
     Uuid,
-    and_,
-    cast,
     column,
     func,
     literal,
     true,
 )
-from sqlalchemy import select as select_columns
 from sqlalchemy.dialects.postgresql import Range, insert
 from sqlalchemy.sql.selectable import CTE
 from sqlmodel import select, tuple_
@@ -63,24 +60,21 @@ class FactPlan(FrozenModel):
 type _Write = tuple[int, FactPlan, ConsolidationVerdict]
 
 
-class GraphWriter:
+class GraphWriter(FlexModel):
     """One graph-write round bound to the exact scope set every write in it shares."""
 
-    def __init__(
-        self,
-        session: Session,
-        created_by: UUID5,
-        scopes: Scopes,
-        capture: CaptureContext | None = None,
-        source_text: str = "",
-        consolidator: Consolidator | None = None,
-    ) -> None:
-        self.session = session
-        self.created_by = created_by
-        self.scopes = sorted(scopes)
-        self.capture = capture or CaptureContext()
-        self.source_text = source_text
-        self.consolidator = consolidator or Consolidator()
+    session: Session
+    created_by: UUID5
+    scopes: list[UUID5]
+    consolidator: Consolidator
+    capture: CaptureContext = Field(default_factory=CaptureContext)
+    source_text: str = ""
+
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def ordered_scopes(cls, scopes: Scopes) -> list[UUID5]:
+        """Canonicalize the exact scope set into the sorted list every claim stores."""
+        return sorted(scopes)
 
     def grounding(self, fact: TimedFact) -> dict[str, int]:
         """Char offsets of the fact's supporting quote inside the source chunk, when it
@@ -92,10 +86,14 @@ class GraphWriter:
 
     async def resolve(self, entity: PreparedEntity) -> UUID5 | None:
         """Resolve one entity through the same set-based path used for a chunk."""
-        return (await self.resolve_all([entity])).get(entity.name)
+        return (await self.resolve_all([entity])).get(normalize_name(entity.name))
 
     async def resolve_all(self, entities: list[PreparedEntity]) -> dict[str, UUID5]:
-        """Resolve a chunk's entities with one claim read and bulk content and claim writes."""
+        """Resolve a chunk by normalized identity and return normalized name to content ID.
+
+        Semantic vector proximity is deliberately excluded from identity. Similar concepts
+        such as Health, Business, and Research are related graph nodes, not aliases.
+        """
         usable: list[tuple[PreparedEntity, UUID5]] = []
         for entity in entities:
             if normalize_name(entity.name):
@@ -104,110 +102,37 @@ class GraphWriter:
                 logger.warning("entity name {!r} is a path or link, dropping", entity.name)
         if not usable:
             return {}
-        rows = await self._resolved_rows(self._entity_inputs(usable))
-        resolved: dict[str, UUID5] = {}
-        new_contents: dict[UUID5, PreparedEntity] = {}
-        for ordinal, resolved_id, is_new in rows:
-            entity, node = usable[ordinal]
-            resolved[entity.name] = resolved_id
-            if is_new:
-                new_contents[node] = entity
+        contents = {
+            node: Entity.Content(
+                id=node,
+                name=entity.name,
+                type=entity.type,
+                embedding=list(entity.vector),
+            )
+            for entity, node in usable
+        }
         await Entity.Content.mint_all(
             self.session,
-            [
-                Entity.Content(
-                    id=node,
-                    name=entity.name,
-                    type=entity.type,
-                    embedding=list(entity.vector),
-                )
-                for node, entity in new_contents.items()
-            ],
+            list(contents.values()),
         )
         await Entity.Claim.claim_all(
             self.session,
-            list(resolved.values()),
+            list(contents),
             self.created_by,
             frozenset(self.scopes),
         )
-        return resolved
-
-    @staticmethod
-    def _entity_inputs(usable: list[tuple[PreparedEntity, UUID5]]) -> CTE:
-        """Render extracted entities as one typed input relation."""
-        return sql.relation(
-            "entity_input",
-            (
-                column("ordinal", Integer),
-                column("id", Uuid),
-                column("name", Text),
-                column("type", Text),
-                column("embedding", HALFVEC(settings.embed_dim)),
-            ),
-            [
-                (ordinal, node, entity.name, entity.type, list(entity.vector))
-                for ordinal, (entity, node) in enumerate(usable)
-            ],
-        )
-
-    async def _resolved_rows(self, inputs: CTE) -> list[tuple[int, UUID5, bool]]:
-        """Resolve exact and nearest canonical identities in one lateral database query."""
-        exact = (
-            select(Entity.Content.id)
-            .where(
-                func.lower(Entity.Content.name) == func.lower(inputs.c.name),
-                Entity.Content.type == inputs.c.type,
-            )
-            .limit(1)
-            .lateral("exact_entity")
-        )
-        distance = Entity.Content.embedding @ cast(inputs.c.embedding, HALFVEC(settings.embed_dim))
-        nearest = (
-            select(Entity.Content.id)
-            .where(
-                Entity.Content.type == inputs.c.type,
-                distance <= 1.0 - settings.entity_resolution_threshold,
-            )
-            .order_by(distance)
-            .limit(1)
-            .lateral("nearest_entity")
-        )
-        return list(
-            await self.session.exec(
-                select(
-                    inputs.c.ordinal,
-                    func.coalesce(Entity.Claim.content_id, exact.c.id, nearest.c.id, inputs.c.id),
-                    and_(
-                        Entity.Claim.content_id.is_(None),
-                        exact.c.id.is_(None),
-                        nearest.c.id.is_(None),
-                    ),
-                )
-                .select_from(
-                    inputs.outerjoin(
-                        Entity.Claim.__table__,
-                        and_(
-                            Entity.Claim.content_id == inputs.c.id,
-                            Entity.Claim.scopes == self.scopes,
-                        ),
-                    )
-                    .outerjoin(exact, Entity.Claim.content_id.is_(None))
-                    .outerjoin(
-                        nearest,
-                        and_(Entity.Claim.content_id.is_(None), exact.c.id.is_(None)),
-                    )
-                )
-                .order_by(inputs.c.ordinal)
-            )
-        )
+        return {normalize_name(entity.name): node for entity, node in usable}
 
     def candidate(self, fact: TimedFact, resolved: dict[str, UUID5]) -> FactCandidate | None:
-        """Build a candidate when its subject resolved to a stored entity."""
-        subject_id = resolved.get(fact.subject)
+        """Build a candidate when both named endpoints resolved to stored entities."""
+        subject_id = resolved.get(normalize_name(fact.subject))
         if subject_id is None:
             logger.warning("fact subject {!r} has no resolved entity, skipping", fact.subject)
             return None
-        object_id = resolved.get(fact.object_) if fact.object_ else None
+        object_id = resolved.get(normalize_name(fact.object_)) if fact.object_ else None
+        if fact.object_ and object_id is None:
+            logger.warning("fact object {!r} has no resolved entity, skipping", fact.object_)
+            return None
         return FactCandidate(
             fact=fact,
             subject_id=subject_id,
@@ -221,6 +146,29 @@ class GraphWriter:
         """The facts not already claimed by this container and whose subject resolved to a
         real entity, the consolidation cascade's first, free tier."""
         candidates = [candidate for fact in facts if (candidate := self.candidate(fact, resolved))]
+        # Non-state candidates deduplicate on their exact identity, which already spans
+        # subject, predicate, object, and statement, so distinct simultaneous facts all
+        # survive. A state relation holds one current value per subject slot and window,
+        # so same-slot state candidates inside one batch collapse to the first; letting
+        # both through would revise the same current claim twice in one write.
+        unique: dict[
+            tuple[UUID5, str, datetime | None, datetime | None, str],
+            FactCandidate,
+        ] = {}
+        for candidate in candidates:
+            policy = Ontology.current().relation_policies[candidate.fact.predicate]
+            state = policy == Relation.Policy.state
+            unique.setdefault(
+                (
+                    candidate.subject_id if state else candidate.identity,
+                    candidate.fact.predicate if state else "",
+                    candidate.fact.valid_from if state else None,
+                    candidate.fact.valid_to if state else None,
+                    candidate.fact.kind.perspective_key(self.created_by),
+                ),
+                candidate,
+            )
+        candidates = list(unique.values())
         if not candidates:
             return []
         keys = [
@@ -295,9 +243,9 @@ class GraphWriter:
 
     async def _fact_matches(self, inputs: CTE, count: int) -> list[list[FactMatch]]:
         """Return each input's nearest live facts from one lateral database query."""
-        distance = Fact.Content.embedding @ cast(inputs.c.embedding, HALFVEC(settings.embed_dim))
+        distance = Fact.Content.embedding @ inputs.c.embedding.cast(HALFVEC(settings.embed_dim))
         ranked = (
-            select_columns(
+            select(
                 Fact.Claim.id,
                 Fact.Content.object_id,
                 Fact.Content.statement,
@@ -317,13 +265,13 @@ class GraphWriter:
         )
         matches: list[list[FactMatch]] = [[] for _ in range(count)]
         rows = await self.session.exec(
-            select_columns(
+            select(
                 inputs.c.ordinal,
                 ranked.c.id,
                 ranked.c.object_id,
                 ranked.c.statement,
-                ranked.c.distance,
             )
+            .add_columns(ranked.c.distance)
             .select_from(inputs.outerjoin(ranked, true()))
             .order_by(inputs.c.ordinal, ranked.c.distance)
         )
@@ -374,7 +322,7 @@ class GraphWriter:
             slots,
         )
         key = func.hashtextextended(
-            cast(inputs.c.subject_id, Text)
+            inputs.c.subject_id.cast(Text)
             + literal("|")
             + inputs.c.predicate
             + literal("|")
@@ -414,7 +362,7 @@ class GraphWriter:
                         Fact.Claim.scopes,
                         Fact.Claim.perspective_key,
                     ],
-                    index_where=func.upper_inf(Fact.Claim.recorded),
+                    index_where=Fact.Claim.recorded.f.upper_inf(result=bool),
                 )
             )
 

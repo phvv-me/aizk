@@ -6,7 +6,7 @@ from typing import cast
 from loguru import logger
 from patos import FrozenModel, sql
 from pydantic import UUID5, UUID7, UUID8
-from sqlalchemy import Integer, LargeBinary, column, literal, or_
+from sqlalchemy import Integer, LargeBinary, column, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import delete, select, update
 
@@ -14,7 +14,7 @@ from ..config import settings
 from ..ontology import Ontology
 from ..provenance import CaptureContext
 from ..serving.chunk import chunk_text, is_text
-from ..serving.embed import embed, embed_images
+from ..serving.embed import EmbedClient
 from ..store import Chunk, Document, Fact, SessionItem
 from ..store.engine import Session
 from ..store.identity import User
@@ -38,6 +38,9 @@ class TextSource(FrozenModel):
     title: str | None = None
     subject_type: str | None = None
     source_uri: str | None = None
+    artifact_id: UUID7 | None = None
+    artifact_content_id: UUID7 | None = None
+    original_content_hash: UUID8 | None = None
     created_by: UUID5 | None = None
     scopes: Scopes = frozenset()
     capture: CaptureContext | None = None
@@ -74,11 +77,15 @@ class PreparedText(FrozenModel):
             and document is not None
             and (
                 document.source_uri,
+                document.artifact_id,
+                document.artifact_content_id,
                 document.observed_at,
                 document.expires_at,
             )
             == (
                 self.source.source_uri,
+                self.source.artifact_id,
+                self.source.artifact_content_id,
                 self.source.capture.observed_at if self.source.capture is not None else None,
                 self.source.capture.expires_at if self.source.capture is not None else None,
             )
@@ -108,11 +115,6 @@ class DocumentStore:
         digest = sql.uuid8(cast(ColumnElement[bytes], inputs.c.content))
         return list(await self.session.exec(select(digest).order_by(inputs.c.ordinal)))
 
-    async def hash_bytes(self, raw: bytes) -> UUID8:
-        """Hash binary content through PostgreSQL `pgcrypto`."""
-        digest = sql.uuid8(literal(raw, type_=LargeBinary))
-        return (await self.session.exec(select(digest))).one()
-
     async def find(self, plans: list[PreparedText]) -> list[Document | None]:
         """Find every standing document for a prepared batch in one query."""
         if not plans:
@@ -122,6 +124,7 @@ class DocumentStore:
                 subject_type=plan.subject_type,
                 title=plan.title,
                 source_uri=plan.source.source_uri,
+                artifact_id=plan.source.artifact_id,
                 content_hash=plan.digest,
             )
             & (Document.scopes == sorted(plan.scopes))
@@ -134,6 +137,7 @@ class DocumentStore:
                     subject_type=document.subject_type,
                     title=document.title,
                     source_uri=document.source_uri,
+                    artifact_id=document.artifact_id,
                     content_hash=document.content_hash,
                 ),
                 frozenset(document.scopes),
@@ -147,6 +151,7 @@ class DocumentStore:
                         subject_type=plan.subject_type,
                         title=plan.title,
                         source_uri=plan.source.source_uri,
+                        artifact_id=plan.source.artifact_id,
                         content_hash=plan.digest,
                     ),
                     plan.scopes,
@@ -182,6 +187,8 @@ class DocumentStore:
         stale.title = document.title
         stale.subject_type = document.subject_type
         stale.source_uri = document.source_uri
+        stale.artifact_id = document.artifact_id
+        stale.artifact_content_id = document.artifact_content_id
         stale.observed_at = document.observed_at
         stale.expires_at = document.expires_at
         stale.content_hash = document.content_hash
@@ -207,6 +214,8 @@ class DocumentStore:
             .where(Document.id == document_id)
             .values(
                 source_uri=source.source_uri,
+                artifact_id=source.artifact_id,
+                artifact_content_id=source.artifact_content_id,
                 observed_at=capture.observed_at if capture is not None else None,
                 expires_at=capture.expires_at if capture is not None else None,
             )
@@ -276,7 +285,19 @@ class TextIngestor:
         async with self.user as opened:
             await Ontology.ensure(opened)
             store = DocumentStore(opened)
-            digests = await store.hash_texts([source.text for source in sources])
+            text_digests = iter(
+                await store.hash_texts(
+                    [source.text for source in sources if source.original_content_hash is None]
+                )
+            )
+            digests = [
+                (
+                    source.original_content_hash
+                    if source.original_content_hash is not None
+                    else next(text_digests)
+                )
+                for source in sources
+            ]
             plans = [
                 self.prepare(source, digest)
                 for source, digest in zip(sources, digests, strict=True)
@@ -297,7 +318,11 @@ class TextIngestor:
             if plan is not None and not plan.content_matches(document)
         ]
         searchable = [text for plan in pending for text in plan.searchable]
-        return await embed(searchable, mode="document") if searchable else []
+        return (
+            await EmbedClient.from_settings(settings).embed(searchable, mode="document")
+            if searchable
+            else []
+        )
 
     async def _store(
         self,
@@ -330,6 +355,7 @@ class TextIngestor:
                     subject_type=plan.subject_type,
                     title=plan.title,
                     source_uri=plan.source.source_uri,
+                    artifact_id=plan.source.artifact_id,
                     content_hash=plan.digest,
                 )
                 document_id, created = await store.store(dedupe, document)
@@ -351,6 +377,8 @@ class TextIngestor:
             title=plan.title,
             subject_type=plan.subject_type,
             source_uri=plan.source.source_uri,
+            artifact_id=plan.source.artifact_id,
+            artifact_content_id=plan.source.artifact_content_id,
             observed_at=capture.observed_at if capture is not None else None,
             expires_at=capture.expires_at if capture is not None else None,
             content_hash=plan.digest,
@@ -370,53 +398,6 @@ class TextIngestor:
                 for order, (span, embedding) in enumerate(zip(plan.spans, embeddings, strict=True))
             ],
         )
-
-
-async def store_document(
-    user: User, dedupe: ColumnElement[bool], document: Document
-) -> tuple[UUID7, bool]:
-    """Dedupe-check then store or refresh a document in one exact scope transaction."""
-    async with user as opened:
-        return await DocumentStore(opened).store(dedupe, document)
-
-
-async def ingest_image(
-    user: User,
-    path: Path,
-    title: str | None = None,
-    caption: str | None = None,
-    created_by: UUID5 | None = None,
-    scopes: Scopes = frozenset(),
-) -> UUID7:
-    """Store an image as a document whose one chunk embeds into the shared multimodal space."""
-    created_by = created_by or settings.system_user_id
-    key = frozenset(scopes or (created_by,))
-    async with user as opened:
-        digest = await DocumentStore(opened).hash_bytes(path.read_bytes())
-    [embedding] = await embed_images([str(path)])
-    document_id = uuid.uuid7()
-    document = Document(
-        id=document_id,
-        title=title or path.stem,
-        source_uri=path.resolve().as_uri(),
-        content_hash=digest,
-        created_by=created_by,
-        scopes=sorted(key),
-        chunks=[
-            Chunk(
-                document_id=document_id,
-                ord=0,
-                text=caption or path.name,
-                embedding=embedding,
-                created_by=created_by,
-                scopes=sorted(key),
-            )
-        ],
-    )
-    document_id, created = await store_document(user, Document.content_hash == digest, document)
-    if created:
-        logger.info("ingested image {} from {}", document_id, path)
-    return document_id
 
 
 def text_files(path: Path) -> list[Path]:
@@ -459,7 +440,10 @@ async def ingest_text(
     scopes: Scopes = frozenset(),
     capture: CaptureContext | None = None,
 ) -> UUID7 | None:
-    """Store a raw text blob as a document with embedded chunks and return its id."""
+    """Store a raw text blob as a document with embedded chunks and return its id.
+
+    Artifact-linked sources build a `TextSource` and go through `TextIngestor` directly.
+    """
     document_id, _ = await TextIngestor(user).ingest(
         TextSource(
             text=text,
@@ -491,7 +475,7 @@ async def remember_session(
     created_by = created_by or settings.system_user_id
     key = frozenset(scopes or (created_by,))
     searchable = capture.search_text(text) if capture is not None else text
-    [embedding] = await embed([searchable], mode="document")
+    [embedding] = await EmbedClient.from_settings(settings).embed([searchable], mode="document")
     async with user as session:
         item = SessionItem(
             kind=kind,

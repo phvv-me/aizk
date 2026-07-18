@@ -10,6 +10,7 @@ from pgvector.sqlalchemy import HALFVEC
 from rls.alembic import AlterRLSOp
 from sqlalchemy import Select
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSTZRANGE
+from sqlmodel import select
 
 from aizk.config import settings
 from aizk.store.ddl import CreateView
@@ -255,7 +256,7 @@ def _scope_authority(standing: sa.ColumnElement, permission: str) -> sa.ColumnEl
         .table_valued("value")
         .render_derived()
     )
-    return sa.func.array(sa.select(sa.cast(values.c.value, sa.Uuid())).scalar_subquery())
+    return sa.func.array(select(sa.cast(values.c.value, sa.Uuid())).scalar_subquery())
 
 
 def scoped_rls(
@@ -281,8 +282,8 @@ def scoped_rls(
             sa.column("scopes", ARRAY(sa.Uuid())),
         )
         parent_id = table.c[f"{read_through}_id"]
-        read = parent_id.in_(sa.select(parent.c.id))
-        parent_scope = sa.tuple_(parent_id, scopes).in_(sa.select(parent.c.id, parent.c.scopes))
+        read = parent_id.in_(select(parent.c.id))
+        parent_scope = sa.tuple_(parent_id, scopes).in_(select(parent.c.id, parent.c.scopes))
     else:
         readable = _scope_authority(standing, "read")
         public = _scope_authority(standing, "public")
@@ -318,7 +319,7 @@ def content_rls(table_name: str) -> rls.RLSState:
         (
             rls.Policy.select(
                 "content_read",
-                content.c.id.in_(sa.select(claim.c.content_id)),
+                content.c.id.in_(select(claim.c.content_id)),
                 roles=(APP_ROLE,),
             ),
             rls.Policy.insert("content_insert", sa.true(), roles=(APP_ROLE,)),
@@ -379,7 +380,8 @@ def live_fact_select() -> Select:
         sa.or_(claim.c.valid.is_(None), claim.c.valid.op("@>")(sa.func.now())),
     )
     return (
-        sa.select(*columns)
+        select(columns[0], columns[1], columns[2], columns[3])
+        .add_columns(*columns[4:])
         .select_from(claim.join(content, content.c.id == claim.c.content_id))
         .where(current)
     )
@@ -759,7 +761,13 @@ def upgrade() -> None:
     op.create_index("ix_watermark_scopes", "watermark", ["scopes"], postgresql_using="gin")
 
     # Security invoker keeps the live view subject to underlying RLS.
-    op.execute(CreateView("live_fact", live_fact_select()))
+    op.execute(
+        CreateView(
+            live_fact_select(),
+            "live_fact",
+            postgresql_with={"security_invoker": True},
+        )
+    )
 
     for statement in bm25_lexical_statements():
         op.execute(statement)

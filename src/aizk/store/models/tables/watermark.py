@@ -5,9 +5,8 @@ from typing import ClassVar
 from patos import sql
 from pydantic import UUID5
 from sqlalchemy import BigInteger, Index, Text, UniqueConstraint, column, func, update
-from sqlalchemy import Column as SAColumn
 from sqlalchemy.dialects.postgresql import insert
-from sqlmodel import Field, select
+from sqlmodel import select
 
 from ....config import settings
 from ....types import Scopes
@@ -35,18 +34,16 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         UniqueConstraint("scopes", "kind", "ref", name="uq_watermark_scope_kind_ref"),
     )
 
-    kind: sql.Column[Kind] = Field(
-        sa_column=SAColumn(Kind.type, nullable=False),
-    )
-    ref: sql.Column[str] = Field(default=_GLOBAL_REF, sa_type=Text)
-    counter: sql.Column[int] = Field(
+    kind = sql.Field(Kind)
+    ref = sql.Field(str, default=_GLOBAL_REF)
+    counter = sql.Field(
+        sql.NonNegativeInt,
         default=0,
-        sa_column_kwargs={"server_default": "0"},
         sa_type=BigInteger,
     )
-    payload: sql.Column[dict] = Field(
+    payload = sql.Field(
+        dict,
         default_factory=dict,
-        sa_column_kwargs={"server_default": "{}"},
         sa_type=sql.TypedJSONB,
     )
 

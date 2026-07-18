@@ -5,7 +5,8 @@ from hypothesis import strategies as st
 from id_factory import uuid5
 from patos import FrozenModel
 from pydantic import ValidationError
-from sqlalchemy import Integer, bindparam, literal, select
+from sqlalchemy import Integer, bindparam, literal
+from sqlmodel import select
 
 from aizk.config import settings
 from aizk.exceptions import ScopeNotFoundError

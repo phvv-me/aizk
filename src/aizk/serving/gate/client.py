@@ -1,7 +1,7 @@
 from collections.abc import Iterable
-from typing import Literal, overload
+from typing import Literal, Protocol, overload, runtime_checkable
 
-from ...config import settings
+from ...config import Settings
 from ...ontology import Ontology
 from ..base import HttpService, http_client, request_throttle
 from .models import (
@@ -13,16 +13,28 @@ from .models import (
 )
 
 
+@runtime_checkable
+class RelevanceGate(Protocol):
+    """The cheap relevance check the graph build runs before extraction."""
+
+    async def relevant(self, text: str) -> bool: ...
+
+
 class GateClient(HttpService):
     """Classification and mention extraction through one GLiNER sidecar."""
 
+    gate_threshold: float
+    gate_floor: frozenset[str]
+
     @classmethod
-    def configured(cls, variant: str = "") -> GateClient:
-        """Build the requested sidecar client from live settings."""
-        url = settings.gliner_variants[variant] if variant else settings.gliner_url
+    def from_settings(cls, config: Settings, variant: str = "") -> GateClient:
+        """Build the requested sidecar client from explicit settings."""
+        url = config.gliner_variants[variant] if variant else config.gliner_url
         return cls(
-            http_client(url, "", settings.gliner_timeout),
-            request_throttle(url, settings.gliner_concurrency),
+            client=http_client(url, "", config.gliner_timeout),
+            throttle=request_throttle(url, config.gliner_concurrency),
+            gate_threshold=config.gliner_gate_threshold,
+            gate_floor=config.gliner_gate_floor,
         )
 
     @staticmethod
@@ -102,7 +114,7 @@ class GateClient(HttpService):
             ExtractRequest(
                 text=text,
                 entity_types=Ontology.current().gate_labels,
-                threshold=settings.gliner_gate_threshold,
+                threshold=self.gate_threshold,
             ),
             ExtractResponse,
         )
@@ -116,67 +128,6 @@ class GateClient(HttpService):
             "present",
             Ontology.current().gate_labels,
             multi=True,
-            threshold=settings.gliner_gate_threshold,
+            threshold=self.gate_threshold,
         )
-        return bool(present - settings.gliner_gate_floor)
-
-
-@overload
-async def classify[LabelT: str](
-    text: str,
-    task: str,
-    labels: Iterable[LabelT],
-    *,
-    multi: Literal[False] = False,
-    threshold: float | None = None,
-) -> LabelT: ...
-
-
-@overload
-async def classify[LabelT: str](
-    text: str,
-    task: str,
-    labels: Iterable[LabelT],
-    *,
-    multi: Literal[True],
-    threshold: float,
-) -> set[LabelT]: ...
-
-
-async def classify[LabelT: str](
-    text: str,
-    task: str,
-    labels: Iterable[LabelT],
-    *,
-    multi: bool = False,
-    threshold: float | None = None,
-) -> LabelT | set[LabelT]:
-    """Classify text through the configured sidecar."""
-    client = GateClient.configured()
-    if multi:
-        if threshold is None:
-            raise ValueError("multi-label classification needs a threshold")
-        return await client.classify(
-            text,
-            task,
-            labels,
-            multi=True,
-            threshold=threshold,
-        )
-    return await client.classify(
-        text,
-        task,
-        labels,
-        multi=False,
-        threshold=threshold,
-    )
-
-
-async def named_entities(text: str) -> list[str]:
-    """Return normalized unique names mentioned in text."""
-    return await GateClient.configured().named_entities(text)
-
-
-async def relevant(text: str) -> bool:
-    """Return whether text carries an extractable ontology type."""
-    return await GateClient.configured().relevant(text)
+        return bool(present - self.gate_floor)

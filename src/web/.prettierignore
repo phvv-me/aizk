@@ -1,0 +1,7 @@
+node_modules/
+.svelte-kit/
+build/
+pnpm-lock.yaml
+src/lib/components/ui/
+src/lib/api/generated/
+openapi.json

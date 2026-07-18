@@ -16,6 +16,7 @@ from sqlmodel import select
 from aizk.config import Settings
 from aizk.extract.ingest import (
     DocumentStore,
+    TextIngestor,
     TextSource,
     contextual_lexical,
     ingest_path,
@@ -25,6 +26,8 @@ from aizk.extract.ingest import (
 from aizk.ontology import Ontology
 from aizk.provenance import CaptureContext
 from aizk.store import (
+    Artifact,
+    Blob,
     Chunk,
     Document,
     Entity,
@@ -51,6 +54,41 @@ def test_document_store_hashes_utf8_text_with_postgres_pgcrypto(text: str) -> No
     assert first == expected_digest(text)
     assert second == first
     assert empty == []
+
+
+@pytest.mark.usefixtures("migrated_db")
+def test_document_store_closes_a_concurrent_exact_insert_as_a_noop(
+    settings: Settings,
+) -> None:
+    """Keep the final write race idempotent when another transaction inserted first."""
+    digest = expected_digest("concurrent source")
+
+    async def body() -> tuple[UUID7, bool]:
+        await dbutil.reset_db()
+        existing = Document(
+            title="Concurrent source",
+            content_hash=digest,
+            created_by=settings.system_user_id,
+            scopes=[settings.system_user_id],
+        )
+        async with User.system() as session:
+            session.add(existing)
+            await session.flush()
+            incoming = Document(
+                title=existing.title,
+                content_hash=digest,
+                created_by=settings.system_user_id,
+                scopes=[settings.system_user_id],
+            )
+            return await DocumentStore(session).store(
+                Document.content_hash == digest,
+                incoming,
+            )
+
+    document_id, created = dbutil.run(body())
+
+    assert document_id.version == 7
+    assert not created
 
 
 def test_contextual_lexical_prepends_the_title_when_enabled(
@@ -230,6 +268,100 @@ def test_ingest_text_updates_validity_without_reembedding(
     assert refreshed == original
     assert document.subject_type == "project"
     assert document.observed_at == observed
+
+
+@pytest.mark.usefixtures("migrated_db")
+def test_artifact_original_hash_refreshes_identical_rendered_text_once(
+    settings: Settings,
+    fake_embedder: RecordingEmbedder,
+) -> None:
+    text = "# Paper\n\nThe stable normalized paper text."
+    first_hash = expected_digest("first original")
+    second_hash = expected_digest("changed original")
+
+    async def body() -> tuple[
+        UUID7 | None,
+        UUID7 | None,
+        UUID7 | None,
+        Document,
+        UUID7,
+        int,
+        int,
+    ]:
+        await dbutil.reset_db()
+        artifact = Artifact(
+            name="paper.pdf",
+            created_by=settings.system_user_id,
+            scopes=[settings.system_user_id],
+        )
+        first_blob = Blob(
+            content_hash=first_hash, size=1, stored_size=1, storage_key="objects/first"
+        )
+        second_blob = Blob(
+            content_hash=second_hash, size=1, stored_size=1, storage_key="objects/second"
+        )
+        async with User.system() as session:
+            session.add_all((artifact, first_blob, second_blob))
+            await session.flush()
+            first_content = Artifact.Content(
+                artifact_id=artifact.id,
+                blob_id=first_blob.id,
+                created_by=settings.system_user_id,
+                scopes=[settings.system_user_id],
+            )
+            second_content = Artifact.Content(
+                artifact_id=artifact.id,
+                blob_id=second_blob.id,
+                revision=2,
+                created_by=settings.system_user_id,
+                scopes=[settings.system_user_id],
+            )
+            session.add_all((first_content, second_content))
+
+        async def linked(content_id: UUID7 | None, content_hash: UUID8) -> UUID7 | None:
+            document_id, _ = await TextIngestor(User.system()).ingest(
+                TextSource(
+                    text=text,
+                    source_uri="https://example.com/paper.pdf",
+                    artifact_id=artifact.id,
+                    artifact_content_id=content_id,
+                    original_content_hash=content_hash,
+                )
+            )
+            return document_id
+
+        first = await linked(first_content.id, first_hash)
+        calls_after_first = len(fake_embedder.calls)
+        refreshed = await linked(second_content.id, second_hash)
+        calls_after_refresh = len(fake_embedder.calls)
+        unchanged = await linked(second_content.id, second_hash)
+        assert len(fake_embedder.calls) == calls_after_refresh
+        async with User.system() as session:
+            document = (await session.exec(select(Document))).one()
+        return (
+            first,
+            refreshed,
+            unchanged,
+            document,
+            second_content.id,
+            calls_after_first,
+            calls_after_refresh,
+        )
+
+    (
+        first,
+        refreshed,
+        unchanged,
+        document,
+        second_content_id,
+        calls_after_first,
+        calls_after_refresh,
+    ) = dbutil.run(body())
+
+    assert first == refreshed == unchanged
+    assert calls_after_refresh == calls_after_first + 1
+    assert document.content_hash == second_hash
+    assert document.artifact_content_id == second_content_id
 
 
 @pytest.mark.usefixtures("migrated_db", "fake_embedder")

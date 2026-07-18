@@ -1,0 +1,39 @@
+discovery.docker "aizk" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=aizk"]
+  }
+}
+
+discovery.relabel "aizk" {
+  targets = discovery.docker.aizk.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+}
+
+loki.source.docker "aizk" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.aizk.output
+  forward_to = [loki.process.aizk.receiver]
+}
+
+loki.process "aizk" {
+  stage.docker {}
+  forward_to = [loki.write.aizk.receiver]
+}
+
+loki.write "aizk" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

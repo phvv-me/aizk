@@ -7,9 +7,13 @@ from dbutil import run
 
 from aizk.config import Settings, settings
 from aizk.serving.base import http_client
-from aizk.serving.rerank import rerank
+from aizk.serving.rerank import RerankClient
 
 rerank_module = import_module("aizk.serving.rerank.client")
+
+
+async def rerank(query: str, texts: list[str]) -> list[float]:
+    return await RerankClient.from_settings(settings).rerank(query, texts)
 
 
 @pytest.fixture

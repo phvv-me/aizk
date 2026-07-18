@@ -1,8 +1,4 @@
-import asyncio
-
-import httpx
-
-from ...config import settings
+from ...config import Settings
 from ..base import HttpService, http_client, ordered_results, request_throttle
 from .models import RerankRequest, RerankResponse
 
@@ -10,45 +6,36 @@ from .models import RerankRequest, RerankResponse
 class RerankClient(HttpService):
     """Cross-encoder scoring through the configured rerank service."""
 
-    __slots__ = ("model",)
-
-    def __init__(
-        self,
-        client: httpx.AsyncClient,
-        model: str,
-        throttle: asyncio.Semaphore,
-    ) -> None:
-        super().__init__(client, throttle)
-        self.model = model
+    model: str
+    instruction: str
+    query_template: str
+    document_template: str
 
     @classmethod
-    def configured(cls) -> RerankClient:
-        """Build the service from the live reranker settings."""
+    def from_settings(cls, config: Settings) -> RerankClient:
+        """Build the service from explicit reranker settings."""
         return cls(
-            http_client(
-                settings.rerank_url,
-                settings.rerank_api_key,
-                settings.rerank_request_timeout,
+            client=http_client(
+                config.rerank_url,
+                config.rerank_api_key,
+                config.rerank_request_timeout,
             ),
-            settings.rerank_model,
-            request_throttle(settings.rerank_url, settings.rerank_concurrency),
+            model=config.rerank_model,
+            throttle=request_throttle(config.rerank_url, config.rerank_concurrency),
+            instruction=config.rerank_instruction,
+            query_template=config.rerank_query_template,
+            document_template=config.rerank_document_template,
         )
 
-    @staticmethod
-    def templated(query: str, texts: list[str]) -> tuple[str, list[str]]:
+    def templated(self, query: str, texts: list[str]) -> tuple[str, list[str]]:
         """Wrap a query and documents in the cross-encoder prompt scaffold."""
         wrapped_query = (
-            settings.rerank_query_template.format(
-                instruction=settings.rerank_instruction,
-                query=query,
-            )
-            if settings.rerank_query_template
+            self.query_template.format(instruction=self.instruction, query=query)
+            if self.query_template
             else query
         )
         wrapped_texts = [
-            settings.rerank_document_template.format(document=text)
-            if settings.rerank_document_template
-            else text
+            self.document_template.format(document=text) if self.document_template else text
             for text in texts
         ]
         return wrapped_query, wrapped_texts
@@ -76,8 +63,3 @@ class RerankClient(HttpService):
                 lambda row: row.index,
             )
         ]
-
-
-async def rerank(query: str, texts: list[str]) -> list[float]:
-    """Score texts through the configured cross-encoder."""
-    return await RerankClient.configured().rerank(query, texts)

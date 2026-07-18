@@ -3,14 +3,14 @@ from collections import defaultdict
 from itertools import batched
 
 from loguru import logger
-from patos import FrozenModel
+from patos import FrozenFlexModel, FrozenModel
 from pydantic import UUID5, UUID7, TypeAdapter
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 
 from ..config import settings
 from ..exceptions import NotVisibleError
-from ..serving.embed import embed
+from ..serving.embed import Embedder
 from ..serving.extract import LLM
 from ..store import Entity, Fact, Profile, Watermark
 from ..store.engine import Session
@@ -37,13 +37,12 @@ class ProfileDraft(FrozenModel):
     vector: tuple[float, ...]
 
 
-class ProfileBuilder:
+class ProfileBuilder(FrozenFlexModel):
     """Load, summarize, embed, and store profiles in bounded database phases."""
 
-    __slots__ = ("scopes",)
-
-    def __init__(self, scopes: Scopes) -> None:
-        self.scopes = frozenset(scopes)
+    scopes: Scopes
+    llm: LLM
+    embed: Embedder
 
     async def snapshot(
         self, session: Session, subject_ids: list[UUID5] | None = None
@@ -72,13 +71,12 @@ class ProfileBuilder:
 
     async def summarize(self, groundings: list[ProfileGrounding]) -> list[ProfileDraft]:
         """Summarize every grounding and embed all resulting profiles in one batch."""
-        llm = LLM.configured()
         reports: list[ProfileReport] = []
         for group in batched(groundings, settings.profile_build_concurrency, strict=False):
             reports.extend(
                 await asyncio.gather(
                     *(
-                        llm.generate(
+                        self.llm.generate(
                             settings.profile_system,
                             f"Entity: {grounding.name}\n\nFacts:\n"
                             + "\n".join(f"- {statement}" for statement in grounding.statements),
@@ -89,7 +87,9 @@ class ProfileBuilder:
                 )
             )
         vectors = (
-            await embed([report.summary for report in reports], mode="document") if reports else []
+            await self.embed.embed([report.summary for report in reports], mode="document")
+            if reports
+            else []
         )
         return [
             ProfileDraft(
@@ -128,11 +128,13 @@ class ProfileBuilder:
 
 async def build_profile(
     subject_id: UUID5,
+    llm: LLM,
+    embed: Embedder,
     scopes: Scopes | None = None,
 ) -> UUID7:
     """Rebuild one entity profile through short read and write transactions."""
     key = frozenset(scopes or (settings.system_user_id,))
-    builder = ProfileBuilder(key)
+    builder = ProfileBuilder(scopes=key, llm=llm, embed=embed)
     async with User.system(key) as session:
         groundings = await builder.snapshot(session, [subject_id])
     if not groundings:
@@ -147,11 +149,13 @@ async def build_profile(
 
 
 async def refresh_profiles(
+    llm: LLM,
+    embed: Embedder,
     scopes: Scopes | None = None,
 ) -> int:
     """Rebuild every visible profile with one snapshot and one bulk write."""
     key = frozenset(scopes or (settings.system_user_id,))
-    builder = ProfileBuilder(key)
+    builder = ProfileBuilder(scopes=key, llm=llm, embed=embed)
     async with User.system(key) as session:
         groundings = await builder.snapshot(session)
     drafts = await builder.summarize(groundings)
@@ -161,10 +165,14 @@ async def refresh_profiles(
     return len(drafts)
 
 
-async def refresh_dirty_profiles(scopes: Scopes | None = None) -> int:
+async def refresh_dirty_profiles(
+    llm: LLM,
+    embed: Embedder,
+    scopes: Scopes | None = None,
+) -> int:
     """Rebuild one bounded dirty-entity batch and consume only its observed increments."""
     key = frozenset(scopes or (settings.system_user_id,))
-    builder = ProfileBuilder(key)
+    builder = ProfileBuilder(scopes=key, llm=llm, embed=embed)
     async with User.system(key) as session:
         counters = await Watermark.pending_refs(
             session,

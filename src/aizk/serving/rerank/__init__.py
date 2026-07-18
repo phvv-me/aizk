@@ -1,4 +1,4 @@
-from .client import RerankClient, rerank
+from .client import RerankClient
 from .models import RerankRequest, RerankResponse, RerankResult
 
 __all__ = [
@@ -6,5 +6,4 @@ __all__ = [
     "RerankRequest",
     "RerankResponse",
     "RerankResult",
-    "rerank",
 ]

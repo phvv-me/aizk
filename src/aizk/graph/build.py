@@ -1,5 +1,6 @@
 import asyncio
 import functools
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from asyncpg.exceptions import TransactionRollbackError
@@ -11,15 +12,16 @@ from sqlalchemy.exc import DBAPIError
 from sqlmodel import select
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 
-from ..config import settings
+from ..config import Settings, settings
 from ..extract.dates import with_source_fallback
 from ..extract.declaration import SourceDeclaration, journal_facts
 from ..extract.extractor import Extractor
 from ..extract.models import ExtractedEntity, TimedFact
 from ..ontology import Ontology, System
 from ..provenance import CaptureContext
-from ..serving.embed import embed
-from ..serving.gate import relevant
+from ..serving.embed import EmbedClient, Embedder
+from ..serving.extract import LLM, GLiNER
+from ..serving.gate import GateClient, RelevanceGate
 from ..store import (
     Chunk,
     Document,
@@ -29,8 +31,30 @@ from ..store import (
 from ..store.engine import Session
 from ..store.identity import User
 from ..types import Scopes
+from .consolidation import Consolidator
 from .grounding import GroundedProjection
 from .writer import FactCandidate, FactPlan, GraphWriter, PreparedEntity
+
+
+@dataclass(frozen=True)
+class GraphClients:
+    """The model clients one graph build round consumes, threaded from the runtime."""
+
+    extractor: Extractor
+    gate: RelevanceGate
+    embed: Embedder
+    llm: LLM
+
+    @classmethod
+    def from_settings(cls, config: Settings) -> GraphClients:
+        """Build the bundle from explicit settings, for one-shot operator entrypoints."""
+        llm = LLM.from_settings(config)
+        return cls(
+            extractor=Extractor.configured(config, llm, GLiNER.from_settings(config)),
+            gate=GateClient.from_settings(config),
+            embed=EmbedClient.from_settings(config),
+            llm=llm,
+        )
 
 
 def is_transient_db_error(error: BaseException) -> bool:
@@ -80,17 +104,13 @@ async def graph_counts(scopes: Scopes) -> tuple[int, int]:
     key = frozenset(scopes)
     async with User.system(key) as session:
         entities = (
-            select(func.count())
-            .select_from(Entity.Claim)
+            select(Entity.Claim.id.count())
             .where(Entity.Claim.scopes == sorted(key))
             .scalar_subquery()
         )
         # The count spans the whole claim history including superseded versions.
         facts = (
-            select(func.count())
-            .select_from(Fact.Claim)
-            .where(Fact.Claim.scopes == sorted(key))
-            .scalar_subquery()
+            select(Fact.Claim.id.count()).where(Fact.Claim.scopes == sorted(key)).scalar_subquery()
         )
         counts = (
             await session.exec(
@@ -131,23 +151,24 @@ def source_extraction(
 
 
 async def model_extraction(
-    chunk: Chunk, document: Document | None
+    chunk: Chunk, document: Document | None, clients: GraphClients
 ) -> tuple[list[ExtractedEntity], list[TimedFact]]:
     """Extract entities and dated facts, or return empty output for an irrelevant chunk."""
-    extractor = Extractor.configured()
-    if extractor.requires_gate:
+    if clients.extractor.requires_gate:
         with span("gate"):
-            gate_relevant = await relevant(chunk.text)
+            gate_relevant = await clients.gate.relevant(chunk.text)
         if not gate_relevant:
             logger.info("chunk {} gated out, no ontology-relevant entities", chunk.id)
             return [], []
     capture = CaptureContext.model_validate(chunk.provenance)
     with span("extract"):
-        extraction = await extractor.extract(capture.search_text(chunk.text))
+        extraction = await clients.extractor.extract(capture.search_text(chunk.text))
     grounded = GroundedProjection.from_extraction(extraction, chunk.text)
-    logger.info(
-        "projection quality chunk={} accepted_facts={}/{} accepted_entities={}/{} rejected={}",
-        chunk.id,
+    logger.bind(
+        chunk_id=str(chunk.id),
+        projection_quality=grounded.quality.model_dump(mode="json"),
+    ).info(
+        "projection quality accepted_facts={}/{} accepted_entities={}/{} rejected={}",
         grounded.quality.accepted_facts,
         grounded.quality.proposed_facts,
         grounded.quality.accepted_entities,
@@ -161,14 +182,14 @@ async def model_extraction(
 
 
 async def prepare_entities(
-    session: Session, entities: list[ExtractedEntity]
+    session: Session, entities: list[ExtractedEntity], embed: Embedder
 ) -> list[PreparedEntity]:
     """Resolve suggested types and embed entity names in one deduplicated model call."""
     entities = merge_entities(entities)
     suggestions = _suggested_types(entities)
     names = list(dict.fromkeys(entity.name for entity in entities))
     texts = list(dict.fromkeys([*suggestions, *names]))
-    vectors = await embed(texts, mode="document") if texts else []
+    vectors = await embed.embed(texts, mode="document") if texts else []
     embedded = dict(zip(texts, vectors, strict=True))
     resolved_types: dict[str, str] = {}
     if suggestions:
@@ -293,16 +314,26 @@ async def write_graph_slice(
     chunk: Chunk,
     entities: list[ExtractedEntity],
     dated_facts: list[TimedFact],
+    clients: GraphClients,
 ) -> set[UUID5]:
     """Plan model work between short entity, read, and final write transactions."""
     capture = CaptureContext.model_validate(chunk.provenance)
-    writer = GraphWriter(opened, chunk.created_by, frozenset(chunk.scopes), capture, chunk.text)
+    writer = GraphWriter(
+        session=opened,
+        created_by=chunk.created_by,
+        scopes=frozenset(chunk.scopes),
+        consolidator=Consolidator(llm=clients.llm),
+        capture=capture,
+        source_text=chunk.text,
+    )
     async with opened.begin():
         entities, dated_facts = await Ontology.normalize(opened, entities, dated_facts)
-    prepared = await prepare_entities(opened, entities)
+    prepared = await prepare_entities(opened, entities, clients.embed)
     resolved, candidates = await _resolve_candidates(opened, writer, prepared, dated_facts)
     vectors = (
-        await embed([candidate.fact.statement for candidate in candidates], mode="document")
+        await clients.embed.embed(
+            [candidate.fact.statement for candidate in candidates], mode="document"
+        )
         if candidates
         else []
     )
@@ -312,7 +343,7 @@ async def write_graph_slice(
     return set(resolved.values())
 
 
-async def extract_and_consolidate(chunk: Chunk) -> set[UUID5]:
+async def extract_and_consolidate(chunk: Chunk, clients: GraphClients) -> set[UUID5]:
     """Extract, resolve, and consolidate one chunk's graph slice, return the entities it
     touched."""
     key = frozenset(chunk.scopes)
@@ -326,10 +357,10 @@ async def extract_and_consolidate(chunk: Chunk) -> set[UUID5]:
                 await mark_processed(opened, chunk.id)
             return set()
         if not short:
-            extracted_entities, extracted_facts = await model_extraction(chunk, document)
+            extracted_entities, extracted_facts = await model_extraction(chunk, document, clients)
             entities = [*entities, *extracted_entities]
             dated_facts = [*dated_facts, *extracted_facts]
-        touched = await write_graph_slice(opened, chunk, entities, dated_facts)
+        touched = await write_graph_slice(opened, chunk, entities, dated_facts, clients)
         logger.info("graph slice from chunk {} done", chunk.id)
         return touched
 
@@ -349,6 +380,7 @@ def raise_failures(chunks: list[Chunk], results: list[set[UUID5] | BaseException
 
 
 async def build_graph(
+    clients: GraphClients,
     limit: int | None = None,
     scopes: Scopes | None = None,
     source: str | None = None,
@@ -361,7 +393,7 @@ async def build_graph(
     chunks = await pending_chunks(key, limit, source)
     entities_before, facts_before = await graph_counts(key)
     results = await asyncio.gather(
-        *(extract_and_consolidate(chunk) for chunk in chunks),
+        *(extract_and_consolidate(chunk, clients) for chunk in chunks),
         return_exceptions=True,
     )
     raise_failures(chunks, results)

@@ -1,19 +1,16 @@
-import dbutil
+import mcp_probe
 import pytest
 from fastmcp.server.context import Context
 from fastmcp.tools import FunctionTool
 from mcp_probe import context_for
 
 from aizk.config import settings
-from aizk.mcp.server import AizkMCP
 from aizk.store.identity import User
 
 
 @pytest.fixture(scope="session")
 def tools() -> dict[str, FunctionTool]:
-    registered = dbutil.run(AizkMCP.shared().list_tools())
-    assert all(isinstance(tool, FunctionTool) for tool in registered)
-    return {tool.name: tool for tool in registered if isinstance(tool, FunctionTool)}
+    return mcp_probe.tools_of(mcp_probe.server)
 
 
 @pytest.fixture

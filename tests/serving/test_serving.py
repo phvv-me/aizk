@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
+import httpx
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -18,8 +19,9 @@ from aizk.config import settings
 from aizk.serving.base import openai_client
 from aizk.serving.chunk import chunk_text, is_code, is_text
 from aizk.serving.chunk.chunker import file_tags
-from aizk.serving.embed import EmbedClient, EmbedMode, embed, embed_images
+from aizk.serving.embed import EmbedClient, EmbedMode, ImageBytes
 
+base_module = import_module("aizk.serving.base")
 chonkie_module = import_module("aizk.serving.chunk.chonkie")
 embed_module = import_module("aizk.serving.embed.client")
 
@@ -96,7 +98,7 @@ def test_embed_batches_realigns_and_carries_the_width(
     client = FakeEmbedClient()
     monkeypatch.setattr(embed_module, "openai_client", lambda *args: client)
 
-    vectors = asyncio.run(embed(texts, mode=mode))
+    vectors = asyncio.run(EmbedClient.from_settings(settings).embed(texts, mode=mode))
 
     assert len(vectors) == len(texts)
     assert all(len(vector) == embed_dim for vector in vectors)
@@ -129,6 +131,13 @@ def test_image_url_normalizes_every_supported_source_type(tmp_path: Path) -> Non
     assert EmbedClient.image_url(str(jpg)).startswith("data:image/jpeg;base64,")
     assert EmbedClient.image_url(str(unknown)).startswith("data:image/png;base64,")
     assert EmbedClient.image_url(Image.new("RGB", (1, 1))).startswith("data:image/png;base64,")
+    assert (
+        EmbedClient.image_url(ImageBytes(content=b"\x89PNG", media_type="image/png"))
+        == "data:image/png;base64,iVBORw=="
+    )
+
+    with pytest.raises(ValueError, match="image media type"):
+        ImageBytes(content=b"video", media_type="video/mp4")
 
 
 def test_embed_images_posts_a_chat_body_and_parses_the_pooled_row(
@@ -140,7 +149,9 @@ def test_embed_images_posts_a_chat_body_and_parses_the_pooled_row(
     client = FakeEmbedClient()
     monkeypatch.setattr(embed_module, "openai_client", lambda *args: client)
 
-    [vector] = asyncio.run(embed_images(["https://pics.test/cat.png"]))
+    [vector] = asyncio.run(
+        EmbedClient.from_settings(settings).embed_images(["https://pics.test/cat.png"])
+    )
 
     assert vector == [0.5, 0.5]
     path, body = client.posts[0]
@@ -255,3 +266,22 @@ def test_chunk_real_backend_returns_clean_spans(
     assert spans
     assert all(span == span.strip() and span for span in spans)
     assert any(needle in span for span in spans)
+
+
+def test_close_clients_closes_each_once_and_resets_the_interning() -> None:
+    class Exploding(httpx.AsyncClient):
+        async def aclose(self) -> None:
+            raise RuntimeError("Event loop is closed")
+
+    async def body() -> None:
+        interned = base_module.openai_client("http://close.test/v1", "", 1.0)
+        assert base_module.openai_client("http://close.test/v1", "", 1.0) is interned
+        sidecar = base_module.http_client("http://close.test", "", 1.0)
+        base_module._open_clients.append(Exploding())
+        await base_module.close_clients()
+        assert base_module._open_clients == []
+        assert sidecar.is_closed
+        assert base_module.openai_client("http://close.test/v1", "", 1.0) is not interned
+        await base_module.close_clients()
+
+    asyncio.run(body())

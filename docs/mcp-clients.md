@@ -2,7 +2,9 @@
 
 Every client points at the same URL and discovers Aizk as an OAuth protected resource. FastMCP
 registers each client dynamically, proxies human sign-in through Logto, and stores encrypted
-registration and refresh state on the server.
+registration and refresh state on the server. A connected client sees the five agent tools,
+`status`, `recall`, `remember`, `share`, and `request_upload` for uploading a local file, all
+described in the [API contract](api.md).
 
 ## Codex
 

@@ -7,8 +7,9 @@ os.environ.setdefault("AIZK_LOG_LEVEL", "")
 # developer's .env must not reroute recall or the gate through live services. The gate client
 # assumes a live sidecar, so tests point it at a fake host and stub the transport or the
 # gate functions themselves.
-os.environ["AIZK_RERANK_URL"] = ""
-os.environ["AIZK_GLINER_URL"] = "http://gate.test"
+if os.environ.get("AIZK_INTEGRATION_REAL_SERVICES") != "1":
+    os.environ["AIZK_RERANK_URL"] = ""
+    os.environ["AIZK_GLINER_URL"] = "http://gate.test"
 
 
 def configured() -> bool:

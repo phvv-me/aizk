@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import dbutil
 import httpx
 import pytest
@@ -197,7 +199,11 @@ def test_refresh_propagates_description_embedding_failure(
         del texts, mode
         raise APIConnectionError(request=httpx.Request("POST", "http://embed.invalid"))
 
-    monkeypatch.setattr(ontology_catalog, "embed", unavailable)
+    monkeypatch.setattr(
+        ontology_catalog.EmbedClient,
+        "from_settings",
+        classmethod(lambda cls, config: SimpleNamespace(embed=unavailable)),
+    )
 
     async def body() -> None:
         async with User.system() as session:

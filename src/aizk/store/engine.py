@@ -93,6 +93,10 @@ class Database:
             expire_on_commit=False,
         )
 
+    # Kept as the one process-wide singleton pair by design. Every `User` session and
+    # transaction resolves its engine here, so injecting it would thread a Runtime through
+    # nearly every query call site for no isolation gain, while the connection pool must
+    # stay per-process anyway.
     @classmethod
     @cache
     def app(cls) -> Self:

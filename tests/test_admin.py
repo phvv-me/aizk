@@ -1,12 +1,15 @@
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
 
 import dbutil
 import pytest
 import seedgraph
-from doubles import AsyncContext, RecordingEmbedder
+from bg_doubles import fake_runtime
+from doubles import AsyncContext, FakeLLM, RecordingEmbedder
 from id_factory import uuid5, uuid7
 from pydantic import UUID5, UUID7
 from sqlalchemy import text
@@ -16,6 +19,8 @@ import aizk.admin as admin
 from aizk.background.status import TasksStatus
 from aizk.config import settings
 from aizk.export import ExportReport
+from aizk.extract.extractor import Extractor
+from aizk.extract.models import ExtractedEntity, Extraction, TimedFact
 from aizk.ontology import Ontology
 from aizk.ops import HealthReport, ResetReport, SetupReport
 from aizk.store import Relation
@@ -80,8 +85,12 @@ def test_maintenance_op_defaults_to_the_system_user(
 ) -> None:
     recorder = Recorder(ret=ret)
     monkeypatch.setattr(admin.graph, delegate, recorder)
+    extras: dict[str, tuple[object, ...]] = {
+        "rebuild": (fake_runtime().graph,),
+        "raptor": (FakeLLM().llm, RecordingEmbedder()),
+    }
 
-    out = dbutil.run(getattr(admin, fn)(user_id=user_id))
+    out = dbutil.run(getattr(admin, fn)(*extras.get(fn, ()), user_id=user_id))
 
     assert out == expected
     assert recorder.kwargs["scopes"] == frozenset({user_id or settings.system_user_id})
@@ -109,7 +118,11 @@ def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
     ) -> list[UUID5 | UUID7]:
         return doc_ids  # every named document contributed one live claim
 
-    monkeypatch.setattr(admin, "embed", fake_embed)
+    monkeypatch.setattr(
+        admin.EmbedClient,
+        "from_settings",
+        classmethod(lambda cls, config: SimpleNamespace(embed=fake_embed)),
+    )
     monkeypatch.setattr(User, "app", property(fake_transaction))
     monkeypatch.setattr(admin.Fact.Claim, "forget_from_documents", fake_forget)
 
@@ -129,6 +142,61 @@ def test_audit_lists_the_recent_visible_writes(migrated_db: None) -> None:
 
     seen, expected = dbutil.run(run())
     assert seen == expected
+
+
+def test_diagnose_extraction_reads_one_chunk_without_writing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "Aizk uses PostgreSQL."
+    chunk = SimpleNamespace(id=DOC_A, document_id=DOC_B, text=source, provenance={})
+    document = SimpleNamespace(title="AIZK")
+    extraction = Extraction(
+        entities=[
+            ExtractedEntity(name="Aizk", type="Project"),
+            ExtractedEntity(name="PostgreSQL", type="Tool"),
+        ],
+        facts=[
+            TimedFact(
+                subject="Aizk",
+                predicate="uses",
+                object="PostgreSQL",
+                statement="Aizk uses PostgreSQL.",
+                quote=source,
+            )
+        ],
+    )
+
+    class FakeSession:
+        async def get(self, model: type, identifier: UUID7) -> SimpleNamespace | None:
+            assert identifier in {DOC_A, DOC_B}
+            return chunk if model is admin.Chunk else document
+
+    extractor = SimpleNamespace(extract=AsyncMock(return_value=extraction))
+    ensure = AsyncMock()
+    monkeypatch.setattr(User, "owner", property(lambda user: AsyncContext(FakeSession())))
+    monkeypatch.setattr(admin.Ontology, "ensure", ensure)
+
+    report = dbutil.run(admin.diagnose_extraction(cast("Extractor", extractor), DOC_A))
+
+    assert report.document_title == "AIZK"
+    assert report.source_chars == len(source)
+    assert report.grounding[0].rejection is None
+    assert report.accepted.quality.accepted_facts == 1
+    assert extractor.extract.call_args.args == (source,)
+    assert ensure.call_count == 1
+
+
+def test_diagnose_extraction_rejects_an_unknown_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeSession:
+        async def get(self, model: type, identifier: UUID7) -> None:
+            return None
+
+    monkeypatch.setattr(User, "owner", property(lambda user: AsyncContext(FakeSession())))
+
+    with pytest.raises(ValueError, match="unknown chunk"):
+        dbutil.run(admin.diagnose_extraction(cast("Extractor", None), DOC_A))
 
 
 @dataclass
@@ -188,55 +256,21 @@ def test_operator_verb_forwards_argv_to_its_seam(
     assert recorder.kwargs == seam.kwargs
 
 
-def test_profile_report_reads_the_span_collector(monkeypatch: pytest.MonkeyPatch) -> None:
-    stats = ["span-a", "span-b"]
-
-    class Collector:
-        def stats(self) -> list[str]:
-            return stats
-
-    monkeypatch.setattr(admin, "default_collector", lambda: Collector())
-
-    assert admin.profile_report() is stats
-
-
-@pytest.mark.parametrize(
-    ("verb", "target", "path", "call_kwargs", "returned"),
-    [
-        ("ingest", "ingest_path", "notes/dir", {"scopes": "org_team"}, 4),
-        (
-            "ingest_image",
-            "ingest_image",
-            "pic.png",
-            {"caption": "a cat", "scopes": "org_team"},
-            DOC_A,
-        ),
-    ],
-    ids=["text", "image"],
-)
-def test_ingest_verbs_resolve_scopes_and_preserve_media_arguments(
+def test_ingest_resolves_scopes_for_the_text_admin_path(
     monkeypatch: pytest.MonkeyPatch,
-    verb: str,
-    target: str,
-    path: str,
-    call_kwargs: dict[str, str],
-    returned: int | UUID7,
 ) -> None:
     scope = admin.settings.scope_id("org_team")
-    ingest = Recorder(ret=returned)
-    monkeypatch.setattr(admin.extract_ingest, target, ingest)
+    ingest = Recorder(ret=4)
+    monkeypatch.setattr(admin.extract_ingest, "ingest_path", ingest)
 
-    out = dbutil.run(getattr(admin, verb)(path, **call_kwargs))
+    out = dbutil.run(admin.ingest("notes/dir", scopes="org_team"))
 
-    assert out == returned
-    assert ingest.args == (User.system(frozenset({scope})), Path(path))
-    expected: dict[str, str | UUID5 | frozenset[UUID5]] = {
+    assert out == 4
+    assert ingest.args == (User.system(frozenset({scope})), Path("notes/dir"))
+    assert ingest.kwargs == {
         "created_by": SYSTEM,
         "scopes": frozenset({scope}),
     }
-    if caption := call_kwargs.get("caption"):
-        expected["caption"] = caption
-    assert ingest.kwargs == expected
 
 
 async def _catalog_row(sql: str, name: str) -> tuple[str, str] | None:

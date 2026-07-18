@@ -1,0 +1,876 @@
+# Pin the project name so it stays `aizk` regardless of the Compose file living under src/deploy.
+# Compose otherwise derives the project from the first file's directory, which would
+# orphan the existing aizk-* containers and the aizk_db-data volume onto a new `deploy` project.
+name: aizk
+
+x-aizk-env: &aizk-env
+  - path: ./logto.conf
+    required: true
+  - path: ../../.env
+    required: false
+
+x-aizk-runtime: &aizk-runtime
+  image: aizk-runtime
+  build:
+    context: ../..
+    dockerfile: src/deploy/Dockerfile
+    target: runtime
+    additional_contexts:
+      mainboard: ../../../mainboard
+      patos: ../../../patos
+      rls: ../../../rls
+  env_file: *aizk-env
+  environment: &aizk-runtime-environment
+    AIZK_DB_HOST: db
+    AIZK_DB_PORT: "5432"
+    AIZK_EMBED_URL: http://vllm-emb:8000/v1
+    AIZK_LLM_URL: http://vllm-llm:8000/v1
+    AIZK_RERANK_URL: http://vllm-rerank:8000
+    AIZK_GLINER_URL: http://gliner:8000
+    AIZK_EMBED_MODEL: ${AIZK_EMBED_MODEL:-qwen3-vl-emb}
+    AIZK_LLM_MODEL: ${AIZK_LLM_MODEL:-extractor}
+    AIZK_LLM_EXTRACT_MAX_TOKENS: ${AIZK_LLM_EXTRACT_MAX_TOKENS:-1024}
+    AIZK_LLM_RESPONSE_MAX_TOKENS: ${AIZK_LLM_RESPONSE_MAX_TOKENS:-512}
+    AIZK_RERANK_MODEL: ${AIZK_RERANK_MODEL:-qwen3-reranker}
+    AIZK_GRAPH_BUILD_CONCURRENCY: ${AIZK_GRAPH_BUILD_CONCURRENCY:-48}
+    AIZK_LOG_JSON: ${AIZK_LOG_JSON:-1}
+    AIZK_QUEUE_BATCH_SIZE: ${AIZK_QUEUE_BATCH_SIZE:-64}
+    AIZK_DISPLAY_TIMEZONE: ${AIZK_DISPLAY_TIMEZONE:-Asia/Tokyo}
+    AIZK_OBJECT_STORE_ENDPOINT: http://objects:8333
+    AIZK_OBJECT_STORE_BUCKET: ${AIZK_OBJECT_STORE_BUCKET:-aizk}
+    AIZK_OBJECT_STORE_ACCESS_KEY: ${AIZK_OBJECT_STORE_ACCESS_KEY:?set AIZK_OBJECT_STORE_ACCESS_KEY}
+    AIZK_OBJECT_STORE_SECRET_KEY: ${AIZK_OBJECT_STORE_SECRET_KEY:?set AIZK_OBJECT_STORE_SECRET_KEY}
+    AIZK_OBJECT_STORE_UPLOAD_BYTE_LIMIT: ${AIZK_OBJECT_STORE_UPLOAD_BYTE_LIMIT:-10485760}
+    AIZK_OBJECT_STORE_COMPRESSION_LEVEL: ${AIZK_OBJECT_STORE_COMPRESSION_LEVEL:-3}
+    AIZK_OBJECT_STORE_COMPRESSION_MIN_SAVINGS: ${AIZK_OBJECT_STORE_COMPRESSION_MIN_SAVINGS:-0.05}
+    AIZK_OBJECT_STORE_INTERNAL_DOWNLOAD_LIFETIME_SECONDS: ${AIZK_OBJECT_STORE_INTERNAL_DOWNLOAD_LIFETIME_SECONDS:-300}
+    AIZK_DOCLING_URL: http://docling:5001
+    AIZK_DOCLING_API_KEY: ${AIZK_DOCLING_API_KEY:?set AIZK_DOCLING_API_KEY}
+    AIZK_DOCLING_DOCUMENT_TIMEOUT: ${AIZK_DOCLING_DOCUMENT_TIMEOUT:-1800}
+    AIZK_DOCLING_REQUEST_TIMEOUT: ${AIZK_DOCLING_REQUEST_TIMEOUT:-1860}
+    AIZK_DOCLING_CONCURRENCY: ${AIZK_DOCLING_CONCURRENCY:-2}
+    AIZK_CLAMAV_HOST: clamav
+    AIZK_CLAMAV_PORT: "3310"
+    AIZK_CLAMAV_TIMEOUT: ${AIZK_CLAMAV_TIMEOUT:-120}
+  cap_drop: ["ALL"]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=1g
+  pids_limit: 512
+  restart: unless-stopped
+
+services:
+  # Named volumes start owned by root. This one-shot service grants only the unprivileged Aizk
+  # runtime user access to its two writable directories, then exits before any server starts.
+  volume-init:
+    <<: *aizk-runtime
+    user: "0:0"
+    cap_add: ["CHOWN", "DAC_READ_SEARCH", "FOWNER"]
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        install -d -o 10001 -g 10001 -m 0700 /oauth /backups
+        && chown -R 10001:10001 /oauth /backups
+        && chmod 0700 /oauth /backups
+    env_file: []
+    environment: {}
+    volumes:
+      - ${AIZK_BACKUP_VOLUME:-backups}:/backups
+      - ${AIZK_OAUTH_VOLUME:-oauth}:/oauth
+    restart: "no"
+
+  db:
+    image: tensorchord/vchord-suite:pg18-latest@sha256:c6e5e77a1180199f91b040b6e85c6d10b0ded6d49fb614dfd2e7272ffb91af08
+    # The compose-level ${VAR:-default} substitutions below come from packages/aizk/.env through
+    # the documented --env-file .env option. Compose anchors automatic discovery to this file's
+    # deploy directory, so omitting that option would silently select these defaults instead.
+    # The single src/deploy/.env.example documents the same fields as src/aizk/config/settings.py.
+    environment:
+      # POSTGRES_USER stays the fixed "aizk_admin" literal, not a var: it is the owning role every
+      # migration and `initdb/roles.sh` connects as, and `Settings.admin_database_url` hardcodes
+      # the same literal role name, only the password travels through the environment.
+      POSTGRES_USER: aizk_admin
+      POSTGRES_PASSWORD: ${AIZK_ADMIN_PASSWORD:?set AIZK_ADMIN_PASSWORD}
+      POSTGRES_DB: ${AIZK_DB_NAME:-aizk}
+      POSTGRES_INITDB_ARGS: --data-checksums
+      AIZK_APP_PASSWORD: ${AIZK_APP_PASSWORD:?set AIZK_APP_PASSWORD}
+      AIZK_LOGTO_DB_PASSWORD: ${AIZK_LOGTO_DB_PASSWORD:?set AIZK_LOGTO_DB_PASSWORD}
+    # unlike the interpolations above, which compose resolves on the host before the container
+    # ever starts, `roles.sh` runs its own shell inside the container and needs AIZK_APP_PASSWORD
+    # as a real environment variable there to read; env_file passes the whole .env through as
+    # container env for exactly that, `required: false` so a checkout with no .env yet (only the
+    # committed .env.example) still starts clean on every field's own default.
+    # the image's own CMD (`docker inspect tensorchord/vchord-suite:pg18-latest`) already carries
+    # shared_preload_libraries and search_path, and a compose `command:` replaces CMD outright
+    # rather than appending to it, so both are repeated here verbatim alongside the request GUC.
+    # User is the only request context and Pydantic serializes `User.scopes` into `app.scopes`.
+    # The empty server default stays fail closed before a session binds User.
+    command:
+      - postgres
+      - -c
+      # pg_stat_statements rides alongside the vchord suite's own libraries so every profiling
+      # wave's Postgres-side query stats (Phase 2's build-slice and recall measurements) come
+      # from the catalog view rather than an ad-hoc EXPLAIN ANALYZE per query; loading a shared
+      # library only ever takes effect on the next Postgres start, `ops.setup`'s own
+      # `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` is the idempotent other half that
+      # makes the view queryable once this restart has happened.
+      - shared_preload_libraries=vchord,vchord_bm25,vector,pg_tokenizer,pg_stat_statements
+      - -c
+      - search_path="$$user", public, bm25_catalog, tokenizer_catalog
+      - -c
+      - app.scopes=
+      - -c
+      - shared_buffers=${AIZK_PG_SHARED_BUFFERS:-16GB}
+      - -c
+      - effective_cache_size=${AIZK_PG_EFFECTIVE_CACHE_SIZE:-128GB}
+      - -c
+      - work_mem=${AIZK_PG_WORK_MEM:-16MB}
+      - -c
+      - maintenance_work_mem=${AIZK_PG_MAINTENANCE_WORK_MEM:-2GB}
+      - -c
+      - effective_io_concurrency=${AIZK_PG_EFFECTIVE_IO_CONCURRENCY:-200}
+      - -c
+      - maintenance_io_concurrency=${AIZK_PG_MAINTENANCE_IO_CONCURRENCY:-200}
+      - -c
+      - random_page_cost=${AIZK_PG_RANDOM_PAGE_COST:-1.1}
+      - -c
+      - checkpoint_timeout=${AIZK_PG_CHECKPOINT_TIMEOUT:-15min}
+      - -c
+      - max_wal_size=${AIZK_PG_MAX_WAL_SIZE:-8GB}
+      - -c
+      - min_wal_size=${AIZK_PG_MIN_WAL_SIZE:-2GB}
+      - -c
+      - wal_compression=${AIZK_PG_WAL_COMPRESSION:-on}
+      - -c
+      - track_io_timing=${AIZK_PG_TRACK_IO_TIMING:-on}
+      - -c
+      - log_lock_waits=${AIZK_PG_LOG_LOCK_WAITS:-on}
+      - -c
+      - log_min_duration_statement=${AIZK_PG_LOG_MIN_DURATION_STATEMENT:-1000ms}
+      - -c
+      - autovacuum_vacuum_scale_factor=${AIZK_PG_AUTOVACUUM_VACUUM_SCALE_FACTOR:-0.05}
+      - -c
+      - autovacuum_analyze_scale_factor=${AIZK_PG_AUTOVACUUM_ANALYZE_SCALE_FACTOR:-0.02}
+    volumes:
+      # pg18+ images store data under a major-version-specific subdirectory (pg_ctlcluster-style),
+      # so the mount point is the parent dir now, not .../data directly
+      - ${AIZK_POSTGRES_DATA_VOLUME:-db-data}:/var/lib/postgresql
+      # runs once against a fresh volume, before any migration ever connects: creates the
+      # restricted aizk_app role and its schema-wide default privileges, so 0001_init never has
+      # to create the role itself. Postgres runs every /docker-entrypoint-initdb.d/ script exactly
+      # once, only when the data directory is empty, so a `down -v && up` is required to re-run it.
+      # A .sh script (not .sql) so it can read AIZK_APP_PASSWORD from its own container env rather
+      # than hardcoding the role's password inline.
+      - ./initdb/roles.sh:/docker-entrypoint-initdb.d/roles.sh:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=\"$${POSTGRES_PASSWORD}\" psql -h 127.0.0.1 -U aizk_admin -d ${AIZK_DB_NAME:-aizk} -qAtc 'SELECT 1' >/dev/null",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # SeaweedFS owns immutable artifact bytes through its S3 interface. PostgreSQL remains the
+  # metadata and authorization authority. No SeaweedFS port is published to the host, including
+  # its filer and administration interfaces. Production binds this volume to storage outside the
+  # dedicated PostgreSQL NVMe so files and database pages never compete for that device.
+  objects:
+    image: chrislusf/seaweedfs:4.29@sha256:d47c7ee99fcb951351d7194915f4e3a5ea604a8e8871183d713907dec4fb9bf5
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${AIZK_OBJECT_STORE_ACCESS_KEY:?set AIZK_OBJECT_STORE_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${AIZK_OBJECT_STORE_SECRET_KEY:?set AIZK_OBJECT_STORE_SECRET_KEY}
+      S3_BUCKET: ${AIZK_OBJECT_STORE_BUCKET:-aizk}
+    volumes:
+      - ${AIZK_OBJECT_DATA_VOLUME:-object-data}:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  # ClamAV scans every accepted artifact before its immutable original enters object storage.
+  # Its TCP protocol has no authentication or encryption, so port 3310 stays inside Compose.
+  # The signature database persists across container replacement and updates through freshclam.
+  clamav:
+    image: clamav/clamav:1.5.3-debian13-slim@sha256:a73435b0fa51886e9e6dd1881656023ba9dce756e055f23981270badbb8ca3d7
+    environment:
+      CLAMD_CONF_MaxFileSize: ${AIZK_CLAMAV_MAX_FILE_SIZE:-10M}
+      CLAMD_CONF_MaxScanSize: ${AIZK_CLAMAV_MAX_SCAN_SIZE:-10M}
+      CLAMD_CONF_StreamMaxLength: ${AIZK_CLAMAV_STREAM_MAX_LENGTH:-10M}
+      FRESHCLAM_CONF_Checks: ${AIZK_CLAMAV_SIGNATURE_CHECKS_PER_DAY:-24}
+    volumes:
+      - ${AIZK_CLAMAV_DATA_VOLUME:-clamav-data}:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 360s
+    restart: unless-stopped
+
+  # Docling converts accepted originals into normalized Markdown and native JSON derivatives.
+  # AIZK owns queuing through PgQueuer, while Docling uses its bounded local engine only. No Redis
+  # or Docling async queue enters the deployment. The API key limits use to trusted AIZK processes.
+  docling:
+    image: quay.io/docling-project/docling-serve-cpu:v1.26.0@sha256:7e07522e0240c1db3ff5b837ffa969c2ecd5a71664c0e0369f5a69fc169e30ba
+    environment:
+      DOCLING_SERVE_API_KEY: ${AIZK_DOCLING_API_KEY:?set AIZK_DOCLING_API_KEY}
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_ENG_KIND: local
+      DOCLING_SERVE_ENG_LOC_NUM_WORKERS: ${AIZK_DOCLING_CONCURRENCY:-2}
+      DOCLING_SERVE_MAX_FILE_SIZE: ${AIZK_OBJECT_STORE_UPLOAD_BYTE_LIMIT:-10485760}
+      DOCLING_SERVE_MAX_SOURCES_PER_REQUEST: "1"
+      DOCLING_SERVE_MAX_DOCUMENT_TIMEOUT: ${AIZK_DOCLING_DOCUMENT_TIMEOUT:-1800}
+      DOCLING_SERVE_MAX_SYNC_WAIT: ${AIZK_DOCLING_DOCUMENT_TIMEOUT:-1800}
+      DOCLING_SERVE_ENABLE_REMOTE_SERVICES: "false"
+      DOCLING_SERVE_ALLOW_EXTERNAL_PLUGINS: "false"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/ready')"
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 600s
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 512
+    restart: unless-stopped
+
+  # vLLM serves Qwen3-VL-Embedding-2B over an OpenAI-compatible /v1/embeddings, so the model loads
+  # in this container, never inside aizk. --runner pooling is the current flag (--task embed was
+  # removed), is_matryoshka lets a request set dimensions=1024 to truncate the native 2048-d output.
+  # The default bf16 path works on Ada and Ampere GPUs. Every
+  # serving knob below is an .env var with an inline default, so flipping precision or model is an
+  # .env edit and never a yaml one. It stays on the private Compose network because vLLM ships
+  # unauthenticated; never expose it on a public address. AIZK_EMBED_CHECKPOINT (the HF weights to load) and
+  # AIZK_EMBED_MODEL (the served alias `src/aizk/config/settings.py`'s embed_model must match) are two
+  # different vars on purpose, since the checkpoint path is not a usable served name.
+  vllm-emb:
+    image: vllm/vllm-openai:v0.24.0
+    command:
+      - "${AIZK_EMBED_CHECKPOINT:-Qwen/Qwen3-VL-Embedding-2B}"
+      - "--runner"
+      - "pooling"
+      - "--gpu-memory-utilization"
+      - "${AIZK_EMBED_GPU_MEM_UTIL:-0.30}"
+      # aizk chunks are 2048 chars (<=700 tokens), so a 2048 context is ample; the model's 262K
+      # native length would size the KV cache at 28 GiB, and even 8192 was ~10x waste. At 2048 this
+      # lane settles near 4.7 GiB and its throughput rises ~15% over the old 8192/0.30 sizing.
+      - "--max-model-len"
+      - "${AIZK_EMBED_MAX_MODEL_LEN:-2048}"
+      # a pooling lane saturates on batch width, not KV depth, so an explicit cap matched to the
+      # extractor's own concurrency keeps continuous batching full without over-reserving memory.
+      - "--max-num-seqs"
+      - "${AIZK_EMBED_MAX_NUM_SEQS:-64}"
+      - "--served-model-name"
+      - "${AIZK_EMBED_MODEL:-qwen3-vl-emb}"
+      - "--trust-remote-code"
+      - "--hf-overrides"
+      - '{"is_matryoshka": true}'
+    # The two models share one 24 GB card, and vLLM sizes each one's cache against the memory
+    # free at profiling time. Started all at once they profile concurrently, each reads the whole
+    # card as free, and the sum over-commits it so one dies with "No available memory for the cache
+    # blocks". The healthcheck plus the depends_on chain below serialize startup instead. The
+    # embedder comes up first and the extractor profiles against the memory it already holds.
+    # start_period covers the
+    # minute-plus of weight loading before /health answers, during which a failing probe is not
+    # counted against retries.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    ipc: host
+    volumes:
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${AIZK_EMBED_GPU_DEVICE:-0}"]
+              capabilities: ["gpu"]
+
+  # vLLM serves schema-constrained graph extraction. Every sizing knob stays in the shared env
+  # file, which supports either a small co-resident model or a dedicated-GPU model with no second
+  # Compose file. The served alias must match AIZK_LLM_MODEL.
+  vllm-llm:
+    image: vllm/vllm-openai:v0.24.0
+    environment:
+      HF_XET_HIGH_PERFORMANCE: "${AIZK_HF_XET_HIGH_PERFORMANCE:-0}"
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+    command:
+      - "${AIZK_LLM_CHECKPOINT:-google/gemma-4-E2B-it-qat-w4a16-ct}"
+      - "--quantization"
+      - "${AIZK_LLM_QUANTIZATION:-compressed-tensors}"
+      - "--gpu-memory-utilization"
+      - "${AIZK_LLM_GPU_MEM_UTIL:-0.45}"
+      - "--max-model-len"
+      - "${AIZK_LLM_MAX_MODEL_LEN:-8192}"
+      - "--max-num-seqs"
+      - "${AIZK_LLM_MAX_NUM_SEQS:-48}"
+      - "--kv-cache-dtype"
+      - "${AIZK_LLM_KV_CACHE_DTYPE:-bfloat16}"
+      - "--enable-prefix-caching"
+      - "--enable-chunked-prefill"
+      - "--structured-outputs-config"
+      - >-
+        {"backend":"${AIZK_LLM_STRUCTURED_OUTPUTS_BACKEND:-xgrammar}",
+        "disable_any_whitespace":${AIZK_LLM_DISABLE_JSON_WHITESPACE:-true}}
+      - "--served-model-name"
+      - "${AIZK_LLM_MODEL:-extractor}"
+      - "--trust-remote-code"
+    # Start after the embedder and the reranker so every model profiles against the memory
+    # the earlier lanes already hold.
+    depends_on:
+      vllm-rerank:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    ipc: host
+    volumes:
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${AIZK_LLM_GPU_DEVICE:-0}"]
+              capabilities: ["gpu"]
+
+  # vLLM serves Qwen3-Reranker-4B over /v1/rerank, the cross-encoder second pass recall
+  # uses to reorder its evidence lanes before packing. The hf-overrides block is the official
+  # recipe that mounts the original Qwen3 reranker checkpoint as a sequence classifier scoring
+  # yes/no token logits; score calibration additionally requires the official prompt scaffold,
+  # which `src/aizk/config/settings.py`'s rerank templates apply client-side. The 4B is the measured
+  # floor for this lane: on 253 real vault queries reranking the embedder's own top 8, the
+  # 0.6B checkpoint DEGRADED ordering (MRR 0.90 to 0.77 even correctly templated) while the
+  # 4B held it (0.90 to 0.91), so the small model is never a valid economy here. The
+  # depends_on chain keeps the three models profiling one at a time on the shared 24 GB card.
+  # AIZK_RERANK_CHECKPOINT/AIZK_RERANK_MODEL split the same way as the other lanes, weights
+  # path versus served alias, and the alias must match `src/aizk/config/settings.py`'s rerank_model.
+  vllm-rerank:
+    image: vllm/vllm-openai:v0.24.0
+    command:
+      - "${AIZK_RERANK_CHECKPOINT:-Qwen/Qwen3-Reranker-4B}"
+      - "--runner"
+      - "pooling"
+      - "--quantization"
+      - "${AIZK_RERANK_QUANTIZATION:-fp8}"
+      - "--gpu-memory-utilization"
+      - "${AIZK_RERANK_GPU_MEM_UTIL:-0.25}"
+      - "--max-model-len"
+      - "${AIZK_RERANK_MAX_MODEL_LEN:-2048}"
+      - "--max-num-seqs"
+      - "${AIZK_RERANK_MAX_NUM_SEQS:-32}"
+      - "--served-model-name"
+      - "${AIZK_RERANK_MODEL:-qwen3-reranker}"
+      - "--trust-remote-code"
+      - "--hf-overrides"
+      - '{"architectures": ["Qwen3ForSequenceClassification"], "classifier_from_token": ["no", "yes"], "is_original_qwen3_reranker": true}'
+    depends_on:
+      vllm-emb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    ipc: host
+    volumes:
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${AIZK_RERANK_GPU_DEVICE:-0}"]
+              capabilities: ["gpu"]
+
+  # The gliner sidecar serves relevance, route classification, query mentions, and optional graph
+  # extraction so the server process never imports torch. Its custom DeBERTa multitask architecture
+  # has no vLLM serving path, so this is a plain torch FastAPI service from src/services/gliner. The
+  # 340M large checkpoint serves every task on GPU with fp16, FlashDeberta, and optional compiled
+  # tensor subgraphs. Dense documents use overlapping long-context extraction.
+  gliner:
+    build:
+      # context is the package root so the image copies the gate and extraction wire models beside
+      # src/services/gliner/app.py. The root .dockerignore keeps the context small.
+      context: ../..
+      dockerfile: src/services/gliner/Dockerfile
+    environment:
+      GLINER_DEVICE: ${AIZK_GLINER_DEVICE:-cuda}
+      GLINER_CHECKPOINT: ${AIZK_GLINER_CHECKPOINT:-fastino/gliner2-large-v1}
+      GLINER_QUANTIZE: ${AIZK_GLINER_QUANTIZE:-true}
+      GLINER_COMPILE: ${AIZK_GLINER_COMPILE:-false}
+      GLINER_LONG_CHUNK_SIZE: ${AIZK_GLINER_LONG_CHUNK_SIZE:-384}
+      GLINER_LONG_CHUNK_OVERLAP: ${AIZK_GLINER_LONG_CHUNK_OVERLAP:-64}
+      GLINER_BATCH_SIZE: ${AIZK_GLINER_BATCH_SIZE:-8}
+    depends_on:
+      vllm-llm:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 180s
+    volumes:
+      - ${AIZK_HOME:-${HOME}/.aizk}/hf-cache:/root/.aizk/hf-cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${AIZK_GLINER_GPU_DEVICE:-0}"]
+              capabilities: ["gpu"]
+  # Migrations and queue installation run once before either long-lived process starts. This
+  # service carries the database-owner credential and exits before public traffic is accepted.
+  setup:
+    <<: *aizk-runtime
+    command: ["db", "setup"]
+    depends_on:
+      cloudflared:
+        condition: service_healthy
+        required: false
+      db:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+        required: false
+      volume-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # The public process receives only the forced-RLS app credential. Owner maintenance, queue
+  # execution, and plaintext backups stay in the private worker below.
+  server:
+    <<: *aizk-runtime
+    depends_on:
+      public-check:
+        condition: service_completed_successfully
+        required: false
+      setup:
+        condition: service_completed_successfully
+      gliner:
+        condition: service_healthy
+      objects:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+        required: false
+    environment:
+      <<: *aizk-runtime-environment
+      # Blank so a full DSN in .env can never reach this public process; settings then
+      # always construct the forced-RLS aizk_app DSN from host, port, and app password.
+      AIZK_DATABASE_URL: ""
+      AIZK_ADMIN_DATABASE_URL: ""
+      AIZK_ADMIN_PASSWORD: ""
+      AIZK_BACKUP_DATABASE_URL: ""
+      AIZK_BACKUP_ENABLED: "0"
+      AIZK_AUTO_SETUP: "0"
+      AIZK_SERVE_WITH_WORKER: "0"
+      AIZK_TUNNEL_TOKEN: ""
+      AIZK_MCP_HOST: 0.0.0.0
+      AIZK_MCP_PORT: "8080"
+      FASTMCP_HOME: /oauth
+    volumes:
+      - ${AIZK_OAUTH_VOLUME:-oauth}:/oauth
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "--max-time", "2", "-o", "/dev/null", "http://127.0.0.1:8080/mcp"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # The browser JSON API authenticates the same Logto bearer tokens as MCP and receives only
+  # the forced-RLS app credential. Upload capabilities minted here or by the MCP request_upload
+  # tool live in the PostgreSQL upload_capability table, so a grant minted in the separate
+  # server container is redeemed here, and either service may scale to more replicas.
+  api:
+    <<: *aizk-runtime
+    profiles: ["public"]
+    command: ["serve-api"]
+    depends_on:
+      web-check:
+        condition: service_completed_successfully
+      setup:
+        condition: service_completed_successfully
+      objects:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    environment:
+      <<: *aizk-runtime-environment
+      # Blank so a full DSN in .env can never reach this public process; settings then
+      # always construct the forced-RLS aizk_app DSN from host, port, and app password.
+      AIZK_DATABASE_URL: ""
+      AIZK_ADMIN_DATABASE_URL: ""
+      AIZK_ADMIN_PASSWORD: ""
+      AIZK_BACKUP_DATABASE_URL: ""
+      AIZK_BACKUP_ENABLED: "0"
+      AIZK_AUTO_SETUP: "0"
+      AIZK_SERVE_WITH_WORKER: "0"
+      AIZK_TUNNEL_TOKEN: ""
+      AIZK_API_HOST: 0.0.0.0
+      AIZK_API_PORT: "8010"
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "--max-time", "2", "-o", "/dev/null", "http://127.0.0.1:8010/api/me"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # A dedicated startup gate makes the optional UI fail closed when its public URL, Logto web
+  # application, or session secret is missing or only partly configured.
+  web-check:
+    <<: *aizk-runtime
+    profiles: ["public"]
+    command: ["check-web"]
+    depends_on:
+      public-check:
+        condition: service_completed_successfully
+    restart: "no"
+
+  # The SvelteKit server renders every browser page and holds the confidential Logto web
+  # application. It exchanges its session for API bearer tokens and calls the api service
+  # directly. No database credential enters this process.
+  web:
+    image: aizk-web
+    profiles: ["public"]
+    build:
+      context: ../..
+      dockerfile: src/deploy/Dockerfile
+      target: web
+    depends_on:
+      api:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    environment:
+      AIZK_LOGTO_URL: ${AIZK_LOGTO_URL:-}
+      AIZK_MCP_PUBLIC_URL: ${AIZK_MCP_PUBLIC_URL:-}
+      AIZK_WEB_PUBLIC_URL: ${AIZK_WEB_PUBLIC_URL:-}
+      AIZK_WEB_API_URL: ${AIZK_WEB_API_URL:-http://api:8010}
+      AIZK_WEB_CLIENT_ID: ${AIZK_WEB_CLIENT_ID:-}
+      AIZK_WEB_CLIENT_SECRET: ${AIZK_WEB_CLIENT_SECRET:-}
+      AIZK_WEB_SESSION_SECRET: ${AIZK_WEB_SESSION_SECRET:-}
+      # adapter-node checks form submissions against this origin, the one public URL.
+      ORIGIN: ${AIZK_WEB_PUBLIC_URL:-}
+      # File bytes never pass through this server: the browser PUTs them straight to the
+      # api service's capability path through Caddy. Form actions carry only small
+      # declarations, so the adapter-node default body cap of 512K stays in force.
+      BODY_SIZE_LIMIT: "524288"
+      PORT: "3000"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    pids_limit: 128
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+
+  # Caddy is the AIZK tunnel origin. It forwards FastMCP and its OAuth routes to the server,
+  # only capability upload PUTs to the api service, and every remaining path to SvelteKit.
+  # Cloudflare reaches caddy:8081 over Compose; no Caddy host port is published.
+  caddy:
+    image: aizk-caddy
+    profiles: ["public"]
+    build:
+      context: ../..
+      dockerfile: src/deploy/Dockerfile
+      target: caddy
+    depends_on:
+      server:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /config:rw,noexec,nosuid,size=8m
+      - /data:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=8m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8081/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  # The private worker owns privileged maintenance and backups but publishes no port. An exploit
+  # in the MCP server therefore cannot obtain the owner connection through its environment.
+  worker:
+    <<: *aizk-runtime
+    command: ["worker"]
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+      gliner:
+        condition: service_healthy
+      objects:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+      docling:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+        required: false
+    environment:
+      <<: *aizk-runtime-environment
+      AIZK_BACKUP_ENABLED: "1"
+      AIZK_BACKUP_DIR: /backups
+    volumes:
+      - ${AIZK_BACKUP_VOLUME:-backups}:/backups
+
+  # This marked suite runs from a disposable test image on the private Compose network. It creates
+  # and drops a separate PostgreSQL database, drives the real PgQueuer worker in-process, and uses
+  # the same object, malware, conversion, embedding, reranking, gate, extraction, and LLM services
+  # as production. No service boundary is replaced and no Redis service exists.
+  artifact-integration:
+    <<: *aizk-runtime
+    image: aizk-integration-test
+    profiles: ["integration"]
+    build:
+      context: ../..
+      dockerfile: src/deploy/Dockerfile
+      target: integration-test
+      additional_contexts:
+        mainboard: ../../../mainboard
+        patos: ../../../patos
+        rls: ../../../rls
+        tests: ../../tests
+    entrypoint: ["python", "-m", "pytest"]
+    command:
+      - tests/integration/test_artifact_stack.py
+      - -m
+      - integration and artifact_stack
+      - -p
+      - no:cacheprovider
+      - --no-cov
+    depends_on:
+      db:
+        condition: service_healthy
+      objects:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+      docling:
+        condition: service_healthy
+      gliner:
+        condition: service_healthy
+    environment:
+      <<: *aizk-runtime-environment
+      AIZK_AUTO_SETUP: "0"
+      AIZK_BACKUP_ENABLED: "0"
+      AIZK_INTEGRATION_REAL_SERVICES: "1"
+      AIZK_LOG_LEVEL: INFO
+      AIZK_TEST_DB_NAME: ${AIZK_ARTIFACT_TEST_DB_NAME:-aizk_artifact_integration}
+      FASTMCP_HOME: /tmp/fastmcp
+      HOME: /tmp
+      NUMBA_CACHE_DIR: /tmp/numba
+      PYTHONDONTWRITEBYTECODE: "1"
+    restart: "no"
+
+  # Logto remains the identity and organization authority in the optional public deployment.
+  logto:
+    image: svhd/logto:1.41.0
+    profiles: ["public"]
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "npm run cli db alt deploy && exec npm start"]
+    environment:
+      - TRUST_PROXY_HEADER=1
+      - DB_URL=postgres://logto:${AIZK_LOGTO_DB_PASSWORD:?set AIZK_LOGTO_DB_PASSWORD}@db:5432/logto
+      - ENDPOINT=${AIZK_LOGTO_ENDPOINT:-http://localhost:3001}
+      - ADMIN_ENDPOINT=${AIZK_LOGTO_ADMIN_ENDPOINT:-http://localhost:3002}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/oidc/.well-known/openid-configuration').then(r => { if (!r.ok) process.exit(1) })"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # The optional observability profile centralizes every AIZK Compose service log. Alloy reads
+  # the Docker socket without modifying it, Loki retains one bounded month, and only Grafana is
+  # published on loopback. Durable product usage remains in PostgreSQL rather than in these logs.
+  # Traces stay inside each Python process unless AIZK_OTLP_ENDPOINT names an OTLP/HTTP
+  # collector, so span export stays off until a Tempo service joins this profile.
+  observability-init:
+    image: grafana/alloy:v1.16.1
+    profiles: ["observability"]
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        install -d -o 10001 -g 10001 -m 0700 /loki
+        && install -d -o 473 -g 473 -m 0700 /alloy
+        && install -d -o 472 -g 0 -m 0700 /grafana
+    volumes:
+      - ${AIZK_LOKI_VOLUME:-loki-data}:/loki
+      - ${AIZK_ALLOY_VOLUME:-alloy-data}:/alloy
+      - ${AIZK_GRAFANA_VOLUME:-grafana-data}:/grafana
+    cap_drop: ["ALL"]
+    cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+
+  loki:
+    image: grafana/loki:3.7.3
+    profiles: ["observability"]
+    command: ["-config.file=/etc/loki/loki.yml"]
+    depends_on:
+      observability-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./observability/loki.yml:/etc/loki/loki.yml:ro
+      - ${AIZK_LOKI_VOLUME:-loki-data}:/var/lib/loki
+    healthcheck:
+      test: ["CMD", "/usr/bin/loki", "-config.file=/etc/loki/loki.yml", "-verify-config"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:v1.16.1
+    profiles: ["observability"]
+    user: "473:473"
+    group_add:
+      - ${AIZK_DOCKER_GID:-0}
+    command: ["run", "/etc/alloy/alloy.alloy", "--storage.path=/var/lib/alloy"]
+    depends_on:
+      loki:
+        condition: service_healthy
+    volumes:
+      - ./observability/alloy.alloy:/etc/alloy/alloy.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${AIZK_ALLOY_VOLUME:-alloy-data}:/var/lib/alloy
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    profiles: ["observability"]
+    depends_on:
+      loki:
+        condition: service_healthy
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SECURITY_ADMIN_USER: ${AIZK_GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${AIZK_GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana:/etc/grafana/provisioning:ro
+      - ${AIZK_GRAFANA_VOLUME:-grafana-data}:/var/lib/grafana
+    # Operator access only: Grafana is the sole host-published port and remains loopback-bound.
+    ports:
+      - "127.0.0.1:${AIZK_GRAFANA_PORT:-3003}:3000"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  # Reconcile the committed authorization policy through Logto's Management API before the
+  # public server starts. The command is idempotent and leaves unrelated roles and permissions
+  # alone.
+  logto-setup:
+    <<: *aizk-runtime
+    profiles: ["public"]
+    command: ["logto", "apply"]
+    depends_on:
+      cloudflared:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+    environment:
+      <<: *aizk-runtime-environment
+      AIZK_REQUIRE_AUTH: "1"
+    restart: "no"
+
+  # This one-shot gate makes the public server fail closed when authentication is absent or
+  # partial. The shared tunnel must be ready first because it publishes Logto's canonical issuer.
+  public-check:
+    <<: *aizk-runtime
+    profiles: ["public"]
+    command: ["check-public"]
+    depends_on:
+      logto-setup:
+        condition: service_completed_successfully
+    environment:
+      <<: *aizk-runtime-environment
+      AIZK_REQUIRE_AUTH: "1"
+    restart: "no"
+
+  # The outbound Cloudflare Tunnel publishes auth.phvv.me from Logto and aizk.phvv.me from
+  # Caddy through the public profile. Logto starts first, then the tunnel's native readiness
+  # endpoint proves an active Cloudflare connection before any process resolves the canonical
+  # public OIDC issuer through it. Neither origin publishes a host port; cloudflared dials both
+  # over the Compose network.
+  cloudflared:
+    image: cloudflare/cloudflared:2026.6.1
+    profiles: ["public"]
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token ${AIZK_TUNNEL_TOKEN:-}
+    depends_on:
+      logto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  alloy-data:
+  db-data:
+  grafana-data:
+  loki-data:
+  object-data:
+  clamav-data:
+  backups:
+  oauth:

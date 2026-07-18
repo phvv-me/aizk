@@ -5,7 +5,7 @@ from sqlalchemy import update
 from sqlmodel import select
 
 from ..config import settings
-from ..serving.embed import embed
+from ..serving.embed import EmbedClient
 from ..store import Chunk, Community, Entity, Fact, Profile
 from ..store.engine import Session
 from ..store.identity import User
@@ -41,7 +41,9 @@ async def rewrite_embeddings(
         selection = selection.where(model.__table__.c.scopes == sorted(scopes))
     rows = (await session.exec(selection)).all()
     for batch in batched(rows, settings.reembed_batch, strict=False):
-        vectors = await embed([source for _, source in batch], mode="document")
+        vectors = await EmbedClient.from_settings(settings).embed(
+            [source for _, source in batch], mode="document"
+        )
         await session.exec(
             update(model),
             params=[

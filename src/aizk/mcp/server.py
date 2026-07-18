@@ -1,68 +1,95 @@
+import shlex
+from collections.abc import Callable, Coroutine
 from datetime import datetime
-from functools import cache
-from typing import Annotated, Self
+from typing import Annotated
 
+import httpx
 from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ResourceError, ToolError
+from fastmcp.resources import ResourceContent, ResourceResult
 from fastmcp.server.context import Context
-from pydantic import UUID7, Field, StringConstraints
+from obstore.exceptions import BaseError as ObjectStoreError
+from patos import FrozenModel
+from pydantic import UUID5, UUID7, UUID8, Field, StringConstraints
 
-from .. import graph, retrieval
-from ..background.queue import enqueue_document
-from ..config import settings
-from ..extract import ingest as extract_ingest
-from ..provenance import CaptureContext
-from ..retrieval import RecallResult
+from ..artifacts.models import ArtifactReceipt
+from ..artifacts.service import ArtifactIntake
+from ..artifacts.uploads import UploadBox, UploadGrantLimitError, UploadRequest
+from ..auth import Auth
+from ..config import Settings
+from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
+from ..memory import Memory, ShareResult, WriteResult
+from ..storage import ByteStore, IntegrityMismatch
+from ..store import Artifact, Blob, Usage
 from ..store.identity import User
 from ..types import ScopeNames
-from .auth import Auth
+from ..usage import annotate_operation
 from .middleware import CallerRateLimit, IdentityMiddleware, bound_user
-from .models import ShareResult, WriteResult
 
-type _RecallQuery = Annotated[
-    str,
-    StringConstraints(
-        strip_whitespace=True, min_length=1, max_length=settings.mcp_recall_query_max_chars
-    ),
-]
-type _RememberText = Annotated[
-    str,
-    StringConstraints(
-        strip_whitespace=True, min_length=1, max_length=settings.mcp_remember_max_chars
-    ),
-]
-type _SourceURI = Annotated[str, StringConstraints(max_length=settings.mcp_source_uri_max_chars)]
-type _ScopeNames = Annotated[ScopeNames, Field(max_length=settings.mcp_scope_names_max)]
-type _Documents = Annotated[
-    list[UUID7], Field(min_length=1, max_length=settings.mcp_share_documents_max)
-]
-type _RecallBudget = Annotated[int, Field(gt=0, le=settings.mcp_recall_budget_max_tokens)]
+
+class _ArtifactObject(FrozenModel):
+    """Authorized object-store fields needed to materialize one original artifact."""
+
+    storage_key: str
+    storage_version: str | None = None
+    content_hash: UUID8
+    size: int
+    encoding: Blob.Encoding
+    scopes: list[UUID5]
+    media_type: str | None = None
+
+
+class UploadDirections(FrozenModel):
+    """Where and how an agent PUTs one approved original file."""
+
+    url: str
+    expires_seconds: int
+    instructions: str
 
 
 class AizkMCP(FastMCP):
     """Expose Aizk's authenticated memory tools through FastMCP.
 
-    Identity middleware resolves one Logto-backed `User` before each call. A
-    per-caller token bucket limits sustained work, and PostgreSQL row security
-    remains the final authorization boundary for every retrieved or written row.
+    The composition root constructs one server per process with its verifier, byte
+    store, upload box, and artifact services. Identity middleware resolves one
+    Logto-backed `User` before each call, a per-caller token bucket limits sustained
+    work, and PostgreSQL row security remains the final authorization boundary for
+    every retrieved or written row. Tool input bounds are read from settings when the
+    server is built, never at import time.
     """
 
-    def __init__(self, name: str) -> None:
-        self.authentication = Auth()
-        super().__init__(name, auth=self.authentication.provider())
-        self.add_middleware(IdentityMiddleware(self.authentication))
+    def __init__(
+        self,
+        auth: Auth,
+        store: ByteStore,
+        uploads: UploadBox,
+        intake: ArtifactIntake,
+        config: Settings,
+        name: str = "aizk",
+    ) -> None:
+        self.authentication = auth
+        self.store = store
+        self.uploads = uploads
+        self.intake = intake
+        self.settings = config
+        super().__init__(name, auth=auth.provider())
+        self.add_middleware(IdentityMiddleware(auth))
         self.add_middleware(
-            CallerRateLimit(max_requests_per_second=settings.mcp_request_rate_per_second)
+            CallerRateLimit(max_requests_per_second=config.mcp_request_rate_per_second)
         )
-
-    @classmethod
-    @cache
-    def shared(cls) -> Self:
-        """Build the process-wide MCP application only when the serving command needs it."""
-        application = cls("aizk")
-        for tool in (status, recall, remember, share):
-            application.tool(tool)
-        return application
+        for verb in (
+            self.status_tool(),
+            self.recall_tool(),
+            self.remember_tool(),
+            self.share_tool(),
+            self.request_upload_tool(),
+        ):
+            self.tool(verb)
+        self.resource(
+            "aizk://artifacts/{artifact_id}/contents/{artifact_content_id}",
+            name="artifact",
+            description="Read one exact visible original artifact revision on demand.",
+        )(self.artifact_resource())
 
     async def user(self, context: Context, identified: bool = False) -> User:
         """Return the request's resolved caller and optionally require authentication."""
@@ -72,91 +99,229 @@ class AizkMCP(FastMCP):
             raise ToolError("anonymous callers are read-only, authenticate to write")
         return user
 
+    def memory(self, user: User) -> Memory:
+        """Build the shared memory service bound to one resolved caller."""
+        return Memory(user=user, intake=self.intake)
 
-async def status(context: Context) -> User:
-    """Return the caller's organizations, roles, and permissions as supplied by Logto."""
-    return await AizkMCP.shared().user(context, identified=True)
+    def status_tool(self) -> Callable[[Context], Coroutine[None, None, User]]:
+        """Build the `status` tool over this server's dependencies."""
 
+        async def status(context: Context) -> User:
+            """Return the caller's organizations, roles, and permissions as supplied by
+            Logto."""
+            return self.memory(await self.user(context, identified=True)).status
 
-async def recall(
-    query: _RecallQuery,
-    context: Context,
-    budget: _RecallBudget = settings.context_token_budget,
-) -> str:
-    """Return visible evidence for one question as clear, ordered Markdown.
+        return status
 
-    query: natural-language question whose length is bounded by deployment settings.
-    budget: optional evidence cap. Omit it unless repeated responses are too long.
-    """
-    if not (query := query.strip()):
-        raise ToolError("recall query cannot be blank")
-    user = await AizkMCP.shared().user(context)
-    candidates = await retrieval.recall(query, user, token_budget=budget)
-    scope_details = {user.id: RecallResult.Scope(name="private")} | {
-        organization.id: RecallResult.Scope(
-            name=organization.name,
-            description=organization.description,
-        )
-        for organization in user.organizations
-    }
-    return RecallResult.from_candidates(candidates, scope_details).to_markdown()
+    def recall_tool(self) -> Callable[..., Coroutine[None, None, str]]:
+        """Build the `recall` tool with input bounds from this server's settings."""
+        config = self.settings
 
+        async def recall(
+            query: Annotated[
+                str,
+                StringConstraints(
+                    strip_whitespace=True,
+                    min_length=1,
+                    max_length=config.mcp_recall_query_max_chars,
+                ),
+            ],
+            context: Context,
+            budget: Annotated[
+                int, Field(gt=0, le=config.mcp_recall_budget_max_tokens)
+            ] = config.context_token_budget,
+        ) -> str:
+            """Return visible evidence for one question as clear, ordered Markdown.
 
-async def remember(
-    text: _RememberText,
-    context: Context,
-    source_uri: _SourceURI | None = None,
-    observed_at: datetime | None = None,
-    expires_at: datetime | None = None,
-    scopes: _ScopeNames | None = None,
-) -> WriteResult:
-    """Store one source document and enqueue its derived graph projection.
+            query: natural-language question whose length is bounded by deployment settings.
+            budget: optional evidence cap. Omit it unless repeated responses are too long.
+            """
+            if not (query := query.strip()):
+                raise ToolError("recall query cannot be blank")
+            memory = self.memory(await self.user(context))
+            return await (await memory.recall(query, budget)).to_markdown()
 
-    text: self-describing Markdown or plain text that remains the source authority.
-    source_uri: original website or paper PDF URL. Omit it for authored notes.
-    observed_at: optional time when the statement became applicable. Normally omitted.
-    expires_at: known time after which the statement stops being true. It is not a reminder.
-        Normally omitted.
-    scopes: optional authorized Logto organization names. Omission means private memory.
-    """
-    if not text.strip():
-        raise ToolError("memory text cannot be blank")
-    try:
-        declaration = extract_ingest.SourceDeclaration.from_text(text)
-    except ValueError as invalid:
-        raise ToolError(str(invalid)) from invalid
-    user = await AizkMCP.shared().user(context, identified=True)
-    target = user.write_scope(scopes)
-    try:
-        document_id = await extract_ingest.ingest_text(
-            user,
-            text,
-            title=declaration.title,
-            source_uri=source_uri,
-            created_by=user.id,
-            scopes=target,
-            capture=CaptureContext(
-                speaker_label=user.label,
-                observed_at=observed_at,
-                expires_at=expires_at,
-            ),
-        )
-    except ValueError as invalid:
-        raise ToolError(str(invalid)) from invalid
-    if document_id is None:
-        raise ToolError("memory ingestion did not create a document")
-    await enqueue_document(document_id, target)
-    return WriteResult(id=document_id)
+        return recall
 
+    def remember_tool(self) -> Callable[..., Coroutine[None, None, WriteResult | ArtifactReceipt]]:
+        """Build the `remember` tool with input bounds from this server's settings."""
+        config = self.settings
 
-async def share(
-    documents: _Documents, context: Context, scopes: _ScopeNames | None = None
-) -> ShareResult:
-    """Copy visible documents into one authorized destination without moving sources.
+        async def remember(
+            context: Context,
+            text: Annotated[
+                str,
+                StringConstraints(
+                    strip_whitespace=True,
+                    min_length=1,
+                    max_length=config.mcp_remember_max_chars,
+                ),
+            ]
+            | None = None,
+            source_uri: Annotated[
+                str, StringConstraints(max_length=config.mcp_source_uri_max_chars)
+            ]
+            | None = None,
+            observed_at: datetime | None = None,
+            expires_at: datetime | None = None,
+            scopes: Annotated[ScopeNames, Field(max_length=config.mcp_scope_names_max)]
+            | None = None,
+            preserve_source: bool = False,
+        ) -> WriteResult | ArtifactReceipt:
+            """Store text now or preserve one URI original with optional companion information.
 
-    documents: visible document IDs to copy, bounded per call.
-    scopes: optional authorized Logto organization names. Omission means private memory.
-    """
-    user = await AizkMCP.shared().user(context, identified=True)
-    shared = await graph.promote(documents, user.write_scope(scopes), user)
-    return ShareResult(shared=shared)
+            text: self-describing Markdown, plain text, or companion information for a
+                preserved file.
+            source_uri: original website or file URL. Omission keeps this a text-only document.
+            observed_at: optional time when the statement became applicable. Normally omitted.
+            expires_at: known time after which the statement stops being true. It is not a
+                reminder. Normally omitted.
+            scopes: optional authorized Logto organization names. Omission means private memory.
+            preserve_source: download and retain `source_uri` as an original file. Omit this
+                unless the exact contract, form, presentation, paper, or other source may be
+                needed later. A URI without `text` is always preserved.
+            """
+            if text is not None:
+                text = text.strip() or None
+            if text is None and source_uri is None:
+                raise ToolError("remember requires text or a source URI")
+            user = await self.user(context, identified=True)
+            try:
+                return await self.memory(user).remember(
+                    text,
+                    source_uri=source_uri,
+                    observed_at=observed_at,
+                    expires_at=expires_at,
+                    scopes=scopes,
+                    preserve_source=preserve_source,
+                )
+            except MalwareRejectedError as rejected:
+                raise ToolError("the source was rejected by the safety scan") from rejected
+            except MalwareUnavailableError as unavailable:
+                raise ToolError("safety scanning is temporarily unavailable") from unavailable
+            except ObjectStoreError as unavailable:
+                raise ToolError("object storage is temporarily unavailable") from unavailable
+            except httpx.HTTPError as unavailable:
+                raise ToolError("the source URI could not be fetched") from unavailable
+            except ValueError as invalid:
+                raise ToolError(str(invalid)) from invalid
+
+        return remember
+
+    def share_tool(self) -> Callable[..., Coroutine[None, None, ShareResult]]:
+        """Build the `share` tool with input bounds from this server's settings."""
+        config = self.settings
+
+        async def share(
+            documents: Annotated[
+                list[UUID7], Field(min_length=1, max_length=config.mcp_share_documents_max)
+            ],
+            context: Context,
+            scopes: Annotated[ScopeNames, Field(max_length=config.mcp_scope_names_max)]
+            | None = None,
+        ) -> ShareResult:
+            """Copy visible documents into one authorized destination without moving sources.
+
+            documents: visible document IDs to copy, bounded per call.
+            scopes: optional authorized Logto organization names. Omission means private memory.
+            """
+            user = await self.user(context, identified=True)
+            return await self.memory(user).share(documents, scopes)
+
+        return share
+
+    def request_upload_tool(self) -> Callable[..., Coroutine[None, None, UploadDirections]]:
+        """Build the `request_upload` tool with input bounds from this server's settings."""
+        config = self.settings
+
+        async def request_upload(
+            filename: Annotated[
+                str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+            ],
+            media_type: Annotated[
+                str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+            ],
+            size: Annotated[int, Field(gt=0, le=config.object_store_upload_byte_limit)],
+            context: Context,
+            scopes: Annotated[ScopeNames, Field(max_length=config.mcp_scope_names_max)]
+            | None = None,
+            companion_text: Annotated[
+                str, StringConstraints(max_length=config.web_artifact_companion_max_chars)
+            ]
+            | None = None,
+        ) -> UploadDirections:
+            """Mint one single-use PUT URL that uploads a local file into preserved memory.
+
+            filename: plain file name with its extension and no path separators.
+            media_type: MIME type of the exact bytes that will be uploaded.
+            size: exact byte length of the file, enforced as the upload budget.
+            scopes: optional authorized Logto organization names. Omission means private memory.
+            companion_text: optional context stored when the file alone may not explain itself.
+            """
+            user = await self.user(context, identified=True)
+            try:
+                declared = UploadRequest(
+                    filename=filename,
+                    media_type=media_type,
+                    size=size,
+                    scopes=scopes,
+                    companion_text=companion_text,
+                )
+                grant = await self.uploads.mint(user, declared)
+            except ValueError as invalid:
+                raise ToolError(str(invalid)) from invalid
+            except UploadGrantLimitError as saturated:
+                raise ToolError(str(saturated)) from saturated
+            command = shlex.join(("curl", "-fsS", "-T", declared.filename, grant.url))
+            return UploadDirections(
+                url=grant.url,
+                expires_seconds=grant.expires_seconds,
+                instructions=(
+                    f"Run `{command}` within "
+                    f"{grant.expires_seconds} seconds. The URL is single use, accepts one PUT of "
+                    f"exactly {declared.size} bytes, and replies with the artifact receipt as "
+                    "JSON."
+                ),
+            )
+
+        return request_upload
+
+    def artifact_resource(self) -> Callable[..., Coroutine[None, None, ResourceResult]]:
+        """Build the artifact resource reader over this server's byte store."""
+
+        async def read_artifact(
+            artifact_id: UUID7,
+            artifact_content_id: UUID7,
+            context: Context,
+        ) -> ResourceResult:
+            """Read exact original bytes that grounded evidence visible to the current caller.
+
+            artifact_id: artifact named by the resource URI.
+            artifact_content_id: immutable original revision named by the resource URI.
+            """
+            user = await self.user(context)
+            rows = await user.exec[_ArtifactObject](
+                Artifact.Content.original(artifact_id, artifact_content_id)
+            )
+            if not rows:
+                raise ResourceError("artifact is not visible or does not exist")
+            original = rows[0]
+            # Attribute the read to the scopes that own the artifact, not the caller.
+            annotate_operation(Usage.Event.Operation.artifact_read, original.scopes)
+            try:
+                content = await self.store.get(
+                    original.storage_key,
+                    encoding=original.encoding,
+                    expected_size=original.size,
+                    expected_hash=original.content_hash,
+                    version=original.storage_version,
+                )
+            except IntegrityMismatch as invalid:
+                raise ResourceError("artifact bytes failed integrity verification") from invalid
+            except ObjectStoreError as unavailable:
+                raise ResourceError("object storage is temporarily unavailable") from unavailable
+            return ResourceResult(
+                contents=[ResourceContent(content, mime_type=original.media_type)]
+            )
+
+        return read_artifact

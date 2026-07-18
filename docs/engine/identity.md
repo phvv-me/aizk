@@ -1,8 +1,8 @@
 # Identity and sharing
 
-This page records the implemented identity boundary. `0001_init` contains no user, organization,
-membership, role, or owner authorization table. The Logto boundary and multi-organization scope
-lattice are durable product rules.
+This page records the implemented identity boundary. Neither `0001_init` nor
+`0002_artifacts_usage` contains a user, organization, membership, role, or owner authorization
+table. The Logto boundary and multi-organization scope lattice are durable product rules.
 
 ## Logto owns identity
 
@@ -13,9 +13,17 @@ Stable UUID5 values derived from the signed `sub` and Logto organization IDs let
 columns without a lookup table. `settings.identity_url` owns the namespace base while
 `settings.subject_id()` and `settings.scope_id()` make the Aizk-owned mapping explicit.
 
-The resource token must pass signature, issuer, expiration, audience, and required-scope checks.
-It does not need a custom multi-organization claim. Membership and role changes take effect after
-the short authority cache expires rather than waiting for a new access token.
+An MCP resource token must pass signature, issuer, expiration, audience, and required `control`
+scope checks. It does not need a custom multi-organization claim. MCP authority uses a short
+coalesced cache so repeated tool calls do not query the Logto Management API for the same directory
+on every request. Membership and role changes therefore reach MCP after that bounded cache expires.
+
+Browser and organization-management authority is deliberately different. It is loaded without the
+MCP authority cache for each browser identity resolution and each management decision. A browser
+request therefore sees account suspension, account deletion, global role removal, membership
+changes, and effective organization permission changes on its next protected request. Successful
+organization mutations also evict cached authority for the acting user, the affected user, the
+organization member directory, and the public organization catalog.
 
 ## One subject resolves multi-organization standing
 
@@ -24,38 +32,46 @@ A standard Logto organization access token represents one organization. It carri
 caller belongs to both organization A and organization B in one MCP bearer token.
 
 Instead of changing the token, MCP `Auth` validates the ordinary Aizk resource token and passes its
-claims to `LogtoClient`. The client reads the user profile and global roles, then calls
+claims to `LogtoClient`. The cached MCP path reads the user profile and global roles, then calls
 `GET /api/users/{userId}/organizations` for current memberships. For each organization it reads
 the complete member directory and calls `GET /api/organizations/{id}/users/{userId}/scopes` for
 effective permissions. A short coalesced TTL cache bounds request volume and membership staleness.
-A failed permission lookup closes write access for that organization. The personal scope remains
-valid because it comes from the verified subject, not from the failed organization lookup.
+A failed refresh closes shared authority instead of constructing authority from incomplete Logto
+data. The personal scope remains valid on the MCP path because it comes from the verified subject,
+not from an organization lookup.
 
 Only the trusted Logto endpoint is configured. `LogtoClient` obtains the issuer, JWKS URI, token
 endpoint, and accepted signing algorithms from its validated discovery document. The public MCP
 base URL remains configured because it is the server's own trust boundary and cannot safely be
 learned from an unverified token. Aizk derives its audience by adding `/mcp` to that URL.
 
-Role names have no authorization meaning inside AIZK. Every returned membership grants read
-standing. Logto's effective organization permissions determine write standing through the one
-deployment-configured write permission. The MCP `status` tool returns the same resolved `User`.
-Its Pydantic organization models preserve Logto names, descriptions, custom data, members, roles,
-and effective permissions. Cached properties index writable and public organizations without
-creating identity tables. Status omits emails, phone numbers, linked identities, and internal IDs
-because they do not help an agent choose a memory scope.
+Organization role names have no direct authorization meaning inside AIZK. Every returned
+membership grants read standing. Logto's effective organization permissions determine write
+standing through the deployment-configured `write:memory` permission. The MCP `status` tool
+returns the same cached MCP `User`. Its Pydantic organization models preserve Logto names,
+descriptions, custom data, members, roles, and effective permissions. Cached properties index
+writable and public organizations without creating identity tables. Status omits emails, phone
+numbers, linked identities, and internal IDs because they do not help an agent choose a memory
+scope.
 
-Global roles and organization roles are separate authorization layers. The global `aizk-user` role
-grants the AIZK API permission needed to enter the service. It never grants a write into every
-organization. An organization role such as editor becomes writable only when its organization
-template assigns `write:memory`. Assigning the global API resource permission named `control` does
-not satisfy this check. The distinct names keep service access separate from collaboration writes.
+Global roles and organization roles are separate authorization layers. The default global
+`aizk-user` role grants the AIZK API `control` permission used by MCP and is also the explicit
+application-access gate for the browser. A fresh browser resolution rejects a user when the
+account is missing, `isSuspended` is true, or the current global roles do not include
+`aizk-user`. This role never grants a write into every organization. An organization role such as
+editor becomes writable only when its organization template assigns `write:memory`. The distinct
+checks keep service access separate from collaboration writes.
 
-`deploy/logto.conf` declares the AIZK-owned API resource, API permissions, default global user role,
-organization roles, and the organization write permission. Every field is an `AIZK_` setting that
-`.env` can override. `aizk logto audit` reports drift and exits nonzero when repair is needed.
-`aizk logto apply` reconciles the policy through the Logto Management API. It deletes only obsolete
-global user roles under the configured managed prefix and preserves unrelated roles and
-permissions.
+`src/deploy/logto.conf` declares the AIZK-owned API resource, API permissions, default global user
+role, organization roles, and organization permissions. Admin receives `write:memory`,
+`manage:member`, and `delete:member`. Editor receives only `write:memory`, while viewer receives no
+write or management permission. AIZK has no invitation workflow. The retired `invite:member`
+permission is revoked from managed roles and removed by policy reconciliation.
+
+Every field is an `AIZK_` setting that `.env` can override. `aizk logto audit` reports drift and
+exits nonzero when repair is needed. `aizk logto apply` reconciles the policy through the Logto
+Management API. It deletes obsolete global user roles under the configured managed prefix and
+explicitly retired AIZK organization permissions while preserving unrelated roles and permissions.
 
 ## Scope sets are the collaboration model
 
@@ -114,19 +130,34 @@ organizations. FastMCP's OAuth proxy still requires a valid bearer, so public me
 every authenticated caller rather than an unauthenticated internet endpoint. The anonymous User
 exists for local auth-off operation and policy tests.
 
-## Signup and unauthenticated access
+## Browser signup and current account access
 
-The current deployment is invitation-only. An administrator creates the Logto account and sends
-the initial credentials privately. There is no self-registration page in the AIZK flow. Once a user
-authenticates, the default global `aizk-user` role grants entry to the MCP API. It does not grant
-membership or write standing in any organization.
+The optional browser has separate login and email-first signup actions. Both delegate credentials,
+verification, consent, and session establishment to Logto. A successful callback stores only a
+signed Logto subject and expiry in the AIZK HttpOnly cookie. Before that cookie is issued, AIZK
+requires a current, unsuspended Logto account with the global `aizk-user` role. Every protected
+browser action repeats that fresh check rather than trusting account state or roles captured at
+login. A confirmed access failure returns an unauthorized response. An unavailable Logto authority
+returns a service-unavailable response instead of silently granting or removing access.
 
-A future self-service signup should remain an authenticated flow through Logto. A new account would
-receive `aizk-user`, its private memory scope, and read access to singleton public organizations. It
-would receive no organization membership and no shared write access. An invitation or explicit
-administrator action would still grant private organization membership and roles. Email
-verification, request throttling, and abuse controls should be enabled before opening registration
-because recall invokes database and model work.
+A new account receives the default `aizk-user` role, its private memory scope, and read access to
+singleton public organizations. It receives no organization membership and no shared write access.
+The browser adds only an existing Logto account. An administrator enters the account's exact email,
+AIZK resolves one exact match without exposing the tenant directory, adds that user to the chosen
+organization, and assigns one configured organization role. It does not create an account or send
+an invitation. The administrator can replace a current member role or remove another member only
+when fresh effective permissions allow it. AIZK refuses self-removal and any demotion or removal
+that would leave the organization without an administrator.
+
+Deployers can disable Logto self-registration and provision accounts separately while keeping the
+same login flow. Email verification, request throttling, and abuse controls should be enabled
+before opening registration because recall invokes database and model work.
+
+`Sign out of AIZK` clears only the AIZK cookie. The browser intentionally does not retain the ID
+token required for OpenID Connect relying-party logout, and it does not pretend that a local action
+ended the user's centralized Logto session. The hosted Logto Account Center owns profile,
+credential, MFA, authorized application, and global session management. A later AIZK sign-in may
+therefore complete immediately while the Logto single sign-on session remains valid.
 
 True unauthenticated reading is a different feature and is not enabled. The safest public interface
 for general documentation remains the static website. If unauthenticated semantic recall is added,

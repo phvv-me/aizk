@@ -1,6 +1,7 @@
 from patos import sql
-from sqlalchemy import Integer, bindparam, func, select
+from sqlalchemy import Integer, bindparam, func
 from sqlalchemy.sql.selectable import Select
+from sqlmodel import select
 
 from ...ontology import System
 from ...store import Entity

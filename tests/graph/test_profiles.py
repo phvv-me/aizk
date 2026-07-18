@@ -2,7 +2,7 @@ from collections.abc import Iterator
 
 import dbutil
 import pytest
-from doubles import FakeLLM
+from doubles import FakeLLM, RecordingEmbedder
 from id_factory import uuid5
 from pydantic import UUID5, UUID7
 from sqlmodel import select
@@ -51,14 +51,13 @@ async def stored_summary(owner: UUID5 | UUID7, subject: UUID5 | UUID7) -> str | 
         ).first()
 
 
-@pytest.mark.usefixtures("fake_embedder")
 def test_build_profile_upserts_one_row_and_is_idempotent(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
 ) -> None:
     async def probe() -> tuple[UUID5 | UUID7, UUID5 | UUID7, str | None]:
         subject = await seed_entity_with_facts(owner, "Leech lattice")
-        first = await build_profile(subject, scopes=frozenset({owner}))
-        second = await build_profile(subject, scopes=frozenset({owner}))
+        first = await build_profile(subject, fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+        second = await build_profile(subject, fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
         return first, second, await stored_summary(owner, subject)
 
     first, second, summary = dbutil.run(probe())
@@ -66,14 +65,13 @@ def test_build_profile_upserts_one_row_and_is_idempotent(
     assert summary is not None and summary.strip()
 
 
-@pytest.mark.usefixtures("fake_embedder")
 @pytest.mark.parametrize("entity_count", [0, 2], ids=["empty", "related"])
 def test_refresh_profiles_rebuilds_the_visible_related_graph_in_one_batch(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, entity_count: int
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder, entity_count: int
 ) -> None:
     async def probe() -> tuple[int, str | None, str | None]:
         if not entity_count:
-            return await refresh_profiles(scopes=frozenset({owner})), None, None
+            return await refresh_profiles(fake_llm.llm, fake_embedder, scopes=frozenset({owner})), None, None
         alpha = await seed_entity_with_facts(owner, "alpha")
         beta = await seed_entity_with_facts(owner, "beta")
         async with dbutil.actor(owner) as session:
@@ -87,7 +85,7 @@ def test_refresh_profiles_rebuilds_the_visible_related_graph_in_one_batch(
             session.add(relation)
             await session.flush()
             session.add(Fact.Claim(content_id=relation.id, created_by=owner, scopes=[owner]))
-        count = await refresh_profiles(scopes=frozenset({owner}))
+        count = await refresh_profiles(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
         return count, await stored_summary(owner, alpha), await stored_summary(owner, beta)
 
     count, alpha, beta = dbutil.run(probe())
@@ -95,21 +93,20 @@ def test_refresh_profiles_rebuilds_the_visible_related_graph_in_one_batch(
     assert (alpha is not None and beta is not None) is bool(entity_count)
 
 
-@pytest.mark.usefixtures("fake_embedder")
 def test_build_profile_refuses_an_invisible_entity(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
 ) -> None:
     async def probe() -> None:
         with pytest.raises(NotVisibleError, match="not visible"):
-            await build_profile(uuid5(), scopes=frozenset({owner}))
+            await build_profile(uuid5(), fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
 
     dbutil.run(probe())
 
 
-@pytest.mark.usefixtures("fake_embedder")
 def test_dirty_profiles_run_in_bounded_batches_and_consume_their_watermarks(
     owner: UUID5 | UUID7,
     fake_llm: FakeLLM,
+    fake_embedder: RecordingEmbedder,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "profile_batch_size", 1)
@@ -126,9 +123,9 @@ def test_dirty_profiles_run_in_bounded_batches_and_consume_their_watermarks(
                 [str(alpha), str(beta)],
             )
         counts = [
-            await refresh_dirty_profiles(key),
-            await refresh_dirty_profiles(key),
-            await refresh_dirty_profiles(key),
+            await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
+            await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
+            await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
         ]
         async with dbutil.actor(owner) as session:
             pending = await Watermark.pending_refs(

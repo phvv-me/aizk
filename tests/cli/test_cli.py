@@ -1,17 +1,18 @@
+import json
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from id_factory import uuid5, uuid7
-from pydantic import UUID5, UUID7
+from pydantic import UUID5, UUID7, AnyHttpUrl
 
 import aizk.cli as cli
-from aizk.common.auth.logto import PolicyReport
 from aizk.config import Settings
+from aizk.integrations.logto import PolicyReport
 from aizk.retrieval import Candidate, Lane
 from aizk.store.identity import User
 
@@ -28,13 +29,41 @@ class Rendered:
         return self.text
 
 
+class FakeRuntime:
+    """The runtime double the CLI opens as an async context and threads through."""
+
+    def __init__(self) -> None:
+        self.auth = Mock()
+        self.store = Mock()
+        self.uploads = Mock()
+        self.database = Mock()
+        self.artifacts = SimpleNamespace(intake=Mock(), conversion=Mock())
+        self.settings = cli.settings
+        self.graph = Mock()
+        self.llm = Mock()
+        self.embed = Mock()
+        self.extractor = Mock()
+        self.closes = 0
+
+    async def __aenter__(self) -> "FakeRuntime":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        self.closes += 1
+
+
 class Seams:
     def __init__(self) -> None:
+        self.runtime = FakeRuntime()
+        self.observe = Mock()
         self.run_alembic = Mock()
         self.alembic_config = Mock(return_value="CONFIG")
         self.setup = AsyncMock(return_value=SimpleNamespace(migrated_to="head"))
         self.rls = AsyncMock(return_value=[])
-        self.enable_spans = Mock()
+        self.profile = MagicMock()
+        self.profile.report.return_value = "profile"
+        self.profiler = Mock(return_value=self.profile)
+        self.profiler.Feature = cli.Profiler.Feature
         self.worker = AsyncMock()
         self.install_queue = AsyncMock()
         self.retry_failed_chunks = AsyncMock(return_value=4)
@@ -55,7 +84,7 @@ def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
     monkeypatch.setattr(cli.ops, "alembic_config", seams.alembic_config)
     monkeypatch.setattr(cli.ops, "setup", seams.setup)
     monkeypatch.setattr(cli.ops, "scoped_rls_violations", seams.rls)
-    monkeypatch.setattr(cli, "enable_spans", seams.enable_spans)
+    monkeypatch.setattr(cli, "Profiler", seams.profiler)
     monkeypatch.setattr(cli, "run_worker", seams.worker)
     monkeypatch.setattr(cli, "install_queue_schema", seams.install_queue)
     monkeypatch.setattr(cli, "retry_failed_chunks", seams.retry_failed_chunks)
@@ -64,7 +93,11 @@ def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
     monkeypatch.setattr(cli, "enqueue_pending", seams.enqueue)
     monkeypatch.setattr(cli.backup_ops, "backup_database", seams.backup)
     monkeypatch.setattr(cli.backup_ops, "restore_database", seams.restore)
-    monkeypatch.setattr(cli.AizkMCP.shared(), "run_http_async", seams.serve_http)
+    monkeypatch.setattr(cli, "observe", seams.observe)
+    monkeypatch.setattr(cli.Runtime, "assemble", classmethod(lambda cls, config: seams.runtime))
+    monkeypatch.setattr(
+        cli, "AizkMCP", Mock(return_value=SimpleNamespace(run_http_async=seams.serve_http))
+    )
     return seams
 
 
@@ -149,7 +182,7 @@ def test_command_dispatches_argv_to_its_boundary(
 
 
 @pytest.mark.parametrize("profiling", [True, False])
-def test_worker_enables_spans_only_when_profiling(
+def test_worker_profiles_only_when_enabled(
     seams: Seams, settings: Settings, monkeypatch: pytest.MonkeyPatch, profiling: bool
 ) -> None:
     monkeypatch.setattr(settings, "profiling", profiling)
@@ -157,7 +190,8 @@ def test_worker_enables_spans_only_when_profiling(
     dispatch(["worker", "--batch-size", "7"])
 
     assert seams.worker.call_args.kwargs["batch_size"] == 7
-    assert seams.enable_spans.call_count == int(profiling)
+    assert seams.profiler.call_count == int(profiling)
+    assert seams.profile.report.call_count == int(profiling)
 
 
 @pytest.mark.parametrize(
@@ -220,10 +254,37 @@ def test_check_rls_gates_on_violations(
         assert "ok" in capsys.readouterr().out
 
 
+def test_check_web_requires_and_reports_the_exact_callback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli.settings, "web_public_url", None)
+    with pytest.raises(RuntimeError, match="web_public_url"):
+        dispatch(["check-web"])
+
+    monkeypatch.setattr(cli.settings, "web_public_url", AnyHttpUrl("https://memory.test"))
+    dispatch(["check-web"])
+    assert "https://memory.test/auth/sign-in-callback" in capsys.readouterr().out
+
+
 def test_check_public_reports_complete_configuration(capsys: pytest.CaptureFixture[str]) -> None:
     dispatch(["check-public"])
 
     assert "configuration is complete" in capsys.readouterr().out
+
+
+def test_openapi_writes_the_browser_api_schema_for_the_client_generator(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    target = tmp_path / "openapi.json"
+
+    dispatch(["openapi", str(target)])
+
+    schema = json.loads(target.read_text(encoding="utf-8"))
+    assert {"/api/recall", "/api/organizations", "/api/uploads/{capability}"} <= set(
+        schema["paths"]
+    )
+    assert {"Me", "Overview", "Answer", "WriteResult"} <= set(schema["components"]["schemas"])
+    assert f"wrote {target}" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
@@ -279,7 +340,29 @@ def test_serve_mcp_runs_http_and_optionally_the_worker(
     assert seams.serve_http.call_args.kwargs["port"] == 9999
     assert seams.worker.call_count == (1 if with_worker else 0)
     assert seams.setup.call_count == int(auto_setup)
-    assert seams.enable_spans.call_count == int(with_worker)
+    assert seams.profiler.call_count == int(with_worker)
+
+
+@pytest.mark.parametrize("auto_setup", [True, False])
+def test_serve_api_runs_uvicorn_on_the_configured_endpoint(
+    seams: Seams,
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+    auto_setup: bool,
+) -> None:
+    monkeypatch.setattr(settings, "api_port", 9001)
+    monkeypatch.setattr(settings, "auto_setup", auto_setup)
+    serve = AsyncMock()
+    config = Mock(return_value="CONFIG")
+    server = Mock(return_value=SimpleNamespace(serve=serve))
+    monkeypatch.setattr(cli, "uvicorn", SimpleNamespace(Config=config, Server=server))
+
+    dispatch(["serve-api"])
+
+    assert serve.await_count == 1
+    assert server.call_args.args == ("CONFIG",)
+    assert config.call_args.kwargs == {"host": settings.api_host, "port": 9001}
+    assert seams.setup.call_count == int(auto_setup)
 
 
 @pytest.mark.parametrize("state", ["present", "unset", "missing-file"])
@@ -328,7 +411,6 @@ _OPERATOR_COMMANDS = [
     ),
     (["data", "promote", str(_DOC_ID), "team"], "promote", 5, "promoted 5 document into team"),
     (["data", "ingest", "notes/"], "ingest", 4, "ingested 4 documents"),
-    (["data", "ingest-image", "pic.png"], "ingest_image", _DOC_ID, str(_DOC_ID)),
     (["data", "export", "dump.jsonl"], "export_scope", Rendered("EXPORT-DUMP"), "EXPORT-DUMP"),
     (
         ["ontology", "define-entity", "Area", "a domain"],
@@ -412,24 +494,25 @@ def test_list_ontology_marks_structural_kinds(
     assert raptor.startswith("* ") and "uses=1" in raptor  # starred, structural
 
 
-def test_profile_report_lists_spans_or_reports_none(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(cli.admin, "profile_report", Mock(return_value=["span-one"]))
-    dispatch(["profile-report"])
-    assert "span-one" in capsys.readouterr().out
-
-    monkeypatch.setattr(cli.admin, "profile_report", Mock(return_value=[]))
-    dispatch(["profile-report"])
-    assert "no spans recorded" in capsys.readouterr().out
-
-
 class Jsonable:
     def __init__(self, payload: str) -> None:
         self.payload = payload
 
     def model_dump_json(self, indent: int | None = None) -> str:
         return self.payload
+
+
+def test_extraction_diagnostic_prints_the_model_dump(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    recorder = AsyncMock(return_value=Jsonable('{"grounding": []}'))
+    monkeypatch.setattr(cli.admin, "diagnose_extraction", recorder)
+
+    dispatch(["graph", "diagnose-extraction", str(_DOC_ID)])
+
+    assert recorder.call_args.args[-1] == _DOC_ID
+    assert '{"grounding": []}' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

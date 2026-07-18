@@ -16,6 +16,7 @@ def test_scoped_declarations_cover_each_table_with_the_canonical_commands() -> N
         for table in TableBase.metadata.tables.values()
         if Catalog.state(table) is not None
     }
+    assert {"artifact", "artifact_content", "blob"} <= protected
     assert {"document", "fact_claim", "entity_claim", "watermark"} <= protected
     assert {"entity_content", "fact_content"} <= protected
     assert Catalog.state(TableBase.metadata.tables["document"]) is not None

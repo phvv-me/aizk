@@ -8,6 +8,14 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Added
 
+- A SvelteKit browser dashboard under `src/web` replaces the planned Reflex Python UI, served by
+  a separate browser API service. `AizkAPI` verifies the same Logto bearer tokens as MCP and
+  exposes profile, overview, recall, remember, upload, and organization management routes while
+  PostgreSQL row security stays the final boundary.
+- `request_upload` gives agents a file upload path that never embeds bytes in a tool call. The
+  MCP tool and the API service mint single-use short-TTL capability PUT URLs into one shared
+  store, only the API PUT redeems them, and the uploaded original flows through the same malware
+  scan and Docling conversion intake as a preserved source URI.
 - Self-describing sources can declare any database-backed ontology kind with `- Type <kind>` and
   any typed relation with `- <predicate> [<object kind>] <object name>`. Project, Area, Status,
   Paper, and future kinds now share one path. Query-relevant entity catalogs derive from declared
@@ -95,6 +103,16 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Changed
 
+- The repository adopts one `src/` layout. The `aizk` package, the deployment files, the
+  evaluation harness, the GPU sidecar services, and the web frontend now live under `src/`.
+- The MCP server is an agents-only surface of five tools, `status`, `recall`, `remember`,
+  `share`, and `request_upload`. Every browser concern moved to the separate API service.
+- The Logto client, its models, and the write policy consolidated under `integrations/logto`
+  alongside the ClamAV and Docling clients. Operator probes, provisioning, and reports split
+  into an `ops` package, settings into a `config` package, and the queue boundary into
+  `background`.
+- Test suites consolidated to mirror the package layout, with API, artifact, integration, and
+  migration suites joining one tree and the duplicated queue tests folded into `background`.
 - Reusable PostgreSQL columns, native enums, JSONB and pgvector operators, typed values relations,
   template expressions, and database hashing moved to the optional `patos[sql]` package. AIZK now
   imports one `patos.sql` namespace and no longer owns a general SQL helper package. Database

@@ -96,6 +96,8 @@ def test_restore_streams_the_archive_and_only_cleans_the_configured_database(
     report = asyncio.run(backup.restore_database(str(dump), database=database))
 
     assert record.args[0] == "pg_restore"
+    assert "--exit-on-error" in record.args
+    assert "--single-transaction" in record.args
     assert ("--clean" in record.args) is clean
     assert ("--if-exists" in record.args) is clean
     assert record.stdin is not None

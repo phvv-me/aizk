@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from pydantic import UUID5, UUID7
-from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import Range, insert
 
 from ..store import Entity, Fact
@@ -31,6 +30,6 @@ async def claim_fact(
         .values(content_id=content_id, created_by=created_by, scopes=scopes, **claim_fields)
         .on_conflict_do_nothing(
             index_elements=[Fact.Claim.content_id, Fact.Claim.scopes, Fact.Claim.perspective_key],
-            index_where=func.upper_inf(Fact.Claim.recorded),
+            index_where=Fact.Claim.recorded.f.upper_inf(result=bool),
         )
     )

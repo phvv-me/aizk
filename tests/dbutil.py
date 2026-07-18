@@ -14,6 +14,9 @@ from aizk.store.identity import User
 
 # App-owned tables in dependency-safe truncation order
 _APP_TABLES = (
+    "artifact_content",
+    "artifact",
+    "blob",
     "document",
     "chunk",
     "entity_claim",
@@ -23,6 +26,8 @@ _APP_TABLES = (
     "community",
     "profile",
     "session_item",
+    "upload_capability",
+    "usage_event",
     "watermark",
 )
 
@@ -62,6 +67,16 @@ async def admin_exec(sql: str, params: dict[str, SqlValue] | None = None) -> Non
 
 async def reset_db() -> None:
     await admin_exec(f"TRUNCATE {', '.join(_APP_TABLES)} RESTART IDENTITY CASCADE")
+
+
+async def count_upload_grants(user_id: UUID5) -> int:
+    """Count the upload capability rows one caller currently holds."""
+    async with admin_engine().connect() as connection:
+        result = await connection.execute(
+            text("SELECT count(*) FROM upload_capability WHERE created_by = :user"),
+            {"user": user_id},
+        )
+        return result.scalar_one()
 
 
 async def seed_document(

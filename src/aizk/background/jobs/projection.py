@@ -1,13 +1,16 @@
+from collections.abc import Sequence
 from typing import ClassVar
 
 from loguru import logger
+from pydantic import UUID7
 
-from ...common.queue import QueueJob
 from ...config import settings
-from ...graph.build import extract_and_consolidate
+from ...graph.build import GraphClients, extract_and_consolidate, pending_chunks
 from ...store import Chunk, Watermark
 from ...store.identity import User
+from ...types import Scopes
 from ..enum import JobPriority
+from ..queue import Queue, QueueJob
 from .models import ChunkJob
 
 
@@ -18,6 +21,9 @@ class ChunkProjectionJob(QueueJob[ChunkJob]):
     payload_type: ClassVar[type[ChunkJob]] = ChunkJob
     priority: ClassVar[int] = JobPriority.chunk
     concurrency_limit: ClassVar[int] = settings.graph_build_concurrency
+
+    def __init__(self, clients: GraphClients) -> None:
+        self.clients = clients
 
     async def handle(self, payload: ChunkJob) -> None:
         key = frozenset(payload.scopes)
@@ -33,7 +39,7 @@ class ChunkProjectionJob(QueueJob[ChunkJob]):
         if frozenset(chunk.scopes) != key:
             logger.warning("chunk {} does not belong to its queued scope, skipping", chunk.id)
             return
-        touched = await extract_and_consolidate(chunk)
+        touched = await extract_and_consolidate(chunk, self.clients)
         if not touched:
             return
         async with User.system(key) as session:
@@ -43,3 +49,44 @@ class ChunkProjectionJob(QueueJob[ChunkJob]):
                 Watermark.Kind.entity_dirty,
                 [str(entity_id) for entity_id in touched],
             )
+
+
+async def enqueue_pending(
+    limit: int | None = None,
+    scopes: Scopes | None = None,
+    source: str | None = None,
+) -> int:
+    """Enqueue a durable job for every pending chunk and return how many were queued."""
+    key = frozenset(scopes or (settings.system_user_id,))
+    chunks = await pending_chunks(key, limit, source)
+    return await enqueue_chunks(chunks, key)
+
+
+async def enqueue_document(document_id: UUID7, scopes: Scopes) -> int:
+    """Enqueue only the pending chunks belonging to one newly ingested document."""
+    key = frozenset(scopes)
+    chunks = await pending_chunks(key, None, None, document_id)
+    return await enqueue_chunks(chunks, key)
+
+
+async def enqueue_chunks(chunks: Sequence[Chunk], scopes: Scopes) -> int:
+    """Enqueue an explicit chunk set with stable per-chunk deduplication."""
+    async with Queue(dsn=settings.asyncpg_dsn) as queue:
+        queued = sum(
+            [
+                await queue.enqueue(
+                    ChunkProjectionJob,
+                    ChunkJob(chunk_id=chunk.id, scopes=scopes),
+                    str(chunk.id),
+                )
+                for chunk in chunks
+            ]
+        )
+    logger.info("enqueued {} pending chunks", queued)
+    return queued
+
+
+async def retry_failed_chunks(limit: int = 100) -> int:
+    """Requeue retained chunk projection failures through PgQueuer."""
+    async with Queue(dsn=settings.asyncpg_dsn) as queue:
+        return await queue.requeue_failed(ChunkProjectionJob, limit)

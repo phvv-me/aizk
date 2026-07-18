@@ -1,7 +1,8 @@
 from functools import cache
 
-from sqlalchemy import select, union_all
+from sqlalchemy import union_all
 from sqlalchemy.sql.selectable import Select
+from sqlmodel import select
 
 from ..models import Plan, QueryContext
 
@@ -39,15 +40,22 @@ def ordered(lanes: list[Select]) -> Select:
     to the sort while the projected columns are exactly the Candidate payload.
     """
     candidates = union_all(*lanes).cte("ordered_context").prefix_with("MATERIALIZED")
-    return select(
-        candidates.c.lane,
-        candidates.c.evidence_id,
-        candidates.c.line,
-        candidates.c.scopes,
-        candidates.c.fact_id,
-        candidates.c.source_chunk_id,
-        candidates.c.source_title,
-        candidates.c.source_uri,
-        candidates.c.created_by,
-        candidates.c.direct,
-    ).order_by(candidates.c.priority, candidates.c.ordering, candidates.c.evidence_id)
+    return (
+        select(
+            candidates.c.lane,
+            candidates.c.evidence_id,
+            candidates.c.line,
+            candidates.c.scopes,
+        )
+        .add_columns(
+            candidates.c.fact_id,
+            candidates.c.source_chunk_id,
+            candidates.c.source_title,
+            candidates.c.source_uri,
+            candidates.c.artifact_id,
+            candidates.c.artifact_content_id,
+            candidates.c.created_by,
+            candidates.c.direct,
+        )
+        .order_by(candidates.c.priority, candidates.c.ordering, candidates.c.evidence_id)
+    )

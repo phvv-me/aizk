@@ -1,19 +1,23 @@
 from pathlib import Path
 
-from mainboard.profiling import SpanStat, default_collector
 from patos import FrozenModel
 from pydantic import UUID5, UUID7, TypeAdapter
 from sqlalchemy import func, literal, union_all
-from sqlalchemy import select as sql_select
 from sqlmodel import select
 
 from . import export, graph, ops
-from .background.queue import enqueue_pending
+from .background.jobs.projection import enqueue_pending
 from .background.status import TasksStatus, tasks_overview
 from .config import settings
 from .extract import ingest as extract_ingest
+from .extract.extractor import Extractor
+from .extract.models import Extraction
+from .graph.build import GraphClients
+from .graph.grounding import FactGrounding, GroundedProjection
 from .ontology import Ontology
-from .serving.embed import embed
+from .provenance import CaptureContext
+from .serving.embed import EmbedClient, Embedder
+from .serving.extract import LLM
 from .store import (
     Chunk,
     Document,
@@ -42,17 +46,32 @@ class OntologyKindRow(FrozenModel):
     uses: int
 
 
+class ExtractionDiagnostic(FrozenModel):
+    """One stored chunk and its read-only model grounding result."""
+
+    chunk_id: UUID7
+    document_id: UUID7
+    document_title: str | None
+    source_chars: int
+    proposed: Extraction
+    grounding: tuple[FactGrounding, ...]
+    accepted: GroundedProjection
+
+
 def system() -> UUID5:
     """The system user id, the identity an operator's CLI call acts as by default."""
     return settings.system_user_id
 
 
 async def rebuild(
-    limit: int | None = None, source: str | None = None, user_id: UUID5 | None = None
+    clients: GraphClients,
+    limit: int | None = None,
+    source: str | None = None,
+    user_id: UUID5 | None = None,
 ) -> tuple[int, int]:
     """Build the graph now over the user's pending chunks, the on-demand extraction."""
     return await graph.build_graph(
-        limit=limit, scopes=frozenset({user_id or system()}), source=source
+        clients, limit=limit, scopes=frozenset({user_id or system()}), source=source
     )
 
 
@@ -73,16 +92,16 @@ async def communities(user_id: UUID5 | None = None) -> int:
     return await graph.build_communities(scopes=frozenset({user_id or system()}))
 
 
-async def raptor(user_id: UUID5 | None = None) -> int:
+async def raptor(llm: LLM, embed: Embedder, user_id: UUID5 | None = None) -> int:
     """Build the RAPTOR tree now, the recursive summary tiers above the communities."""
-    return await graph.build_raptor(scopes=frozenset({user_id or system()}))
+    return await graph.build_raptor(llm, embed, scopes=frozenset({user_id or system()}))
 
 
 async def forget(query: str, k: int = 8, user_id: UUID5 | None = None) -> ForgetResult:
     """Retract the claims a query's own source notes contributed, remember's erasure
     counterpart."""
     actor = user_id or system()
-    [vector] = await embed([query], mode="query")
+    [vector] = await EmbedClient.from_settings(settings).embed([query], mode="query")
     async with User.system({actor}) as session:
         distance = Chunk.embedding @ vector
         doc_ids = list(
@@ -120,22 +139,6 @@ async def ingest(path: str, scopes: str | None = None, user_id: UUID5 | None = N
     return ingested
 
 
-async def ingest_image(
-    path: str,
-    caption: str | None = None,
-    scopes: str | None = None,
-    user_id: UUID5 | None = None,
-) -> UUID7:
-    """Ingest an image into the shared multimodal space so a text query can recall it."""
-    actor = user_id or system()
-    target = settings.scope_ids(scopes) or frozenset({actor})
-    document_id = await extract_ingest.ingest_image(
-        User.system(target), Path(path), caption=caption, created_by=actor, scopes=target
-    )
-    await enqueue_pending(scopes=target)
-    return document_id
-
-
 async def export_scope(path: str, user_id: UUID5 | None = None) -> export.ExportReport:
     """Export a user's visible memory to a JSONL file, the scoped portable dump."""
     return await export.export_scope(Path(path), user=User.system({user_id or system()}))
@@ -146,6 +149,29 @@ async def audit(limit: int = 20, user_id: UUID5 | None = None) -> list[Document]
     actor = user_id or system()
     statement = select(Document).order_by(Document.created_at.desc()).limit(limit)
     return list(await User.system({actor}).exec[Document](statement))
+
+
+async def diagnose_extraction(extractor: Extractor, chunk_id: UUID7) -> ExtractionDiagnostic:
+    """Run extraction and grounding on one stored chunk without changing its graph state."""
+    user = User.system()
+    async with user.owner as session:
+        chunk = await session.get(Chunk, chunk_id)
+        if chunk is None:
+            raise ValueError(f"unknown chunk {chunk_id}")
+        document = await session.get(Document, chunk.document_id)
+        await Ontology.ensure(session)
+    capture = CaptureContext.model_validate(chunk.provenance)
+    extraction = await extractor.extract(capture.search_text(chunk.text))
+    accepted = GroundedProjection.from_extraction(extraction, chunk.text)
+    return ExtractionDiagnostic(
+        chunk_id=chunk.id,
+        document_id=chunk.document_id,
+        document_title=document.title if document is not None else None,
+        source_chars=len(chunk.text),
+        proposed=extraction,
+        grounding=GroundedProjection.audit(extraction, chunk.text),
+        accepted=accepted,
+    )
 
 
 async def define_entity_kind(name: str, description: str, domain: str = "general") -> None:
@@ -168,36 +194,30 @@ async def define_relation_kind(
 async def list_ontology() -> list[OntologyKindRow]:
     """Every ontology kind with how much of the graph uses it, the catalog inspection surface."""
     entity_uses = (
-        sql_select(func.count())
-        .select_from(Entity.Content)
+        select(Entity.Content.id.count())
         .where(Entity.Content.type == Entity.Kind.name)
         .correlate(Entity.Kind)
         .scalar_subquery()
     )
     relation_uses = (
-        sql_select(func.count())
-        .select_from(Fact.Content)
+        select(Fact.Content.id.count())
         .where(Fact.Content.predicate == Relation.Kind.name)
         .correlate(Relation.Kind)
         .scalar_subquery()
     )
     statement = union_all(
-        sql_select(
+        select(
             Entity.Kind.name,
             literal("entity").label("kind"),
             Entity.Kind.description,
             Entity.Kind.domain,
-            Entity.Kind.structural,
-            entity_uses.label("uses"),
-        ),
-        sql_select(
+        ).add_columns(Entity.Kind.structural, entity_uses.label("uses")),
+        select(
             Relation.Kind.name,
             literal("relation").label("kind"),
             Relation.Kind.description,
             Relation.Kind.domain,
-            Relation.Kind.structural,
-            relation_uses.label("uses"),
-        ),
+        ).add_columns(Relation.Kind.structural, relation_uses.label("uses")),
     ).order_by("kind", "name")
     async with User.system() as session:
         rows = (await session.exec(statement)).all()
@@ -212,11 +232,6 @@ async def tasks_status() -> TasksStatus:
 async def reset_database() -> ops.ResetReport:
     """Recreate only Aizk's database and reinstall the ready schema."""
     return await ops.reset()
-
-
-def profile_report() -> list[SpanStat]:
-    """The process-wide span timing stats mainboard.profiling collected, slowest first."""
-    return default_collector().stats()
 
 
 async def setup() -> ops.SetupReport:

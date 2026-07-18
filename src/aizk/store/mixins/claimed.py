@@ -7,6 +7,7 @@ from patos import Model
 from sqlalchemy import Table
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
+from sqlmodel import select
 
 from ...config import settings
 from ..engine import Session
@@ -52,7 +53,7 @@ class ClaimedContent(Model):
         return (
             rls.Policy.select(
                 "content_read",
-                content.id.in_(sa.select(claims.content_id)),
+                content.id.in_(select(claims.content_id)),
                 roles=(settings.app_role,),
             ),
             rls.Policy.insert("content_insert", sa.true(), roles=(settings.app_role,)),

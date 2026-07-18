@@ -1,37 +1,42 @@
-import uuid
-from datetime import datetime
-from typing import cast
+from datetime import UTC, datetime
 
 from patos import sql
 from pydantic import UUID5, UUID7
-from sqlalchemy import DateTime, func
-from sqlmodel import Field
+from sqlalchemy import func
 
 
-class Id:
+class Id(sql.Model):
     """Client-generated, time-ordered UUID primary key."""
 
-    id: sql.Column[UUID7] = Field(default_factory=uuid.uuid7, primary_key=True)
+    id = sql.PK(UUID7)
 
 
-class DeterministicId:
+class DeterministicId(sql.Model):
     """Deterministic UUID5 primary key derived from canonical content."""
 
-    id: sql.Column[UUID5] = Field(primary_key=True)
+    id = sql.PK(UUID5)
 
 
-class Timestamped:
-    """Server-stamped creation and last-update times."""
+class CreatedAt(sql.Model):
+    """Creation time stamped by both Python and PostgreSQL."""
 
-    created_at: sql.Column[datetime] = Field(
-        default=None,
+    created_at = sql.Field(
+        datetime,
+        default_factory=lambda: datetime.now(UTC),
         nullable=False,
-        sa_type=cast(type[datetime], DateTime(timezone=True)),
-        sa_column_kwargs={"server_default": func.now()},
     )
-    updated_at: sql.Column[datetime] = Field(
-        default=None,
+
+
+class UpdatedAt(sql.Model):
+    """Last-update time refreshed by SQLAlchemy on every changed row."""
+
+    updated_at = sql.Field(
+        datetime,
+        default_factory=lambda: datetime.now(UTC),
         nullable=False,
-        sa_type=cast(type[datetime], DateTime(timezone=True)),
-        sa_column_kwargs={"server_default": func.now(), "onupdate": func.now()},
+        onupdate=func.now(),
     )
+
+
+class Timestamped(CreatedAt, UpdatedAt):
+    """Creation and last-update times for mutable records."""

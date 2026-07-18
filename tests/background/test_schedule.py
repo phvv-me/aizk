@@ -5,7 +5,7 @@ from typing import cast
 
 import dbutil
 import pytest
-from bg_doubles import FakeJob, RecordingPg, RecordingQueue
+from bg_doubles import FakeJob, RecordingPg, RecordingQueue, fake_runtime
 from hypothesis import given
 from hypothesis import strategies as st
 from id_factory import uuid5, uuid5s
@@ -13,18 +13,23 @@ from pgqueuer import PgQueuer
 from pydantic import UUID5
 
 import aizk.background.schedule as schedule_mod
-from aizk.background.jobs.maintenance import BackupJob, ProfileProjectionJob, ScheduledJob
+from aizk.background.jobs.maintenance import (
+    ProfileProjectionJob,
+    ScheduledJob,
+    ScopedScheduledJob,
+)
 from aizk.background.jobs.models import MaintenanceJob
 from aizk.background.jobs.projection import ChunkProjectionJob
 from aizk.background.schedule import fan_out, run_worker, scope_roster
 from aizk.config import settings
 from aizk.store import SessionItem
 from aizk.types import Scopes
+from aizk.usage import UsageAccountingJob
 
 InstallSeam = Callable[[ModuleType], RecordingQueue]
 # Per-scope tasks that fan out through the queue
 fanned_job_classes = sorted(
-    (cls for cls in ScheduledJob.implementations() if cls is not BackupJob),
+    ScopedScheduledJob.implementations(),
     key=lambda cls: cls.name,
 )
 job_classes = st.sampled_from(fanned_job_classes)
@@ -35,7 +40,7 @@ crons = st.sampled_from(["0 3 * * *", "30 4 * * 0", "*/15 * * * *"])
 def test_fan_out_enqueues_one_deduped_job_per_user(
     monkeypatch: pytest.MonkeyPatch,
     queue_seam: InstallSeam,
-    job_type: type[ScheduledJob],
+    job_type: type[ScopedScheduledJob],
     users: list[UUID5],
 ) -> None:
     recorder = queue_seam(schedule_mod)
@@ -46,7 +51,7 @@ def test_fan_out_enqueues_one_deduped_job_per_user(
         return [frozenset({user}) for user in users]
 
     monkeypatch.setattr(schedule_mod, "scope_roster", fake_scope_roster)
-    job = job_type()
+    job = job_type.assemble(fake_runtime())
 
     asyncio.run(fan_out(job))
     asyncio.run(fan_out(job))
@@ -66,25 +71,25 @@ def test_register_wires_the_queue_always_and_the_cron_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
     pg_factory: type[RecordingPg],
     job_factory: type[FakeJob],
-    job_type: type[ScheduledJob],
+    job_type: type[ScopedScheduledJob],
     expression: str,
     enabled: bool,
 ) -> None:
     pg = pg_factory()
     body_calls: list[Scopes] = []
 
-    async def record_body(self: ScheduledJob, scopes: Scopes) -> None:
+    async def record_body(self: ScopedScheduledJob, scopes: Scopes) -> None:
         body_calls.append(scopes)
 
     monkeypatch.setattr(job_type, "execute", record_body)
-    fanned: list[ScheduledJob] = []
+    fanned: list[ScopedScheduledJob] = []
 
-    async def fake_fan_out(job: ScheduledJob) -> None:
+    async def fake_fan_out(job: ScopedScheduledJob) -> None:
         fanned.append(job)
 
     monkeypatch.setattr(settings, f"{job_type.name}_cron", expression)
     monkeypatch.setattr(settings, f"{job_type.name}_enabled", enabled)
-    job = job_type()
+    job = job_type.assemble(fake_runtime())
     job.register(cast(PgQueuer, pg), fake_fan_out)
 
     assert job.entrypoint in pg.entrypoints
@@ -113,22 +118,27 @@ def test_run_worker_registers_every_entrypoint(
     recorder = queue_seam(schedule_mod)
     recorder.worker_instance = pg
 
-    asyncio.run(run_worker(batch_size=7))
+    runtime = fake_runtime()
+    asyncio.run(run_worker(runtime, batch_size=7))
+    asyncio.run(run_worker(runtime))
 
-    chunk_entrypoint = ChunkProjectionJob().entrypoint
-    profile_entrypoint = ProfileProjectionJob().entrypoint
-    assert {chunk_entrypoint, profile_entrypoint} <= set(pg.entrypoints)
+    chunk_entrypoint = ChunkProjectionJob.entrypoint
+    profile_entrypoint = ProfileProjectionJob.entrypoint
+    usage_entrypoint = UsageAccountingJob().entrypoint
+    assert {chunk_entrypoint, profile_entrypoint, usage_entrypoint} <= set(pg.entrypoints)
+    assert pg.failure_policies[usage_entrypoint] == "hold"
     assert pg.failure_policies[chunk_entrypoint] == "hold"
     assert pg.failure_policies[profile_entrypoint] == "hold"
     assert pg.concurrency_limits[chunk_entrypoint] == settings.graph_build_concurrency
     assert pg.concurrency_limits[profile_entrypoint] == 1
     for job_type in ScheduledJob.implementations():
-        job = job_type()
-        assert (job.entrypoint in pg.entrypoints) is (job_type is not BackupJob)
+        job = job_type.assemble(runtime)
+        if isinstance(job, ScopedScheduledJob):
+            assert job.entrypoint in pg.entrypoints
         registered = any(entry[0] == job.cron_entrypoint for entry in pg.schedules)
         assert registered is job.enabled
-    assert pg.runs == [7]
-    assert recorder.opened == recorder.closed == 1
+    assert pg.runs == [7, settings.queue_batch_size]
+    assert recorder.opened == recorder.closed == 2
 
 
 def test_scope_roster_unions_document_and_session_scopes(migrated_db: None) -> None:

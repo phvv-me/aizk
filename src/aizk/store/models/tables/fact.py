@@ -11,15 +11,16 @@ from sqlalchemy import (
     Float,
     Index,
     Integer,
+    String,
     Table,
     Text,
     Uuid,
     and_,
     case,
-    cast,
     column,
     extract,
     func,
+    literal,
     or_,
     update,
 )
@@ -27,13 +28,15 @@ from sqlalchemy import Column as SAColumn
 from sqlalchemy.dialects.postgresql import TSTZRANGE, Range
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import declared_attr
-from sqlmodel import Field, select
+from sqlmodel import select
 
 from ....config import settings
 from ....types import Scopes
 from ...engine import Session
 from ...mixins import ClaimedContent, DeterministicId, Embedded, Id, Scoped, TableBase
 from .chunk import Chunk
+from .entity import EntityContent
+from .ontology import RelationKind
 
 
 class FactClaim(Id, Scoped, TableBase, table=True):
@@ -41,44 +44,40 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 
     mutable: ClassVar[bool] = True
 
-    content_id: sql.Column[UUID5] = Field(
+    content_id = sql.Field(
+        UUID5,
         foreign_key="fact_content.id",
         ondelete="CASCADE",
-        nullable=False,
         index=True,
     )
-    valid: sql.Column[Range[datetime] | None] = Field(default=None, sa_column=SAColumn(TSTZRANGE))
-    recorded: sql.Column[Range[datetime]] = Field(
+    valid = sql.Field(Range[datetime] | None, sa_type=TSTZRANGE)
+    recorded = sql.Field(
+        Range[datetime],
         default=None,
-        sa_column=SAColumn(
-            TSTZRANGE,
-            nullable=False,
-            server_default=func.tstzrange(func.now(), None, "[)"),
-        ),
+        sa_type=TSTZRANGE,
+        server_default=func.tstzrange(func.now(), None, "[)"),
     )
-    last_accessed: sql.Column[datetime | None] = Field(
-        default=None,
-        sa_column=SAColumn(DateTime(timezone=True)),
-    )
-    access_count: sql.Column[int] = Field(default=0, sa_column_kwargs={"server_default": "0"})
-    attributes: sql.Column[dict] = Field(
+    last_accessed = sql.Nullable(datetime)
+    access_count = sql.Field(int, default=0)
+    attributes = sql.Field(
+        dict,
         default_factory=dict,
-        sa_column_kwargs={"server_default": "{}"},
         sa_type=sql.TypedJSONB,
     )
-    perspective_key: sql.Column[str] = Field(
+    perspective_key = sql.Field(
+        str,
         default="world",
         index=True,
-        sa_column_kwargs={"server_default": "world"},
+        sa_type=String,
     )
-    source_chunk_id: sql.Column[UUID7 | None] = Field(
-        default=None,
-        foreign_key="chunk.id",
+    source_chunk_id = sql.FK(
+        Chunk.id,
+        nullable=True,
         ondelete="SET NULL",
         index=True,
     )
-    promoted_from: sql.Column[UUID7 | None] = Field(
-        default=None,
+    promoted_from = sql.Field(
+        UUID7 | None,
         foreign_key="fact_claim.id",
         ondelete="SET NULL",
         index=True,
@@ -109,7 +108,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     @classmethod
     def _is_current_predicate(cls) -> ColumnElement[bool]:
         return and_(
-            func.upper_inf(cls.recorded, type_=Boolean),
+            cls.recorded.f.upper_inf(result=bool),
             or_(cls.valid.is_(None), cls.valid.contains(func.now())),
         )
 
@@ -133,7 +132,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     @created_at.inplace.expression
     @classmethod
     def created_at_expression(cls) -> ColumnElement[datetime]:
-        return func.lower(cls.recorded)
+        return cls.recorded.lower(result=datetime)
 
     @classmethod
     def visible_at(cls, as_of: datetime | None) -> tuple[ColumnElement[bool], ...]:
@@ -160,7 +159,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         await session.exec(
             update(cls)
             .where(
-                func.upper_inf(cls.recorded, type_=Boolean),
+                cls.recorded.f.upper_inf(result=bool),
                 cls.id.in_(claim_ids),
             )
             .values(last_accessed=func.now(), access_count=cls.access_count + 1)
@@ -186,9 +185,9 @@ class FactClaim(Id, Scoped, TableBase, table=True):
             ),
             list(revisions),
         )
-        valid_from = cast(inputs.c.valid_from, DateTime(timezone=True))
-        input_valid_to = cast(inputs.c.valid_to, DateTime(timezone=True))
-        lower = func.lower(cls.valid)
+        valid_from = inputs.c.valid_from.cast(DateTime(timezone=True))
+        input_valid_to = inputs.c.valid_to.cast(DateTime(timezone=True))
+        lower = cls.valid.lower(result=datetime)
         backdated = and_(
             valid_from.is_not(None),
             lower.is_not(None),
@@ -209,7 +208,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
                 ),
                 recorded=case(
                     (backdated, cls.recorded),
-                    else_=func.tstzrange(func.lower(cls.recorded), func.now(), "[)"),
+                    else_=func.tstzrange(cls.recorded.lower(result=datetime), func.now(), "[)"),
                 ),
             )
             .returning(inputs.c.ordinal, valid_to)
@@ -233,22 +232,22 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         half_lives = (
             extract(
                 "epoch",
-                func.now() - func.coalesce(cls.last_accessed, func.lower(cls.recorded)),
+                func.now() - cls.last_accessed.coalesce(cls.recorded.lower(result=datetime)),
             )
             / timedelta(days=1).total_seconds()
             / half_life_days
         )
-        relevance = func.power(cast(0.5, Float), half_lives) * (1 + cls.access_count)
+        relevance = func.power(literal(0.5, Float), half_lives) * (1 + cls.access_count)
         result = await session.exec(
             update(cls)
             .where(
-                func.upper_inf(cls.recorded, type_=Boolean),
+                cls.recorded.f.upper_inf(result=bool),
                 or_(cls.valid.is_(None), cls.valid.contains(func.now())),
                 cls.scopes == sorted(scopes),
                 relevance < floor,
             )
             .values(
-                recorded=func.tstzrange(func.lower(cls.recorded), func.now()),
+                recorded=func.tstzrange(cls.recorded.lower(result=datetime), func.now()),
                 attributes=cls.attributes.op("||")(func.jsonb_build_object("decayed", func.now())),
             )
             .returning(cls.id)
@@ -265,19 +264,19 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     ) -> list[UUID7]:
         """Close live claims derived from documents before their chunks change."""
         now = datetime.now(UTC)
-        now_ts = cast(now, DateTime(timezone=True))
+        now_ts = literal(now, DateTime(timezone=True))
         result = await session.exec(
             update(cls)
             .where(
-                func.upper_inf(cls.recorded, type_=Boolean),
+                cls.recorded.f.upper_inf(result=bool),
                 cls.source_chunk_id.in_(
                     select(Chunk.id).where(Chunk.document_id.in_(document_ids))
                 ),
             )
             .values(
-                recorded=func.tstzrange(func.lower(cls.recorded), now_ts),
+                recorded=func.tstzrange(cls.recorded.lower(result=datetime), now_ts),
                 attributes=cls.attributes.op("||")(
-                    func.jsonb_build_object(reason, cast(now.isoformat(), Text))
+                    func.jsonb_build_object(reason, literal(now.isoformat(), Text))
                 ),
             )
             .returning(cls.id)
@@ -296,18 +295,17 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 class FactContent(DeterministicId, Embedded, ClaimedContent, TableBase, table=True):
     """Immutable, content-addressed graph edge shared by visible claims."""
 
-    subject_id: sql.Column[UUID5] = Field(
-        foreign_key="entity_content.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
-    object_id: sql.Column[UUID5 | None] = Field(
-        default=None,
-        foreign_key="entity_content.id",
+    subject_id = sql.FK(
+        EntityContent.id,
         ondelete="CASCADE",
         index=True,
     )
-    predicate: sql.Column[str] = Field(sa_type=Text, foreign_key="relation_kind.name")
-    statement: sql.Column[str] = Field(sa_type=Text)
+    object_id = sql.FK(
+        EntityContent.id,
+        nullable=True,
+        ondelete="CASCADE",
+        index=True,
+    )
+    predicate = sql.FK(RelationKind.name)
+    statement = sql.Field(str)
     claim_table: ClassVar[Table] = FactClaim.__table__

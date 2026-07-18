@@ -15,6 +15,7 @@ from pydantic import (
 )
 from sqlalchemy import Row
 from sqlalchemy.sql.selectable import Select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from ...config import settings
 from ...config.settings import StatementValue
@@ -170,6 +171,13 @@ class User(rls.Context, prefix="app"):
         """Index the resolved Logto organization names by their stable AIZK scope IDs."""
         return {item.name: item.id for item in self.organizations}
 
+    def scope_labels(self, scopes: Iterable[UUID5]) -> tuple[str, ...]:
+        """Label scope ids in order as Private, the organization name, or Shared."""
+        names = {item.id: item.name for item in self.organizations}
+        return tuple(
+            "Private" if scope == self.id else names.get(scope, "Shared") for scope in scopes
+        )
+
     @model_serializer
     def serialize_status(self) -> UserStatus:
         """Serialize the useful Logto directory while excluding internal and personal fields."""
@@ -231,6 +239,10 @@ class RowStatement[RowT: BaseModel](FrozenModel):
         parameters = {**settings.for_statement(statement), **binds}
         async with self.user as session:
             rows = (await session.exec(statement, params=parameters)).all()
+        if isinstance(statement, SelectOfScalar):
+            field = next(iter(statement.selected_columns)).key
+            if len(self.model.model_fields) == 1 and field in self.model.model_fields:
+                return tuple(self.model.model_validate({field: value}) for value in rows)
         return self.validate_rows(rows)
 
     def validate_rows(self, rows: Sequence[Row]) -> tuple[RowT, ...]:

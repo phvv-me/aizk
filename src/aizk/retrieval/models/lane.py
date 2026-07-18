@@ -5,9 +5,10 @@ from typing import TYPE_CHECKING
 from patos import FrozenModel, sql
 from pgvector.sqlalchemy import HALFVEC
 from pydantic import UUID5, UUID7
-from sqlalchemy import ColumnElement, Float, Integer, Text, bindparam, literal, select
+from sqlalchemy import ColumnElement, Float, Integer, Text, bindparam, literal
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.selectable import Select
+from sqlmodel import select
 
 if TYPE_CHECKING:
     from patos.sql import Expr
@@ -88,6 +89,8 @@ class Lane(FrozenModel, abc.ABC):
         source_chunk_id: ColumnElement[UUID7 | None] | None = None,
         source_title: ColumnElement[str] | ColumnElement[str | None] | None = None,
         source_uri: ColumnElement[str | None] | None = None,
+        artifact_id: ColumnElement[UUID7 | None] | None = None,
+        artifact_content_id: ColumnElement[UUID7 | None] | None = None,
         created_by: ColumnElement[UUID5] | None = None,
         direct: ColumnElement[bool] | None = None,
     ) -> Select:
@@ -97,12 +100,15 @@ class Lane(FrozenModel, abc.ABC):
             literal(self.priority).label("priority"),
             evidence_id.label("evidence_id"),
             ordering.label("ordering"),
+        ).add_columns(
             line.label("line"),
             scopes.label("scopes"),
             sql.provided(fact_id).label("fact_id"),
             sql.provided(source_chunk_id).label("source_chunk_id"),
             sql.provided(source_title).label("source_title"),
             sql.provided(source_uri).label("source_uri"),
+            sql.provided(artifact_id).label("artifact_id"),
+            sql.provided(artifact_content_id).label("artifact_content_id"),
             sql.provided(created_by).label("created_by"),
             (literal(False) if direct is None else direct).label("direct"),
         )

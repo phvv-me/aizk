@@ -1,9 +1,8 @@
-import inflection
 import rls
-from sqlalchemy import Column, Table
-from sqlalchemy.dialects.postgresql.base import RESERVED_WORDS
+from sqlalchemy import PrimaryKeyConstraint
 from sqlalchemy.sql import Select
 
+from ..ddl import CreateView
 from .base import MappedBase
 
 
@@ -29,18 +28,16 @@ class ViewBase(MappedBase):
         super().__pydantic_init_subclass__(**kwargs)
         if "__view_select__" not in cls.__dict__:
             return
-        name = inflection.underscore(cls.__name__)
-        name = f"{name}_" if name in RESERVED_WORDS else name
-        selection = cls.__view_select__()
-        table = Table(
+        name = cls.table_name()
+        view = CreateView(
+            cls.__view_select__(),
             name,
-            MappedBase.metadata,
-            *(
-                Column(column.name, column.type, primary_key=(index == 0))
-                for index, column in enumerate(selection.selected_columns)
-            ),
-            info={"is_view": True},
+            metadata=MappedBase.metadata,
+            postgresql_with={"security_invoker": True},
         )
+        table = view.table
+        table.info["is_view"] = True
+        table.append_constraint(PrimaryKeyConstraint(next(iter(table.c))))
         MappedBase.metadata.info.setdefault("views", set()).add(name)
-        cls.__tablename__ = name
+        type.__setattr__(cls, "__tablename__", name)
         MappedBase.mapper_registry.map_imperatively(cls, table)

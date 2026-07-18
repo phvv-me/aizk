@@ -1,12 +1,12 @@
 from typing import ClassVar
 
 from patos import sql
-from pydantic import UUID5
-from sqlalchemy import Index, Text, UniqueConstraint
+from patos.sql import Column as C
+from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.orm import declared_attr
-from sqlmodel import Field
 
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
+from .entity import EntityContent
 
 
 class Profile(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
@@ -14,10 +14,12 @@ class Profile(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
 
     mutable: ClassVar[bool] = True
 
-    subject_id: sql.Column[UUID5] = Field(
-        foreign_key="entity_content.id", ondelete="CASCADE", nullable=False, index=True
+    subject_id = sql.FK(
+        EntityContent.id,
+        ondelete="CASCADE",
+        index=True,
     )
-    summary: sql.Column[str] = Field(sa_type=Text)
+    summary: C[str]
 
     @declared_attr.directive
     def __table_args__(cls) -> tuple[Index | UniqueConstraint, ...]:

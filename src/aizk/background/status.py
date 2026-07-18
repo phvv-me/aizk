@@ -2,10 +2,10 @@ from collections import defaultdict
 
 from patos import FrozenModel
 
-from ..common.queue import Queue
 from ..config import settings
 from .enum import QueueStatus
 from .jobs.projection import ChunkProjectionJob
+from .queue import Queue
 
 
 class TasksStatus(FrozenModel):

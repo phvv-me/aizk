@@ -1,6 +1,7 @@
 import json
 import uuid
 from importlib import import_module
+from types import SimpleNamespace
 
 import dbutil
 import httpx
@@ -74,7 +75,11 @@ def install_seams(
         return any(label in text for label in accepted)
 
     monkeypatch.setattr(gate, "gated_chunks", stub_chunks)
-    monkeypatch.setattr(gate, "relevant", stub_relevant)
+    monkeypatch.setattr(
+        gate.GateClient,
+        "from_settings",
+        classmethod(lambda cls, config: SimpleNamespace(relevant=stub_relevant)),
+    )
     return StubExtractor(facts, timeouts)
 
 

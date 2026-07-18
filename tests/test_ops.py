@@ -1,4 +1,5 @@
 import io
+import json
 from collections.abc import Callable
 from datetime import UTC, datetime
 from types import TracebackType
@@ -9,7 +10,7 @@ import httpx
 import pytest
 import seedgraph
 from factories import CandidateFactory
-from id_factory import uuid5
+from id_factory import uuid5, uuid8
 from pydantic import JsonValue
 from sqlalchemy import update
 from sqlalchemy.exc import DBAPIError
@@ -21,18 +22,113 @@ from aizk.background.status import TasksStatus
 from aizk.config import settings
 from aizk.ops import EndpointHealth
 from aizk.retrieval import Candidate, Lane
-from aizk.store import Chunk
+from aizk.store import Artifact, Blob, Chunk, Usage
 from aizk.store.identity import User
+from aizk.usage import UsageAccountingJob, UsageCapture
 from alembic import command
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, payload: JsonValue = None) -> None:
+    def __init__(self, status_code: int, payload: JsonValue | Exception = None) -> None:
         self.status_code = status_code
         self.payload = payload
 
     def json(self) -> JsonValue:
+        if isinstance(self.payload, Exception):
+            raise self.payload
         return self.payload
+
+
+def test_usage_health_attributes_operations_and_deduplicated_storage() -> None:
+    async def probe() -> tuple[
+        list[ops.ActorUsage],
+        list[ops.ScopeUsage],
+        list[ops.ScopeStorage],
+        ops.StorageHealth,
+    ]:
+        await dbutil.reset_db()
+        actor, team = uuid5(), uuid5()
+        events = (
+            (Usage.Event.Operation.recall, (actor, team), 4, 10),
+            (Usage.Event.Operation.remember_file, (team,), 100, 0),
+            (Usage.Event.Operation.share, (team,), 0, 0),
+            (Usage.Event.Operation.artifact_read, (actor,), 0, 12),
+        )
+        job = UsageAccountingJob()
+        for index, (operation, targets, request_bytes, response_bytes) in enumerate(events):
+            await job.handle(
+                UsageCapture(
+                    key=f"span-{index}",
+                    user_id=actor,
+                    operation=operation,
+                    targets=targets,
+                    request_bytes=request_bytes,
+                    response_bytes=response_bytes,
+                )
+            )
+
+        blob = Blob(
+            content_hash=uuid8(),
+            size=100,
+            stored_size=60,
+            encoding=Blob.Encoding.zstd,
+            storage_key="objects/accounted",
+        )
+        artifacts = (
+            Artifact(name="private.pdf", created_by=actor, scopes=[actor]),
+            Artifact(name="shared.pdf", created_by=actor, scopes=[team]),
+        )
+        # The maintenance caller reads both target scopes so the attachment guard
+        # accepts the second content revision that reuses the deduplicated blob.
+        async with User.system(frozenset({actor, team})).owner as session:
+            session.add(blob)
+            session.add_all(artifacts)
+            await session.flush()
+            session.add_all(
+                Artifact.Content(
+                    artifact_id=artifact.id,
+                    blob_id=blob.id,
+                    created_by=actor,
+                    scopes=artifact.scopes,
+                )
+                for artifact in artifacts
+            )
+        return await ops.usage_health()
+
+    actors, scopes, scope_storage, storage = dbutil.run(probe())
+    assert len(actors) == 1
+    assert actors[0].model_dump() == {
+        "actor_id": actors[0].actor_id,
+        "recalls": 1,
+        "remembers": 1,
+        "files": 1,
+        "shares": 1,
+        "artifact_reads": 1,
+        "request_bytes": 104,
+        "response_bytes": 22,
+    }
+    scope_usage = {item.scope_id: item for item in scopes}
+    assert sorted((item.recalls, item.files, item.shares) for item in scopes) == [
+        (1, 0, 0),
+        (1, 1, 1),
+    ]
+    assert sum(item.request_bytes for item in scope_usage.values()) == 108
+    assert sum(item.response_bytes for item in scope_usage.values()) == 32
+    assert sorted((item.artifact_revisions, item.logical_bytes) for item in scope_storage) == [
+        (1, 100),
+        (1, 100),
+    ]
+    assert storage == ops.StorageHealth(
+        originals=2,
+        logical_bytes=200,
+        physical_blobs=1,
+        original_bytes=100,
+        stored_bytes=60,
+        compression_saved_bytes=40,
+        unverified_blobs=1,
+        failed_integrity_blobs=0,
+        last_integrity_check=None,
+    )
 
 
 class HTTPClient(Protocol):
@@ -51,7 +147,7 @@ class HTTPClient(Protocol):
 def fake_async_client(
     status_code: int | None,
     error: httpx.HTTPError | None,
-    payload: JsonValue = None,
+    payload: JsonValue | Exception = None,
 ) -> Callable[..., HTTPClient]:
     class Client:
         def __init__(self, *, timeout: float) -> None:
@@ -178,7 +274,7 @@ def test_probe_endpoint_maps_status_and_errors_to_reachability(
     error: httpx.HTTPError | None,
     reachable: bool,
 ) -> None:
-    monkeypatch.setattr(ops.httpx, "AsyncClient", fake_async_client(status_code, error))
+    monkeypatch.setattr(ops.probes.httpx, "AsyncClient", fake_async_client(status_code, error))
 
     health = dbutil.run(ops.probe_endpoint("embed", "http://x/v1"))
 
@@ -219,11 +315,26 @@ def test_probe_endpoint_decodes_each_supported_model_metadata_shape(
     configured_as: str | None,
     expected: dict[str, str | int | bool | None],
 ) -> None:
-    monkeypatch.setattr(ops.httpx, "AsyncClient", fake_async_client(200, None, payload))
+    monkeypatch.setattr(ops.probes.httpx, "AsyncClient", fake_async_client(200, None, payload))
 
     health = dbutil.run(ops.probe_endpoint("llm", "http://x/v1", configured_as=configured_as))
 
     assert {field: getattr(health, field) for field in expected} == expected
+
+
+def test_probe_endpoint_keeps_the_row_when_the_endpoint_returns_non_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decode_error = json.JSONDecodeError("Expecting value", "<html>error</html>", 0)
+    monkeypatch.setattr(
+        ops.probes.httpx, "AsyncClient", fake_async_client(200, None, decode_error)
+    )
+
+    health = dbutil.run(ops.probe_endpoint("llm", "http://x/v1", configured_as="extractor"))
+
+    assert health == EndpointHealth(
+        name="llm", url="http://x/v1", reachable=True, configured_as="extractor"
+    )
 
 
 def corpus() -> ops.ScopeHealth:
@@ -270,15 +381,16 @@ def test_recall_health_reports_candidates_and_expected_failures(
         source_title="Aizk",
     )
 
-    async def recalled(query: str, user: User, token_budget: int) -> list[Candidate]:
+    async def recalled(query: str, user: User, k: int, token_budget: int) -> list[Candidate]:
         if failure:
             raise httpx.ConnectError("refused")
         assert query
         assert user.scopes.read == frozenset(corpus().scopes)
+        assert k == 2
         assert token_budget == 512
         return [candidate]
 
-    monkeypatch.setattr(ops, "recall", recalled)
+    monkeypatch.setattr(ops.probes, "recall", recalled)
 
     report = dbutil.run(ops.recall_health(corpus()))
 
@@ -304,7 +416,7 @@ def test_enable_query_stats_tolerates_only_the_preload_error(
     monkeypatch: pytest.MonkeyPatch, error: Exception | None, raises: bool
 ) -> None:
     engine = FakeEngine(error)
-    monkeypatch.setattr(ops, "create_async_engine", lambda url: engine)
+    monkeypatch.setattr(ops.provision, "create_async_engine", lambda url: engine)
 
     if raises:
         with pytest.raises(DBAPIError):
@@ -322,7 +434,17 @@ def test_grant_app_role_privileges_is_idempotent(migrated_db: None) -> None:
     dbutil.run(body())
 
 
-def test_setup_is_idempotent_on_a_ready_database(migrated_db: None) -> None:
+def test_setup_is_idempotent_on_a_ready_database(
+    migrated_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tokenizer_checks = 0
+
+    async def ensure_bm25_tokenizer() -> None:
+        nonlocal tokenizer_checks
+        tokenizer_checks += 1
+
+    monkeypatch.setattr(ops.provision, "ensure_bm25_tokenizer", ensure_bm25_tokenizer)
+
     async def body() -> ops.SetupReport:
         report = await ops.setup()
         assert await ops.queue_schema_present() is True
@@ -332,6 +454,7 @@ def test_setup_is_idempotent_on_a_ready_database(migrated_db: None) -> None:
 
     assert report.queue_installed is False
     assert report.migrated_from == report.migrated_to
+    assert tokenizer_checks == 1
 
 
 def test_reset_recreates_only_the_configured_database_then_runs_setup(
@@ -342,8 +465,8 @@ def test_reset_recreates_only_the_configured_database_then_runs_setup(
     async def setup() -> ops.SetupReport:
         return ops.SetupReport(migrated_from=None, migrated_to="0001_init", queue_installed=True)
 
-    monkeypatch.setattr(ops, "create_async_engine", lambda *args, **kwargs: engine)
-    monkeypatch.setattr(ops, "setup", setup)
+    monkeypatch.setattr(ops.provision, "create_async_engine", lambda *args, **kwargs: engine)
+    monkeypatch.setattr(ops.provision, "setup", setup)
 
     report = dbutil.run(ops.reset())
 
@@ -353,6 +476,42 @@ def test_reset_recreates_only_the_configured_database_then_runs_setup(
         f'CREATE DATABASE "{settings.db_name}"',
     ]
     assert engine.disposed is True
+
+
+@pytest.mark.parametrize(
+    ("admin_url", "app_url", "message"),
+    [
+        (
+            "postgresql+asyncpg://a:p@h/postgres",
+            "postgresql+asyncpg://u:p@h/postgres",
+            "maintenance database",
+        ),
+        (
+            "postgresql+asyncpg://a:p@h/template1",
+            "postgresql+asyncpg://u:p@h/template1",
+            "maintenance database",
+        ),
+        (
+            "postgresql+asyncpg://a:p@h",
+            "postgresql+asyncpg://u:p@h/aizk",
+            "maintenance database",
+        ),
+        (
+            "postgresql+asyncpg://a:p@h/aizk",
+            "postgresql+asyncpg://u:p@h/other",
+            "same database",
+        ),
+    ],
+    ids=["postgres", "template", "unnamed", "mismatched"],
+)
+def test_reset_refuses_maintenance_and_mismatched_databases(
+    monkeypatch: pytest.MonkeyPatch, admin_url: str, app_url: str, message: str
+) -> None:
+    monkeypatch.setattr(settings, "admin_database_url", admin_url)
+    monkeypatch.setattr(settings, "database_url", app_url)
+
+    with pytest.raises(ValueError, match=message):
+        dbutil.run(ops.reset())
 
 
 def test_setup_installs_the_queue_on_a_fresh_database(migrated_db: None) -> None:
@@ -401,10 +560,10 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
         assert selected == expected_corpus
         return recall
 
-    monkeypatch.setattr(ops, "probe_endpoint", fake_probe)
-    monkeypatch.setattr(ops, "tasks_overview", fake_overview)
-    monkeypatch.setattr(ops, "corpus_health", fake_corpora)
-    monkeypatch.setattr(ops, "recall_health", fake_recall)
+    monkeypatch.setattr(ops.probes, "probe_endpoint", fake_probe)
+    monkeypatch.setattr(ops.probes, "tasks_overview", fake_overview)
+    monkeypatch.setattr(ops.probes, "corpus_health", fake_corpora)
+    monkeypatch.setattr(ops.probes, "recall_health", fake_recall)
 
     report = dbutil.run(ops.health())
 
@@ -413,6 +572,9 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
     assert report.rls_violations == []
     assert set(report.row_counts) == {
         "document",
+        "artifact",
+        "artifact_content",
+        "blob",
         "chunk",
         "entity_content",
         "entity_claim",
@@ -421,6 +583,7 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
         "community",
         "profile",
         "session_item",
+        "usage_event",
     }
     assert report.queue == queue
     assert report.extraction == ops.ExtractionHealth(

@@ -1,4 +1,4 @@
-from typing import ClassVar, cast
+from typing import ClassVar
 
 import rls
 import sqlalchemy as sa
@@ -7,13 +7,14 @@ from pydantic import UUID5
 from sqlalchemy import Table, Uuid
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.elements import ColumnElement
-from sqlmodel import Field
+from sqlalchemy.sql.selectable import CompoundSelect
+from sqlmodel import select
 
 from ...config import settings
 from ..identity import User
 
 
-class Scoped:
+class Scoped(sql.Model):
     """Authorize one nonempty scope intersection entirely inside PostgreSQL.
 
     A caller may read a row only when every stored scope is readable. A caller
@@ -27,11 +28,18 @@ class Scoped:
     deletable: ClassVar[bool] = False
     read_through: ClassVar[str | None] = None
 
-    created_by: sql.Column[UUID5] = Field(nullable=False, index=True)
-    scopes: sql.Column[list[UUID5]] = Field(
+    created_by = sql.Field(UUID5, index=True)
+    scopes = sql.Field(
+        list[UUID5],
         min_length=1,
-        sa_type=cast(type[list[UUID5]], ARRAY(Uuid())),
+        sa_type=ARRAY(Uuid()),
+        server_default=sa.text("'{}'"),
     )
+
+    @classmethod
+    def scope_sets(cls, *peers: type[Scoped]) -> CompoundSelect:
+        """Every distinct stored scope array across this table and its peers."""
+        return select(cls.scopes).union(*(select(peer.scopes) for peer in peers))
 
     @staticmethod
     def _authority(standing: ColumnElement, permission: str) -> ColumnElement[list[UUID5]]:
@@ -41,7 +49,7 @@ class Scoped:
             .table_valued("value")
             .render_derived()
         )
-        return sa.func.array(sa.select(sa.cast(values.c.value, Uuid())).scalar_subquery())
+        return sa.func.array(select(values.c.value.cast(Uuid())).scalar_subquery())
 
     @classmethod
     def __rls__(cls) -> tuple[rls.Policy, ...]:
@@ -57,10 +65,8 @@ class Scoped:
                 sa.column("scopes", ARRAY(Uuid())),
             )
             parent_id = cls.__table__.c[f"{parent_name}_id"]
-            read = cls.__table__.c[f"{parent_name}_id"].in_(sa.select(parent.c.id))
-            parent_scope = sa.tuple_(parent_id, scopes).in_(
-                sa.select(parent.c.id, parent.c.scopes)
-            )
+            read = cls.__table__.c[f"{parent_name}_id"].in_(select(parent.c.id))
+            parent_scope = sa.tuple_(parent_id, scopes).in_(select(parent.c.id, parent.c.scopes))
         else:
             readable = cls._authority(standing, "read")
             public = cls._authority(standing, "public")

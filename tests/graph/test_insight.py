@@ -2,7 +2,7 @@ from collections.abc import Iterator
 
 import dbutil
 import pytest
-from doubles import FakeLLM
+from doubles import FakeLLM, RecordingEmbedder
 from id_factory import uuid5
 from pydantic import UUID5, UUID7
 from sqlmodel import select
@@ -68,9 +68,8 @@ async def observed(user: UUID5 | UUID7) -> list[str]:
         )
 
 
-@pytest.mark.usefixtures("fake_embedder")
 def test_insight_writes_only_the_gated_observation_and_is_idempotent(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
 ) -> None:
     fake_llm.register(
         InsightReport,
@@ -84,8 +83,8 @@ def test_insight_writes_only_the_gated_observation_and_is_idempotent(
 
     async def probe() -> tuple[int, int, list[str]]:
         await seed_two_facts(owner)
-        written = await derive_insights(scopes=frozenset({owner}))
-        again = await derive_insights(scopes=frozenset({owner}))
+        written = await derive_insights(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+        again = await derive_insights(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
         return written, again, await observed(owner)
 
     written, again, mine = dbutil.run(probe())
@@ -94,14 +93,14 @@ def test_insight_writes_only_the_gated_observation_and_is_idempotent(
     assert mine == ["alice drives the project"]
 
 
-@pytest.mark.usefixtures("fake_embedder")
-def test_insight_skips_a_graph_with_too_few_facts(owner: UUID5 | UUID7, fake_llm: FakeLLM) -> None:
-    assert dbutil.run(derive_insights(scopes=frozenset({owner}))) == 0
+def test_insight_skips_a_graph_with_too_few_facts(
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
+) -> None:
+    assert dbutil.run(derive_insights(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))) == 0
 
 
-@pytest.mark.usefixtures("fake_embedder")
 def test_insight_writes_nothing_when_no_observation_clears_the_gate(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
 ) -> None:
     fake_llm.register(
         InsightReport,
@@ -112,6 +111,6 @@ def test_insight_writes_nothing_when_no_observation_clears_the_gate(
 
     async def probe() -> int:
         await seed_two_facts(owner)
-        return await derive_insights(scopes=frozenset({owner}))
+        return await derive_insights(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
 
     assert dbutil.run(probe()) == 0

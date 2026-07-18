@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import dbutil
 import pytest
 from doubles import RecordingEmbedder
@@ -7,7 +5,7 @@ from pydantic import UUID5, UUID7
 from sqlalchemy import text
 
 from aizk.config import settings
-from aizk.extract.ingest import ingest_image, remember_session
+from aizk.extract.ingest import remember_session
 from aizk.store.identity import User
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
@@ -39,24 +37,5 @@ def test_remember_session_writes_one_embedded_working_item(
             == 1
         )
         assert fake_embedder.calls  # the text lane was exercised
-
-    dbutil.run(body())
-
-
-def test_ingest_image_stores_and_dedupes_on_bytes(
-    fake_embedder: RecordingEmbedder, tmp_path: Path
-) -> None:
-    async def body() -> None:
-        await seed_system()
-        picture = tmp_path / "shot.png"
-        picture.write_bytes(b"\x89PNG\r\n\x1a\n fake bytes")
-        first = await ingest_image(User.system(), picture, caption="a diagram")
-        again = await ingest_image(User.system(), picture)
-        assert first == again
-        assert await count("document", "id = :id AND subject_type IS NULL", {"id": first}) == 1
-        assert (
-            await count("chunk", "document_id = :id AND embedding IS NOT NULL", {"id": first}) == 1
-        )
-        assert fake_embedder.image_calls  # the image lane was exercised
 
     dbutil.run(body())

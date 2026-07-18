@@ -1,4 +1,7 @@
+from typing import Self
+
 from patos import FrozenModel
+from pydantic import model_validator
 
 from ...config import settings
 from ..lanes import (
@@ -40,7 +43,33 @@ class Plan(FrozenModel):
     order: tuple[Lane.Kind, ...]
     communities: bool = False
     raptor: bool = False
+    profiles: bool = True
     hops: int = 0
+
+    @model_validator(mode="after")
+    def validate_order(self) -> Self:
+        """Reject orders that cannot supply every lane the plan will instantiate."""
+        if len(self.order) != len(set(self.order)):
+            duplicates = sorted({kind.value for kind in self.order if self.order.count(kind) > 1})
+            raise ValueError("plan order contains duplicate lane kinds: " + ", ".join(duplicates))
+        required = {
+            Lane.Kind.FACTS,
+            Lane.Kind.SOURCES,
+            Lane.Kind.WORKING_MEMORY,
+        }
+        required.update(
+            kind
+            for enabled, kind in (
+                (self.profiles, Lane.Kind.PROFILE),
+                (self.communities, Lane.Kind.COMMUNITIES),
+                (self.raptor, Lane.Kind.OVERVIEW),
+            )
+            if enabled
+        )
+        missing = sorted(kind.value for kind in required.difference(self.order))
+        if missing:
+            raise ValueError("plan order is missing required lane kinds: " + ", ".join(missing))
+        return self
 
     @classmethod
     def maximal(cls) -> Plan:
@@ -52,6 +81,21 @@ class Plan(FrozenModel):
             raptor=True,
             hops=settings.multihop_max_hops,
         )
+
+    @classmethod
+    def maximal_without_raptor(cls) -> Plan:
+        """The maximal plan without RAPTOR overview recall."""
+        return cls.maximal().model_copy(update={"raptor": False})
+
+    @classmethod
+    def maximal_without_communities(cls) -> Plan:
+        """The maximal plan without community-summary recall."""
+        return cls.maximal().model_copy(update={"communities": False})
+
+    @classmethod
+    def maximal_without_profiles(cls) -> Plan:
+        """The maximal plan without entity-profile recall."""
+        return cls.maximal().model_copy(update={"profiles": False})
 
     @classmethod
     def focused(cls) -> Plan:
@@ -82,8 +126,9 @@ class Plan(FrozenModel):
             SourceLane(priority=priority[Lane.Kind.SOURCES]),
             EntityCatalogLane(priority=priority[Lane.Kind.SOURCES]),
             VectorLane(kind=Lane.Kind.WORKING_MEMORY, priority=priority[Lane.Kind.WORKING_MEMORY]),
-            VectorLane(kind=Lane.Kind.PROFILE, priority=priority[Lane.Kind.PROFILE]),
         ]
+        if self.profiles:
+            lanes.append(VectorLane(kind=Lane.Kind.PROFILE, priority=priority[Lane.Kind.PROFILE]))
         if self.communities:
             lanes.append(
                 VectorLane(kind=Lane.Kind.COMMUNITIES, priority=priority[Lane.Kind.COMMUNITIES])

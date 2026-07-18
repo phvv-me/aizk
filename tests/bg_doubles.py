@@ -1,15 +1,89 @@
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from types import ModuleType, TracebackType
+from typing import cast
 
 import pytest
+from doubles import FakeLLM, RecordingEmbedder
+from pgqueuer import PgQueuer
 from pgqueuer.executors import AbstractEntrypointExecutor, EntrypointExecutorParameters
 from pgqueuer.types import OnFailure
 from pydantic import UUID5, UUID7
 
-from aizk.common.queue import QueueJob, QueuePayload
+from aizk.artifacts.configured import ArtifactServices
+from aizk.artifacts.service import ArtifactIntake, ArtifactIntegrity
+from aizk.artifacts.uploads import UploadBox
+from aizk.auth import Auth
+from aizk.background.jobs.conversion import DoclingConversionJob
+from aizk.background.queue import QueueJob, QueuePayload
+from aizk.config import settings
+from aizk.extract.extractor import Extractor, LLMExtractor
+from aizk.graph.build import GraphClients
+from aizk.integrations.logto import LogtoClient
+from aizk.runtime import Runtime
+from aizk.serving.embed import EmbedClient
+from aizk.serving.extract import LLM
+from aizk.serving.gate import GateClient
+from aizk.serving.rerank import RerankClient
+from aizk.storage import ByteStore
+from aizk.store.engine import Database
 
 type AsyncCallback = Callable[..., Awaitable[None]]
+
+
+@dataclass
+class RecordingConversion:
+    """Stand in for the Docling conversion job, recording queue bindings."""
+
+    bound: list[PgQueuer] = field(default_factory=list)
+
+    def bind(self, worker: PgQueuer) -> None:
+        self.bound.append(worker)
+
+
+def fake_artifact_services(
+    intake: ArtifactIntake | None = None,
+    conversion: RecordingConversion | None = None,
+    integrity: ArtifactIntegrity | None = None,
+) -> ArtifactServices:
+    """Build an artifact service container around whatever fakes a test provides."""
+    return ArtifactServices(
+        intake=cast("ArtifactIntake", intake),
+        conversion=cast("DoclingConversionJob", conversion or RecordingConversion()),
+        integrity=cast("ArtifactIntegrity", integrity),
+    )
+
+
+def fake_runtime(
+    artifacts: ArtifactServices | None = None,
+    llm: LLM | None = None,
+    embed: RecordingEmbedder | None = None,
+    graph: GraphClients | None = None,
+) -> Runtime:
+    """Build a runtime container around whatever fakes a test provides."""
+    model = llm or FakeLLM().llm
+    embedder = embed or RecordingEmbedder()
+    return Runtime(
+        settings=settings,
+        database=cast("Database", None),
+        store=cast("ByteStore", None),
+        artifacts=artifacts or fake_artifact_services(),
+        uploads=cast("UploadBox", None),
+        logto=cast("LogtoClient", None),
+        auth=cast("Auth", None),
+        embed=cast("EmbedClient", embedder),
+        rerank=cast("RerankClient", None),
+        gate=cast("GateClient", None),
+        llm=model,
+        extractor=cast("Extractor", LLMExtractor(llm=model)),
+        graph=graph
+        or GraphClients(
+            extractor=LLMExtractor(llm=model),
+            gate=cast("GateClient", None),
+            embed=embedder,
+            llm=model,
+        ),
+    )
 
 
 @dataclass(frozen=True)

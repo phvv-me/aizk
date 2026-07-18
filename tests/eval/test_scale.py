@@ -1,7 +1,7 @@
 import math
 import uuid
 from collections import defaultdict
-from importlib import import_module
+from types import SimpleNamespace
 
 import dbutil
 import numpy as np
@@ -13,6 +13,7 @@ from id_factory import uuid5s
 from pydantic import UUID5
 
 from aizk.config import settings
+from aizk.serving.gate import GateClient
 from aizk.store import Chunk, Document, Entity, Fact
 from aizk.store.identity import User
 from eval.scale import (
@@ -276,7 +277,9 @@ def test_run_scale_benchmark_measures_a_tiny_curve(
         return []
 
     monkeypatch.setattr(
-        import_module("aizk.retrieval.recall.orchestrator"), "named_entities", no_entities
+        GateClient,
+        "from_settings",
+        classmethod(lambda cls, config: SimpleNamespace(named_entities=no_entities)),
     )
 
     async def body() -> None:

@@ -17,21 +17,25 @@ A self-hosted shared memory engine for people, teams, and MCP agents
 
 ## What this is
 
-aizk is a memory an AI assistant can actually keep. Text goes in, an entity and fact knowledge
-graph comes out, addressed by meaning so the same knowledge extracted twice never duplicates.
-Everything lives in one self-hosted Postgres, and row level security enforces who can see what
-at the database layer, private notes, shared projects, and overlapping groups never cross. It
+aizk is a memory an AI assistant can actually keep. Text, files, and public HTTPS sources become an
+entity and fact knowledge graph, addressed by meaning so the same knowledge extracted twice never
+duplicates. PostgreSQL owns all authority, metadata, temporal state, and queued work. Immutable
+file bytes live in private S3-compatible storage. Row level security enforces who can see what at
+the database layer, so private notes, shared projects, and overlapping groups never cross. It
 speaks MCP, so Claude or any other MCP-capable assistant calls it directly. Full explanation at
 [phvv.me/aizk](https://phvv.me/aizk).
 
 ## Quickstart
 
-One command brings up PostgreSQL, the model services, and one hardened Aizk image. Compose runs
+One command brings up PostgreSQL, object storage, malware scanning, document conversion, model
+services, and one hardened Aizk image. Compose runs
 that image as a one-shot migration service, a forced-RLS MCP server, and a private background
-worker. The public process never receives the database-owner credential.
+worker. Its public profile also runs a SvelteKit browser interface and a forced-RLS browser
+JSON API behind one Caddy origin. Public processes never receive the database-owner
+credential.
 
 ```sh
-docker compose --env-file .env -f deploy/docker-compose.yml up -d
+docker compose --env-file .env -f src/deploy/docker-compose.yml up -d
 ```
 
 Then call its tools from any MCP client.
@@ -45,8 +49,8 @@ async with Client("http://localhost:8080/mcp") as client:
     print(result.data)
 ```
 
-Every secret and deployment override is documented in `deploy/.env.example`. The committed
-nonsecret Logto role and permission policy lives in `deploy/logto.conf`, and `.env` overrides any
+Every secret and deployment override is documented in `src/deploy/.env.example`. The committed
+nonsecret Logto role and permission policy lives in `src/deploy/logto.conf`, and `.env` overrides any
 matching value. Copy the example to `.env`, generate independent database passwords, and run
 Compose from the package root. Every host port binds to loopback. The optional public profile
 opens an outbound Cloudflare Tunnel, reconciles Logto, and starts MCP only after its authentication
@@ -60,18 +64,31 @@ Claude Code, Codex, or OpenCode.
 
 ```mermaid
 flowchart LR
-    A[agent] -->|remember| W[write path<br/>chunk, extract, consolidate]
+    A[agent] -->|remember text or URI| W[write path<br/>scan, convert, extract]
+    B[browser] -->|upload or URI| W
     A -->|recall| Re[read path<br/>fused retrieval]
     W --> P[(Postgres<br/>knowledge graph + row level security)]
+    W --> O[(object storage<br/>immutable bytes)]
     Re --> P
     P --> Re --> A
 ```
 
-Writing turns text into a typed entity and fact graph, one content row shared by meaning plus
+Writing turns authored text or Docling-normalized artifacts into a typed entity and fact graph,
+one content row shared by meaning plus
 one scoped, bi-temporal claim per owner. Reading fuses five retrieval lanes behind one Postgres
 round trip, filtered to exactly what the caller's own scopes make visible before a row is ever
 considered. The full breakdown of both, with a diagram for each stage, lives in
 [Engine](https://phvv.me/aizk/engine/).
+
+Text is the preferred memory input. When exact source bytes matter, AIZK accepts an original up to
+10 MiB, scans it, compresses it when worthwhile, and stores only that original as an object Blob.
+Companion text, normalized Markdown, Docling JSON, and metadata stay in PostgreSQL. Unsupported
+conversion still yields a recallable metadata document. Sharing creates a new authorized scope
+reference to the same physical Blob instead of uploading another copy.
+
+The optional observability profile collects every Compose service log through Alloy and Loki into
+a loopback-only Grafana. Durable PostgreSQL usage events separately account for recalls, memories,
+file transfers, shares, logical scope storage, physical Blob bytes, and compression savings.
 
 Self-describing Markdown may declare any live ontology kind with `- Type <kind>` and any typed
 relation with `- <predicate> [<object kind>] <object name>`. Projects and areas use this generic

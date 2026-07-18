@@ -16,6 +16,8 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
+      # layered import contracts from pyproject [tool.importlinter], defined in docs/architecture.md
+      - run: uv run --no-sync lint-imports
       - run: uv run --no-sync pyrefly check
       # second checker; known third-party gaps are per-file warnings in [tool.ty.overrides],
       # any new error still fails. --python overrides the local pixi path from pyproject.

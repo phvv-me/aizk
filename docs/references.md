@@ -25,11 +25,11 @@ implementation or that another project endorses Aizk.
 | recursive summary tree | adopted from [RAPTOR](https://arxiv.org/abs/2401.18059) | rolls grounded summaries into bounded higher levels | `graph/raptor.py`, `retrieval/lanes/overview.py` |
 | reflective observations | adapted from [A-MEM](https://arxiv.org/abs/2502.12110) | derives optional observations without replacing their grounding facts | `graph/insight.py` |
 | entity profiles | adapted from [GAM](https://arxiv.org/abs/2604.12285) | builds one evidence-grounded profile per entity and scope set | `graph/profiles.py` |
-| raw evidence as authority | supported by [Does Memory Need Graphs](https://arxiv.org/abs/2601.01280) | keeps source chunks primary and makes every graph lane earn its cost in ablation | `retrieval/lanes/sources.py`, `eval/plans.py` |
+| raw evidence as authority | supported by [Does Memory Need Graphs](https://arxiv.org/abs/2601.01280) | keeps source chunks primary and makes every graph lane earn its cost in ablation | `src/aizk/retrieval/lanes/sources.py`, `src/eval/plans.py` |
 | append-only corrective history | supported by [APEX-MEM](https://arxiv.org/abs/2604.14362) | closes temporal ranges rather than deleting contradicted knowledge | `store/models/tables/fact.py` |
-| speaker-aware group memory | adapted from [GroupMemBench](https://arxiv.org/abs/2605.14498) and [Hindsight](https://aclanthology.org/2026.acl-demo.27/) | separates objective state from observations, opinions, experiences, and preferences | `provenance.py`, `graph/grounding.py`, `eval/groupmem.py` |
-| forgetting-aware evaluation | adopted from [Memora](https://arxiv.org/abs/2604.20006) | measures current evidence without rewarding expired memory | `eval/metrics.py` |
-| workflow and premise benchmark categories | planned from [LongMemEval-V2](https://arxiv.org/abs/2605.12493) | keeps these categories in evaluation until a production schema earns them | `eval` |
+| speaker-aware group memory | adapted from [GroupMemBench](https://arxiv.org/abs/2605.14498) and [Hindsight](https://aclanthology.org/2026.acl-demo.27/) | separates objective state from observations, opinions, experiences, and preferences | `src/aizk/provenance.py`, `src/aizk/graph/grounding.py`, `src/eval/groupmem.py` |
+| forgetting-aware evaluation | adopted from [Memora](https://arxiv.org/abs/2604.20006) | measures current evidence without rewarding expired memory | `src/eval/metrics.py` |
+| workflow and premise benchmark categories | planned from [LongMemEval-V2](https://arxiv.org/abs/2605.12493) | keeps these categories in evaluation until a production schema earns them | `src/eval` |
 | action-memory boundary | compared with [Mem2ActBench](https://aclanthology.org/2026.acl-long.370/) | makes no action-selection claim from a retrieval-only score | `docs/benchmarks.md` |
 | dense and lexical fusion | adapted from [Reciprocal Rank Fusion](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/) | fuses typed source ranks inside one SQL recall program | `retrieval/recall/program.py`, `retrieval/lanes/sources.py` |
 | merit ordering and maximal recall | original measured Aizk result | keeps every lane available and lets one cross-encoder rank candidates together | `retrieval/recall/orchestrator.py`, `retrieval/rerank/rescore.py` |
@@ -70,8 +70,15 @@ identity or membership mirror.
 | vector index | [VectorChord](https://github.com/tensorchord/VectorChord) and [pgvector](https://github.com/pgvector/pgvector) | low-memory production vector search with a portable fallback |
 | ORM and validation | [SQLModel](https://sqlmodel.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/), and [Pydantic](https://docs.pydantic.dev/) | typed models, PostgreSQL statements, and wire contracts |
 | durable jobs | [PgQueuer](https://github.com/JanBjorge/PgQueuer) | graph projection and scheduled maintenance without a bespoke workflow ledger |
+| document conversion | [Docling](https://github.com/docling-project/docling) and [Docling Serve](https://github.com/docling-project/docling-serve) | private conversion of already accepted bytes into native JSON and normalized Markdown |
+| immutable object bytes | [SeaweedFS](https://github.com/seaweedfs/seaweedfs) and [obstore](https://github.com/developmentseed/obstore) | private S3-compatible storage behind opaque keys and a bounded typed client |
+| malware scanning | [ClamAV](https://docs.clamav.net/manual/Usage/ClamdProtocol.html) | fail-closed streaming scan before object persistence over a private service connection |
+| log collection | [Grafana Alloy](https://grafana.com/docs/alloy/latest/tutorials/processing-logs/) | discover Compose containers and forward labeled Docker logs without a per-service logging driver |
+| log storage and inspection | [Loki](https://grafana.com/docs/loki/latest/) and [Grafana](https://grafana.com/docs/grafana/latest/) | one bounded operational log store and a loopback-only inspection interface |
+| log event vocabulary | [OpenTelemetry Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) | structured AIZK application events while PostgreSQL remains the durable usage authority |
 | MCP transport and OAuth | [FastMCP](https://github.com/jlowin/fastmcp) | the four public tools and the Logto OIDC proxy |
-| model serving | [vLLM](https://github.com/vllm-project/vllm) | replaceable OpenAI-compatible embedding, reranking, and extraction endpoints |
+| browser application | [SvelteKit](https://svelte.dev/docs/kit) and [@logto/sveltekit](https://docs.logto.io/quick-starts/sveltekit) | optional server-rendered web interface for Logto login, scoped statistics, recall, artifacts, and organization management over the browser JSON API |
+| model serving | [vLLM](https://github.com/vllm-project/vllm) and [structured outputs](https://docs.vllm.ai/en/latest/features/structured_outputs/) | replaceable OpenAI-compatible endpoints with compact XGrammar-constrained extraction |
 | typed LLM calls and judging | [Pydantic AI](https://ai.pydantic.dev/) and [Pydantic Evals](https://ai.pydantic.dev/evals/) | schema-constrained extraction and isolated evaluation |
 | chunking | [Chonkie](https://github.com/chonkie-inc/chonkie) | bounded prose and source windows |
 | fast entity gate | [GLiNER2](https://github.com/fastino-ai/GLiNER2) and [GLiNER2 large](https://huggingface.co/fastino/gliner2-large-v1) | a cheap GPU gate and an experimental extractor, not the production graph authority |
@@ -85,6 +92,29 @@ identity or membership mirror.
 Model names are deployment choices rather than domain names in the code. Embedding, reranking,
 gating, and extraction clients can move to another compatible provider without renaming the memory
 engine.
+
+## Original files and derived document data
+
+Several mature systems separate an authoritative source from replaceable interpretation.
+
+| Reference | Useful mechanism | AIZK adaptation |
+|---|---|---|
+| [Paperless-ngx usage](https://docs.paperless-ngx.com/usage/) and [FAQ](https://docs.paperless-ngx.com/faq/) | preserve the original, track checksums, and index OCR or archive derivatives | one original Blob remains authoritative while searchable Markdown and structured data stay in PostgreSQL |
+| [Docling supported formats](https://docling-project.github.io/docling/usage/supported_formats/) | emit normalized Markdown and a lossless structured Docling document | store both database derivatives on the exact original revision and keep the source for later reinterpretation |
+| [Unstructured document elements](https://docs.unstructured.io/concepts/document-elements) | normalize many formats into typed elements carrying source and coordinate metadata | retain source metadata and conversion details without adopting a second element store |
+| [ColPali](https://arxiv.org/abs/2407.01449) | retrieve document pages through visual language representations without depending on lossy text extraction | supplement converted image text with a direct image vector while keeping Docling structure authoritative |
+| [VisRAG](https://arxiv.org/abs/2410.10594) | retrieve page images and answer from visual document evidence | keep exact authorized files available on demand while avoiding automatic file transfer during recall |
+| [M3DocRAG](https://arxiv.org/abs/2411.04952) | combine visual and textual evidence for long multimodal documents | retain both original and parsed representations while deferring page-level and video retrieval until they show measurable benefit |
+
+The papers agree that text extraction can lose layout, figures, tables, and other evidence. They
+differ in retrieval granularity and whether visual embeddings replace or complement text. AIZK
+keeps Docling text and structure authoritative, then adds one supplemental direct vector for an
+accepted image on the same document and exact artifact revision. The generic visual interface can
+later support video, but the current video path uses Docling's audio transcript and metadata only.
+Page-level document images and video frames remain deferred until measured retrieval quality
+justifies their storage and serving cost. Unsupported conversion falls back to filename, size,
+media type, URI, conversion state, and companion text rather than making an accepted file
+disappear.
 
 ## Product and project comparisons
 
@@ -153,6 +183,12 @@ The following pieces should be cited as Aizk design rather than attributed to on
 - a source-preserving `share` operation that creates provenance-linked copies
 - one maximal recall plan whose cross-encoder orders every lane by merit
 - a single prompt-ready MCP recall string produced by a token-budget prefix
+- exact artifact revision resources that remain authorized by PostgreSQL and transfer no bytes during recall
+- one original-only Blob model with database derivatives, metadata fallback, adaptive compression,
+  shared physical bytes, a fail-closed scan gate, and no Redis
+- one supplemental direct image vector on the authoritative converted document with exact revision
+  provenance and no model-provider coupling
+- durable actor and scope usage accounting separated from expiring operational logs
 - an operational health snapshot that checks schema, policy, jobs, models, scopes, graph freshness,
   and a real recall in under five seconds
 

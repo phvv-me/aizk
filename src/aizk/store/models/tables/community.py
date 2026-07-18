@@ -2,11 +2,9 @@ from typing import ClassVar
 
 from patos import sql
 from pydantic import UUID5
-from sqlalchemy import Column as SAColumn
-from sqlalchemy import ColumnElement, Index, Text, UniqueConstraint, Uuid
+from sqlalchemy import ColumnElement, Index, UniqueConstraint, Uuid, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import declared_attr
-from sqlmodel import Field
 
 from ...mixins import Embedded, Id, Scoped, TableBase, Timestamped
 
@@ -16,10 +14,13 @@ class Community(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
 
     deletable: ClassVar[bool] = True
 
-    label: sql.Column[str] = Field(sa_type=Text)
-    summary: sql.Column[str] = Field(sa_type=Text)
-    member_ids: sql.Column[list[UUID5]] = Field(
-        default_factory=list, sa_column=SAColumn(ARRAY(Uuid), nullable=False)
+    label = sql.Field(str)
+    summary = sql.Field(str)
+    member_ids = sql.Field(
+        list[UUID5],
+        default_factory=list,
+        sa_type=ARRAY(Uuid),
+        server_default=text("'{}'::uuid[]"),
     )
 
     @declared_attr.directive

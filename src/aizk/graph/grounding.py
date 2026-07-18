@@ -1,9 +1,8 @@
-import re
-
 from patos import FrozenModel
 
 from ..extract.models import ExtractedEntity, Extraction, TimedFact
 from ..ontology import System
+from .naming import normalize_name
 
 
 class ProjectionQuality(FrozenModel):
@@ -25,6 +24,13 @@ class ProjectionQuality(FrozenModel):
         return self.proposed_facts - self.accepted_facts
 
 
+class FactGrounding(FrozenModel):
+    """One proposed fact and the deterministic reason it was rejected."""
+
+    fact: TimedFact
+    rejection: str | None
+
+
 class GroundedProjection(FrozenModel):
     """The evidence-backed subset of one model-proposed extraction."""
 
@@ -33,11 +39,35 @@ class GroundedProjection(FrozenModel):
     quality: ProjectionQuality
 
     @classmethod
+    def audit(
+        cls,
+        extraction: Extraction,
+        source: str,
+    ) -> tuple[FactGrounding, ...]:
+        """Explain deterministic grounding for every proposed fact."""
+        entities = {
+            key: entity for entity in extraction.entities if (key := normalize_name(entity.name))
+        }
+        return tuple(
+            FactGrounding(
+                fact=fact,
+                rejection=cls.rejection(
+                    fact,
+                    source,
+                    entities,
+                    normalize_name(fact.subject),
+                    normalize_name(fact.object_),
+                ),
+            )
+            for fact in extraction.facts
+        )
+
+    @classmethod
     def from_extraction(cls, extraction: Extraction, source: str) -> GroundedProjection:
         """Accept only source-grounded facts with resolved, distinct endpoints."""
         entities: dict[str, ExtractedEntity] = {}
         for entity in extraction.entities:
-            if name := entity.name.strip().casefold():
+            if name := normalize_name(entity.name):
                 entities.setdefault(name, entity)
         accepted: list[TimedFact] = []
         used: set[str] = set()
@@ -49,9 +79,9 @@ class GroundedProjection(FrozenModel):
             "generic_relation": 0,
         }
         for fact in extraction.facts:
-            subject = fact.subject.strip().casefold()
-            object_name = fact.object_.strip().casefold()
-            reason = cls._rejection(fact, source, entities, subject, object_name)
+            subject = normalize_name(fact.subject)
+            object_name = normalize_name(fact.object_)
+            reason = cls.rejection(fact, source, entities, subject, object_name)
             if reason is not None:
                 rejected[reason] += 1
                 continue
@@ -77,7 +107,7 @@ class GroundedProjection(FrozenModel):
         )
 
     @staticmethod
-    def _rejection(
+    def rejection(
         fact: TimedFact,
         source: str,
         entities: dict[str, ExtractedEntity],
@@ -89,7 +119,7 @@ class GroundedProjection(FrozenModel):
             return "missing_quote"
         if quote_interval(fact.quote, source) is None:
             return "unsupported_quote"
-        if subject not in entities or (object_name and object_name not in entities):
+        if subject not in entities or (fact.object_.strip() and object_name not in entities):
             return "unresolved_endpoint"
         if object_name and subject == object_name:
             return "self_relation"
@@ -99,11 +129,17 @@ class GroundedProjection(FrozenModel):
 
 
 def normalized_map(text: str) -> tuple[str, list[int]]:
-    """Normalize text while preserving each output character's source offset."""
+    """Normalize text while preserving each output character's source offset.
+
+    Markdown backticks carry presentation rather than evidence. Models commonly omit them
+    from otherwise verbatim quotes, so grounding ignores them on both sides.
+    """
     folded: list[str] = []
     offsets: list[int] = []
     pending_space = False
     for offset, char in enumerate(text):
+        if char == "`":
+            continue
         if char.isspace():
             pending_space = bool(folded)
             continue
@@ -125,7 +161,9 @@ def quote_interval(quote: str | None, text: str) -> tuple[int, int] | None:
     if start >= 0:
         return start, start + len(quote)
     folded_text, offsets = normalized_map(text)
-    folded_quote = re.sub(r"\s+", " ", quote.casefold()).strip()
+    folded_quote, _ = normalized_map(quote)
+    if not folded_quote:
+        return None
     start = folded_text.find(folded_quote)
     if start < 0:
         return None

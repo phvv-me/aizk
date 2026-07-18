@@ -15,6 +15,7 @@ from pydantic_evals.evaluators import Evaluator, EvaluatorContext
 import eval.runner as runner_module
 from aizk.config import settings
 from aizk.extract.ingest import TextSource
+from aizk.graph.build import GraphClients
 from aizk.retrieval import Candidate
 from aizk.store.identity import User
 from aizk.types import Scopes
@@ -175,7 +176,7 @@ def test_prepare_batches_authored_sources_and_verifies_the_exact_corpus(
         captured_sources.extend(sources)
         return [uuid.uuid7() for _ in sources]
 
-    async def build(scopes: Scopes) -> tuple[int, int]:
+    async def build(clients: GraphClients, scopes: Scopes) -> tuple[int, int]:
         built_scopes.append(scopes)
         return 1, 1
 

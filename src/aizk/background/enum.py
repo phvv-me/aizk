@@ -20,3 +20,4 @@ class JobPriority(IntEnum):
 
     maintenance = 10
     chunk = 50
+    artifact = 75

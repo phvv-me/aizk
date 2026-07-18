@@ -1,17 +1,44 @@
 from collections.abc import Collection
 from datetime import datetime
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
-import sqlalchemy
 from patos import sql
+from patos.sql import Column as C
 from pydantic import UUID5, UUID7
-from sqlalchemy import ColumnElement, and_, case, func, union_all
+from sqlalchemy import (
+    ColumnElement,
+    Float,
+    Integer,
+    and_,
+    bindparam,
+    case,
+    func,
+    union,
+    union_all,
+)
 from sqlalchemy.dialects.postgresql import Range
+from sqlalchemy.sql.selectable import CTE
+from sqlalchemy.sql.selectable import Select as SelectStatement
 from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from ...mixins import ViewBase
 from ..tables.fact import FactClaim, FactContent
+
+if TYPE_CHECKING:
+    from ....retrieval.models.lane import QueryContext
+
+
+def half_life_decay(
+    age_days: ColumnElement[float], half_life_days: ColumnElement[float]
+) -> ColumnElement[float]:
+    """Exponential forgetting-curve retention, one half per half-life: 0.5 ** (age / T)."""
+    return func.power(0.5, age_days / half_life_days)
+
+
+def log_frequency(access_count: ColumnElement[int]) -> ColumnElement[float]:
+    """Diminishing-returns access signal, ln(1 + count)."""
+    return func.ln(1 + access_count)
 
 
 class LiveFact(ViewBase):
@@ -25,23 +52,23 @@ class LiveFact(ViewBase):
     from psql. Keep the view.
     """
 
-    id: sql.Column[UUID7]
-    content_id: sql.Column[UUID5]
-    subject_id: sql.Column[UUID5]
-    object_id: sql.Column[UUID5 | None]
-    predicate: sql.Column[str]
-    statement: sql.Column[str]
-    embedding: sql.Column[list[float] | None]
-    created_by: sql.Column[UUID5]
-    scopes: sql.Column[list[UUID5]]
-    valid: sql.Column[Range[datetime] | None]
-    recorded: sql.Column[Range[datetime]]
-    last_accessed: sql.Column[datetime | None]
-    access_count: sql.Column[int]
-    attributes: sql.Column[dict]
-    perspective_key: sql.Column[str]
-    source_chunk_id: sql.Column[UUID7 | None]
-    promoted_from: sql.Column[UUID7 | None]
+    id: C[UUID7]
+    content_id: C[UUID5]
+    subject_id: C[UUID5]
+    object_id: C[UUID5 | None]
+    predicate: C[str]
+    statement: C[str]
+    embedding: C[list[float] | None]
+    created_by: C[UUID5]
+    scopes: C[list[UUID5]]
+    valid: C[Range[datetime] | None]
+    recorded: C[Range[datetime]]
+    last_accessed: C[datetime | None]
+    access_count: C[int]
+    attributes: C[dict]
+    perspective_key: C[str]
+    source_chunk_id: C[UUID7 | None]
+    promoted_from: C[UUID7 | None]
 
     @classmethod
     def line(cls) -> ColumnElement[str]:
@@ -76,28 +103,36 @@ class LiveFact(ViewBase):
             select(
                 cls.subject_id.label("entity_id"),
                 cls.statement,
-                func.lower(cls.recorded).label("recorded_at"),
+                cls.recorded.lower(result=datetime).label("recorded_at"),
                 cls.id,
             ).where(cls.subject_id.in_(entity_ids)),
             select(
                 cls.object_id.label("entity_id"),
                 cls.statement,
-                func.lower(cls.recorded).label("recorded_at"),
+                cls.recorded.lower(result=datetime).label("recorded_at"),
                 cls.id,
             ).where(
                 cls.object_id.in_(entity_ids),
                 cls.object_id != cls.subject_id,
             ),
         ).subquery("profile_fact_touch")
-        ranked = sqlalchemy.select(
-            touches,
-            func.row_number()
-            .over(
-                partition_by=touches.c.entity_id,
-                order_by=(touches.c.recorded_at.desc(), touches.c.id.desc()),
+        ranked = (
+            select(
+                touches.c.entity_id,
+                touches.c.statement,
+                touches.c.recorded_at,
+                touches.c.id,
             )
-            .label("profile_rank"),
-        ).subquery("profile_fact_rank")
+            .add_columns(
+                func.row_number()
+                .over(
+                    partition_by=touches.c.entity_id,
+                    order_by=(touches.c.recorded_at.desc(), touches.c.id.desc()),
+                )
+                .label("profile_rank"),
+            )
+            .subquery("profile_fact_rank")
+        )
         return (
             select(ranked.c.entity_id, ranked.c.statement)
             .where(ranked.c.profile_rank <= limit)
@@ -111,16 +146,190 @@ class LiveFact(ViewBase):
 
         limit: how many statements to keep.
         """
-        return select(cls.statement).order_by(func.lower(cls.recorded).desc()).limit(limit)
+        return (
+            select(cls.statement).order_by(cls.recorded.lower(result=datetime).desc()).limit(limit)
+        )
 
     @classmethod
-    def __view_select__(cls) -> sqlalchemy.Select:
+    def dense(cls, context: QueryContext) -> CTE:
+        """Dense fact seeds under the floor, ordered by distance with access recency and
+        frequency blended in.
+
+        The materialized content cut isolates the vector index scan; live_fact then
+        supplies visibility and access history in one join.
+        """
+        fact_distance = FactContent.embedding @ context.vector
+        dense_fact_content = (
+            select(
+                FactContent.id,
+                FactContent.subject_id,
+                FactContent.object_id,
+                fact_distance.label("distance"),
+            )
+            .where(FactContent.embedding.is_not(None), fact_distance < context.floor)
+            .order_by(fact_distance)
+            .limit(context.fusion_depth)
+            .cte("dense_fact_content")
+            # prefix_with is SQLAlchemy's supported spelling for a MATERIALIZED CTE.
+            .prefix_with("MATERIALIZED")
+        )
+        last_seen = cls.last_accessed.coalesce(
+            cls.recorded.lower(result=datetime),
+        )
+        blended = (
+            dense_fact_content.c.distance
+            - bindparam("recall_recency_weight", type_=Float)
+            * half_life_decay(
+                sql.days_since(last_seen),
+                bindparam("recall_recency_half_life_days", type_=Float),
+            )
+            - bindparam("recall_frequency_weight", type_=Float) * log_frequency(cls.access_count)
+        )
         return (
-            sqlalchemy.select(
+            select(
+                cls.id,
+                dense_fact_content.c.subject_id,
+                dense_fact_content.c.object_id,
+                dense_fact_content.c.distance,
+            )
+            .add_columns(blended.label("blended"))
+            .join(dense_fact_content, dense_fact_content.c.id == cls.content_id)
+            .order_by(blended)
+            .limit(context.k)
+            .cte("dense_fact")
+        )
+
+    @staticmethod
+    def endpoints(
+        dense_facts: CTE, *extra: ColumnElement
+    ) -> tuple[SelectOfScalar, SelectOfScalar]:
+        """One select per dense-fact endpoint, the object side guarded against nulls."""
+        return (
+            select(dense_facts.c.subject_id.label("entity_id"), *extra),
+            select(dense_facts.c.object_id.label("entity_id"), *extra).where(
+                dense_facts.c.object_id.is_not(None)
+            ),
+        )
+
+    @classmethod
+    def neighbors(cls, dense_facts: CTE, context: QueryContext) -> SelectStatement:
+        """One-hop graph neighbors of the dense seeds as one fact part, ranked by
+        distance.
+
+        Each endpoint side joins the seeds through its own index; an OR across both
+        endpoints would fall back to scanning every fact.
+        """
+        seed_entities = union(*cls.endpoints(dense_facts)).cte("seed_entity")
+        live_distance = cls.embedding @ context.vector
+        neighbor_sides = [
+            select(cls.id, live_distance.label("ordering"))
+            .join(seed_entities, endpoint == seed_entities.c.entity_id)
+            .where(
+                cls.embedding.is_not(None),
+                cls.id.not_in(select(dense_facts.c.id)),
+            )
+            for endpoint in (cls.subject_id, cls.object_id)
+        ]
+        neighbor_touch = union(*neighbor_sides).subquery("neighbor_touch")
+        return (
+            select(neighbor_touch.c.id, neighbor_touch.c.ordering)
+            .order_by(neighbor_touch.c.ordering)
+            .limit(context.k)
+        )
+
+    @classmethod
+    def diffused(cls, seeds: CTE, ppr_hops: int) -> CTE:
+        """The seed mass diffused one bounded degree-normalized hop at a time,
+        accumulated over every hop and cut to the mass window.
+
+        Each direction joins the frontier through its own endpoint index instead of a
+        membership test over every fact.
+        """
+        ppr_frontier = bindparam("graph_ppr_frontier", type_=Integer)
+        ppr_damping = bindparam("graph_ppr_damping", type_=Float)
+        spread = [seeds]
+        previous = seeds
+        for hop in range(1, ppr_hops + 1):
+            frontier = (
+                select(previous.c.entity_id, previous.c.mass)
+                .order_by(previous.c.mass.desc())
+                .limit(ppr_frontier)
+                .cte(f"frontier_{hop}")
+            )
+            edges = union_all(
+                select(cls.subject_id.label("src"), cls.object_id.label("dst"))
+                .join(frontier, cls.subject_id == frontier.c.entity_id)
+                .where(cls.object_id.is_not(None)),
+                select(cls.object_id, cls.subject_id).join(
+                    frontier, cls.object_id == frontier.c.entity_id
+                ),
+            ).cte(f"edge_{hop}")
+            degree = (
+                select(edges.c.src, func.count().label("edges"))
+                .group_by(edges.c.src)
+                .subquery(f"degree_{hop}")
+            )
+            flow = func.sum(frontier.c.mass * ppr_damping / func.greatest(degree.c.edges, 1))
+            previous = (
+                select(edges.c.dst.label("entity_id"), flow.label("mass"))
+                .select_from(
+                    edges.join(frontier, frontier.c.entity_id == edges.c.src).join(
+                        degree, degree.c.src == edges.c.src
+                    )
+                )
+                .group_by(edges.c.dst)
+                .cte(f"hop_{hop}")
+            )
+            spread.append(previous)
+        accumulated = union_all(
+            *(select(step.c.entity_id, step.c.mass) for step in spread)
+        ).subquery("spread")
+        return (
+            select(accumulated.c.entity_id, func.sum(accumulated.c.mass).label("mass"))
+            .group_by(accumulated.c.entity_id)
+            .order_by(func.sum(accumulated.c.mass).desc())
+            .limit(bindparam("graph_mass_window", type_=Integer))
+            .cte("entity_mass")
+        )
+
+    @classmethod
+    def connected(cls, mass: CTE) -> SelectStatement:
+        """The facts the accumulated mass connects, ordered by the weaker endpoint's
+        mass.
+
+        A connecting fact needs standing at both endpoints, so the score takes the
+        weaker endpoint's mass, which lets a semantically distant hop outrank dense
+        near-duplicates that merely touch one popular entity. Semantic order needs no
+        second vote here, the dense part of the merged lane already casts it.
+        """
+        subject_mass = mass.alias("subject_mass")
+        object_mass = mass.alias("object_mass")
+        connection = func.least(
+            subject_mass.c.mass,
+            func.coalesce(
+                object_mass.c.mass,
+                subject_mass.c.mass * bindparam("graph_dangling_factor", type_=Float),
+            ),
+        )
+        return (
+            select(cls.id, (-connection).label("ordering"))
+            .join(subject_mass, subject_mass.c.entity_id == cls.subject_id)
+            .outerjoin(object_mass, object_mass.c.entity_id == cls.object_id)
+            .where(cls.embedding.is_not(None))
+            .order_by(connection.desc())
+            .limit(bindparam("graph_facts_k", type_=Integer))
+        )
+
+    @classmethod
+    def __view_select__(cls) -> SelectStatement:
+        return (
+            select(
                 FactClaim.id.label("id"),
                 FactClaim.content_id.label("content_id"),
                 FactContent.subject_id.label("subject_id"),
                 FactContent.object_id.label("object_id"),
+            )
+            .add_columns(
                 FactContent.predicate.label("predicate"),
                 FactContent.statement.label("statement"),
                 FactContent.embedding.label("embedding"),

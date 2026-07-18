@@ -12,7 +12,7 @@ from sqlalchemy import delete
 from sqlmodel import select
 
 from ..config import settings
-from ..serving.embed import embed
+from ..serving.embed import EmbedClient
 from ..serving.extract import LLM
 from ..store import Community, Entity, Fact
 from ..store.identity import User
@@ -79,9 +79,9 @@ class CommunityBuilder:
 
     async def rows(self, clusters: list[set[UUID5]]) -> list[Community]:
         """Build all summary rows before the generation replacement begins."""
-        llm = LLM.configured()
+        llm = LLM.from_settings(settings)
         reports: list[CommunitySummary] = []
-        with span("community_summaries", memory=True):
+        with span("community_summaries"):
             for group in batched(clusters, settings.community_build_concurrency, strict=False):
                 reports.extend(
                     await asyncio.gather(
@@ -95,9 +95,11 @@ class CommunityBuilder:
                         )
                     )
                 )
-        with span("community_embeddings", memory=True):
+        with span("community_embeddings"):
             vectors = (
-                await embed([report.summary for report in reports], mode="document")
+                await EmbedClient.from_settings(settings).embed(
+                    [report.summary for report in reports], mode="document"
+                )
                 if reports
                 else []
             )
@@ -120,7 +122,7 @@ async def build_communities(
     """Detect communities over the entity graph, summarize each, store the rows, return the
     count."""
     key = frozenset(scopes or (settings.system_user_id,))
-    with span("community_snapshot", memory=True):
+    with span("community_snapshot"):
         async with User.system(key) as session:
             facts = [
                 CommunityFact.model_validate(row, from_attributes=True)
@@ -144,10 +146,10 @@ async def build_communities(
                     )
                 )
             }
-    with span("community_detection", memory=True):
+    with span("community_detection"):
         clusters = detect(facts, settings.community_min_size, settings.community_backend)
     rows = await CommunityBuilder(key, entities, facts).rows(clusters)
-    with span("community_replacement", memory=True):
+    with span("community_replacement"):
         async with User.system(key) as session:
             await session.exec(
                 delete(Community)

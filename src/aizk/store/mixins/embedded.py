@@ -1,20 +1,16 @@
-from typing import ClassVar, cast
-
 from patos import sql
 from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.orm import declared_attr
-from sqlmodel import Field
 
 from ...config import settings
 
 
-class Embedded:
+class Embedded(sql.Model):
     """Nullable halfvec embedding with a cosine ANN index."""
 
-    __tablename__: ClassVar[str]
-
-    embedding: sql.Column[list[float] | None] = Field(
-        default=None, sa_type=cast(type[list[float]], sql.CosineHalfvec(settings.embed_dim))
+    embedding = sql.Field(
+        list[float] | None,
+        sa_type=sql.CosineHalfvec(settings.embed_dim),
     )
 
     @declared_attr.directive

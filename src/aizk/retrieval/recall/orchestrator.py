@@ -7,8 +7,8 @@ from pydantic.types import PositiveInt
 from ...config import settings
 from ...exceptions import OntologyNotReadyError
 from ...ontology import Ontology
-from ...serving.embed import embed
-from ...serving.gate import named_entities
+from ...serving.embed import EmbedClient
+from ...serving.gate import GateClient
 from ...store import Fact
 from ...store.identity import User
 from ..models import Candidate, Plan, QueryContext, RecallTrace
@@ -34,7 +34,7 @@ async def query_entities(query: str, user: User) -> list[str]:
     except OntologyNotReadyError:
         async with user as session:
             await Ontology.ensure(session)
-    return await named_entities(query)
+    return await GateClient.from_settings(settings).named_entities(query)
 
 
 async def recall(
@@ -104,7 +104,7 @@ async def _execute(
         _speaker_query_template.format(query=query, label=user.label) if user.label else query
     )
     embedded, named = await asyncio.gather(
-        embed([search_query], mode="query"),
+        EmbedClient.from_settings(settings).embed([search_query], mode="query"),
         query_entities(query, user),
     )
     [vector] = embedded

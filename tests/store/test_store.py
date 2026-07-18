@@ -102,7 +102,7 @@ def test_session_item_promotion_is_the_ordered_union_of_age_and_overflow(
             result = await session.exec(
                 SessionItem.due_for_promotion(frozenset({owner}), age_minutes, threshold)
             )
-            due = [item.id for item in result.scalars()]
+            due = [item.id for item in result]
         return due, expected
 
     due, expected = dbutil.run(body())

@@ -1,19 +1,26 @@
-from sqlalchemy.schema import ExecutableDDLElement
+from collections.abc import Mapping
+
+from sqlalchemy import MetaData
 from sqlalchemy.sql import Select
+from sqlalchemy.sql.ddl import CreateView as SQLAlchemyCreateView
 
 
-class CreateView(ExecutableDDLElement):
-    """Create a security-invoker PostgreSQL view from a typed select.
+# FIXME: Delete this shim after a SQLAlchemy release includes issue 13432.
+class CreateView(SQLAlchemyCreateView):
+    """Backport PostgreSQL options onto SQLAlchemy 2.1's native view object.
 
-    SQLAlchemy 2.1 ships a native `CreateView`, but as of 2.1.0b3 it cannot express this
-    statement. Its `visit_create_view` renders no view options at all and the postgresql
-    dialect declares no construct arguments for it, so `postgresql_with` keyword arguments
-    raise `ArgumentError` instead of compiling. This element stays custom until the native
-    construct can emit `WITH (security_invoker = true)`.
+    SQLAlchemy main supports this after issue 13432, but 2.1.0b3 predates that merge.
+    The subclass keeps the upstream constructor and table mapping while adding only the
+    missing option payload. Delete it when the next 2.1 release includes the upstream fix.
     """
 
-    inherit_cache = False
-
-    def __init__(self, name: str, select: Select) -> None:
-        self.name = name
-        self.select = select
+    def __init__(
+        self,
+        selectable: Select,
+        view_name: str,
+        *,
+        metadata: MetaData | None = None,
+        postgresql_with: Mapping[str, str | bool | None] | None = None,
+    ) -> None:
+        self.postgresql_with = dict(postgresql_with or {})
+        super().__init__(selectable, view_name, metadata=metadata)

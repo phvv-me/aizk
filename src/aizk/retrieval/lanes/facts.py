@@ -1,20 +1,10 @@
-from patos import sql
-from sqlalchemy import (
-    ColumnElement,
-    Float,
-    Integer,
-    bindparam,
-    func,
-    select,
-    union,
-    union_all,
-)
+from sqlalchemy import Integer, bindparam, func, union_all
 from sqlalchemy.orm import aliased
-from sqlalchemy.sql.selectable import CTE, Select
+from sqlalchemy.sql.selectable import Select
+from sqlmodel import select
 
-from ...store import Chunk, Document, Fact
+from ...store import Chunk, Document, Entity, Fact
 from ..models.lane import Lane, QueryContext
-from .graph import endpoint_selects, multihop_part
 
 
 class FactLane(Lane):
@@ -30,11 +20,18 @@ class FactLane(Lane):
     hops: int = 0
 
     def __call__(self, context: QueryContext) -> Select:
-        """The fact candidates: dense seeds, neighbors, and the optional graph walk."""
-        dense_facts = dense_fact_cte(context)
-        parts = [seed_part(dense_facts), neighbor_part(dense_facts, context)]
+        """The fact candidates: dense seeds, neighbors, and the optional graph walk.
+
+        The walk is the personalized PageRank expansion: mention-seeded mass diffuses a
+        bounded number of degree-normalized hops and the weaker endpoint's accumulated
+        mass orders each connecting fact.
+        """
+        dense_facts = Fact.Live.dense(context)
+        seed_part = select(dense_facts.c.id, dense_facts.c.blended.label("ordering"))
+        parts: list[Select] = [seed_part, Fact.Live.neighbors(dense_facts, context)]
         if self.hops:
-            parts.append(multihop_part(dense_facts, context, self.hops))
+            seeds = Entity.seed_mass(dense_facts, context)
+            parts.append(Fact.Live.connected(Fact.Live.diffused(seeds, self.hops)))
         return self.merged(parts, context)
 
     def merged(self, parts: list[Select], context: QueryContext) -> Select:
@@ -56,12 +53,13 @@ class FactLane(Lane):
         )
         statement_candidates = (
             select(
-                ranked_candidates,
+                ranked_candidates.c.id,
+                ranked_candidates.c.rank,
                 func.row_number()
                 .over(
                     partition_by=(
                         Fact.Live.perspective_key,
-                        func.lower(Fact.Live.statement),
+                        Fact.Live.statement.lower(),
                     ),
                     order_by=(ranked_candidates.c.rank, ranked_candidates.c.id),
                 )
@@ -89,6 +87,8 @@ class FactLane(Lane):
                 source_chunk_id=Fact.Live.source_chunk_id,
                 source_title=fact_document.title,
                 source_uri=fact_document.source_uri,
+                artifact_id=fact_document.artifact_id,
+                artifact_content_id=fact_document.artifact_content_id,
                 created_by=Fact.Live.created_by,
             )
             .select_from(fact_candidates)
@@ -96,91 +96,3 @@ class FactLane(Lane):
             .outerjoin(fact_source, fact_source.id == Fact.Live.source_chunk_id)
             .outerjoin(fact_document, fact_document.id == fact_source.document_id)
         )
-
-
-def half_life_decay(
-    age_days: ColumnElement[float], half_life_days: ColumnElement[float]
-) -> ColumnElement[float]:
-    """Exponential forgetting-curve retention, one half per half-life: 0.5 ** (age / T)."""
-    return func.power(0.5, age_days / half_life_days)
-
-
-def log_frequency(access_count: ColumnElement[int]) -> ColumnElement[float]:
-    """Diminishing-returns access signal, ln(1 + count)."""
-    return func.ln(1 + access_count)
-
-
-def dense_fact_cte(context: QueryContext) -> CTE:
-    """Dense fact seeds under the floor, ordered by distance with access recency and
-    frequency blended in.
-
-    The materialized content cut isolates the vector index scan; live_fact then supplies
-    visibility and access history in one join.
-    """
-    fact_distance = Fact.Content.embedding @ context.vector
-    dense_fact_content = (
-        select(
-            Fact.Content.id,
-            Fact.Content.subject_id,
-            Fact.Content.object_id,
-            fact_distance.label("distance"),
-        )
-        .where(Fact.Content.embedding.is_not(None), fact_distance < context.floor)
-        .order_by(fact_distance)
-        .limit(context.fusion_depth)
-        .cte("dense_fact_content")
-        # prefix_with is SQLAlchemy's supported spelling for a MATERIALIZED CTE.
-        .prefix_with("MATERIALIZED")
-    )
-    last_seen = func.coalesce(Fact.Live.last_accessed, func.lower(Fact.Live.recorded))
-    blended = (
-        dense_fact_content.c.distance
-        - bindparam("recall_recency_weight", type_=Float)
-        * half_life_decay(
-            sql.days_since(last_seen), bindparam("recall_recency_half_life_days", type_=Float)
-        )
-        - bindparam("recall_frequency_weight", type_=Float) * log_frequency(Fact.Live.access_count)
-    )
-    return (
-        select(
-            Fact.Live.id,
-            dense_fact_content.c.subject_id,
-            dense_fact_content.c.object_id,
-            dense_fact_content.c.distance,
-            blended.label("blended"),
-        )
-        .join(dense_fact_content, dense_fact_content.c.id == Fact.Live.content_id)
-        .order_by(blended)
-        .limit(context.k)
-        .cte("dense_fact")
-    )
-
-
-def seed_part(dense_facts: CTE) -> Select:
-    """The dense seeds as one fact part, ranked by their blended order."""
-    return select(dense_facts.c.id, dense_facts.c.blended.label("ordering"))
-
-
-def neighbor_part(dense_facts: CTE, context: QueryContext) -> Select:
-    """One-hop graph neighbors of the dense seeds as one fact part, ranked by distance.
-
-    Each endpoint side joins the seeds through its own index; an OR across both endpoints
-    would fall back to scanning every fact.
-    """
-    seed_entities = union(*endpoint_selects(dense_facts)).cte("seed_entity")
-    live_distance = Fact.Live.embedding @ context.vector
-    neighbor_sides = [
-        select(Fact.Live.id, live_distance.label("ordering"))
-        .join(seed_entities, endpoint == seed_entities.c.entity_id)
-        .where(
-            Fact.Live.embedding.is_not(None),
-            Fact.Live.id.not_in(select(dense_facts.c.id)),
-        )
-        for endpoint in (Fact.Live.subject_id, Fact.Live.object_id)
-    ]
-    neighbor_touch = union(*neighbor_sides).subquery("neighbor_touch")
-    return (
-        select(neighbor_touch.c.id, neighbor_touch.c.ordering)
-        .order_by(neighbor_touch.c.ordering)
-        .limit(context.k)
-    )

@@ -1,16 +1,17 @@
 import abc
 
 from loguru import logger
+from patos import FrozenFlexModel
 
-from ..config import settings
+from ..config import Settings, settings
 from ..ontology import Ontology, System, WireExtraction
 from ..serving.chunk import chunk_text
-from ..serving.extract import LLM, GLiNER, GraphResponse, Relation, Span
+from ..serving.extract import LLM, GraphBackend, GraphResponse, Relation, Span
 from .dates import resolve_valid_from
 from .models import ExtractedEntity, Extraction, TimedFact
 
 
-class Extractor(abc.ABC):
+class Extractor(FrozenFlexModel, abc.ABC):
     """Ontology-constrained graph extractor selected by configuration."""
 
     @property
@@ -23,20 +24,17 @@ class Extractor(abc.ABC):
         """Extract entities and dated facts from one source span."""
 
     @classmethod
-    def configured(cls) -> Extractor:
-        """Build the extraction implementation selected in settings."""
-        if settings.extract_backend == "gliner":
-            return GLiNERExtractor()
-        return LLMExtractor()
+    def configured(cls, config: Settings, llm: LLM, gliner: GraphBackend) -> Extractor:
+        """Build the backend selected in settings over the runtime's shared clients."""
+        if config.extract_backend == "gliner":
+            return GLiNERExtractor(gliner=gliner)
+        return LLMExtractor(llm=llm)
 
 
 class LLMExtractor(Extractor):
     """Generate one rich graph slice through a schema-constrained LLM."""
 
-    __slots__ = ("llm",)
-
-    def __init__(self, llm: LLM | None = None) -> None:
-        self.llm = llm or LLM.configured()
+    llm: LLM
 
     @property
     def requires_gate(self) -> bool:
@@ -102,10 +100,7 @@ class LLMExtractor(Extractor):
 class GLiNERExtractor(Extractor):
     """Build a grounded graph slice from GLiNER entities and relations."""
 
-    __slots__ = ("gliner",)
-
-    def __init__(self, gliner: GLiNER | None = None) -> None:
-        self.gliner = gliner or GLiNER.configured()
+    gliner: GraphBackend
 
     @staticmethod
     def _excerpt(text: str, head: Span, tail: Span) -> str:

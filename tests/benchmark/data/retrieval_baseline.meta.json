@@ -1,0 +1,13 @@
+{
+  "arms": [
+    "focused",
+    "maximal",
+    "maximal_without_communities",
+    "maximal_without_profiles",
+    "maximal_without_raptor"
+  ],
+  "corpus_sha256": "0567433fdfd50704112a0bd90f5a8007a3d7bab8fb8e413a5a2f0ad6d26208c0",
+  "judge_model": "extractor",
+  "k": 8,
+  "schema": 1
+}

@@ -1,10 +1,7 @@
-from typing import cast
-
 from loguru import logger
 from sqlalchemy import func, update
-from sqlalchemy.engine import Result
 
-from ..background.queue import enqueue_pending
+from ..background.jobs.projection import enqueue_pending
 from ..config import settings
 from ..extract.ingest import TextSource, ingest_texts
 from ..provenance import CaptureContext
@@ -16,17 +13,14 @@ from ..types import Scopes
 async def due_working_items(scopes: Scopes) -> list[SessionItem]:
     """The aged and overflow working items in one exact scope set, decided in the database."""
     async with User.system(scopes) as session:
-        result = cast(
-            "Result[SessionItem]",
-            await session.exec(
-                SessionItem.due_for_promotion(
-                    scopes,
-                    settings.session_promote_age_minutes,
-                    settings.session_promote_threshold,
-                )
-            ),
+        result = await session.exec(
+            SessionItem.due_for_promotion(
+                scopes,
+                settings.session_promote_age_minutes,
+                settings.session_promote_threshold,
+            )
         )
-        return list(result.scalars())
+        return list(result)
 
 
 async def mark_promoted(scopes: Scopes, due: list[SessionItem]) -> None:

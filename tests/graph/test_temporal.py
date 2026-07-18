@@ -5,7 +5,6 @@ import pytest
 import seedgraph
 from hypothesis import given
 from id_factory import uuid5
-from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import Range
 from sqlmodel import select
 from strategies import TemporalState, fact_timeline, temporal_states
@@ -133,8 +132,7 @@ def test_skip_live_gate_reveals_the_full_history() -> None:
             )
             await seedgraph.add_fact(session, owner, subject, statement="current")
         base = (
-            select(func.count())
-            .select_from(Fact.Claim)
+            select(Fact.Claim.id.count())
             .join(Fact.Content, Fact.Content.id == Fact.Claim.content_id)
             .where(Fact.Content.subject_id == subject)
         )

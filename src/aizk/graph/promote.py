@@ -8,7 +8,7 @@ from sqlalchemy.orm import QueryableAttribute, selectinload
 from sqlmodel import select
 
 from ..exceptions import NotVisibleError
-from ..store import Chunk, Document, Fact
+from ..store import Artifact, Chunk, Document, Fact
 from ..store.engine import Session
 from ..store.identity import User
 from ..types import Scopes
@@ -112,6 +112,9 @@ async def promote(document_ids: Collection[UUID7], scopes: Scopes, user: User) -
             facts = await source_live_facts(session, chunks)
             promoted_id = uuid.uuid7()
             copies = copied_chunks(chunks, promoted_id, user.id, target)
+            artifact_id, artifact_content_id = await Artifact.share(
+                session, source, user.id, target
+            )
             session.add(
                 Document(
                     id=promoted_id,
@@ -120,6 +123,8 @@ async def promote(document_ids: Collection[UUID7], scopes: Scopes, user: User) -
                     source_uri=source.source_uri,
                     observed_at=source.observed_at,
                     expires_at=source.expires_at,
+                    artifact_id=artifact_id,
+                    artifact_content_id=artifact_content_id,
                     content_hash=source.content_hash,
                     created_by=user.id,
                     scopes=target,

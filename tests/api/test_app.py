@@ -1,0 +1,671 @@
+from collections.abc import AsyncIterator, Mapping
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
+
+import dbutil
+import httpx
+import pytest
+from id_factory import uuid5, uuid7
+from obstore.exceptions import PermissionDeniedError
+from starlette.routing import Route
+
+import aizk.api.app as app_module
+from aizk.api.app import AizkAPI
+from aizk.api.artifacts import ArtifactDashboard
+from aizk.api.dashboard import Dashboard
+from aizk.api.organizations import OrganizationDirectory, OrganizationView
+from aizk.artifacts.models import ArtifactReceipt
+from aizk.artifacts.service import ArtifactIntake
+from aizk.artifacts.uploads import InertIntake, UploadBox
+from aizk.auth import Auth, Caller
+from aizk.config import settings
+from aizk.exceptions import ScopeNotFoundError
+from aizk.integrations.clamav import MalwareRejectedError, MalwareUnavailableError
+from aizk.integrations.docling import ArtifactBytes
+from aizk.integrations.logto import LogtoClient, OrganizationChange
+from aizk.memory import WriteResult
+from aizk.store import Artifact
+from aizk.store.identity import OrganizationStanding, User
+
+pytestmark = pytest.mark.usefixtures("migrated_db")
+
+# Every route except the capability PUT, whose single-use grant is its own authorization.
+_PROTECTED = (
+    ("GET", "/api/me", "/api/me"),
+    ("GET", "/api/overview", "/api/overview"),
+    ("POST", "/api/recall", "/api/recall"),
+    ("POST", "/api/remember", "/api/remember"),
+    ("POST", "/api/uploads", "/api/uploads"),
+    ("GET", "/api/organizations", "/api/organizations"),
+    ("POST", "/api/organizations", "/api/organizations"),
+    ("POST", "/api/organizations/{name}/members", "/api/organizations/Lab/members"),
+    (
+        "PUT",
+        "/api/organizations/{name}/members/{member_id}",
+        "/api/organizations/Lab/members/member-1",
+    ),
+    (
+        "DELETE",
+        "/api/organizations/{name}/members/{member_id}",
+        "/api/organizations/Lab/members/member-1",
+    ),
+)
+
+
+def verified(user: User | None = None) -> Caller:
+    """Build the caller a valid Logto bearer token would resolve to."""
+    return Caller(subject="user-1", user=user or User.private(uuid5()))
+
+
+class RecordingIntake:
+    """Record accepted uploads and reply with one scripted receipt or failure."""
+
+    def __init__(self, outcome: ArtifactReceipt | Exception) -> None:
+        self.outcome = outcome
+        self.accepted: list[ArtifactBytes] = []
+
+    async def accept(
+        self,
+        user: User,
+        artifact: ArtifactBytes,
+        *,
+        scopes: list[str] | None = None,
+        companion_text: str | None = None,
+    ) -> ArtifactReceipt:
+        del user, scopes, companion_text
+        self.accepted.append(artifact)
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return self.outcome
+
+
+def box(
+    intake: RecordingIntake | None = None,
+    live_grants_per_caller: int | None = None,
+) -> UploadBox:
+    """Build one capability store over a recording or inert intake."""
+    built = UploadBox(
+        intake=cast("ArtifactIntake", intake if intake is not None else InertIntake()),
+        ttl_seconds=60,
+    )
+    if live_grants_per_caller is None:
+        return built
+    return built.model_copy(update={"live_grants_per_caller": live_grants_per_caller})
+
+
+def api(uploads: UploadBox | None = None) -> AizkAPI:
+    """Build one API service over an inert memory intake."""
+    return AizkAPI(
+        Auth(),
+        uploads if uploads is not None else box(),
+        cast("ArtifactIntake", InertIntake()),
+    )
+
+
+def service_as(
+    monkeypatch: pytest.MonkeyPatch, who: Caller | None, uploads: UploadBox | None = None
+) -> AizkAPI:
+    """Build one isolated API service whose bearer verification returns `who`."""
+    built = api(uploads)
+    monkeypatch.setattr(built.auth, "bearer", AsyncMock(return_value=who))
+    return built
+
+
+def call(
+    service: AizkAPI,
+    method: str,
+    path: str,
+    json: Mapping[str, str | int | list[str] | bool] | None = None,
+    content: bytes | None = None,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """Drive one request through the assembled ASGI application."""
+
+    async def drive() -> httpx.Response:
+        transport = httpx.ASGITransport(app=service.app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as client:
+            return await client.request(method, path, json=json, content=content, headers=headers)
+
+    return dbutil.run(drive())
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [(method, path) for method, _, path in _PROTECTED],
+)
+def test_every_authenticated_route_rejects_an_unverified_bearer(
+    monkeypatch: pytest.MonkeyPatch, method: str, path: str
+) -> None:
+    response = call(service_as(monkeypatch, None), method, path)
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "a valid Logto bearer token is required"}
+
+
+def test_the_protected_route_list_covers_every_registered_surface() -> None:
+    routes = api().app().routes
+    exposed = {
+        (method, route.path)
+        for route in routes
+        if isinstance(route, Route) and route.methods is not None
+        for method in route.methods - {"HEAD", "OPTIONS"}
+    }
+
+    assert exposed == {(method, template) for method, template, _ in _PROTECTED} | {
+        ("PUT", "/api/uploads/{capability}")
+    }
+
+
+def test_bearer_verification_receives_only_bearer_scheme_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bearer = AsyncMock(return_value=None)
+    service = api()
+    monkeypatch.setattr(service.auth, "bearer", bearer)
+
+    first = call(service, "GET", "/api/me", headers={"Authorization": "Bearer abc"})
+    second = call(service, "GET", "/api/overview", headers={"Authorization": "Basic abc"})
+    third = call(service, "POST", "/api/recall")
+
+    assert (first.status_code, second.status_code, third.status_code) == (401, 401, 401)
+    assert [request.args for request in bearer.await_args_list] == [("abc",), ("",), ("",)]
+
+
+def test_me_returns_the_label_and_exact_organization_standing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner, shared = uuid5(), uuid5()
+    user = User.authorized(
+        owner,
+        read=(owner, shared),
+        write=(owner, shared),
+        name="Pedro Valois",
+        organizations=(
+            OrganizationStanding(
+                id=shared,
+                name="Lab",
+                description="Shared experiments",
+                roles=("editor",),
+                permissions=("write:memory",),
+            ),
+        ),
+    )
+
+    response = call(service_as(monkeypatch, verified(user)), "GET", "/api/me")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "label": "Pedro Valois",
+        "organizations": [
+            {
+                "name": "Lab",
+                "description": "Shared experiments",
+                "roles": ["editor"],
+                "permissions": ["write:memory"],
+                "writable": True,
+                "public": False,
+            }
+        ],
+    }
+
+
+def test_overview_merges_knowledge_usage_sources_and_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    who = verified()
+    dashboard = AsyncMock(return_value=Dashboard())
+    artifacts = AsyncMock(return_value=ArtifactDashboard())
+    monkeypatch.setattr(app_module.Dashboard, "load", dashboard)
+    monkeypatch.setattr(app_module.ArtifactDashboard, "load", artifacts)
+
+    response = call(service_as(monkeypatch, who), "GET", "/api/overview")
+
+    assert response.status_code == 200
+    assert set(response.json()) == {"totals", "usage", "recent_sources", "artifacts"}
+    assert dashboard.await_args is not None and dashboard.await_args.args == (who.user,)
+    assert artifacts.await_args is not None and artifacts.await_args.args == (who.user,)
+
+
+@pytest.mark.parametrize("budget", [512, None], ids=["explicit", "default"])
+def test_recall_forwards_the_query_budget_and_caller(
+    monkeypatch: pytest.MonkeyPatch, budget: int | None
+) -> None:
+    who = verified()
+    seen: dict[str, User | str | int] = {}
+
+    class FakeMemory:
+        def __init__(self, *, user: User, intake: ArtifactIntake) -> None:
+            del intake
+            seen["user"] = user
+
+        async def recall(self, query: str, budget: int) -> SimpleNamespace:
+            seen["query"], seen["budget"] = query, budget
+
+            async def to_markdown() -> str:
+                return "## Evidence"
+
+            return SimpleNamespace(to_markdown=to_markdown)
+
+    monkeypatch.setattr(app_module, "Memory", FakeMemory)
+    body: dict[str, str | int] = {"query": "  what holds  "}
+    if budget is not None:
+        body["budget"] = budget
+
+    response = call(service_as(monkeypatch, who), "POST", "/api/recall", json=body)
+
+    assert response.status_code == 200
+    assert response.json() == {"markdown": "## Evidence"}
+    assert seen == {
+        "user": who.user,
+        "query": "what holds",
+        "budget": budget or settings.context_token_budget,
+    }
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"not json", b'{"query": ""}'],
+    ids=["malformed", "blank-query"],
+)
+def test_invalid_json_bodies_are_unprocessable(
+    monkeypatch: pytest.MonkeyPatch, content: bytes
+) -> None:
+    response = call(service_as(monkeypatch, verified()), "POST", "/api/recall", content=content)
+
+    assert response.status_code == 422
+    assert "detail" in response.json()
+
+
+def test_remember_forwards_the_write_and_returns_its_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    who = verified()
+    document_id = uuid7()
+    seen: dict[str, User | str | list[str] | bool | None] = {}
+
+    class FakeMemory:
+        def __init__(self, *, user: User, intake: ArtifactIntake) -> None:
+            del intake
+            seen["user"] = user
+
+        async def remember(
+            self,
+            text: str | None,
+            *,
+            source_uri: str | None = None,
+            scopes: list[str] | None = None,
+            preserve_source: bool = False,
+        ) -> WriteResult:
+            seen.update(text=text, source_uri=source_uri, scopes=scopes, preserve=preserve_source)
+            return WriteResult(id=document_id)
+
+    monkeypatch.setattr(app_module, "Memory", FakeMemory)
+
+    response = call(
+        service_as(monkeypatch, who),
+        "POST",
+        "/api/remember",
+        json={"text": "A durable note", "scopes": ["Lab"], "preserve_source": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"id": str(document_id)}
+    assert seen == {
+        "user": who.user,
+        "text": "A durable note",
+        "source_uri": None,
+        "scopes": ["Lab"],
+        "preserve": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("failure", "status", "detail"),
+    [
+        (
+            ValueError("remember requires text or a source URI"),
+            400,
+            "remember requires text or a source URI",
+        ),
+        (
+            ScopeNotFoundError("no writable scope named 'Lab'"),
+            403,
+            "no writable scope named 'Lab'",
+        ),
+        (
+            PermissionError("organization administration is not permitted"),
+            403,
+            "organization administration is not permitted",
+        ),
+        (
+            MalwareRejectedError("Win.Test.EICAR_HDB-1 found in stream"),
+            422,
+            "the source was rejected by the safety scan",
+        ),
+        (
+            MalwareUnavailableError("clamd refused the connection at clamav:3310"),
+            503,
+            "safety scanning is temporarily unavailable",
+        ),
+        (
+            PermissionDeniedError("Generic S3 error: ... 403 Forbidden"),
+            503,
+            "object storage is temporarily unavailable",
+        ),
+        (
+            httpx.ConnectError("[Errno -2] Name or service not known"),
+            502,
+            "an upstream request could not be completed",
+        ),
+    ],
+)
+def test_expected_domain_failures_map_to_stable_sanitized_details(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception, status: int, detail: str
+) -> None:
+    class FakeMemory:
+        def __init__(self, *, user: User, intake: ArtifactIntake) -> None:
+            del user, intake
+
+        async def remember(
+            self,
+            text: str | None,
+            *,
+            source_uri: str | None = None,
+            scopes: list[str] | None = None,
+            preserve_source: bool = False,
+        ) -> WriteResult:
+            raise failure
+
+    monkeypatch.setattr(app_module, "Memory", FakeMemory)
+
+    response = call(
+        service_as(monkeypatch, verified()),
+        "POST",
+        "/api/remember",
+        json={"text": "note"},
+    )
+
+    assert response.status_code == status
+    assert response.json() == {"detail": detail}
+
+
+@pytest.mark.parametrize(
+    ("path", "body", "field"),
+    [
+        ("/api/recall", {"query": "x" * 20}, "query"),
+        ("/api/recall", {"query": "what", "budget": 10_000_000}, "budget"),
+        ("/api/remember", {"text": "x" * 20}, "text"),
+        ("/api/remember", {"text": "note", "source_uri": "u" * 20}, "source_uri"),
+        ("/api/remember", {"text": "note", "scopes": ["A", "B", "C"]}, "scopes"),
+    ],
+)
+def test_request_models_enforce_the_deployment_bounds_at_validation_time(
+    monkeypatch: pytest.MonkeyPatch, path: str, body: dict, field: str
+) -> None:
+    monkeypatch.setattr(settings, "mcp_recall_query_max_chars", 10)
+    monkeypatch.setattr(settings, "mcp_remember_max_chars", 10)
+    monkeypatch.setattr(settings, "mcp_source_uri_max_chars", 10)
+    monkeypatch.setattr(settings, "mcp_scope_names_max", 2)
+
+    response = call(service_as(monkeypatch, verified()), "POST", path, json=body)
+
+    assert response.status_code == 422
+    assert field in response.json()["detail"]
+
+
+def test_status_mapping_rejects_an_unexpected_failure_family() -> None:
+    with pytest.raises(TypeError, match="unsupported API failure"):
+        AizkAPI.status_for(RuntimeError("not a domain failure"))
+
+
+def test_upload_capability_is_minted_with_auth_and_redeemed_without_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = ArtifactReceipt(
+        artifact_id=uuid7(),
+        content_id=uuid7(),
+        state=Artifact.Content.State.queued,
+    )
+    intake = RecordingIntake(receipt)
+    minting = api()
+    monkeypatch.setattr(minting.auth, "bearer", AsyncMock(return_value=verified()))
+    # An independent store on the receiving service proves the grant crosses processes
+    # through PostgreSQL rather than through shared interpreter state.
+    receiving = api(box(intake))
+    monkeypatch.setattr(receiving.auth, "bearer", AsyncMock(return_value=None))
+
+    grant = call(
+        minting,
+        "POST",
+        "/api/uploads",
+        json={"filename": "paper.pdf", "media_type": "application/pdf", "size": 4},
+    )
+    assert grant.status_code == 200
+    assert set(grant.json()) == {"url", "expires_seconds"}
+    path = httpx.URL(grant.json()["url"]).path
+
+    first = call(receiving, "PUT", path, content=b"data")
+    replay = call(receiving, "PUT", path, content=b"data")
+
+    assert first.status_code == 200
+    assert first.json() == {
+        "artifact_id": str(receipt.artifact_id),
+        "content_id": str(receipt.content_id),
+        "state": "queued",
+    }
+    assert [artifact.content for artifact in intake.accepted] == [b"data"]
+    assert replay.status_code == 410
+
+
+def test_upload_put_enforces_the_declared_byte_budget_and_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    intake = RecordingIntake(MalwareRejectedError("infected"))
+    service = service_as(monkeypatch, verified(), uploads=box(intake))
+
+    def minted_path() -> str:
+        grant = call(
+            service,
+            "POST",
+            "/api/uploads",
+            json={"filename": "paper.pdf", "media_type": "application/pdf", "size": 4},
+        )
+        return httpx.URL(grant.json()["url"]).path
+
+    oversize = call(service, "PUT", minted_path(), content=b"12345")
+    short = call(service, "PUT", minted_path(), content=b"da")
+    unknown = call(service, "PUT", "/api/uploads/unknown", content=b"data")
+    infected = call(service, "PUT", minted_path(), content=b"data")
+
+    assert oversize.status_code == 413
+    assert short.status_code == 400
+    assert short.json() == {"detail": "the upload does not match its declared byte size"}
+    assert unknown.status_code == 410
+    assert infected.status_code == 422
+    assert infected.json() == {"detail": "the source was rejected by the safety scan"}
+    assert [artifact.content for artifact in intake.accepted] == [b"data"]
+
+
+def test_upload_put_maps_an_object_store_outage_to_a_stable_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    intake = RecordingIntake(PermissionDeniedError("Generic S3 error: ... 403 Forbidden"))
+    service = service_as(monkeypatch, verified(), uploads=box(intake))
+    grant = call(
+        service,
+        "POST",
+        "/api/uploads",
+        json={"filename": "paper.pdf", "media_type": "application/pdf", "size": 4},
+    )
+    path = httpx.URL(grant.json()["url"]).path
+
+    response = call(service, "PUT", path, content=b"data")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "object storage is temporarily unavailable"}
+
+
+def test_upload_minting_validates_declarations_and_write_standing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    who = verified()
+    service = service_as(monkeypatch, who)
+
+    oversize = call(
+        service,
+        "POST",
+        "/api/uploads",
+        json={
+            "filename": "paper.pdf",
+            "media_type": "application/pdf",
+            "size": settings.object_store_upload_byte_limit + 1,
+        },
+    )
+    unauthorized = call(
+        service,
+        "POST",
+        "/api/uploads",
+        json={
+            "filename": "paper.pdf",
+            "media_type": "application/pdf",
+            "size": 4,
+            "scopes": ["Lab"],
+        },
+    )
+
+    assert oversize.status_code == 422
+    assert unauthorized.status_code == 403
+    assert dbutil.run(dbutil.count_upload_grants(who.user.id)) == 0
+
+
+def test_upload_minting_returns_429_at_the_live_grant_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = api(box(live_grants_per_caller=1))
+    monkeypatch.setattr(service.auth, "bearer", AsyncMock(return_value=verified()))
+    declaration = {"filename": "paper.pdf", "media_type": "application/pdf", "size": 4}
+
+    granted = call(service, "POST", "/api/uploads", json=declaration)
+    saturated = call(service, "POST", "/api/uploads", json=declaration)
+
+    assert granted.status_code == 200
+    assert saturated.status_code == 429
+    assert saturated.json() == {
+        "detail": "too many live upload grants, wait for one to expire or be used"
+    }
+
+
+def test_json_routes_refuse_bodies_past_the_api_byte_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "mcp_remember_max_chars", 2)  # budget becomes 16 bytes
+    service = service_as(monkeypatch, verified())
+
+    declared = call(service, "POST", "/api/recall", content=b"x" * 32)
+
+    async def chunks() -> AsyncIterator[bytes]:
+        yield b"x" * 12
+        yield b"x" * 12
+
+    async def stream_without_length() -> httpx.Response:
+        transport = httpx.ASGITransport(app=service.app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as client:
+            return await client.post("/api/recall", content=chunks())
+
+    streamed = dbutil.run(stream_without_length())
+
+    assert declared.status_code == 413
+    assert declared.json() == {"detail": "the request body exceeds the API byte budget"}
+    assert streamed.status_code == 413
+    assert streamed.json() == {"detail": "the upload exceeds its declared byte budget"}
+
+
+def test_organizations_directory_loads_for_the_verified_subject(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    directory = OrganizationDirectory(
+        organizations=(OrganizationView(name="Lab", description="Shared experiments"),)
+    )
+    load = AsyncMock(return_value=directory)
+    monkeypatch.setattr(app_module.OrganizationDirectory, "load", load)
+    service = service_as(monkeypatch, verified())
+
+    response = call(service, "GET", "/api/organizations")
+
+    assert response.status_code == 200
+    assert response.json() == directory.model_dump(mode="json")
+    assert load.await_args is not None
+    assert load.await_args.args == (service.auth.client, "user-1")
+
+
+def test_organization_mutations_run_through_the_authorized_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    who = verified()
+    built: list[tuple[User, str]] = []
+    actions: list[tuple[str, ...]] = []
+
+    class FakeManager:
+        def __init__(self, client: LogtoClient, user: User, subject: str) -> None:
+            del client
+            built.append((user, subject))
+
+        async def create(self, name: str, description: str | None) -> OrganizationChange:
+            actions.append(("create", name, description or ""))
+            return OrganizationChange(organization=name)
+
+        async def add(self, name: str, email: str, role: str) -> OrganizationChange:
+            actions.append(("add", name, email, role))
+            return OrganizationChange(organization=name, member=email)
+
+        async def set_role(self, name: str, member: str, role: str) -> OrganizationChange:
+            actions.append(("set_role", name, member, role))
+            return OrganizationChange(organization=name, member=member)
+
+        async def remove(self, name: str, member: str) -> OrganizationChange:
+            actions.append(("remove", name, member))
+            return OrganizationChange(organization=name, member=member)
+
+    monkeypatch.setattr(app_module, "OrganizationManager", FakeManager)
+    service = service_as(monkeypatch, who)
+
+    created = call(
+        service, "POST", "/api/organizations", json={"name": "Lab", "description": "Shared"}
+    )
+    added = call(
+        service,
+        "POST",
+        "/api/organizations/Lab/members",
+        json={"email": "mate@lab.test", "role": "editor"},
+    )
+    changed = call(
+        service, "PUT", "/api/organizations/Lab/members/member-1", json={"role": "admin"}
+    )
+    removed = call(service, "DELETE", "/api/organizations/Lab/members/member-1")
+
+    assert created.json() == {"organization": "Lab", "member": None}
+    assert added.json() == {"organization": "Lab", "member": "mate@lab.test"}
+    assert changed.json() == {"organization": "Lab", "member": "member-1"}
+    assert removed.json() == {"organization": "Lab", "member": "member-1"}
+    assert built == [(who.user, "user-1")] * 4
+    assert actions == [
+        ("create", "Lab", "Shared"),
+        ("add", "Lab", "mate@lab.test", "editor"),
+        ("set_role", "Lab", "member-1", "admin"),
+        ("remove", "Lab", "member-1"),
+    ]
+
+
+def test_organization_administration_requires_a_matching_current_user(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = call(
+        service_as(monkeypatch, verified()),
+        "POST",
+        "/api/organizations",
+        json={"name": "Lab"},
+    )
+
+    assert response.status_code == 403
+    assert "current user" in response.json()["detail"]

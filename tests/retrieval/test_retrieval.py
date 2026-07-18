@@ -1,6 +1,7 @@
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Sequence
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
+from types import SimpleNamespace
 
 import dbutil
 import pytest
@@ -28,6 +29,8 @@ from aizk.retrieval import (
 )
 from aizk.retrieval.lanes import FactLane, VectorLane
 from aizk.retrieval.recall import build_recall_statement
+from aizk.serving.gate import GateClient
+from aizk.serving.rerank import RerankClient
 from aizk.store import (
     Chunk,
     Document,
@@ -48,6 +51,17 @@ def owner(migrated_db: None) -> Iterator[UUID5 | UUID7]:
     dbutil.run(dbutil.reset_db())
 
 
+def stub_gate(
+    monkeypatch: pytest.MonkeyPatch, named_entities: Callable[[str], Awaitable[list[str]]]
+) -> None:
+    """Route the entity gate recall makes at the client seam, keeping tests hermetic."""
+    monkeypatch.setattr(
+        GateClient,
+        "from_settings",
+        classmethod(lambda cls, config: SimpleNamespace(named_entities=named_entities)),
+    )
+
+
 @pytest.fixture
 def stub_entities(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub the entity gate call recall makes, since the client assumes a live sidecar."""
@@ -56,7 +70,7 @@ def stub_entities(monkeypatch: pytest.MonkeyPatch) -> None:
         del text
         return []
 
-    monkeypatch.setattr(recall_module, "named_entities", no_entities)
+    stub_gate(monkeypatch, no_entities)
 
 
 def basis(primary: float = 1.0, secondary: float = 0.0) -> list[float]:
@@ -648,7 +662,11 @@ def test_recall_reranks_evidence_between_the_candidate_and_packing_phases(
         reranked.append(texts)
         return [1.0 if "second seeded" in text else 0.0 for text in texts]
 
-    monkeypatch.setattr(rescore_module, "rerank", rerank)
+    monkeypatch.setattr(
+        RerankClient,
+        "from_settings",
+        classmethod(lambda cls, config: SimpleNamespace(rerank=rerank)),
+    )
 
     async def probe() -> tuple[list[Candidate], dict[UUID5 | UUID7, int]]:
         first = await seed_fact(user, "first seeded", vector)
@@ -809,7 +827,7 @@ def test_query_entity_seeding_controls_the_lowered_gate_names(
         assert text == "who uses what"
         return ["ada", "git"]
 
-    monkeypatch.setattr(recall_module, "named_entities", named)
+    stub_gate(monkeypatch, named)
     monkeypatch.setattr(settings, "graph_entity_seeding", enabled)
 
     assert dbutil.run(recall_module.query_entities("who uses what", User.system())) == expected
@@ -826,7 +844,7 @@ def test_query_entities_loads_the_ontology_in_a_fresh_process(
         return [text]
 
     monkeypatch.setattr(Ontology, "_cached", None)
-    monkeypatch.setattr(recall_module, "named_entities", named)
+    stub_gate(monkeypatch, named)
 
     assert dbutil.run(recall_module.query_entities("ada", User.system())) == ["ada"]
 

@@ -1,7 +1,6 @@
 import asyncio
 import socket
 from collections.abc import Iterator
-from importlib import import_module
 from urllib.parse import urlsplit
 
 import a_env
@@ -22,6 +21,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from aizk import ops
 from aizk.config import Settings
 from aizk.config import settings as aizk_settings
+from aizk.runtime import Runtime
+from aizk.serving.embed import EmbedClient
+from aizk.serving.rerank import RerankClient
 
 # a_env configures the isolated database before Aizk imports.
 assert a_env.configured()
@@ -37,6 +39,26 @@ hypothesis_settings.register_profile(
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
 hypothesis_settings.load_profile("aizk")
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register benchmark reporting and regression-gate modes."""
+    group = parser.getgroup("aizk evaluation")
+    group.addoption(
+        "--eval-mode",
+        choices=("report", "gate"),
+        default=None,
+        help="run retrieval benchmarks in report or regression-gate mode",
+    )
+
+
+@pytest.fixture(scope="session")
+def eval_mode(pytestconfig: pytest.Config) -> str:
+    """Return the explicitly selected benchmark mode."""
+    mode = pytestconfig.getoption("--eval-mode")
+    if mode is None:
+        raise pytest.UsageError("benchmark tests require --eval-mode=report or --eval-mode=gate")
+    return str(mode)
 
 
 def _port_open(host: str | None, port: int | None, timeout: float = 0.5) -> bool:
@@ -85,8 +107,11 @@ def drop_test_database() -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def isolated_database() -> Iterator[None]:
-    """Create one migrated database per pytest process and remove it after the session."""
+def isolated_database(pytestconfig: pytest.Config) -> Iterator[None]:
+    """Create a test database unless a live-corpus benchmark was requested."""
+    if pytestconfig.getoption("--eval-mode") is not None:
+        yield
+        return
     if not DB_UP:
         yield
         return
@@ -104,6 +129,12 @@ def settings() -> Settings:
 
 
 @pytest.fixture(scope="session")
+def runtime() -> Runtime:
+    """The one per-process service graph, assembled exactly like a serving entrypoint."""
+    return Runtime.assemble(aizk_settings)
+
+
+@pytest.fixture(scope="session")
 def migrated_db() -> None:
     if not DB_UP:
         pytest.skip("aizk_test postgres not reachable")
@@ -112,24 +143,7 @@ def migrated_db() -> None:
 @pytest.fixture
 def fake_embedder(monkeypatch: pytest.MonkeyPatch) -> RecordingEmbedder:
     embedder = RecordingEmbedder()
-    for name in (
-        "aizk.admin",
-        "eval.scale",
-        "aizk.extract.ingest",
-        "aizk.graph.build",
-        "aizk.graph.communities",
-        "aizk.graph.insight",
-        "aizk.graph.profiles",
-        "aizk.graph.raptor",
-        "aizk.graph.reembed",
-        "aizk.ontology.catalog",
-        "aizk.retrieval.recall.orchestrator",
-    ):
-        module = import_module(name)
-        monkeypatch.setattr(module, "embed", embedder.embed)
-    monkeypatch.setattr(
-        import_module("aizk.extract.ingest"), "embed_images", embedder.embed_images
-    )
+    monkeypatch.setattr(EmbedClient, "from_settings", classmethod(lambda cls, config: embedder))
     return embedder
 
 
@@ -138,12 +152,15 @@ def fake_reranker(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Score every rerank call neutrally and record the texts each call saw."""
     calls: list[list[str]] = []
 
-    async def rerank(query: str, texts: list[str]) -> list[float]:
-        del query
-        calls.append(texts)
-        return [0.0] * len(texts)
+    class NeutralReranker:
+        async def rerank(self, query: str, texts: list[str]) -> list[float]:
+            del query
+            calls.append(texts)
+            return [0.0] * len(texts)
 
-    monkeypatch.setattr(import_module("aizk.retrieval.rerank.rescore"), "rerank", rerank)
+    monkeypatch.setattr(
+        RerankClient, "from_settings", classmethod(lambda cls, config: NeutralReranker())
+    )
     return calls
 
 

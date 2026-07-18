@@ -1,0 +1,31 @@
+:8081 {
+	encode zstd gzip
+
+	@mcp path /mcp /mcp/* /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource/mcp /authorize /token /register /auth/callback /consent
+	handle @mcp {
+		reverse_proxy server:8080
+	}
+
+	@upload {
+		method PUT
+		path /api/uploads/*
+	}
+	handle @upload {
+		reverse_proxy api:8010
+	}
+
+	@api path /api /api/*
+	handle @api {
+		respond 404
+	}
+
+	header {
+		Referrer-Policy same-origin
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

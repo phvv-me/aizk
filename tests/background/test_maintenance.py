@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from bg_doubles import RecordingPg
+from bg_doubles import RecordingPg, fake_artifact_services, fake_runtime
 from doubles import AsyncContext
 from hypothesis import given
 from hypothesis import strategies as st
@@ -13,7 +13,10 @@ from pgqueuer.models import Schedule
 from sqlalchemy.sql.selectable import Select
 
 import aizk.background.jobs.maintenance as jobs_mod
+from aizk.artifacts.service import ArtifactIntake, ArtifactIntegrity
 from aizk.background.jobs.maintenance import (
+    ArtifactDispatchJob,
+    ArtifactIntegrityJob,
     BackupJob,
     CommunitiesJob,
     DecayJob,
@@ -23,7 +26,9 @@ from aizk.background.jobs.maintenance import (
     ProfileRefreshJob,
     RaptorJob,
     ScheduledJob,
+    ScopedScheduledJob,
     SessionPromoteJob,
+    SystemScheduledJob,
 )
 from aizk.config import settings
 from aizk.store import Watermark
@@ -32,13 +37,13 @@ from aizk.types import Scopes
 
 
 @given(
-    flags=st.lists(st.booleans(), min_size=9, max_size=9),
+    flags=st.lists(st.booleans(), min_size=11, max_size=11),
     cron=st.sampled_from(["0 3 * * *", "30 4 * * 0"]),
 )
 def test_job_registry_names_and_settings_are_coherent(
     flags: list[bool], cron: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    jobs = [job_type() for job_type in ScheduledJob.implementations()]
+    jobs = [job_type.assemble(fake_runtime()) for job_type in ScheduledJob.implementations()]
     assert {job.name for job in jobs} == {
         "decay",
         "dedup",
@@ -49,10 +54,13 @@ def test_job_registry_names_and_settings_are_coherent(
         "session_promote",
         "insight",
         "backup",
+        "artifact_dispatch",
+        "artifact_integrity",
     }
-    queue_names = {job.entrypoint for job in jobs}
+    scoped = [job for job in jobs if isinstance(job, ScopedScheduledJob)]
+    queue_names = {job.entrypoint for job in scoped}
     cron_names = {job.cron_entrypoint for job in jobs}
-    assert queue_names == {f"aizk_task_{job.name}" for job in jobs}
+    assert queue_names == {f"aizk_task_{job.name}" for job in scoped}
     assert cron_names == {f"aizk_cron_{job.name}" for job in jobs}
     assert queue_names.isdisjoint(cron_names)
     overrides: dict[str, bool | str] = {
@@ -78,17 +86,50 @@ def test_job_registry_names_and_settings_are_coherent(
     ],
 )
 def test_thin_passes_delegate_under_the_user(
-    monkeypatch: pytest.MonkeyPatch, job_type: type[ScheduledJob], target: str
+    monkeypatch: pytest.MonkeyPatch, job_type: type[ScopedScheduledJob], target: str
 ) -> None:
     user = uuid5()
     seen: list[Scopes] = []
 
-    async def record(*, scopes: Scopes, **kwargs: float) -> None:
+    async def record(*args: object, scopes: Scopes, **kwargs: float) -> None:
         seen.append(scopes)
 
     monkeypatch.setattr(jobs_mod, target, record)
-    asyncio.run(job_type().execute(frozenset({user})))
+    asyncio.run(job_type.assemble(fake_runtime()).execute(frozenset({user})))
     assert seen == [frozenset({user})]
+
+
+def test_artifact_dispatch_recovers_pending_originals() -> None:
+    scopes = frozenset({uuid5()})
+    calls: list[Scopes] = []
+
+    class Intake:
+        async def dispatch_pending(self, target: Scopes) -> int:
+            calls.append(target)
+            return 2
+
+    services = fake_artifact_services(intake=cast("ArtifactIntake", Intake()))
+
+    asyncio.run(ArtifactDispatchJob.assemble(fake_runtime(artifacts=services)).execute(scopes))
+
+    assert calls == [scopes]
+
+
+def test_artifact_integrity_runs_as_one_system_cron(monkeypatch: pytest.MonkeyPatch) -> None:
+    reports: list[tuple[int, int]] = []
+
+    class Integrity:
+        async def verify(self, limit: int, interval_days: int) -> SimpleNamespace:
+            reports.append((limit, interval_days))
+            return SimpleNamespace(checked=3, valid=2, failed=1)
+
+    services = fake_artifact_services(integrity=cast("ArtifactIntegrity", Integrity()))
+    runtime = fake_runtime(artifacts=services)
+    asyncio.run(ArtifactIntegrityJob.assemble(runtime).fire_cron(cast(Schedule, None)))
+
+    assert reports == [
+        (settings.artifact_integrity_batch_size, settings.artifact_integrity_interval_days)
+    ]
 
 
 class GateSession:
@@ -117,7 +158,7 @@ class GateSession:
 @given(current=st.integers(0, 400), last=st.integers(0, 400), threshold=st.integers(1, 200))
 def test_growth_gated_passes_build_only_past_the_threshold(
     monkeypatch: pytest.MonkeyPatch,
-    job_type: type[ScheduledJob],
+    job_type: type[ScopedScheduledJob],
     threshold_field: str,
     kind: Watermark.Kind,
     build_target: str,
@@ -145,7 +186,7 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     ) -> None:
         set_calls.append((watermark_kind, counter))
 
-    async def fake_build(*, scopes: Scopes) -> None:
+    async def fake_build(*args: object, scopes: Scopes) -> None:
         builds.append(scopes)
 
     monkeypatch.setattr(User, "app", property(fake_transaction))
@@ -155,7 +196,7 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     monkeypatch.setattr(settings, threshold_field, threshold)
 
     key = frozenset({user})
-    asyncio.run(job_type().execute(key))
+    asyncio.run(job_type.assemble(fake_runtime()).execute(key))
 
     should_build = current - last >= threshold
     assert (builds == [key]) is should_build
@@ -163,36 +204,32 @@ def test_growth_gated_passes_build_only_past_the_threshold(
 
 
 def test_backup_job_fire_cron_runs_the_scheduled_backup(monkeypatch: pytest.MonkeyPatch) -> None:
-    ran = []
+    ran: list[bool] = []
 
     async def fake_scheduled_backup() -> SimpleNamespace:
         ran.append(True)
         return SimpleNamespace(bytes=7, path="/backups/x.dump")
 
-    async def fail_fan_out(job: ScheduledJob) -> None:
-        raise AssertionError("a backup must never fan out across users")
-
     monkeypatch.setattr(jobs_mod, "scheduled_backup", fake_scheduled_backup)
-    asyncio.run(BackupJob().fire_cron(fail_fan_out, schedule=cast("Schedule", None)))
+    asyncio.run(BackupJob().fire_cron(cast(Schedule, None)))
     assert ran == [True]
-    with pytest.raises(NotImplementedError, match="system pass"):
-        asyncio.run(BackupJob().execute(frozenset({uuid5()})))
 
 
+@pytest.mark.parametrize("job_type", [BackupJob, ArtifactIntegrityJob])
 @pytest.mark.parametrize("enabled", [True, False])
-def test_backup_job_registers_only_the_cron_and_only_when_enabled(
-    monkeypatch: pytest.MonkeyPatch, enabled: bool
+def test_system_jobs_register_only_the_cron_and_only_when_enabled(
+    monkeypatch: pytest.MonkeyPatch, job_type: type[SystemScheduledJob], enabled: bool
 ) -> None:
-    monkeypatch.setattr(settings, "backup_enabled", enabled)
-    monkeypatch.setattr(settings, "backup_cron", "0 2 * * *")
+    monkeypatch.setattr(settings, f"{job_type.name}_enabled", enabled)
+    monkeypatch.setattr(settings, f"{job_type.name}_cron", "0 2 * * *")
     pg = RecordingPg()
 
-    async def unused_fan_out(job: ScheduledJob) -> None:
+    async def unused_fan_out(job: ScopedScheduledJob) -> None:
         pass
 
-    BackupJob().register(cast(PgQueuer, pg), fan_out=unused_fan_out)
+    job_type.assemble(fake_runtime()).register(cast(PgQueuer, pg), fan_out=unused_fan_out)
 
     assert pg.entrypoints == {}  # never a per-user entrypoint, whatever the flag
     assert len(pg.schedules) == (1 if enabled else 0)
     if enabled:
-        assert pg.schedules[0][:2] == ("aizk_cron_backup", "0 2 * * *")
+        assert pg.schedules[0][:2] == (f"aizk_cron_{job_type.name}", "0 2 * * *")

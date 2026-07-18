@@ -29,6 +29,14 @@ class Candidate(FrozenModel):
     source_uri: str | None = Field(
         default=None, description="stable originating document location"
     )
+    artifact_id: UUID7 | None = Field(
+        default=None,
+        description="stored original that may be fetched through an authorized MCP resource",
+    )
+    artifact_content_id: UUID7 | None = Field(
+        default=None,
+        description="exact stored original revision that grounded this evidence",
+    )
     created_by: UUID5 | None = Field(
         default=None, description="Logto-derived creator identity retained as provenance"
     )

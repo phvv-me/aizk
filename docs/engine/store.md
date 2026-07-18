@@ -44,6 +44,53 @@ gantt
     version 2, live                :active, 2026-05-23, 30d
 ```
 
+## Artifacts and object bytes
+
+An `Artifact` is the stable identity of one file or external URI within one exact scope set.
+`Artifact.Content` records one immutable original revision together with its companion text,
+normalized Markdown, Docling JSON, conversion details, observation time, and expiration time.
+Refreshing the same URI and scopes advances the revision without changing old evidence. The
+resulting `Document` keeps the stable artifact identity and points to the exact revision that
+grounded its text.
+
+A `Blob` represents only an original file. It stores the original UUIDv8 content fingerprint and
+size, stored size, storage encoding, opaque object key, storage version, media type, and ETag.
+Markdown, JSON, companion text, and conversion metadata stay in PostgreSQL. No generated
+derivative becomes another object. The S3-compatible object store owns original bytes, while
+forced row security on artifact metadata remains the authority for every read. Object keys are
+random and carry no filename, user, organization, source, or digest information.
+
+Object writes use Zstandard only when the encoded payload saves at least five percent by default.
+Otherwise the original representation is stored directly. Reads decode transparently, then verify
+the original size and UUIDv8 content fingerprint. The object-store client independently requests a
+SHA-256 transport checksum for uploads. Compression therefore changes physical storage cost
+without changing the logical file or its integrity identity.
+
+Each generated `Document` points to both the stable artifact and the exact original content row.
+Recall can therefore expose a compact authorized resource identifier without copying bytes into
+the evidence string. Reading that resource requires the caller to pass the same PostgreSQL policy
+that made the source visible and verifies the UUIDv8 content fingerprint before returning bytes.
+
+Converted images also receive one supplemental direct vector chunk on that exact document. The
+chunk preserves the ordinary document scope and revision boundary. Docling-derived text stays
+authoritative, while the direct vector keeps visual meaning that OCR may lose. No second Blob is
+created.
+
+Artifact processing state lives on the original content row. The normal path is `pending`,
+`queued`, `processing`, and `ready`. Conversion or integrity failures become `failed`. A scheduled
+dispatcher finds originals left pending after a process interruption and safely queues them again.
+PgQueuer deduplicates jobs by original content ID.
+
+Docling failure does not erase an accepted original. A deterministic fallback `Document` records
+the filename, original size, media type, source URI, conversion state, and companion text when one
+was supplied. This metadata source participates in text recall. It enters graph projection only
+when companion or converted content provides semantic claims worth extracting.
+
+Sharing creates destination-scoped `Artifact` and `Artifact.Content` metadata but points it at the
+same immutable `Blob`. The destination has its own RLS boundary and provenance while physical
+bytes remain deduplicated. Storage reporting therefore distinguishes logical artifact references
+from unique physical Blobs.
+
 ## The identity rule
 
 Value objects get `uuid5` and events get `uuid7`. Content is what it says, so its id derives
@@ -64,9 +111,11 @@ must come back empty.
 
 ## The SQLModel boundary
 
-SQLModel owns table entities, relationships, field constraints, ordinary selects, and the async
-session API. Normal model reads should use SQLModel `select` with `AsyncSession.exec`, which keeps
-scalar model results direct and typed. SQLAlchemy Core remains the narrow escape hatch for
+SQLModel owns table entities, relationships, field constraints, every `select` constructor, and
+the async session API. AIZK never imports or aliases SQLAlchemy's separate `select` function.
+SQLModel `select` with `AsyncSession.exec` keeps scalar model results direct and typed. Projections
+wider than SQLModel's four-column typing overload start with up to four columns and append the rest
+through `add_columns` on the same statement. SQLAlchemy Core remains the narrow escape hatch for
 PostgreSQL array and range operators, CTEs, conflict-aware bulk DML, views, migration DDL, and RLS
 expressions.
 

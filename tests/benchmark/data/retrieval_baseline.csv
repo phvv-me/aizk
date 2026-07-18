@@ -1,0 +1,11 @@
+arm,stratum,question_id,rank_first_relevant,hit_at_k,ndcg_at_k,mrr,judge,latency_ms
+focused,local,local:0000,2,1,0.63092975357145753,0.5,1,157.27114677429199
+focused,local,local:0001,1,1,1,1,1,141.31469605490565
+maximal,local,local:0000,2,1,0.63092975357145753,0.5,1,171.10437294468284
+maximal,local,local:0001,1,1,1,1,1,135.87938481941819
+maximal_without_communities,local,local:0000,2,1,0.63092975357145753,0.5,1,165.78294336795807
+maximal_without_communities,local,local:0001,1,1,1,1,1,134.53372707590461
+maximal_without_profiles,local,local:0000,1,1,1,1,1,327.30756979435682
+maximal_without_profiles,local,local:0001,1,1,1,1,1,136.89538976177573
+maximal_without_raptor,local,local:0000,2,1,0.63092975357145753,0.5,1,367.7026410587132
+maximal_without_raptor,local,local:0001,1,1,1,1,1,144.12401476874948

@@ -1,3 +1,3 @@
-from .client import GateClient, classify, named_entities, relevant
+from .client import GateClient, RelevanceGate
 
-__all__ = ["GateClient", "classify", "named_entities", "relevant"]
+__all__ = ["GateClient", "RelevanceGate"]

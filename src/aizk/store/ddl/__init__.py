@@ -1,6 +1,7 @@
+from sqlalchemy.sql.ddl import DropView
+
 from .compiler import postgresql_sql
 from .create_view import CreateView
-from .drop_view import DropView
 from .extension import CreateExtension
 from .grant import Grant
 from .grant_target import GrantTarget

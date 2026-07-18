@@ -4,7 +4,7 @@ from patos import FrozenModel
 from pydantic import UUID5, UUID7
 
 from ...config import settings
-from ...serving.rerank import rerank
+from ...serving.rerank import RerankClient
 from ..models import Candidate
 
 
@@ -31,7 +31,9 @@ async def merit_order(candidates: Sequence[Candidate], query: str) -> MeritOrder
     title the query explicitly names.
     """
     evidence = candidates[: settings.rerank_depth]
-    scores = await rerank(query, [candidate.line for candidate in evidence])
+    scores = await RerankClient.from_settings(settings).rerank(
+        query, [candidate.line for candidate in evidence]
+    )
     by_evidence = dict(zip((candidate.evidence_id for candidate in evidence), scores, strict=True))
     return MeritOrder(candidates=reordered(candidates, by_evidence), scores=by_evidence)
 

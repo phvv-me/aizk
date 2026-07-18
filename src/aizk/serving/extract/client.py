@@ -1,26 +1,44 @@
+from functools import cached_property
+from typing import Protocol, runtime_checkable
+
+from patos import FrozenFlexModel
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModelSettings
 
-from ...config import settings
+from ...config import Settings
 from ...ontology import Ontology
 from ..base import HttpService, http_client, llm_model, request_throttle
 from .models import GraphRequest, GraphResponse
 
 
-class LLM:
+class LLM(FrozenFlexModel):
     """Schema-constrained generation through the configured extraction model."""
 
-    __slots__ = ("agent",)
+    model: Model
+    temperature: float = 0.0
+    timeout: float = 300.0
+    response_max_tokens: int = 512
+    chat_template_kwargs: dict[str, bool] = {}
 
-    def __init__(self, model: Model) -> None:
-        self.agent = Agent[None, str](model, deps_type=type(None))
+    @cached_property
+    def agent(self) -> Agent[None, str]:
+        """The typed agent bound to this endpoint's model."""
+        return Agent[None, str](self.model, deps_type=type(None))
 
     @classmethod
-    def configured(cls) -> LLM:
-        """Build the service from the live extraction settings."""
-        return cls(llm_model(settings.llm_url, settings.llm_api_key, settings.llm_model))
+    def from_settings(cls, config: Settings) -> LLM:
+        """Build the service from explicit extraction settings."""
+        return cls(
+            model=llm_model(
+                config.llm_url, config.llm_api_key, config.llm_model, config.llm_timeout
+            ),
+            temperature=config.llm_temperature,
+            timeout=config.llm_timeout,
+            response_max_tokens=config.llm_response_max_tokens,
+            chat_template_kwargs=config.llm_chat_template_kwargs,
+        )
 
     async def generate[ResponseT: BaseModel](
         self,
@@ -34,14 +52,12 @@ class LLM:
     ) -> ResponseT:
         """Run one typed model turn and return its validated response."""
         model_settings = OpenAIChatModelSettings(
-            temperature=settings.llm_temperature if temperature is None else temperature,
-            timeout=settings.llm_timeout if timeout is None else timeout,
-            max_tokens=settings.llm_response_max_tokens if max_tokens is None else max_tokens,
+            temperature=self.temperature if temperature is None else temperature,
+            timeout=self.timeout if timeout is None else timeout,
+            max_tokens=self.response_max_tokens if max_tokens is None else max_tokens,
         )
-        if settings.llm_chat_template_kwargs:
-            model_settings["extra_body"] = {
-                "chat_template_kwargs": settings.llm_chat_template_kwargs
-            }
+        if self.chat_template_kwargs:
+            model_settings["extra_body"] = {"chat_template_kwargs": self.chat_template_kwargs}
         return (
             await self.agent.run(
                 user,
@@ -52,15 +68,25 @@ class LLM:
         ).output
 
 
+@runtime_checkable
+class GraphBackend(Protocol):
+    """The grounded graph extraction surface the GLiNER extractor consumes."""
+
+    async def extract(self, text: str) -> GraphResponse: ...
+
+
 class GLiNER(HttpService):
     """Schema-constrained graph extraction through the GLiNER sidecar."""
 
+    extract_threshold: float
+
     @classmethod
-    def configured(cls) -> GLiNER:
-        """Build the service from the shared GLiNER endpoint settings."""
+    def from_settings(cls, config: Settings) -> GLiNER:
+        """Build the service from explicit GLiNER endpoint settings."""
         return cls(
-            http_client(settings.gliner_url, "", settings.gliner_timeout),
-            request_throttle(settings.gliner_url, settings.gliner_concurrency),
+            client=http_client(config.gliner_url, "", config.gliner_timeout),
+            throttle=request_throttle(config.gliner_url, config.gliner_concurrency),
+            extract_threshold=config.gliner_extract_threshold,
         )
 
     async def extract(self, text: str) -> GraphResponse:
@@ -72,7 +98,7 @@ class GLiNER(HttpService):
                 text=text,
                 entity_types=ontology.entity_descriptions,
                 relation_types=ontology.relation_descriptions,
-                threshold=settings.gliner_extract_threshold,
+                threshold=self.extract_threshold,
             ),
             GraphResponse,
         )

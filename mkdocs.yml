@@ -55,6 +55,7 @@ nav:
       - Scope lattice: engine/lattice.md
   - Engine:
       - engine/index.md
+      - Architecture rules: architecture.md
       - Write path: engine/write-path.md
       - Store: engine/store.md
       - Read path: engine/read-path.md

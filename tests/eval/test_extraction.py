@@ -1,6 +1,7 @@
 from datetime import UTC, date, datetime
 
 import dbutil
+from pydantic import ConfigDict
 
 from aizk.extract.extractor import Extractor
 from aizk.extract.models import ExtractedEntity, Extraction, TimedFact
@@ -16,8 +17,9 @@ from eval.extraction import (
 
 
 class StaticExtractor(Extractor):
-    def __init__(self, extraction: Extraction | ValueError) -> None:
-        self.extraction = extraction
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    extraction: Extraction | ValueError
 
     async def extract(self, text: str) -> Extraction:
         assert text
@@ -71,7 +73,9 @@ def test_extraction_benchmark_scores_grounding_aliases_and_semantic_metadata() -
         facts=[supported, unsupported],
     )
 
-    report = dbutil.run(ExtractionBenchmark(StaticExtractor(extraction)).run([case], "model-a"))
+    report = dbutil.run(
+        ExtractionBenchmark(StaticExtractor(extraction=extraction)).run([case], "model-a")
+    )
 
     assert normalized("  AIZK\nMemory ") == "aizk memory"
     assert report.model == "model-a"
@@ -114,7 +118,9 @@ def test_extraction_reports_define_failure_and_empty_boundaries() -> None:
     case = ExtractionCase(id="bad-json", text="source", targets=(target(),))
 
     failed = dbutil.run(
-        ExtractionBenchmark(StaticExtractor(ValueError("no parsed output"))).run([case], "broken")
+        ExtractionBenchmark(StaticExtractor(extraction=ValueError("no parsed output"))).run(
+            [case], "broken"
+        )
     )
 
     assert failed.failed == 1

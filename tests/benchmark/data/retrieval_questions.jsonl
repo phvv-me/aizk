@@ -1,0 +1,2 @@
+{"question":"Who owns every task in the monorepo?","expected":["Chefe owns every task in the monorepo."],"stratum":"local","id":"local:0000"}
+{"question":"What does Logto own?","expected":["Logto owns authentication"],"stratum":"local","id":"local:0001"}

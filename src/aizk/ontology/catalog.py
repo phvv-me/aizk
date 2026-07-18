@@ -11,7 +11,7 @@ from sqlmodel import select
 from ..config import settings
 from ..exceptions import OntologyNotReadyError
 from ..extract.models import ExtractedEntity, TimedFact
-from ..serving.embed import embed
+from ..serving.embed import EmbedClient
 from ..store.engine import Session
 from ..store.models import Entity, Relation
 from .system import System
@@ -136,7 +136,9 @@ class Ontology(FrozenModel):
         )
         if not missing:
             return
-        embedded = await embed([kind.description for kind in missing], mode="document")
+        embedded = await EmbedClient.from_settings(settings).embed(
+            [kind.description for kind in missing], mode="document"
+        )
         for kind, vector in zip(missing, embedded, strict=True):
             kind.embedding = vector
         await session.flush()
@@ -150,7 +152,9 @@ class Ontology(FrozenModel):
         domain: str,
     ) -> Ontology:
         """Create or refine one entity kind and persist its description embedding."""
-        [embedding] = await embed([description], mode="document")
+        [embedding] = await EmbedClient.from_settings(settings).embed(
+            [description], mode="document"
+        )
         await session.exec(
             insert(Entity.Kind)
             .values(

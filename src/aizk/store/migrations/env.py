@@ -1,8 +1,10 @@
 import asyncio
 
 import sqlalchemy as sa
+from rls.alembic import omit_runtime_table_info
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlmodel import select
 
 # Importing the store maps models and attaches their RLS declarations.
 from aizk.store import TableBase
@@ -37,7 +39,7 @@ def do_run_migrations(connection: Connection) -> None:
     views = target_metadata.info.get("views", set())
     extension_owned = set(
         connection.execute(
-            sa.select(_pg_class.c.relname)
+            select(_pg_class.c.relname)
             .join(_pg_depend, _pg_depend.c.objid == _pg_class.c.oid)
             .join(_pg_extension, _pg_depend.c.refobjid == _pg_extension.c.oid)
             .where(_pg_depend.c.deptype == "e")
@@ -57,7 +59,12 @@ def do_run_migrations(connection: Connection) -> None:
         if type_ == "column" and reflected and compare_to is None:
             return not (name == "bm25" and object.table.name == "chunk")
         if type_ == "index" and reflected and compare_to is None:
-            return name != "ix_chunk_bm25" and object.table.name not in views
+            migration_indexes = {
+                "ix_chunk_bm25",
+                "ix_entity_content_name_lower",
+                "ix_entity_content_name_trgm",
+            }
+            return name not in migration_indexes and object.table.name not in views
         if type_ == "table" and reflected and compare_to is None and name in views:
             return False
         if type_ != "table" or not reflected or compare_to is not None:
@@ -70,6 +77,7 @@ def do_run_migrations(connection: Connection) -> None:
         include_name=include_name,
         include_object=include_object,
         autogenerate_plugins=["alembic.autogenerate.*", "rls"],
+        process_revision_directives=omit_runtime_table_info,
     )
     with context.begin_transaction():
         context.run_migrations()

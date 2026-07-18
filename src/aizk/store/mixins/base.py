@@ -1,27 +1,30 @@
-from typing import ClassVar, cast
+from typing import ClassVar
 
-import inflection
-from sqlalchemy import Table
-from sqlalchemy.dialects.postgresql.base import RESERVED_WORDS
+from patos import sql
+from sqlalchemy import Table, func
 from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import declared_attr, registry
-from sqlmodel import SQLModel
+from sqlalchemy.orm import registry
+from sqlalchemy.sql.selectable import ScalarSelect
+from sqlmodel import select
+from sqlmodel.main import SQLModelConfig
 
 type Json = bool | int | float | str | None | list["Json"] | dict[str, "Json"]
 
 _REGISTRY = registry()
 
 
-class MappedBase(SQLModel, registry=_REGISTRY):
+class MappedBase(sql.Model, registry=_REGISTRY):
     """Shared SQLModel mapping and portable record serialization."""
 
-    model_config = {"ignored_types": (hybrid_property,)}
+    model_config = SQLModelConfig(ignored_types=(hybrid_property,))
     mapper_registry: ClassVar[registry] = _REGISTRY
     record_excluded: ClassVar[frozenset[str]] = frozenset({"embedding"})
     __table__: ClassVar[Table]
-    # sqlmodel redefines its ClassVar `__tablename__` as a declared_attr under its own
-    # `type: ignore`, so any redeclaration here trips the same third-party stub gap.
-    __tablename__: ClassVar[str]  # pyrefly: ignore[bad-override]
+
+    @classmethod
+    def total(cls) -> ScalarSelect[int]:
+        """Count this relation's visible rows as one scalar subquery."""
+        return select(func.count(cls.__table__.c.id)).scalar_subquery()
 
     def record(self) -> dict[str, Json]:
         """Serialize a mapped row with its table identity."""
@@ -33,10 +36,3 @@ class MappedBase(SQLModel, registry=_REGISTRY):
 
 class TableBase(MappedBase):
     """Declarative table base with singular snake case names."""
-
-    @declared_attr.directive
-    def __tablename__(cls) -> str:
-        name = inflection.underscore(cls.__name__)
-        return f"{name}_" if name in RESERVED_WORDS else name
-
-    __tablename__ = cast(str, __tablename__)

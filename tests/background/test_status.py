@@ -43,11 +43,11 @@ def test_tasks_overview_summarizes_empty_and_populated_queues(
         await clear_queue()
         if not populated:
             return
-        await seed_job("queued", ChunkProjectionJob().entrypoint)
-        await seed_job("queued", ChunkProjectionJob().entrypoint)
+        await seed_job("queued", ChunkProjectionJob.entrypoint)
+        await seed_job("queued", ChunkProjectionJob.entrypoint)
         await seed_job("queued", "aizk_task_decay")
-        await seed_job("picked", ChunkProjectionJob().entrypoint)
-        await seed_job("failed", ChunkProjectionJob().entrypoint)
+        await seed_job("picked", ChunkProjectionJob.entrypoint)
+        await seed_job("failed", ChunkProjectionJob.entrypoint)
         await seed_job("failed", "aizk_task_decay")
         await seed_log("exception", datetime(2026, 1, 1, tzinfo=UTC))
         await seed_log("exception", last)

@@ -1,6 +1,7 @@
+import runpy
 import sys
 from pathlib import Path
-from types import TracebackType
+from types import SimpleNamespace, TracebackType
 from unittest.mock import AsyncMock, MagicMock
 
 import dbutil
@@ -19,7 +20,7 @@ from eval.database import EvaluationDatabase
 from eval.gate import GateReport
 from eval.management import ManagementReport
 from eval.models import BenchmarkDataset, BenchmarkReport, QuestionKind
-from eval.plans import PlanStudyReport
+from eval.plans import PlanStudyReport, Stratum
 from eval.scale import Budget, ScaleReport
 from eval.service import Evaluation
 
@@ -43,6 +44,19 @@ class RecordingEvaluation:
         assert (k, per_stratum, strata) == (3, 4, ["local", "global"])
         assert self.user_id is not None
         return Rendered(text="production")
+
+    async def freeze(
+        self,
+        path: Path,
+        per_stratum: int,
+        strata: list[str],
+    ) -> Rendered:
+        assert (path, per_stratum, strata) == (
+            Path("questions.jsonl"),
+            2,
+            ["local"],
+        )
+        return Rendered(text="freeze")
 
     async def trace(self, query: str, k: int, budget: int) -> Rendered:
         assert (query, k, budget) == ("why", 3, 500)
@@ -107,6 +121,7 @@ def test_cli_maps_strings_to_typed_evaluation_arguments(
     user = uuid5()
 
     assert command.bench(3, 4, "local,global", user) == "production"
+    assert command.freeze("questions.jsonl", 2, "local", user) == "freeze"
     assert command.trace("why", 3, 500, user) == "trace"
     assert command.management("area", 3, 500, user) == "management"
     assert command.plans(3, 4, "multihop", False, 5, user) == "plans"
@@ -131,7 +146,12 @@ def test_cli_main_gives_fire_the_command_tree(monkeypatch: pytest.MonkeyPatch) -
 
 @pytest.mark.parametrize(
     ("arguments", "isolated"),
-    [(["aizk-eval"], False), (["aizk-eval", "bench"], False), (["aizk-eval", "scale"], True)],
+    [
+        (["aizk-eval"], False),
+        (["aizk-eval", "bench"], False),
+        (["aizk-eval", "freeze"], False),
+        (["aizk-eval", "scale"], True),
+    ],
 )
 def test_launcher_isolates_only_destructive_commands(
     arguments: list[str], isolated: bool, monkeypatch: pytest.MonkeyPatch
@@ -156,6 +176,17 @@ def test_launcher_isolates_only_destructive_commands(
     else:
         assert environment["AIZK_DATABASE_URL"] == "production"
         assert environment["AIZK_ADMIN_DATABASE_URL"] == "production-admin"
+
+
+def test_launcher_runs_as_a_module(monkeypatch: pytest.MonkeyPatch) -> None:
+    execute = MagicMock()
+    monkeypatch.setattr(sys, "argv", ["aizk-eval", "bench"])
+    monkeypatch.setattr(launcher_module.os, "execvpe", execute)
+    monkeypatch.delitem(sys.modules, "eval.launcher")
+
+    runpy.run_module("eval.launcher", run_name="__main__")
+
+    execute.assert_called_once()
 
 
 def test_evaluation_database_refuses_live_names_and_resets_isolated_names(
@@ -215,6 +246,9 @@ def test_evaluation_orchestrates_live_diagnostics(monkeypatch: pytest.MonkeyPatc
     management_run = AsyncMock(return_value=management)
     trace = AsyncMock(return_value=traced)
     measure = AsyncMock(return_value=gate)
+    frozen = MagicMock()
+    freeze = AsyncMock(return_value=frozen)
+    monkeypatch.setattr(service_module, "freeze_corpus", freeze)
     monkeypatch.setattr(service_module.RetrievalBenchmark, "production", production)
     monkeypatch.setattr(service_module.RetrievalBenchmark, "diagnostic", diagnostic)
     monkeypatch.setattr(service_module.ManagementBenchmark, "run", management_run)
@@ -227,6 +261,7 @@ def test_evaluation_orchestrates_live_diagnostics(monkeypatch: pytest.MonkeyPatc
         assert evaluation.user.scopes.write == frozenset({owner})
         assert Evaluation().user.id == service_module.settings.system_user_id
         assert await evaluation.production(3, 4, ("local",)) is report
+        assert await evaluation.freeze(Path("questions.jsonl"), 4, ("local",)) is frozen
         assert await evaluation.trace("why", 3, 500) is traced
         assert await evaluation.management(("area",), 3, 500) is management
         assert await evaluation.plans(3, 4, ("global",), False) is report
@@ -236,6 +271,10 @@ def test_evaluation_orchestrates_live_diagnostics(monkeypatch: pytest.MonkeyPatc
 
     dbutil.run(body())
     production.assert_awaited_once_with()
+    freeze.assert_awaited_once()
+    assert freeze.await_args is not None
+    assert freeze.await_args.args[0] == Path("questions.jsonl")
+    assert freeze.await_args.args[2:] == (4, (Stratum.LOCAL,))
     diagnostic.assert_awaited()
     management_run.assert_awaited_once_with(("area",))
     trace.assert_awaited_once()
@@ -273,7 +312,11 @@ def test_evaluation_orchestrates_isolated_benchmarks(
     monkeypatch.setattr(service_module.EvaluationDatabase, "reset", reset)
     monkeypatch.setattr(service_module.User, "system", staticmethod(lambda scopes=None: session))
     monkeypatch.setattr(service_module.Ontology, "ensure", ensure)
-    monkeypatch.setattr(service_module.Extractor, "configured", lambda: extractor)
+    monkeypatch.setattr(
+        service_module.GraphClients,
+        "from_settings",
+        classmethod(lambda cls, config: SimpleNamespace(extractor=extractor)),
+    )
     monkeypatch.setattr(service_module, "load_extraction_cases", lambda path: cases)
     extraction = MagicMock()
     extraction.return_value.run = extraction_run

@@ -2,13 +2,14 @@ from collections.abc import Iterator
 
 import dbutil
 import pytest
-from doubles import FakeLLM
+from doubles import FakeLLM, RecordingEmbedder
 from hypothesis import given
 from hypothesis import strategies as st
 from id_factory import uuid5
 from pgvector import HalfVector
 from pydantic import UUID5, UUID7
 from sqlalchemy import text
+from sqlmodel import select
 
 from aizk.graph.raptor import (
     Node,
@@ -18,7 +19,7 @@ from aizk.graph.raptor import (
     redundant_parent,
     to_floats,
 )
-from aizk.store import Community
+from aizk.store import Community, Entity
 
 DIM = 1024
 
@@ -84,17 +85,17 @@ async def seed_communities(owner: UUID5 | UUID7, axes: list[int]) -> None:
 
 
 def test_similarity_groups_preserves_one_vector(owner: UUID5 | UUID7) -> None:
-    assert dbutil.run(RaptorBuilder(frozenset({owner})).similarity_groups([basis(0)])) == [[0]]
+    builder = RaptorBuilder(scopes=frozenset({owner}), llm=FakeLLM().llm, embed=RecordingEmbedder())
+    assert dbutil.run(builder.similarity_groups([basis(0)])) == [[0]]
 
 
-@pytest.mark.usefixtures("fake_embedder")
 def test_build_raptor_lifts_communities_into_a_part_of_tree(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
 ) -> None:
     async def probe() -> tuple[int, int, int, list[tuple[int, int]]]:
         await seed_communities(owner, [0, 0, 1, 1])
-        await build_raptor(scopes=frozenset({owner}))
-        written = await build_raptor(scopes=frozenset({owner}))
+        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+        written = await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
         async with dbutil.actor(owner) as session:
             leaves = (
                 await session.exec(
@@ -144,7 +145,35 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
     assert all(child == 0 and parent >= 1 for child, parent in edges)
 
 
-@pytest.mark.usefixtures("fake_embedder")
+def test_build_raptor_shares_content_without_deleting_another_scope(
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
+) -> None:
+    other = uuid5()
+
+    async def probe() -> tuple[int, int]:
+        await seed_communities(owner, [0, 0])
+        await seed_communities(other, [0, 0])
+        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({other}))
+        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({other}))
+        raptor_claims = (
+            select(Entity.Claim.id.count())
+            .join(Entity.Content, Entity.Content.id == Entity.Claim.content_id)
+            .where(Entity.Content.type == "raptor_summary")
+        )
+        async with dbutil.actor(owner) as session:
+            first = (await session.exec(raptor_claims.where(Entity.Claim.scopes == [owner]))).one()
+        async with dbutil.actor(other) as session:
+            second = (
+                await session.exec(raptor_claims.where(Entity.Claim.scopes == [other]))
+            ).one()
+        return first, second
+
+    first, second = dbutil.run(probe())
+    assert first >= 2
+    assert second >= 2
+
+
 @pytest.mark.parametrize(
     ("axes", "expected"),
     [
@@ -154,19 +183,23 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
     ],
 )
 def test_build_raptor_writes_the_expected_summary_count(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, axes: list[int], expected: int
+    owner: UUID5 | UUID7,
+    fake_llm: FakeLLM,
+    fake_embedder: RecordingEmbedder,
+    axes: list[int],
+    expected: int,
 ) -> None:
     async def probe() -> int:
         await seed_communities(owner, axes)
-        return await build_raptor(scopes=frozenset({owner}))
+        return await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
 
     assert dbutil.run(probe()) == expected
 
 
-@pytest.mark.usefixtures("fake_embedder")
 def test_build_raptor_bounds_fanout_and_child_text(
     owner: UUID5 | UUID7,
     fake_llm: FakeLLM,
+    fake_embedder: RecordingEmbedder,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("aizk.graph.raptor.settings.raptor_branch_factor", 2)
@@ -175,7 +208,7 @@ def test_build_raptor_bounds_fanout_and_child_text(
 
     async def probe() -> None:
         await seed_communities(owner, [0, 0, 0, 0, 0])
-        await build_raptor(scopes=frozenset({owner}))
+        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
 
     dbutil.run(probe())
     prompts = [

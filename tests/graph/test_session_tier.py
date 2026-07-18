@@ -3,7 +3,6 @@ import pytest
 import seedgraph
 from id_factory import uuid5
 from pydantic import UUID5, UUID7
-from sqlalchemy import func
 from sqlmodel import select
 
 import aizk.graph.session_tier as session_tier_module
@@ -53,9 +52,7 @@ def test_promote_moves_due_items_into_the_graph_and_skips_unwritable_scopes(
         promoted = await promote_sessions(frozenset({owner}))
         async with dbutil.actor(owner) as session:
             chunks = (
-                await session.exec(
-                    select(func.count()).select_from(Chunk).where(Chunk.text.ilike(f"%{marker}%"))
-                )
+                await session.exec(select(Chunk.id.count()).where(Chunk.text.ilike(f"%{marker}%")))
             ).one()
             private_item = await session.get(SessionItem, private)
         async with dbutil.admin_engine().connect() as connection:

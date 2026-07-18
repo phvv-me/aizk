@@ -1,18 +1,23 @@
-from loguru import logger
-from sqlmodel import select
+from typing import TYPE_CHECKING
 
-from ..common.queue import Queue
+from loguru import logger
+
 from ..config import settings
 from ..ontology import Ontology
-from ..store import Document, SessionItem
+from ..store import Artifact, Document, SessionItem
 from ..store.identity import User
 from ..types import Scopes
-from .jobs.maintenance import ScheduledJob
+from ..usage import UsageAccountingJob
+from .jobs.maintenance import ScheduledJob, ScopedScheduledJob
 from .jobs.models import MaintenanceJob
 from .jobs.projection import ChunkProjectionJob
+from .queue import Queue
+
+if TYPE_CHECKING:
+    from ..runtime import Runtime
 
 
-async def fan_out(job: ScheduledJob) -> None:
+async def fan_out(job: ScopedScheduledJob) -> None:
     """Read the distinct scope roster past row security and enqueue one task per scope."""
     scopes = await scope_roster()
     async with Queue(dsn=settings.asyncpg_dsn) as queue:
@@ -32,19 +37,22 @@ async def fan_out(job: ScheduledJob) -> None:
 async def scope_roster() -> list[Scopes]:
     """Every exact scope set with stored memory, read under the database administrator role."""
     async with User.system().owner as db:
-        rows = await db.exec(select(Document.scopes).union(select(SessionItem.scopes)))
+        rows = await db.exec(Document.scope_sets(SessionItem, Artifact))
         keys = {frozenset(scopes) for (scopes,) in rows if scopes}
         return sorted(keys, key=lambda scopes: sorted(scopes))
 
 
-async def run_worker(batch_size: int = settings.queue_batch_size) -> None:
+async def run_worker(runtime: Runtime, batch_size: int | None = None) -> None:
     """Run the autonomous engine, draining on-write jobs and firing the scheduled passes."""
+    batch = batch_size or settings.queue_batch_size
     async with User.system() as session:
         await Ontology.refresh(session)
     async with Queue(dsn=settings.asyncpg_dsn) as queue:
         pg = queue.worker()
-        ChunkProjectionJob().bind(pg)
+        ChunkProjectionJob(runtime.graph).bind(pg)
+        UsageAccountingJob().bind(pg)
+        runtime.artifacts.conversion.bind(pg)
         for job_type in ScheduledJob.implementations():
-            job_type().register(pg, fan_out)
+            job_type.assemble(runtime).register(pg, fan_out)
         logger.info("autonomous worker listening on the queue and the scheduler")
-        await pg.run(batch_size=batch_size, max_concurrent_tasks=batch_size * 4)
+        await pg.run(batch_size=batch, max_concurrent_tasks=batch * 4)

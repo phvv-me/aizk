@@ -28,11 +28,14 @@ dependencies = [
   "pydantic-settings>=2.14.2,<3",
   "httpx>=0.28.1,<0.29",
   "async-lru>=2.3,<3",
+  "clamav-client>=0.7.2,<0.8",
   "cyclopts>=4.21,<5",
   "loguru>=0.7.3,<0.8",
   "fastmcp>=3.4.4,<4",
+  "fastapi>=0.128,<1",
   "networkx>=3.6.1,<4",
   "openai>=2.45,<3",
+  "obstore>=0.11,<0.12",
   "pydantic-ai-slim[openai]>=2.8,<3",
   "chonkie>=1.7,<2",
   "identify>=2.6.19,<3",
@@ -42,6 +45,11 @@ dependencies = [
   "rlsalchemy>=0.4.1,<0.6",
   "mainboard>=0.0.8,<0.1",
   "pgqueuer>=1.1.1,<2",
+  "opentelemetry-sdk>=1.44,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.43,<2",
+  "opentelemetry-instrumentation-starlette>=0.65b0,<1",
+  "opentelemetry-instrumentation-sqlalchemy>=0.65b0,<1",
+  "opentelemetry-instrumentation-httpx>=0.65b0,<1",
   "dateparser>=1.4.1,<2",
   "jinja2>=3.1.6,<4",
   "tenacity>=9.1.4,<10",
@@ -49,14 +57,20 @@ dependencies = [
 
 [project.scripts]
 aizk = "aizk.cli:app"
+aizk-eval = "eval.launcher:main"
 
 [project.optional-dependencies]
 dev = [
   "fire>=0.7.1,<0.8",
   "pydantic-evals>=2.8,<3",
-  "ranx>=0.3.21,<0.4",
-  "numpy>=2.4.6,<2.5",
+  "ir-measures>=0.4.3,<0.5",
+  "pytrec-eval-terrier>=0.5.10,<0.6",
+  "autorank>=1.3.0,<2",
+  "statsmodels>=0.14.6,<0.15",
+  "pytest-regressions>=2.11.0,<3",
+  "numpy>=2.4.6,<3",
   "ruff>=0.6",
+  "import-linter>=2.3,<3",
   "pyrefly>=1",
   "ty>=0.0.59,<0.1",
   "mypy>=1.11",
@@ -77,17 +91,76 @@ Repository = "https://github.com/phvv-me/aizk"
 Issues = "https://github.com/phvv-me/aizk/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aizk"]
+packages = ["src/aizk", "src/eval"]
 
 [tool.ruff]
 line-length = 99
 target-version = "py314"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP", "B", "SIM", "TID251"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["aizk", "eval", "alembic"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sqlalchemy.select".msg = "Use sqlmodel.select for every query."
+
+# The layered architecture below is enforced by import-linter (`lint-imports`, wired into
+# the CI lint job and `chefe run lint-imports-aizk`). docs/architecture.md defines the rules.
+[tool.importlinter]
+root_packages = ["aizk"]
+include_external_packages = true
+exclude_type_checking_imports = true
+
+# Exhaustive over every top-level aizk package: a new package breaks the gate until it is
+# assigned a layer here. `|` siblings are independent, `:` siblings may import each other.
+# `config` importing nothing internal follows from its independent bottom-layer placement.
+[[tool.importlinter.contracts]]
+name = "Every aizk package sits in one enforced layer"
+type = "layers"
+containers = ["aizk"]
+exhaustive = true
+layers = [
+  "cli",
+  "admin | runtime",
+  "mcp | api | ops",
+  "memory",
+  "artifacts : background : graph : retrieval : extract : serving : ontology : usage",
+  "auth | backup | export",
+  "integrations | storage",
+  "store",
+  "config | types | exceptions | provenance | common",
+]
+
+# Rule 1: SQL is composed in the store's model classmethods and in the packages whose
+# lane and maintenance statements live beside the code they serve; every other package
+# reads through model methods and `User.exec`. The packages missing from the source list
+# are the documented exceptions: store owns the schema and statements; admin, artifacts,
+# background, backup, export, extract, graph, ontology, ops, and retrieval compose their
+# own statements; config types its statement hooks with `sqlalchemy.Select`.
+# `tests/test_contracts.py` asserts this split stays exhaustive as packages appear.
+[[tool.importlinter.contracts]]
+name = "Non-SQL packages reach the store only through model methods and User.exec"
+type = "forbidden"
+source_modules = [
+  "aizk.api",
+  "aizk.auth",
+  "aizk.cli",
+  "aizk.common",
+  "aizk.exceptions",
+  "aizk.integrations",
+  "aizk.mcp",
+  "aizk.memory",
+  "aizk.provenance",
+  "aizk.runtime",
+  "aizk.serving",
+  "aizk.storage",
+  "aizk.types",
+  "aizk.usage",
+]
+forbidden_modules = ["sqlmodel", "sqlalchemy"]
+allow_indirect_imports = true
 
 [tool.pyright]
 pythonVersion = "3.14"
@@ -97,33 +170,37 @@ venv = "default"
 reportMissingModuleSource = false
 
 [tool.pyrefly]
-project-includes = ["src", "eval", "tests"]
-search-path = ["src", "tests", "."]
+project-includes = ["src/aizk", "src/eval", "tests"]
+search-path = ["src", "tests"]
 python-interpreter-path = "../../.chefe/.pixi/envs/default/bin/python"
 replace-imports-with-any = ["sqlmodel.ext.*"]
 
 [tool.ty.environment]
 python = "../../.chefe/.pixi/envs/default"
-root = ["src", "eval"]
+root = ["src"]
 
 # ty covers src as the second checker beside pyrefly, which also covers tests.
 # Each override below downgrades one known third-party typing gap to a warning on the
 # exact files that hit it, so anything new anywhere stays an error and fails the gate.
 [tool.ty.src]
-include = ["src", "eval"]
+include = ["src/aizk", "src/eval"]
 
-# sqlmodel's SQLModelConfig does not declare ignored_types (sqlalchemy hybrid_property)
-# and its metaclass bridge loses the declared_attr shape of __tablename__.
+# sqlmodel's SQLModelConfig does not declare Pydantic's ignored_types field used for
+# SQLAlchemy hybrid properties.
 [[tool.ty.overrides]]
 include = ["src/aizk/store/mixins/base.py"]
 [tool.ty.overrides.rules]
 invalid-assignment = "warn"
-invalid-attribute-override = "warn"
 
 [tool.pytest.ini_options]
-addopts = "-q -ra --strict-markers --import-mode=importlib --cov=aizk --cov=eval --cov-report=term-missing"
+addopts = "-q -ra --strict-markers --import-mode=importlib -m 'not integration and not benchmark' --cov=aizk --cov=eval --cov-report=term-missing"
 testpaths = ["tests"]
-pythonpath = ["tests", "."]
+pythonpath = ["tests", "src"]
+markers = [
+  "benchmark: statistical retrieval benchmarks requiring the frozen live corpus and model stack",
+  "integration: tests that require real external service boundaries",
+  "artifact_stack: the complete PostgreSQL, PgQueuer, object, scan, conversion, model, recall, and resource path",
+]
 
 [tool.coverage.run]
 source = ["aizk", "eval"]

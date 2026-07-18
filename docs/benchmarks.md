@@ -117,12 +117,31 @@ gate and remains a selectable experimental writer at the safer 0.7 threshold. Th
 nearly free beside the existing lanes, but speed cannot compensate for wrong graph edges. These
 cells are small diagnostics rather than published quality benchmarks.
 
+The July 17 production check used Gemma 4 31B on GPU 1 against five stored documents about
+frontend architecture, authentication, hashing, artifacts, and the public memory interface. The
+final contract produced twenty proposed facts and accepted all twenty through deterministic source
+grounding. Earlier cells exposed three independent interface failures. A nullable wire quote made
+the model omit evidence, legal JSON whitespace exhausted a bounded response, and the phrase
+shortest quote encouraged ellipses between separate source spans. Requiring a quote, enabling
+compact XGrammar output, and requiring one contiguous character-for-character substring fixed
+those failures. Grounding also ignores Markdown backticks while rejecting actual word changes.
+
+The same host then tried Gemma 4 E2B with an 8,192 token context and 95 percent GPU allocation. It
+used about 9.5 GB of the 24 GB card and did not become healthy within two bounded five-minute
+windows. The service was stopped as stalled and production returned to 31B. This operational
+failure does not erase the earlier E2B quality measurements, but it confirms that E2B neither
+meets the dedicated-card requirement nor provides a safer production path.
+
 The same database held 10,000 entities and 100,000 live facts for the graph write-path check.
 Loading every full live fact for 32 subjects and reranking in Python took about 833 ms and spilled
 1,455 temporary blocks. A typed lateral query ranked each candidate through the subject index,
 selected only claim ID, predicate, object, statement, and raw cosine distance, and returned the top
 five in about 39 ms without temporary I/O. Entity resolution now sends a whole extracted batch
-through one `VALUES` relation, and unchanged documents are removed before any embedding request.
+through deterministic normalized IDs and bulk inserts. It never merges by semantic vector
+proximity because related areas such as Health and Business are distinct graph nodes. Fact endpoint
+lookup uses that same normalized identity, so capitalization and display formatting cannot turn a
+grounded endpoint into a missing entity. Unchanged documents are removed before any embedding
+request.
 
 ## GroupMemBench
 
@@ -173,9 +192,21 @@ invalidated memory therefore loses credit.
 ## Verification posture
 
 The suite uses Hypothesis for algebraic and authorization properties and parametrized tests for
-backend matrices. A fresh `aizk_test` database migrates from `0001_init`, and Alembic autogenerate
-returns an empty revision against the current models. The RLS verifier separately checks every
-scoped table and policy in the PostgreSQL catalog.
+backend matrices. Its migration preservation test creates a disposable PostgreSQL database and
+upgrades it only to the deployed `0001_init` revision. It inserts a real scoped `document` and
+child `chunk`, including the original UUIDv8 content hash and source text, before upgrading that
+populated database to `0002_artifacts_usage`.
+
+The test then proves that the document title and content hash survived unchanged, the new artifact
+links remain null for the preexisting text source, and the database reached the exact
+`0002_artifacts_usage` revision. It also verifies that `artifact`, `artifact_content`, `blob`, and
+`usage_event` were installed with forced row security. Finally, it inspects the new chunk insert
+policy and confirms that a child write must match both its parent document ID and exact scope set.
+The disposable database is dropped even after a failure. This exercises preservation across the
+real `0001` to `0002` upgrade rather than proving only that a blank database reaches head.
+
+Alembic autogenerate separately returns an empty revision against the current models. The RLS
+verifier checks every scoped table and policy in the PostgreSQL catalog.
 
 Sources include [GroupMemBench](https://arxiv.org/abs/2605.14498),
 [Memora](https://arxiv.org/abs/2604.20006), and
