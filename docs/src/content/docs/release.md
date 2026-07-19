@@ -1,4 +1,7 @@
-# Release
+---
+title: "Release"
+description: "How a version bump in pyproject.toml drives the CI publish, tag, and GitHub release."
+---
 
 Releases are driven by the `version` in `pyproject.toml`. Bumping it and merging to
 `main` is normally the whole release, CI runs the gate, and if `v<version>` is not yet

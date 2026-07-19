@@ -1,4 +1,7 @@
-# API
+---
+title: "API"
+description: "The four public MCP tools plus the SSH-only maintenance surface."
+---
 
 The public network surface has four MCP tools. Maintenance and evaluation stay on the SSH-only
 CLI so a client token cannot rebuild, export, promote, or erase data.
@@ -17,6 +20,50 @@ coalesced Logto Management API cache, so repeated tool calls do not reload the s
 organization directory. A failed refresh closes shared authority, while a successful organization
 mutation evicts affected entries. The optional browser uses a separate uncached resolution path for
 account access and organization management.
+
+### A client session over MCP
+
+One authenticated session logs in through Logto once, then reuses the resulting access token on
+every tool call. The server verifies the token and derives scope authority from Logto, while
+PostgreSQL row security stays the final boundary. A local-only upload takes the extra ticket
+round trip, redeemed by a tokenless `PUT`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor A as MCP agent
+    participant L as Logto
+    participant S as aizk MCP server
+    participant DB as PostgreSQL RLS
+    participant UP as Upload endpoint
+
+    A->>L: OAuth login, PKCE with consent
+    L-->>A: access token, scopes and aud=resource_id
+
+    Note over A,S: every tool call carries the Bearer token
+
+    A->>S: remember(text, upload{filename, size, sha256})
+    S->>S: verify JWT issuer, audience, scopes
+    S->>L: resolve user, orgs, permissions (cached)
+    L-->>S: verified caller and write scopes
+    Note over S: scope authority from Logto, per-caller rate limit
+    S-->>A: {status: accepted, capability, instruction}
+    A->>UP: PUT exact bytes to /api/uploads/{capability}
+    Note over A,UP: no token, the capability authorizes one upload
+    UP->>DB: scan, store original, queue Docling
+    UP-->>A: ArtifactReceipt {artifact_id, content_id, state: queued}
+
+    A->>S: recall(query, budget)
+    S->>DB: read the caller's visible union
+    Note over DB: RLS is the final scope boundary
+    DB-->>S: merit-ordered evidence
+    S-->>A: one prompt-ready Markdown string
+
+    A->>S: share(documents, scopes)
+    S->>DB: copy into one authorized destination
+    DB-->>S: copied count
+    S-->>A: {shared: 1}
+```
 
 `status` returns safe profile fields and global roles. Each organization carries its Logto name,
 description, custom data, members, member roles, caller roles, effective permissions, public flag,

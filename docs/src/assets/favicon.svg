@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="aizk">
+  <title>aizk</title>
+  <defs>
+    <linearGradient id="indigo" x1="8" y1="6" x2="92" y2="94" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="100" height="100" rx="23" fill="url(#indigo)"/>
+  <rect x="28" y="19" width="44" height="42" rx="8" fill="#c7d2fe"/>
+  <path d="M17 46 Q17 41 22 41 H78 Q83 41 83 46 L80 76 Q79 83 71 83 H29 Q21 83 20 76 Z"
+        fill="#ffffff"/>
+  <rect x="36" y="57" width="28" height="12" rx="6" fill="#4338ca"/>
+  <path d="M78 13 C79 18 82 21 87 22 C82 23 79 26 78 31 C77 26 74 23 69 22 C74 21 77 18 78 13 Z"
+        fill="#fbbf24"/>
+</svg>

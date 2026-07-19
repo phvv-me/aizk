@@ -1,4 +1,7 @@
-# The store
+---
+title: "The store"
+description: "The content-and-claim union model and the tables behind the knowledge graph."
+---
 
 ## Content and claim, a union model
 

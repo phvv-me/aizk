@@ -1,4 +1,7 @@
-# The read path
+---
+title: "The read path"
+description: "How recall runs the maximal retrieval plan and packs one budgeted response."
+---
 
 `recall()` is the retrieval entry point. It embeds the asker-aware query and always runs the
 maximal plan, every lane on in facts-first order, with no query-time route classification. A

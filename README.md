@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://phvv.me/aizk"><img src="https://raw.githubusercontent.com/phvv-me/aizk/main/docs/assets/banner.png" alt="aizk" width="100%"></a>
+  <a href="https://phvv.me/aizk"><img src="https://raw.githubusercontent.com/phvv-me/aizk/main/docs/src/assets/banner.png" alt="aizk" width="100%"></a>
 </p>
 
 <p align="center">
@@ -8,10 +8,6 @@
   <a href="https://github.com/phvv-me/aizk/actions/workflows/ci.yml"><img src="https://github.com/phvv-me/aizk/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/phvv-me/aizk/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-4F46E5.svg" alt="License"></a>
   <a href="https://phvv.me/aizk"><img src="https://img.shields.io/badge/docs-phvv.me%2Faizk-4F46E5" alt="Docs"></a>
-</p>
-
-<p align="center">
-  <a href="https://phvv.me/aizk/pt-BR/">🇧🇷</a> <a href="https://phvv.me/aizk/es/">🇲🇽</a> <a href="https://phvv.me/aizk/ja/">🇯🇵</a> <a href="https://phvv.me/aizk/zh/">🇨🇳</a>
 </p>
 
 Memory your agents actually keep. aizk is a self-hosted AI Zettelkasten for people, teams, and MCP agents.

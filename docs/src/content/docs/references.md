@@ -1,4 +1,7 @@
-# References
+---
+title: "References"
+description: "Which parts of aizk are original, adapted, or compared, each mapped to its source."
+---
 
 Aizk combines published memory mechanisms, open source infrastructure, product comparisons, and
 original work. This page records which is which. A citation here does not mean that Aizk copied an
@@ -192,6 +195,6 @@ The following pieces should be cited as Aizk design rather than attributed to on
 - an operational health snapshot that checks schema, policy, jobs, models, scopes, graph freshness,
   and a real recall in under five seconds
 
-The [Benchmarks](benchmarks.md) page records what has been measured. The [Comparison](comparison.md)
+The [Benchmarks](/benchmarks) page records what has been measured. The [Comparison](/comparison)
 page separates observed results from architectural differences. Neither page turns a related
 paper, model, or product into an endorsement.

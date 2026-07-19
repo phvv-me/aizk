@@ -1,7 +1,10 @@
-# The scope-set lattice
+---
+title: "The scope-set lattice"
+description: "The scope-set intersection lattice that governs shared and private access."
+---
 
 The intersection lattice is a permanent collaboration rule. Every scoped row carries a sorted,
-duplicate-free, nonempty `scopes uuid[]` key. See [Identity and sharing](identity.md).
+duplicate-free, nonempty `scopes uuid[]` key. See [Identity and sharing](/engine/identity).
 
 A personal UUID derived from the Logto subject holds private memory. One organization UUID holds
 ordinary team memory. Any larger set is an intersection graph. A claim in Toshiba and SPReAD is
