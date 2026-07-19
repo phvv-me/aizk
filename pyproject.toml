@@ -12,50 +12,48 @@ license = "Apache-2.0"
 authors = [{ name = "Pedro Valois", email = "contact@phvv.me" }]
 keywords = ["aizk"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
-  "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.14",
-  "Topic :: Software Development :: Libraries",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-  "sqlalchemy[asyncio]>=2.1.0b3,<3",
-  # sqlalchemy's asyncio extra needs greenlet at runtime; pixi's PyPI resolver drops it as a
-  # marker-only transitive, so name it directly (pip already pulls it in via the extra).
-  "greenlet>=3,<4",
-  "sqlmodel>=0.0.39,<0.1",
-  "asyncpg>=0.31,<0.32",
-  "alembic>=1.18.5,<2",
-  "pgvector>=0.5,<0.6",
-  "pydantic-settings>=2.14.2,<3",
-  "httpx>=0.28.1,<0.29",
-  "async-lru>=2.3,<3",
-  "clamav-client>=0.7.2,<0.8",
-  "cyclopts>=4.21,<5",
-  "loguru>=0.7.3,<0.8",
-  "fastmcp>=3.4.4,<4",
-  "fastapi>=0.128,<1",
-  "networkx>=3.6.1,<4",
-  "openai>=2.45,<3",
-  "obstore>=0.11,<0.12",
-  "pydantic-ai-slim[openai]>=2.8,<3",
-  "chonkie>=1.7,<2",
-  "identify>=2.6.19,<3",
-  "python-slugify>=8.0.4,<9",
-  "inflection>=0.5.1,<0.6",
-  "patos[sql]>=0.0.9,<0.1",
-  "rlsalchemy>=0.4.1,<0.6",
-  "mainboard>=0.0.8,<0.1",
-  "pgqueuer>=1.1.1,<2",
-  "opentelemetry-sdk>=1.44,<2",
-  "opentelemetry-exporter-otlp-proto-http>=1.43,<2",
-  "opentelemetry-instrumentation-starlette>=0.65b0,<1",
-  "opentelemetry-instrumentation-sqlalchemy>=0.65b0,<1",
-  "opentelemetry-instrumentation-httpx>=0.65b0,<1",
-  "dateparser>=1.4.1,<2",
-  "jinja2>=3.1.6,<4",
-  "tenacity>=9.1.4,<10",
+    "sqlalchemy[asyncio]>=2.1.0b3,<3",
+    "greenlet>=3,<4",
+    "sqlmodel>=0.0.39,<0.1",
+    "asyncpg>=0.31,<0.32",
+    "alembic>=1.18.5,<2",
+    "pgvector>=0.5,<0.6",
+    "pydantic-settings>=2.14.2,<3",
+    "httpx>=0.28.1,<0.29",
+    "async-lru>=2.3,<3",
+    "clamav-client>=0.7.2,<0.8",
+    "cyclopts>=4.21,<5",
+    "loguru>=0.7.3,<0.8",
+    "fastmcp>=3.4.4,<4",
+    "fastapi>=0.128,<1",
+    "networkx>=3.6.1,<4",
+    "openai>=2.45,<3",
+    "obstore>=0.11,<0.12",
+    "pydantic-ai-slim[openai]>=2.8,<3",
+    "chonkie>=1.7,<2",
+    "identify>=2.6.19,<3",
+    "python-slugify>=8.0.4,<9",
+    "inflection>=0.5.1,<0.6",
+    "patos[sql]>=0.0.9,<0.1",
+    "rlsalchemy>=0.4.1,<0.6",
+    "mainboard>=0.0.8,<0.1",
+    "pgqueuer>=1.1.1,<2",
+    "opentelemetry-sdk>=1.44,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.43,<2",
+    "opentelemetry-instrumentation-starlette>=0.65b0,<1",
+    "opentelemetry-instrumentation-sqlalchemy>=0.65b0,<1",
+    "opentelemetry-instrumentation-httpx>=0.65b0,<1",
+    "dateparser>=1.4.1,<2",
+    "jinja2>=3.1.6,<4",
+    "tenacity>=9.1.4,<10",
 ]
 
 [project.scripts]
@@ -71,44 +69,44 @@ docs = ["mkdocs-material>=9.5", "mkdocs-static-i18n>=1.2"]
 # diagnostics (ty 0.0.61 flags 11 `AsyncSession.exec` overloads that 0.0.59 does not).
 [dependency-groups]
 dev = [
-  # eval + benchmark stack (src/eval and the benchmark tests import these)
-  "fire>=0.7.1,<0.8",
-  "pydantic-evals>=2.8,<3",
-  "ir-measures>=0.4.3,<0.5",
-  "pytrec-eval-terrier>=0.5.10,<0.6",
-  "autorank>=1.3.0,<2",
-  "statsmodels>=0.14.6,<0.15",
-  "pytest-regressions>=2.11.0,<3",
-  # numeric and image libs the eval + serving tests import (scipy rides in via statsmodels)
-  "numpy>=2.4.6,<3",
-  "pandas>=3.0.3,<4",
-  "pillow>=12,<13",
-  # third-party type stubs: the crux of the old uv divergence (pyrefly could not type these)
-  "asyncpg-stubs>=0.31.2,<0.32",
-  "types-dateparser>=1.4.1.20260617,<2",
-  "types-networkx>=3.6.1.20260624,<4",
-  # checkers and linters, pinned to the versions the monorepo gate runs green on
-  "ruff>=0.6",
-  "pyrefly==1.1.1",
-  "ty==0.0.59",
-  "mypy>=1.19.1,<2",
-  "import-linter>=2.3,<3",
-  # test runner and plugins
-  "pytest>=9.1.0,<10",
-  "pytest-cov>=7.1.0,<8",
-  "pytest-randomly>=4.1.0,<5",
-  "pytest-xdist>=3.8.0,<4",
-  "pytest-mock>=3.15.1,<4",
-  "pytest-subprocess>=1.6.0,<2",
-  "pytest-benchmark>=5.2.3,<6",
-  "pytest-clarity>=1.0.1,<2",
-  "pytest-rerunfailures>=16.3,<17",
-  "pytest-timeout>=2.4.0,<3",
-  "hypothesis>=6.155.3,<7",
-  "polyfactory>=2.22.4,<3",
-  "faker>=40.23.0,<41",
-  "syrupy>=5.3.2,<6",
-  "dirty-equals>=0.11,<0.12",
+    # eval + benchmark stack (src/eval and the benchmark tests import these)
+    "fire>=0.7.1,<0.8",
+    "pydantic-evals>=2.8,<3",
+    "ir-measures>=0.4.3,<0.5",
+    "pytrec-eval-terrier>=0.5.10,<0.6",
+    "autorank>=1.3.0,<2",
+    "statsmodels>=0.14.6,<0.15",
+    "pytest-regressions>=2.11.0,<3",
+    # numeric and image libs the eval + serving tests import (scipy rides in via statsmodels)
+    "numpy>=2.4.6,<3",
+    "pandas>=3.0.3,<4",
+    "pillow>=12,<13",
+    # third-party type stubs: the crux of the old uv divergence (pyrefly could not type these)
+    "asyncpg-stubs>=0.31.2,<0.32",
+    "types-dateparser>=1.4.1.20260617,<2",
+    "types-networkx>=3.6.1.20260624,<4",
+    # checkers and linters, pinned to the versions the monorepo gate runs green on
+    "ruff>=0.6",
+    "pyrefly==1.1.1",
+    "ty==0.0.59",
+    "mypy>=1.19.1,<2",
+    "import-linter>=2.3,<3",
+    # test runner and plugins
+    "pytest>=9.1.0,<10",
+    "pytest-cov>=7.1.0,<8",
+    "pytest-randomly>=4.1.0,<5",
+    "pytest-xdist>=3.8.0,<4",
+    "pytest-mock>=3.15.1,<4",
+    "pytest-subprocess>=1.6.0,<2",
+    "pytest-benchmark>=5.2.3,<6",
+    "pytest-clarity>=1.0.1,<2",
+    "pytest-rerunfailures>=16.3,<17",
+    "pytest-timeout>=2.4.0,<3",
+    "hypothesis>=6.155.3,<7",
+    "polyfactory>=2.22.4,<3",
+    "faker>=40.23.0,<41",
+    "syrupy>=5.3.2,<6",
+    "dirty-equals>=0.11,<0.12",
 ]
 
 [project.urls]
@@ -156,15 +154,15 @@ type = "layers"
 containers = ["aizk"]
 exhaustive = true
 layers = [
-  "cli",
-  "admin | runtime",
-  "mcp | api | ops",
-  "memory",
-  "artifacts : background : graph : retrieval : extract : serving : ontology : usage",
-  "auth | backup | export",
-  "integrations | storage",
-  "store",
-  "config | types | exceptions | provenance | common",
+    "cli",
+    "admin | runtime",
+    "mcp | api | ops",
+    "memory",
+    "artifacts : background : graph : retrieval : extract : serving : ontology : usage",
+    "auth | backup | export",
+    "integrations | storage",
+    "store",
+    "config | types | exceptions | provenance | common",
 ]
 
 # Rule 1: SQL is composed in the store's model classmethods and in the packages whose
@@ -178,20 +176,20 @@ layers = [
 name = "Non-SQL packages reach the store only through model methods and User.exec"
 type = "forbidden"
 source_modules = [
-  "aizk.api",
-  "aizk.auth",
-  "aizk.cli",
-  "aizk.common",
-  "aizk.exceptions",
-  "aizk.integrations",
-  "aizk.mcp",
-  "aizk.memory",
-  "aizk.provenance",
-  "aizk.runtime",
-  "aizk.serving",
-  "aizk.storage",
-  "aizk.types",
-  "aizk.usage",
+    "aizk.api",
+    "aizk.auth",
+    "aizk.cli",
+    "aizk.common",
+    "aizk.exceptions",
+    "aizk.integrations",
+    "aizk.mcp",
+    "aizk.memory",
+    "aizk.provenance",
+    "aizk.runtime",
+    "aizk.serving",
+    "aizk.storage",
+    "aizk.types",
+    "aizk.usage",
 ]
 forbidden_modules = ["sqlmodel", "sqlalchemy"]
 allow_indirect_imports = true
@@ -231,9 +229,10 @@ addopts = "-q -ra --strict-markers --import-mode=importlib -m 'not integration a
 testpaths = ["tests"]
 pythonpath = ["tests", "src"]
 markers = [
-  "benchmark: statistical retrieval benchmarks requiring the frozen live corpus and model stack",
-  "integration: tests that require real external service boundaries",
-  "artifact_stack: the complete PostgreSQL, PgQueuer, object, scan, conversion, model, recall, and resource path",
+    "benchmark: statistical retrieval benchmarks requiring the frozen live corpus and model stack",
+    "integration: tests that require real external service boundaries",
+    "artifact_stack: the complete PostgreSQL, PgQueuer, object, scan, conversion, model, recall, and resource path",
+    "real_services: exercises real serving-client construction over an in-test transport double, opting out of the default model-lane stubbing",
 ]
 
 [tool.coverage.run]
@@ -245,11 +244,11 @@ omit = ["*/store/migrations/*"]
 show_missing = true
 fail_under = 100
 exclude_lines = [
-  "pragma: no cover",
-  "raise NotImplementedError",
-  "if TYPE_CHECKING:",
-  "if __name__ == .__main__.:",
-  "\\.\\.\\.",
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "\\.\\.\\.",
 ]
 
 # chefe reads this table as the dev-env manifest (compiled to pixi). Runtime deps come from

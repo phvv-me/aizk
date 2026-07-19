@@ -321,6 +321,7 @@ def test_consolidator_normalizes_model_verdicts(fake_llm: FakeLLM, response: str
     assert asyncio.run(Consolidator(llm=fake_llm.llm).resolve([(candidate, matches)])) == expected
 
 
+@pytest.mark.real_services
 def test_llm_reuses_its_only_endpoint_client() -> None:
     first = LLM.from_settings(settings)
     second = LLM.from_settings(settings)

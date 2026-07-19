@@ -20,6 +20,10 @@ from eval.routes import Route
 
 gate_module = import_module("aizk.serving.gate.client")
 
+# Builds the real gate client over an in-test transport double, so it opts out of the default
+# model-lane stubbing.
+pytestmark = pytest.mark.real_services
+
 
 def gate() -> GateClient:
     return GateClient.from_settings(settings)

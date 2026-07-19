@@ -25,6 +25,10 @@ base_module = import_module("aizk.serving.base")
 chonkie_module = import_module("aizk.serving.chunk.chonkie")
 embed_module = import_module("aizk.serving.embed.client")
 
+# Builds the real embed client over an in-test transport double, so it opts out of the default
+# model-lane stubbing.
+pytestmark = pytest.mark.real_services
+
 
 @dataclass
 class EmbedCall:

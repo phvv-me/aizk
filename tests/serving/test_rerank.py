@@ -11,6 +11,10 @@ from aizk.serving.rerank import RerankClient
 
 rerank_module = import_module("aizk.serving.rerank.client")
 
+# Builds the real rerank client over an in-test transport double, so it opts out of the default
+# model-lane stubbing.
+pytestmark = pytest.mark.real_services
+
 
 async def rerank(query: str, texts: list[str]) -> list[float]:
     return await RerankClient.from_settings(settings).rerank(query, texts)

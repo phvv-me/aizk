@@ -59,6 +59,33 @@ class RecordingEmbedder:
         return [deterministic_vector(f"{mode}:{text}", self.embed_dim) for text in texts]
 
 
+class NeutralReranker:
+    """Score every rerank call neutrally and record the texts each call saw."""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    async def rerank(self, query: str, texts: list[str]) -> list[float]:
+        del query
+        self.calls.append(list(texts))
+        return [0.0] * len(texts)
+
+
+class NeutralGate:
+    """Relevance gate that admits every chunk and seeds no mentions."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def relevant(self, text: str) -> bool:
+        self.calls.append(text)
+        return True
+
+    async def named_entities(self, text: str) -> list[str]:
+        del text
+        return []
+
+
 def default_response(schema: type[BaseModel]) -> BaseModel:
     defaults: dict[str, BaseModel] = {
         WireExtraction.__name__: WireExtraction(e=[], f=[]),

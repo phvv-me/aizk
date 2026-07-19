@@ -1,6 +1,9 @@
 import asyncio
+import os
 import socket
 from collections.abc import Iterator
+from contextlib import contextmanager
+from unittest import mock
 from urllib.parse import urlsplit
 
 import a_env
@@ -8,6 +11,8 @@ import dbutil
 import pytest
 from doubles import (
     FakeLLM,
+    NeutralGate,
+    NeutralReranker,
     RecordingEmbedder,
 )
 from hypothesis import HealthCheck
@@ -23,6 +28,7 @@ from aizk.config import Settings
 from aizk.config import settings as aizk_settings
 from aizk.runtime import Runtime
 from aizk.serving.embed import EmbedClient
+from aizk.serving.gate import GateClient
 from aizk.serving.rerank import RerankClient
 
 # a_env configures the isolated database before Aizk imports.
@@ -75,6 +81,32 @@ _db = urlsplit(aizk_settings.database_url)
 DB_UP = _port_open(_db.hostname, _db.port)
 
 
+@contextmanager
+def stubbed_model_lanes() -> Iterator[None]:
+    """Point every model lane at an in-process double for the duration of the block.
+
+    The suite is hermetic above the database seam, so ontology bootstrap, recall, extraction,
+    and every other path resolve their embedder, reranker, gate, and extraction model to a
+    recording double instead of reaching a live service.
+    """
+    extraction_model = FakeLLM().model
+    with (
+        mock.patch.object(
+            EmbedClient, "from_settings", classmethod(lambda cls, config: RecordingEmbedder())
+        ),
+        mock.patch.object(
+            RerankClient, "from_settings", classmethod(lambda cls, config: NeutralReranker())
+        ),
+        mock.patch.object(
+            GateClient,
+            "from_settings",
+            classmethod(lambda cls, config, variant="": NeutralGate()),
+        ),
+        mock.patch("aizk.serving.extract.client.llm_model", lambda *args: extraction_model),
+    ):
+        yield
+
+
 def ensure_test_database() -> None:
     async def bootstrap() -> None:
         maintenance = make_url(aizk_settings.admin_database_url).set(database="postgres")
@@ -88,7 +120,10 @@ def ensure_test_database() -> None:
             await engine.dispose()
         await ops.setup()
 
-    asyncio.run(bootstrap())
+    # Ontology bootstrap embeds every entity description, so it must resolve to a double before
+    # `ops.setup` runs, well before any function-scoped fixture could patch the seam.
+    with stubbed_model_lanes():
+        asyncio.run(bootstrap())
 
 
 def drop_test_database() -> None:
@@ -140,6 +175,30 @@ def migrated_db() -> None:
         pytest.skip("aizk_test postgres not reachable")
 
 
+@pytest.fixture(autouse=True)
+def stub_model_lanes(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Default every model lane to an in-process double so no test reaches a live service.
+
+    A test that must exercise real client construction opts out with the `real_services`
+    marker, and the live-corpus and integration suites opt out through their marker or
+    `AIZK_INTEGRATION_REAL_SERVICES`. Tests that assert on recorded calls request the explicit
+    `fake_*` fixture, whose monkeypatch is installed after this default and so wins.
+    """
+    opts_out = (
+        os.environ.get("AIZK_INTEGRATION_REAL_SERVICES") == "1"
+        or request.config.getoption("--eval-mode") is not None
+        or any(
+            request.node.get_closest_marker(marker)
+            for marker in ("real_services", "integration", "benchmark")
+        )
+    )
+    if opts_out:
+        yield
+        return
+    with stubbed_model_lanes():
+        yield
+
+
 @pytest.fixture
 def fake_embedder(monkeypatch: pytest.MonkeyPatch) -> RecordingEmbedder:
     embedder = RecordingEmbedder()
@@ -150,18 +209,9 @@ def fake_embedder(monkeypatch: pytest.MonkeyPatch) -> RecordingEmbedder:
 @pytest.fixture
 def fake_reranker(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
     """Score every rerank call neutrally and record the texts each call saw."""
-    calls: list[list[str]] = []
-
-    class NeutralReranker:
-        async def rerank(self, query: str, texts: list[str]) -> list[float]:
-            del query
-            calls.append(texts)
-            return [0.0] * len(texts)
-
-    monkeypatch.setattr(
-        RerankClient, "from_settings", classmethod(lambda cls, config: NeutralReranker())
-    )
-    return calls
+    reranker = NeutralReranker()
+    monkeypatch.setattr(RerankClient, "from_settings", classmethod(lambda cls, config: reranker))
+    return reranker.calls
 
 
 @pytest.fixture
