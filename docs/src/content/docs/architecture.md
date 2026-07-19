@@ -1,4 +1,7 @@
-# Architecture rules
+---
+title: "Architecture rules"
+description: "The architecture rules and import contracts that define how aizk is put together."
+---
 
 This page is the definition of record for how aizk is put together. The eight rules came out
 of the architecture audit, each with its one-line rationale, and the import contracts at the

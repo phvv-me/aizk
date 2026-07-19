@@ -1,4 +1,7 @@
-# The write path
+---
+title: "The write path"
+description: "How authored notes, files, and public sources become normalized Markdown and graph projections."
+---
 
 There are two entry paths. Authored notes enter as text. Files and public HTTPS sources enter as
 immutable artifacts. Both paths converge on the same normalized Markdown ingestion and graph

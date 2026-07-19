@@ -1,10 +1,37 @@
-# Autonomy
+---
+title: "Autonomy"
+description: "Why aizk has no review queue, so agents own what is remembered and corrected."
+---
 
 AIZK has no review system and will not gain one. Agents decide what to remember, where it belongs,
 and when changed evidence requires a correction. A successful write becomes a source immediately.
 The autonomous engine maintains rebuildable projections and operational health rather than judging
 whether knowledge deserves acceptance. Human operators maintain infrastructure rather than process
 memory.
+
+A write drops an immutable source into the store, the ingest queue projects it into the graph, and
+scheduled passes keep that graph correct and current. The loop has two entry points, the on-write
+queue and the cron scheduler, and every derived pass feeds the same graph that recall reads back.
+
+```mermaid
+flowchart TD
+    W["agent remember"] --> SRC["Document + Chunks<br/>immutable source"]
+    SRC --> IQ[["ingest queue"]]
+    IQ --> CP["ChunkProjectionJob<br/>gate, extract, consolidate"]
+    CP --> KG[("graph<br/>entities + fact claims")]
+    CP -->|entity_dirty| PP["ProfileProjectionJob"]
+    PP --> KG
+
+    SCH[["cron scheduler<br/>one task per scope set"]]
+    SCH --> SP["SessionPromoteJob"] --> IQ
+    SCH --> PP
+    KG -->|growth gate| CM["CommunitiesJob"] --> KG
+    KG -->|growth gate| RA["RaptorJob"] --> KG
+    SCH --> IN["InsightJob<br/>observations back as facts"] --> KG
+    SCH --> DD["DedupJob<br/>merge duplicates"] --> KG
+    SCH --> DC["DecayJob<br/>archive stale facts"] --> KG
+    KG -.->|recall| W
+```
 
 Maintenance never runs in a caller request. A pgqueuer worker drains durable jobs and a cron
 scheduler fans scheduled passes out once per exact scope set. Each job binds authority for only
@@ -36,7 +63,6 @@ use `ON CONFLICT`.
 | RAPTOR | build recursive summaries above communities | growth gate |
 | profiles | refresh rolled-up entity descriptions | schedule and write queue |
 | insights | derive higher-level observations and write them back as facts | schedule |
-| self improve | score retrieval toggles and persist a significant winner | schedule |
 | backup | write and prune database backups | schedule |
 
 Profile projections run at priority 100 with a small fleet-wide concurrency limit. Chunk graph

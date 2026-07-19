@@ -1,7 +1,49 @@
-# Concepts
+---
+title: "Concepts"
+description: "A plain-language primer for the terms these docs use, from MCP to bi-temporal facts."
+---
 
 A short plain-language primer for the words the rest of these docs use freely. Read this first
 if terms like MCP, row level security, or bi-temporal are unfamiliar. Skip it otherwise.
+
+## The whole picture at a glance
+
+Everything below is one loop. An agent writes with `remember`, the store keeps the raw source,
+autonomous passes project it into a knowledge graph, and `recall` reads across both to return a
+single prompt-ready string. One identity and its scope lattice gate every layer through row level
+security. Each deeper page zooms into one box of this diagram.
+
+```mermaid
+flowchart TD
+    A([MCP agent])
+
+    A -->|remember| I[extract, chunk, embed]
+
+    subgraph store[Store]
+        I --> T[(documents, chunks, artifacts)]
+    end
+
+    subgraph passes[Autonomous graph passes]
+        P[extract, consolidate, communities, profiles, RAPTOR]
+        P --> K[(entities, facts, communities, profiles)]
+    end
+
+    subgraph retr[Retrieval]
+        Q[dense, lexical, and graph lanes] --> M[merit rerank and budget pack]
+    end
+
+    T --> P
+    A -->|recall| Q
+    T --> Q
+    K --> Q
+    M -->|one prompt-ready string| A
+    A -->|share| T
+
+    L[Logto identity and scope lattice]
+    L -.->|RLS on every row| store
+    L -.->|RLS on every row| passes
+    L -.->|RLS on every row| retr
+```
 
 ## Agent and MCP
 
@@ -76,17 +118,17 @@ land near each other, which is how aizk finds the right memory even when a searc
 the original words. Retrieval is the general term for turning a question into the handful of
 facts, snippets, and summaries worth showing back. aizk's retrieval blends several techniques at
 once, meaning-based search, exact-word search, and graph traversal, rather than picking one, see
-[Read path](engine/read-path.md).
+[Read path](/engine/read-path).
 
 ## Scopes and the lattice
 
 A scope is a group knowledge can be shared with, a team, a project, a household. aizk lets one
 piece of knowledge belong to several scopes at once, and only someone standing in every one of
 those groups can see it, which is what "the scope-set lattice" means in the deeper pages, see
-[Lattice](engine/lattice.md). The several-scope form is a real intersection corpus, not a request
+[Lattice](/engine/lattice). The several-scope form is a real intersection corpus, not a request
 to choose one active organization. Logto owns the organizations and memberships while aizk stores
 only the stable scope IDs derived from their signed identifiers, see
-[Identity and sharing](engine/identity.md).
+[Identity and sharing](/engine/identity).
 
 Public means readable by every authenticated AIZK user. It does not mean writable by everyone and
 it does not currently mean readable without login. Only organization members whose effective Logto
@@ -106,7 +148,7 @@ gets the chance.
 Most memory only tracks when it learned something. aizk tracks two independent clocks, when a
 fact was true in the world, and when aizk itself recorded it. That second clock lets a later
 correction coexist with the original claim rather than overwrite it, so the engine can honestly
-answer what it believed on a given day in the past, see [Store](engine/store.md).
+answer what it believed on a given day in the past, see [Store](/engine/store).
 
 ## Agent-managed currentness
 

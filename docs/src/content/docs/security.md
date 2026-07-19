@@ -1,8 +1,11 @@
-# Security
+---
+title: "Security"
+description: "What a production aizk deployment protects, what it trusts, and the release gate."
+---
 
 This page defines what a production Aizk deployment protects, what it deliberately trusts, and
 which checks must pass before public traffic is allowed. It assumes the single-host Compose
-deployment described in [Operations](operations.md).
+deployment described in [Operations](/operations).
 
 ## Protected assets
 
@@ -22,6 +25,40 @@ OAuth sessions, organization standing, and database backups. The main security g
 Logto owns users, organizations, memberships, roles, permissions, login, and consent. Aizk owns
 the deterministic mapping from verified Logto identifiers to PostgreSQL UUID5 values. It does not
 mirror identity rows.
+
+An agent request crosses these boundaries in order. Each stage narrows authority, and the final
+row filter runs inside PostgreSQL under a role that cannot bypass it.
+
+```mermaid
+flowchart TD
+    agent["Agent, MCP client"]
+
+    subgraph edge["Cloudflare tunnel, public ingress"]
+      routes["body and rate limits on mcp, authorize, token, register"]
+    end
+
+    subgraph srv["server process, holds only the aizk_app credential"]
+      oauth["FastMCP OAuth proxy"]
+      verify["verify Logto JWT: issuer, audience, control scope, signature"]
+      ident["resolve User via Logto orgs, roles, permissions"]
+      bucket["per-caller token bucket"]
+      tools["recall, remember, share, artifact"]
+      guc["bind caller scopes into the app.scopes setting"]
+    end
+
+    subgraph pg["PostgreSQL, aizk_app is NOSUPERUSER NOBYPASSRLS"]
+      rls{"forced RLS: row scopes within caller standing"}
+      rows[("tenant rows")]
+    end
+
+    obj[("SeaweedFS objects, opaque keys")]
+
+    agent --> routes --> oauth --> verify --> ident --> bucket --> tools --> guc --> rls
+    rls -->|"every scope present"| rows
+    rls -->|"missing a scope"| drop["row filtered out"]
+    tools -->|"artifact read"| obj
+    obj -->|"integrity verified bytes"| tools
+```
 
 The MCP server verifies the token signature, issuer, expiration, required `control` scope, and
 the exact Aizk resource audience. It resolves organization standing through a short coalesced
@@ -50,7 +87,36 @@ policy must enforce the parent relationship itself.
 
 ## Process privilege separation
 
-The Compose stack uses one image with separate services.
+The Compose stack uses one image with separate services. The database roles split into those that
+reach tenant data only through row security and those that own the tables and therefore bypass it.
+The public server and API receive a blank owner password, so no owner edge exists for them.
+
+```mermaid
+flowchart TD
+    subgraph public["Public-facing, reachable through Caddy"]
+      server2["server, MCP"]
+      api2["api, browser JSON"]
+    end
+
+    subgraph private["Private, no published port"]
+      worker2["worker"]
+      setup2["setup"]
+    end
+
+    app2["aizk_app: NOSUPERUSER, NOBYPASSRLS"]
+    owner2["aizk_admin: owns the tables"]
+    logto2["logto: owns only the logto database"]
+
+    server2 --> app2
+    api2 --> app2
+    worker2 --> app2
+    worker2 --> owner2
+    setup2 --> owner2
+
+    app2 -->|"every row checked by RLS"| tables[("tenant tables")]
+    owner2 -->|"ownership bypasses RLS"| tables
+    logto2 --> logtodb[("logto database")]
+```
 
 - `setup` holds owner credentials only while applying migrations and installing the queue schema.
 - `server` holds the app password and OAuth credentials. Owner settings are explicitly blank.
@@ -58,7 +124,7 @@ The Compose stack uses one image with separate services.
   has no published port.
 - `api` holds the forced-RLS app password and answers browser JSON requests with the same Logto
   bearer verification as MCP. It receives no owner or backup credential.
-- `web` is the SvelteKit server holding only the confidential Logto web application and the
+- `frontend` is the SvelteKit server holding only the confidential Logto web application and the
   session secret. It has no database credential.
 - `caddy` routes the one public origin to the server, the API, and the interface. It has no
   secret at all.
@@ -223,7 +289,7 @@ some corruption but reveal nothing about confidentiality and do not replace a re
 
 Core PostgreSQL has no transparent cluster encryption. Crimson's dedicated database NVMe is not
 yet LUKS-encrypted and has no TPM-assisted unlock path. This is a recorded physical-security gap,
-not an implicit guarantee. The exact choices are explained in [Operations](operations.md).
+not an implicit guarantee. The exact choices are explained in [Operations](/operations).
 
 Local `pg_dump` files are plaintext database archives. Aizk creates them with mode `0600` and
 passes the password through `PGPASSWORD` rather than the process command line. Every successful

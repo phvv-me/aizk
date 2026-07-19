@@ -1,8 +1,36 @@
-# Identity and sharing
+---
+title: "Identity and sharing"
+description: "The Logto identity boundary and the multi-organization scope model aizk enforces."
+---
 
-This page records the implemented identity boundary. Neither `0001_init` nor
-`0002_artifacts_usage` contains a user, organization, membership, role, or owner authorization
-table. The Logto boundary and multi-organization scope lattice are durable product rules.
+This page records the implemented identity boundary. The consolidated `0001_init` schema contains
+no user, organization, membership, role, or owner authorization table. The Logto boundary and
+multi-organization scope lattice are durable product rules.
+
+One request walks the whole boundary. A verified token names a subject, Logto returns that
+subject's current organizations, both become stable UUID5 scopes, and those scopes ride into the
+transaction where PostgreSQL turns them into a row filter it enforces itself.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as MCP client
+    participant M as IdentityMiddleware
+    participant A as Auth / JWTVerifier
+    participant L as Logto
+    participant P as Postgres app role
+    C->>M: tool call + bearer token
+    M->>A: resolve()
+    A->>A: verify signature, issuer,<br/>audience, control scope
+    A->>L: user(claims.sub)
+    L-->>A: account, orgs, roles<br/>(short coalesced cache)
+    A->>A: id = uuid5(sub)<br/>scope = uuid5(org id)
+    Note over A: ScopeTable<br/>read: personal + member orgs<br/>write: orgs granting write:memory<br/>public: public orgs
+    A-->>M: User(scopes)
+    M->>P: async with user,<br/>SET LOCAL app.scopes
+    P->>P: RLS scope_read filter,<br/>row scopes contained by read
+    P-->>C: only rows the standing covers
+```
 
 ## Logto owns identity
 
@@ -88,6 +116,21 @@ when its whole scope set is contained by the caller's readable standing. Retriev
 second scope selector. A user in A and B automatically reads personal, A, B, and A-and-B rows.
 Writes choose one destination separately and require its complete scope set to be contained by the
 caller's writable standing.
+
+The same containment test decides both directions, so read standing and write standing become one
+enforced row filter rather than an application check.
+
+```mermaid
+flowchart TD
+    ST["caller standing<br/>read, write, public"]
+    ST --> Q{"row operation"}
+    Q -->|select| RR["stored scopes<br/>contained by read<br/>(or singleton in public)"]
+    Q -->|insert / update| WW["stored scopes<br/>contained by write"]
+    RR -->|holds| OK["row passes RLS"]
+    WW -->|holds| OK
+    RR -->|fails| NO["row hidden or write refused"]
+    WW -->|fails| NO
+```
 
 The application represents this once as `User.scopes`. Its `read`, `write`, and `public` fields are
 frozen sets validated by Pydantic. `async with user` opens one short app-role transaction, applies

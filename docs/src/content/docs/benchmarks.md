@@ -1,4 +1,7 @@
-# Benchmarks and evaluation
+---
+title: "Benchmarks and evaluation"
+description: "Three separate evaluation levels, from unit tests through production retrieval to external benchmarks."
+---
 
 Aizk keeps three evaluation levels separate. A test proves a contract. The production retrieval
 benchmark measures memory already stored in one deployment. An external benchmark imports its own
@@ -192,18 +195,16 @@ invalidated memory therefore loses credit.
 ## Verification posture
 
 The suite uses Hypothesis for algebraic and authorization properties and parametrized tests for
-backend matrices. Its migration preservation test creates a disposable PostgreSQL database and
-upgrades it only to the deployed `0001_init` revision. It inserts a real scoped `document` and
-child `chunk`, including the original UUIDv8 content hash and source text, before upgrading that
-populated database to `0002_artifacts_usage`.
+backend matrices. Its migration test creates a disposable PostgreSQL database and upgrades it to
+head, the single `0001_init` revision that builds the entire schema in one step. It inserts a real
+scoped `document` and child `chunk`, including the original UUIDv8 content hash and source text.
 
-The test then proves that the document title and content hash survived unchanged, the new artifact
-links remain null for the preexisting text source, and the database reached the exact
-`0002_artifacts_usage` revision. It also verifies that `artifact`, `artifact_content`, `blob`, and
-`usage_event` were installed with forced row security. Finally, it inspects the new chunk insert
-policy and confirms that a child write must match both its parent document ID and exact scope set.
-The disposable database is dropped even after a failure. This exercises preservation across the
-real `0001` to `0002` upgrade rather than proving only that a blank database reaches head.
+The test then proves that the document title and content hash are stored unchanged, the artifact
+links remain null for a plain text source, and the database reached the exact `0001_init` head. It
+also verifies that `artifact`, `artifact_content`, `blob`, and `usage_event` were installed with
+forced row security. Finally, it inspects the new chunk insert policy and confirms that a child
+write must match both its parent document ID and exact scope set. The disposable database is
+dropped even after a failure.
 
 Alembic autogenerate separately returns an empty revision against the current models. The RLS
 verifier checks every scoped table and policy in the PostgreSQL catalog.

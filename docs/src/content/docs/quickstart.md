@@ -1,4 +1,7 @@
-# Quickstart
+---
+title: "Quickstart"
+description: "Connect an MCP client to the aizk deployment in about five minutes."
+---
 
 You need one MCP URL. The lab deployment is available at
 `https://aizk.phvv.me/mcp`. Account provisioning automatically grants each user the global
@@ -7,7 +10,7 @@ You need one MCP URL. The lab deployment is available at
 ## Connect a client
 
 Add the endpoint to Codex, Claude Code, or OpenCode with the project configuration on the
-[MCP clients](mcp-clients.md) page. Then start OAuth from that client. No OAuth client ID or secret
+[MCP clients](/mcp-clients) page. Then start OAuth from that client. No OAuth client ID or secret
 belongs in the repository.
 
 For Codex the login command is
@@ -69,7 +72,7 @@ source URI.
 Both `observed_at` and `expires_at` are optional. Omit them for ordinary durable knowledge. Set
 `observed_at` only when a known applicability time differs materially from capture. Set
 `expires_at` only when the outside world supplies a known time after which the information stops
-being true. It is not a reminder or maintenance date. See [Observation and expiration](concepts.md#observation-and-expiration).
+being true. It is not a reminder or maintenance date. See [Observation and expiration](/concepts#observation-and-expiration).
 
 An optional `scopes` list chooses an authorized organization or intersection destination. Without
 it, `remember` writes to the caller's private scope.
@@ -170,5 +173,5 @@ docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker a
 
 The report covers migrations, RLS, queue state, model aliases, context sizes, per-scope graph counts,
 usage by caller and target scope, logical and physical file bytes, the last writes, and one bounded
-recall. Continue with [Operations](operations.md) for Logto, TLS,
+recall. Continue with [Operations](/operations) for Logto, TLS,
 backups, and production deployment.

@@ -1,8 +1,11 @@
-# Operations
+---
+title: "Operations"
+description: "Running aizk as durable shared infrastructure with storage, backups, and upgrades."
+---
 
 This page explains how to run Aizk as durable shared infrastructure. It covers process
 privileges, network exposure, PostgreSQL storage, encryption, backups, upgrades, and the
-five-second health check. The [security page](security.md) defines the threat model and release
+five-second health check. The [security page](/security) defines the threat model and release
 gate.
 
 ## Deployment shape
@@ -22,7 +25,7 @@ handling away from database-owner credentials without creating a second deployme
 | `public-check` | Fail closed on incomplete public authentication settings | None | None |
 | `web-check` | Fail closed on incomplete browser authentication settings | None | None |
 | `api` | Serve the browser JSON API over the shared AIZK memory service | Forced-RLS app role | None |
-| `web` | Render the SvelteKit interface and hold the Logto web application | None | None |
+| `frontend` | Render the SvelteKit interface and hold the Logto web application | None | None |
 | `caddy` | Route the AIZK tunnel origin to the server, capability upload, and interface | None | None |
 | `objects` | Store immutable artifact bytes through SeaweedFS S3 | None | None |
 | `clamav` | Scan incoming artifact bytes and update malware signatures | None | None |
@@ -33,6 +36,60 @@ handling away from database-owner credentials without creating a second deployme
 | `loki` | Retain and query centralized operational logs | None | None |
 | `grafana` | Inspect logs through the provisioned Loki source | None | Loopback only |
 | `observability-init` | Prepare the Loki volume for its unprivileged process | None | None |
+
+The topology below places those services on Crimson. Only `cloudflared` reaches the Internet; every
+other service binds to loopback or stays on the Compose network. The `server` and `api` tier reaches
+the data plane and every model lane over loopback, and the diagram draws one representative edge per
+lane to keep it legible.
+
+```mermaid
+architecture-beta
+    service internet(internet)[Public clients]
+
+    group public(cloud)[Public via Cloudflare]
+    service tunnel(cloud)[cloudflared] in public
+
+    group gateway(server)[HTTP gateway]
+    service caddy(server)[caddy] in gateway
+    service frontend(server)[frontend] in gateway
+
+    group app(server)[MCP and API tier]
+    service server(server)[server] in app
+    service api(server)[api] in app
+    service worker(server)[worker] in app
+
+    group idp(server)[Identity]
+    service logto(server)[logto] in idp
+
+    group data(database)[Data plane loopback]
+    service db(database)[db] in data
+    service objects(disk)[objects] in data
+    service clamav(server)[clamav] in data
+    service docling(server)[docling] in data
+
+    group models(server)[Model lanes loopback]
+    service emb(server)[vllm-emb] in models
+    service llm(server)[vllm-llm] in models
+    service rerank(server)[vllm-rerank] in models
+    service gliner(server)[gliner] in models
+
+    internet:R --> L:tunnel
+    tunnel:R --> L:caddy
+    tunnel:B --> T:logto
+    caddy:R --> L:server
+    caddy:B --> T:frontend
+    caddy:T --> B:api
+    frontend:R --> L:api
+    server:R --> L:db
+    api:B --> T:db
+    worker:L --> R:db
+    server:B --> T:clamav
+    server:T --> B:gliner
+    worker:T --> B:docling
+    worker:R --> L:llm
+    worker:B --> T:objects
+    api:R --> L:emb
+```
 
 ## Exposure model
 
@@ -122,7 +179,7 @@ as `https://aizk.phvv.me/auth/sign-in-callback`. Keep Logto at `https://auth.phv
 Tunnel maps `auth.phvv.me` to `logto:3001` and maps `aizk.phvv.me` to `caddy:8081`. Caddy
 forwards the MCP endpoint and FastMCP OAuth routes to `server:8080`, forwards only
 `PUT /api/uploads/*` to `api:8010`, refuses every other `/api` request, and sends every remaining
-path to the SvelteKit server at `web:3000`. Set `AIZK_MCP_PUBLIC_URL` and
+path to the SvelteKit server at `frontend:3000`. Set `AIZK_MCP_PUBLIC_URL` and
 `AIZK_WEB_PUBLIC_URL` to `https://aizk.phvv.me`. This keeps both clients same-origin and avoids
 exposing any backend port.
 
@@ -159,7 +216,7 @@ PostgreSQL, Logto, the Logto admin console, MCP, the browser UI, and every model
 to `127.0.0.1` on the host only for Grafana operator access; every other host publication has
 been removed. The Cloudflare container reaches `logto:3001` and `caddy:8081` over the Compose
 network and publishes no inbound host port. Caddy reaches `server:8080`, `api:8010`, and
-`web:3000` internally, with only capability upload PUTs routed publicly to the API. See the
+`frontend:3000` internally, with only capability upload PUTs routed publicly to the API. See the
 [Docker Compose port reference](https://docs.docker.com/reference/compose-file/services/#ports).
 
 ClamAV TCP has no protocol authentication or encryption. It is safe here only because it remains
@@ -475,8 +532,8 @@ session secret. The session secret must contain at least 32 bytes and differ fro
 secrets. The interface image bakes no deployment configuration at build time. The Logto web
 secret and session secret enter only the `web` service at runtime, and the database app
 credential enters only the `api` service.
-Client-specific setup lives in [MCP clients](mcp-clients.md), and the complete authority model
-lives in [Identity and sharing](engine/identity.md).
+Client-specific setup lives in [MCP clients](/mcp-clients), and the complete authority model
+lives in [Identity and sharing](/engine/identity).
 
 Every external image uses a validated version tag. VectorChord Suite currently provides only the
 floating `pg18-latest` suite tag, so that image and the artifact services also carry tested

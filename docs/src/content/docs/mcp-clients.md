@@ -1,10 +1,13 @@
-# MCP clients
+---
+title: "MCP clients"
+description: "Point Codex, Claude Code, OpenCode, and other MCP clients at one OAuth-protected URL."
+---
 
 Every client points at the same URL and discovers Aizk as an OAuth protected resource. FastMCP
 registers each client dynamically, proxies human sign-in through Logto, and stores encrypted
 registration and refresh state on the server. A connected client sees the four agent tools,
 `status`, `recall`, `remember`, and `share`, all described in the
-[API contract](api.md). `remember` handles text, preserved URIs, and local file uploads.
+[API contract](/api). `remember` handles text, preserved URIs, and local file uploads.
 
 ## Codex
 

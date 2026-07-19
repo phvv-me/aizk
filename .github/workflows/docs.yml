@@ -1,11 +1,12 @@
 name: Docs
 
-# Deploys on main when docs change. The mkdocs build is the gate. (CI runs only
-# on pull_request and workflow_call, so a workflow_run trigger would never fire.)
+# Builds the Astro + Starlight docs site and deploys it to GitHub Pages on main when docs change.
+# The site is static and imports no project code, so this job never touches Python, chefe, or the
+# runtime dependencies.
 on:
   push:
     branches: [main]
-    paths: ["docs/**", "mkdocs.yml", ".github/workflows/docs.yml", "README.md"]
+    paths: ["docs/**", ".github/workflows/docs.yml", "README.md"]
   workflow_dispatch:
 
 permissions:
@@ -22,14 +23,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-      - run: uv sync --extra docs
-      # front-run PyPI lag: reinstall rlsalchemy straight from its git main
-      - run: uv pip install --reinstall "rlsalchemy @ git+https://github.com/phvv-me/rls"
-      - run: uv run --no-sync --extra docs mkdocs build -d site
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: docs/pnpm-lock.yaml
+      - run: pnpm --dir docs install --frozen-lockfile
+      - run: pnpm --dir docs build
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: site
+          path: docs/dist
 
   deploy:
     needs: build

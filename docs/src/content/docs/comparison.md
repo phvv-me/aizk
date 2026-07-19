@@ -1,4 +1,7 @@
-# Comparison
+---
+title: "Comparison"
+description: "How aizk compares to vault search and other memory systems, honestly scoped."
+---
 
 ## Against vault search
 
