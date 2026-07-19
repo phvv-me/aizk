@@ -1,7 +1,7 @@
 from collections.abc import Iterable, Sequence
 from functools import cache, cached_property
 from types import TracebackType
-from typing import TYPE_CHECKING, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import rls
 from patos import FrozenModel
@@ -14,8 +14,7 @@ from pydantic import (
     model_serializer,
 )
 from sqlalchemy import Row
-from sqlalchemy.sql.selectable import Select
-from sqlmodel.sql.expression import SelectOfScalar
+from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from ...config import settings
 from ...config.settings import StatementValue
@@ -227,7 +226,7 @@ class RowStatement[RowT: BaseModel](FrozenModel):
 
     async def __call__(
         self,
-        statement: Select,
+        statement: Select[Any] | SelectOfScalar[Any],
         /,
         **binds: StatementValue,
     ) -> tuple[RowT, ...]:
@@ -245,7 +244,7 @@ class RowStatement[RowT: BaseModel](FrozenModel):
                 return tuple(self.model.model_validate({field: value}) for value in rows)
         return self.validate_rows(rows)
 
-    def validate_rows(self, rows: Sequence[Row]) -> tuple[RowT, ...]:
+    def validate_rows(self, rows: Sequence[Row[Any]]) -> tuple[RowT, ...]:
         """Validate statement rows into this runner's row model by attribute access."""
         validator = cast("TypeAdapter[RowT]", self.row_validator(self.model))
         return tuple(validator.validate_python(row, from_attributes=True) for row in rows)

@@ -13,6 +13,7 @@ from pydantic import UUID5, BaseModel
 from ..auth import Auth
 from ..store import Usage
 from ..store.identity import User
+from ..store.models.tables import UsageEvent
 from ..usage import annotate_caller, annotate_operation, annotate_transport, serving_span
 
 _USER_STATE = "aizk_user"
@@ -70,7 +71,7 @@ class IdentityMiddleware(Middleware):
         self,
         context: MiddlewareContext[ParamsT],
         call_next: CallNext[ParamsT, ResultT],
-        operation: Usage.Event.Operation | None,
+        operation: UsageEvent.Operation | None,
         reply_size: Callable[[ResultT], int],
     ) -> ResultT:
         """Bind the freshly resolved caller, run the handler, and account its transport."""

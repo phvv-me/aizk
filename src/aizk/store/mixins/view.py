@@ -1,3 +1,5 @@
+from typing import Any
+
 import rls
 from sqlalchemy import PrimaryKeyConstraint
 from sqlalchemy.sql import Select
@@ -19,7 +21,7 @@ class ViewBase(MappedBase):
     __rls__ = rls.Open()
 
     @classmethod
-    def __view_select__(cls) -> Select:
+    def __view_select__(cls) -> Select[Any]:
         """Return the select defining a concrete view."""
         raise NotImplementedError
 

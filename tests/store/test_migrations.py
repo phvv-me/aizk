@@ -16,7 +16,7 @@ def migration_url(database: str) -> URL:
     return make_url(settings.admin_database_url).set(database=database)
 
 
-def test_upgrade_from_deployed_0001_preserves_rows_and_installs_artifacts() -> None:
+def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
     database = f"aizk_migration_test_{os.getpid()}"
     maintenance_url = migration_url("postgres")
     target_url = migration_url(database)
@@ -41,7 +41,8 @@ def test_upgrade_from_deployed_0001_preserves_rows_and_installs_artifacts() -> N
             target_url.render_as_string(hide_password=False).replace("%", "%%"),
         )
         try:
-            ops.run_alembic(command.upgrade, config, "0001_init")
+            # The whole schema is one revision, so head installs it in a single upgrade.
+            ops.run_alembic(command.upgrade, config, "head")
             document_id = uuid7()
             chunk_id = uuid7()
             owner = uuid5()
@@ -78,7 +79,6 @@ def test_upgrade_from_deployed_0001_preserves_rows_and_installs_artifacts() -> N
             finally:
                 await engine.dispose()
 
-            ops.run_alembic(command.upgrade, config, "head")
             engine = create_async_engine(target_url, poolclass=NullPool)
             try:
                 async with engine.connect() as connection:
@@ -159,7 +159,7 @@ def test_upgrade_from_deployed_0001_preserves_rows_and_installs_artifacts() -> N
                 }
                 assert all(forced.values())
                 assert "(document_id, scopes) IN" in chunk_check
-                assert revision == "0005_upload_content_hash"
+                assert revision == "0001_init"
             finally:
                 await engine.dispose()
         finally:

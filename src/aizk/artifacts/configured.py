@@ -1,5 +1,7 @@
+from collections.abc import Hashable
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import cast
 
 import httpx
 
@@ -56,18 +58,21 @@ def build_artifact_services(config: Settings, storage: ByteStore) -> ArtifactSer
         str(config.docling_url),
         config.docling_api_key.get_secret_value(),
         config.docling_request_timeout,
-        DoclingOptions(
-            pipeline=config.docling_pipeline,
-            do_ocr=config.docling_do_ocr,
-            force_ocr=config.docling_force_ocr,
-            table_mode=config.docling_table_mode,
-            code_enrichment=config.docling_code_enrichment,
-            formula_enrichment=config.docling_formula_enrichment,
-            picture_classification=config.docling_picture_classification,
-            chart_extraction=config.docling_chart_extraction,
-            picture_description=config.docling_picture_description,
-            picture_description_preset=config.docling_picture_description_preset,
-            document_timeout=config.docling_document_timeout,
+        cast(
+            "Hashable",
+            DoclingOptions(
+                pipeline=config.docling_pipeline,
+                do_ocr=config.docling_do_ocr,
+                force_ocr=config.docling_force_ocr,
+                table_mode=config.docling_table_mode,
+                code_enrichment=config.docling_code_enrichment,
+                formula_enrichment=config.docling_formula_enrichment,
+                picture_classification=config.docling_picture_classification,
+                chart_extraction=config.docling_chart_extraction,
+                picture_description=config.docling_picture_description,
+                picture_description_preset=config.docling_picture_description_preset,
+                document_timeout=config.docling_document_timeout,
+            ),
         ),
     )
     processor = ArtifactProcessor(

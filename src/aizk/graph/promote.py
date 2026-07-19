@@ -11,6 +11,7 @@ from ..exceptions import NotVisibleError
 from ..store import Artifact, Chunk, Document, Fact
 from ..store.engine import Session
 from ..store.identity import User
+from ..store.models.views import LiveFact
 from ..types import Scopes
 from .dedupe import claim_entity, claim_fact
 
@@ -24,7 +25,7 @@ async def source_document(session: Session, document_id: UUID7) -> Document:
     return source
 
 
-async def source_live_facts(session: Session, chunks: list[Chunk]) -> list[Fact.Live]:
+async def source_live_facts(session: Session, chunks: list[Chunk]) -> list[LiveFact]:
     """The live facts sourced from a document's own chunks, the only facts a promotion
     carries."""
     return list(
@@ -57,7 +58,7 @@ def copied_chunks(
 
 
 async def claim_promoted_entities(
-    session: Session, facts: list[Fact.Live], user_id: UUID5, target: list[UUID5]
+    session: Session, facts: list[LiveFact], user_id: UUID5, target: list[UUID5]
 ) -> None:
     """Claim, in the target scope set, every entity a promoted fact's subject or object
     names."""
@@ -70,7 +71,7 @@ async def claim_promoted_entities(
 
 async def claim_promoted_facts(
     session: Session,
-    facts: list[Fact.Live],
+    facts: list[LiveFact],
     copies: dict[UUID7, Chunk],
     user_id: UUID5,
     target: list[UUID5],

@@ -1,8 +1,7 @@
 from patos import sql
-from sqlalchemy.sql.selectable import Select
 
 from ...store import Chunk, Entity
-from ..models.lane import Lane, QueryContext
+from ..models.lane import Lane, LaneSelect, QueryContext
 
 
 class SourceLane(Lane):
@@ -15,7 +14,7 @@ class SourceLane(Lane):
 
     kind: Lane.Kind = Lane.Kind.SOURCES
 
-    def __call__(self, context: QueryContext) -> Select:
+    def __call__(self, context: QueryContext) -> LaneSelect:
         """The capped hybrid chunk hits rendered as scored source lines."""
         hits = Chunk.hybrid(context)
         return self.row(
@@ -38,7 +37,7 @@ class EntityCatalogLane(Lane):
 
     kind: Lane.Kind = Lane.Kind.SOURCES
 
-    def __call__(self, context: QueryContext) -> Select:
+    def __call__(self, context: QueryContext) -> LaneSelect:
         """Render query-relevant entity kinds and their current state facts."""
         catalog = Entity.catalog(context)
         return self.row(

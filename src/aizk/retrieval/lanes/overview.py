@@ -1,11 +1,10 @@
 from patos import sql
 from sqlalchemy import Integer, bindparam, func
-from sqlalchemy.sql.selectable import Select
 from sqlmodel import select
 
 from ...ontology import System
 from ...store import Entity
-from ..models.lane import Lane, QueryContext
+from ..models.lane import Lane, LaneSelect, QueryContext
 
 
 class OverviewLane(Lane):
@@ -17,7 +16,7 @@ class OverviewLane(Lane):
 
     kind: Lane.Kind = Lane.Kind.OVERVIEW
 
-    def __call__(self, context: QueryContext) -> Select:
+    def __call__(self, context: QueryContext) -> LaneSelect:
         """The deepest RAPTOR summaries under the query vector's distance order."""
         level = Entity.Claim.attributes[int] >> "level"
         root_depth = (

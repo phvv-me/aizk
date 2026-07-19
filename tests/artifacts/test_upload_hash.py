@@ -8,7 +8,7 @@ from aizk.artifacts.models import ArtifactReceipt
 from aizk.artifacts.uploads import UploadBox, UploadRequest, UploadTicket
 from aizk.integrations.docling import ArtifactBytes
 from aizk.store.identity import User
-from aizk.types import ScopeNames
+from aizk.types import Scopes
 
 
 class _RecordingIntake:
@@ -21,7 +21,7 @@ class _RecordingIntake:
         user: User,
         artifact: ArtifactBytes,
         *,
-        scopes: ScopeNames | None = None,
+        target: Scopes,
         companion_text: str | None = None,
     ) -> ArtifactReceipt:
         self.artifacts.append(artifact)
@@ -29,14 +29,16 @@ class _RecordingIntake:
 
 
 def _ticket(content: bytes) -> UploadTicket:
+    user_id = uuid5(NAMESPACE_URL, "https://aizk.example/test-user")
     return UploadTicket(
-        user=User.model_construct(id=uuid5(NAMESPACE_URL, "https://aizk.example/test-user")),
+        user=User.model_construct(id=user_id),
         declared=UploadRequest(
             filename="evidence.txt",
             media_type="text/plain",
             size=len(content),
             sha256=hashlib.sha256(content).hexdigest(),
         ),
+        target=frozenset({user_id}),
     )
 
 

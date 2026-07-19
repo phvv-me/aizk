@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import cast
+
 from loguru import logger
 from pydantic import UUID5
 from sqlalchemy import delete, or_, update
@@ -9,8 +12,12 @@ from ..ontology import System
 from ..store import Entity, Fact
 from ..store.engine import Session
 from ..store.identity import User
+from ..store.models.tables import FactClaim, FactContent
 from ..types import Scopes
 from .naming import normalize_name
+
+# SQLModel synthesizes table-model keyword constructors outside the static signatures.
+_fact_content = cast("Callable[..., FactContent]", Fact.Content)
 
 
 def redirect_entity(
@@ -25,7 +32,7 @@ def redirect_entity(
     return replacement, replacement is None
 
 
-def claim_row(claim: Fact.Claim, content_id: UUID5) -> dict:
+def claim_row(claim: FactClaim, content_id: UUID5) -> dict[str, object]:
     """One claim's full column set as a plain dict, content_id re-pointed at the corrected
     row."""
     return {
@@ -44,7 +51,7 @@ def claim_row(claim: Fact.Claim, content_id: UUID5) -> dict:
     }
 
 
-async def snapshot_claims(session: Session, content_id: UUID5) -> list[dict]:
+async def snapshot_claims(session: Session, content_id: UUID5) -> list[dict[str, object]]:
     """Read and expunge a fact content's whole claim history ahead of its cascading delete."""
     claims = list(
         await session.exec(
@@ -76,7 +83,7 @@ async def repoint_fact_content(  # pragma: no cover
     await session.delete(content)
     await session.flush()
     session.add(
-        Fact.Content(
+        _fact_content(
             id=content_id,
             subject_id=corrected_subject,
             object_id=corrected_object,

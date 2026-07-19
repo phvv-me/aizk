@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 
 from patos import FrozenModel
-from pydantic import UUID7, Field, WithJsonSchema
+from pydantic import UUID7, Field, JsonValue, WithJsonSchema
 
 from ..provenance import EpistemicKind
 
@@ -13,7 +13,7 @@ class ExtractedEntity(FrozenModel):
     name: str = Field(description="plain human-readable noun phrase, never an identifier")
     type: str
     suggested_type: str | None = None
-    attributes: dict = {}
+    attributes: dict[str, JsonValue] = {}
 
 
 class TimedFact(FrozenModel):

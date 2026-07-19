@@ -1,9 +1,11 @@
 from pathlib import Path
+from typing import cast
 
 from patos import FrozenModel
 from pydantic import UUID5, UUID7, TypeAdapter
 from sqlalchemy import func, literal, union_all
 from sqlmodel import select
+from sqlmodel.sql.expression import Select
 
 from . import export, graph, ops
 from .background.jobs.projection import enqueue_pending
@@ -26,6 +28,7 @@ from .store import (
     Relation,
 )
 from .store.identity import User
+from .store.models.tables import RelationPolicy
 
 
 class ForgetResult(FrozenModel):
@@ -184,7 +187,7 @@ async def define_relation_kind(
     name: str,
     description: str,
     domain: str = "general",
-    policy: Relation.Policy = Relation.Policy.set,
+    policy: RelationPolicy = Relation.Policy.set,
 ) -> None:
     """Add or refine a relation predicate in the live ontology and refresh its prompt."""
     async with User.system() as session:
@@ -220,7 +223,11 @@ async def list_ontology() -> list[OntologyKindRow]:
         ).add_columns(Relation.Kind.structural, relation_uses.label("uses")),
     ).order_by("kind", "name")
     async with User.system() as session:
-        rows = (await session.exec(statement)).all()
+        # `union_all` yields a `CompoundSelect`, which sqlmodel's `exec` runs (returning the
+        # same tuple rows a `Select` would) but does not cover in its overloads, so bridge it.
+        rows = (
+            await session.exec(cast("Select[tuple[str, str, str, str, bool, int]]", statement))
+        ).all()
     return [OntologyKindRow.model_validate(row, from_attributes=True) for row in rows]
 
 

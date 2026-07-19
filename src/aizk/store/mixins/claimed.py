@@ -3,7 +3,7 @@ from typing import ClassVar, Self
 
 import rls
 import sqlalchemy as sa
-from patos import Model
+from patos import sql
 from sqlalchemy import Table
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
@@ -13,7 +13,7 @@ from ...config import settings
 from ..engine import Session
 
 
-class ClaimedContent(Model):
+class ClaimedContent(sql.Model):
     """Canonical content visible through any readable scoped claim."""
 
     __table__: ClassVar[Table]

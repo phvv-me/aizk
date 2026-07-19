@@ -13,8 +13,8 @@ from pydantic import UUID5, UUID7
 from sqlalchemy import Row, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import Range
-from sqlalchemy.sql.selectable import Select
 from sqlmodel import select
+from sqlmodel.sql.expression import Select
 
 from aizk.config import settings
 from aizk.config.settings import Settings

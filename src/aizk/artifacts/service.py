@@ -1,11 +1,11 @@
 from compression import zstd
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import Protocol, cast
 
 import httpx
 from loguru import logger
 from obstore.exceptions import BaseError as ObjectStoreError
-from pydantic import UUID7, JsonValue
+from pydantic import UUID7, AnyHttpUrl, JsonValue
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..background.jobs.projection import enqueue_document
@@ -30,6 +30,7 @@ from ..storage import (
 )
 from ..store import Artifact, Usage
 from ..store.identity import User
+from ..store.models.tables import ArtifactContent
 from ..types import ScopeNames, Scopes
 from ..usage import annotate_operation
 from .models import (
@@ -78,13 +79,14 @@ class ArtifactIntake:
         expires_at: datetime | None = None,
     ) -> ArtifactReceipt:
         """Fetch one public HTTPS resource once before accepting its immutable bytes."""
-        source = URISource(uri=uri)
+        target = user.write_scope(scopes)
+        source = URISource(uri=cast("AnyHttpUrl", uri))
         artifact = await self.reader.read_uri(source)
         return await self.accept(
             user,
             artifact,
             source_uri=str(source.uri),
-            scopes=scopes,
+            target=target,
             companion_text=companion_text,
             observed_at=observed_at,
             expires_at=expires_at,
@@ -95,19 +97,19 @@ class ArtifactIntake:
         user: User,
         artifact: ArtifactBytes,
         *,
+        target: Scopes,
         source_uri: str | None = None,
-        scopes: ScopeNames | None = None,
         companion_text: str | None = None,
         observed_at: datetime | None = None,
         expires_at: datetime | None = None,
     ) -> ArtifactReceipt:
         """Scan, store, register, and enqueue one bounded artifact without temporary files.
 
-        The whole artifact is held in memory, bounded by the declared upload limit,
-        because malware scanning, content hashing, and object storage each need the
-        complete bytes.
+        The caller resolves and authorizes `target` before delivery, so intake writes to
+        exactly those scopes under PostgreSQL row security. The whole artifact is held in
+        memory, bounded by the declared upload limit, because malware scanning, content
+        hashing, and object storage each need the complete bytes.
         """
-        target = user.write_scope(scopes)
         annotate_operation(Usage.Event.Operation.remember_file, target)
         await self.scanner.scan(artifact.content)
         stored = await self.storage.put(artifact.content)
@@ -253,7 +255,7 @@ class ArtifactProcessor:
         self,
         user: User,
         original: OriginalArtifact,
-        state: Artifact.Content.State,
+        state: ArtifactContent.State,
         content: bytes,
         markdown: str | None = None,
         details: dict[str, JsonValue] | None = None,

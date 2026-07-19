@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { deserialize, enhance } from '$app/forms';
+  import { enhance } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
-  import { Link, RefreshCw, UploadCloud } from '@lucide/svelte';
-  import { toast } from 'svelte-sonner';
+  import { Link, RefreshCw } from '@lucide/svelte';
   import type { ArtifactView } from '$lib/api';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ScopeBadges from '$lib/components/ScopeBadges.svelte';
@@ -17,10 +16,7 @@
 
   let { data }: { data: PageServerData } = $props();
 
-  let fileInput: HTMLInputElement;
-  let uploading = $state(false);
   let intaking = $state(false);
-  let dragging = $state(false);
   let refreshing = $state(false);
 
   const statusVariants: Record<ArtifactView['status'], BadgeVariant> = {
@@ -30,74 +26,6 @@
     failed: 'destructive'
   };
 
-  /** Ask the server action for a capability grant, then PUT the bytes same-origin. */
-  async function upload(file: File) {
-    if (file.size === 0) {
-      toast.error('Choose a non-empty file to upload.');
-      return;
-    }
-    uploading = true;
-    try {
-      const path = await grantPath(file);
-      if (!path) return;
-      const put = await fetch(path, {
-        method: 'PUT',
-        headers: { 'content-type': file.type || 'application/octet-stream' },
-        body: file
-      });
-      if (!put.ok) {
-        toast.error(await putDetail(put));
-        return;
-      }
-      toast.success('File accepted for processing.');
-      await invalidateAll();
-    } catch {
-      toast.error('The AIZK API is unreachable right now. Please try again.');
-    } finally {
-      uploading = false;
-      fileInput.value = '';
-    }
-  }
-
-  /** Declare the file to the `grant` action and read back the same-origin PUT path. */
-  async function grantPath(file: File): Promise<string | null> {
-    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
-    const sha256 = Array.from(new Uint8Array(digest))
-      .map((byte) => byte.toString(16).padStart(2, '0'))
-      .join('');
-    const declaration = new FormData();
-    declaration.set('filename', file.name);
-    declaration.set('media_type', file.type || 'application/octet-stream');
-    declaration.set('size', String(file.size));
-    declaration.set('sha256', sha256);
-    const response = await fetch('?/grant', {
-      method: 'POST',
-      headers: { 'x-sveltekit-action': 'true' },
-      body: declaration
-    });
-    const result = deserialize<{ path: string }, { message: string }>(await response.text());
-    if (result.type === 'success' && result.data?.path) return result.data.path;
-    const message = result.type === 'failure' ? result.data?.message : undefined;
-    toast.error(message ?? 'The upload could not be authorized.');
-    return null;
-  }
-
-  async function putDetail(response: Response): Promise<string> {
-    try {
-      const body = (await response.json()) as { detail?: string };
-      return body.detail ?? `The upload failed with status ${response.status}.`;
-    } catch {
-      return `The upload failed with status ${response.status}.`;
-    }
-  }
-
-  function drop(event: DragEvent) {
-    event.preventDefault();
-    dragging = false;
-    const file = event.dataTransfer?.files?.[0];
-    if (file) void upload(file);
-  }
-
   async function refresh() {
     refreshing = true;
     await invalidateAll();
@@ -105,49 +33,9 @@
   }
 </script>
 
-<PageHeader
-  title="Sources"
-  description="Upload documents or intake https links and follow their processing."
-/>
+<PageHeader title="Sources" description="Intake https links and follow their processing." />
 
-<div class="mb-8 grid gap-4 lg:grid-cols-2">
-  <div>
-    <input
-      type="file"
-      name="file"
-      id="file"
-      class="sr-only"
-      bind:this={fileInput}
-      onchange={() => {
-        const file = fileInput.files?.[0];
-        if (file) void upload(file);
-      }}
-    />
-    <label
-      for="file"
-      class={cn(
-        'border-border hover:border-ring hover:bg-accent/40 flex h-full min-h-40 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors',
-        dragging && 'border-ring bg-accent/40',
-        uploading && 'pointer-events-none opacity-60'
-      )}
-      aria-label="Upload a document"
-      ondragover={(event) => {
-        event.preventDefault();
-        dragging = true;
-      }}
-      ondragleave={() => (dragging = false)}
-      ondrop={drop}
-    >
-      <UploadCloud class="text-muted-foreground size-8" aria-hidden="true" />
-      <span class="text-sm font-medium">
-        {uploading ? 'Uploading' : 'Drop a document here or click to browse'}
-      </span>
-      <span class="text-muted-foreground text-xs">
-        Files are scanned and converted before they join your memory.
-      </span>
-    </label>
-  </div>
-
+<div class="mb-8">
   <Card.Root>
     <Card.Header>
       <Card.Title>Intake a link</Card.Title>
@@ -200,7 +88,7 @@
         </p>
       {:else if data.overview.artifacts.length === 0}
         <p class="text-muted-foreground text-sm">
-          No files or links yet. Upload a document above to get started.
+          No links yet. Intake a link above to get started.
         </p>
       {:else}
         <ul class="divide-border divide-y">

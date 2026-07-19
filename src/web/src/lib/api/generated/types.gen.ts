@@ -280,22 +280,6 @@ export type RecentSource = {
 export type State = 'pending' | 'queued' | 'processing' | 'ready' | 'failed';
 
 /**
- * UploadGrant
- *
- * One live single-use capability PUT URL and its remaining lifetime.
- */
-export type UploadGrant = {
-    /**
-     * Url
-     */
-    url: string;
-    /**
-     * Expires Seconds
-     */
-    expires_seconds: number;
-};
-
-/**
  * UsageTotals
  *
  * Caller-owned operation and transfer totals suitable for cost awareness.
@@ -461,49 +445,6 @@ export type RememberResponses = {
 };
 
 export type RememberResponse = RememberResponses[keyof RememberResponses];
-
-export type RequestUploadData = {
-    /**
-     * UploadRequest
-     *
-     * One declared original a caller intends to upload as preserved memory.
-     */
-    body: {
-        /**
-         * Filename
-         */
-        filename: string;
-        /**
-         * Media Type
-         */
-        media_type: string;
-        /**
-         * Size
-         */
-        size: number;
-        /**
-         * Sha256
-         */
-        sha256: string;
-        scopes?: Array<string> | null;
-        /**
-         * Companion Text
-         */
-        companion_text?: string | null;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/uploads';
-};
-
-export type RequestUploadResponses = {
-    /**
-     * Successful Response
-     */
-    200: UploadGrant;
-};
-
-export type RequestUploadResponse = RequestUploadResponses[keyof RequestUploadResponses];
 
 export type ReceiveUploadData = {
     body: Blob | File;

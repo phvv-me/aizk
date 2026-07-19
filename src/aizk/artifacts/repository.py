@@ -7,6 +7,7 @@ from sqlmodel import select
 from ..storage import IntegrityCheck, StoredBytes, StoredObject
 from ..store import Artifact, Blob
 from ..store.identity import User
+from ..store.models.tables import ArtifactContent
 from ..types import Scopes
 from .models import ArtifactReceipt, OriginalArtifact, OriginalDescription
 
@@ -192,7 +193,7 @@ class ArtifactRepository:
         user: User,
         content_id: UUID7,
         scopes: Scopes,
-        state: Artifact.Content.State,
+        state: ArtifactContent.State,
         error: str | None = None,
     ) -> None:
         """Advance one visible original while preserving its exact queued scope set."""

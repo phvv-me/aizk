@@ -110,7 +110,7 @@ async def accept(
             ArtifactBytes(content=content, filename=filename, media_type=media_type),
             source_uri=source_uri,
             companion_text=companion_text,
-            scopes=scopes,
+            target=user.write_scope(scopes),
         )
         await terminal_content(user, receipt)
         return receipt
@@ -299,6 +299,7 @@ def test_eicar_is_rejected_by_real_clamav_before_object_or_metadata_storage() ->
                     filename="eicar.com.txt",
                     media_type="text/plain",
                 ),
+                target=user.write_scope(None),
             )
         async with user as session:
             assert (await session.exec(select(Blob.id.count()))).one() == before_blobs

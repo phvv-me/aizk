@@ -30,6 +30,7 @@ from .retrieval import RecallResult, recall
 from .runtime import Runtime
 from .store import Relation
 from .store.identity import User
+from .store.models.tables import RelationPolicy
 from .usage import observe, sink
 
 if TYPE_CHECKING:
@@ -380,7 +381,7 @@ async def define_relation_kind(
     name: str,
     description: str,
     domain: str = "general",
-    policy: Relation.Policy = Relation.Policy.set,
+    policy: RelationPolicy = Relation.Policy.set,
 ) -> None:
     """Add or refine a relation predicate in the live ontology and refresh its prompt."""
     await admin.define_relation_kind(name, description, domain, policy)

@@ -2,17 +2,15 @@ import hashlib
 import secrets
 from collections.abc import AsyncIterable
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Protocol, Self, runtime_checkable
+from typing import Annotated, Protocol, Self, cast, runtime_checkable
 
 from patos import FlexModel, FrozenModel
 from pydantic import (
     UUID5,
     Field,
     StringConstraints,
-    field_serializer,
     model_validator,
 )
-from pydantic.types import JsonValue
 from sqlalchemy import delete, func
 from sqlmodel import select
 
@@ -20,8 +18,8 @@ from ..config import Settings, settings
 from ..integrations.docling import ArtifactBytes
 from ..storage import ByteLimitExceeded
 from ..store import UploadCapability
-from ..store.identity import OrganizationStanding, ScopeTable, User
-from ..types import ScopeNames
+from ..store.identity import User
+from ..types import ScopeNames, Scopes
 from .models import ArtifactReceipt
 
 Sha256Hex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -36,7 +34,7 @@ class Intake(Protocol):
         user: User,
         artifact: ArtifactBytes,
         *,
-        scopes: ScopeNames | None = None,
+        target: Scopes,
         companion_text: str | None = None,
     ) -> ArtifactReceipt: ...
 
@@ -49,7 +47,7 @@ class InertIntake:
         user: User,
         artifact: ArtifactBytes,
         *,
-        scopes: ScopeNames | None = None,
+        target: Scopes,
         companion_text: str | None = None,
     ) -> ArtifactReceipt:
         raise RuntimeError("this upload box was built for schema generation only")
@@ -101,61 +99,51 @@ class UploadGrant(FrozenModel):
 
 
 class UploadTicket(FrozenModel):
-    """One claimed capability bound to its verified caller and declared file."""
+    """One claimed capability bound to its caller, authorized target, and declared file."""
 
     user: User
     declared: UploadRequest
+    target: Scopes
 
 
 class TicketRecord(FrozenModel):
-    """Persisted caller standing and declaration one claimed capability restores."""
+    """Persisted least-authority standing one claimed capability restores.
+
+    Only the minter's id, its human provenance label, the write target the minter was
+    authorized against, and the declaration are kept, never the caller's full scope
+    table or organization directory, so a redeemed ticket can write to exactly those
+    target scopes and nothing broader.
+    """
 
     user_id: UUID5
     name: str | None = None
     username: str | None = None
-    avatar: str | None = None
-    roles: tuple[str, ...] = ()
-    scopes: ScopeTable
-    organizations: tuple[OrganizationStanding, ...] = ()
+    target: Scopes
     declared: UploadRequest
 
-    @field_serializer("organizations")
-    def serialize_full_standing(
-        self, organizations: tuple[OrganizationStanding, ...]
-    ) -> list[dict[str, JsonValue]]:
-        """Persist each standing with the scope ID its directory serialization excludes."""
-        return [
-            {"id": str(organization.id)} | organization.model_dump(mode="json")
-            for organization in organizations
-        ]
-
     @classmethod
-    def pack(cls, user: User, declared: UploadRequest) -> Self:
-        """Snapshot the verified caller and declaration for the redeeming process."""
+    def pack(cls, user: User, declared: UploadRequest, target: Scopes) -> Self:
+        """Snapshot only the minter, the authorized target, and the declaration."""
         return cls(
             user_id=user.id,
             name=user.name,
             username=user.username,
-            avatar=user.avatar,
-            roles=user.roles,
-            scopes=user.scopes,
-            organizations=user.organizations,
+            target=target,
             declared=declared,
         )
 
     def restore(self) -> UploadTicket:
-        """Rebuild the verified caller exactly as the minting process resolved it."""
+        """Rebuild a caller writable to exactly the target scopes the minter authorized."""
         return UploadTicket(
-            user=User(
-                id=self.user_id,
+            user=User.authorized(
+                self.user_id,
+                read=self.target,
+                write=self.target,
                 name=self.name,
                 username=self.username,
-                avatar=self.avatar,
-                roles=self.roles,
-                scopes=self.scopes,
-                organizations=self.organizations,
             ),
             declared=self.declared,
+            target=self.target,
         )
 
 
@@ -211,7 +199,7 @@ class UploadBox(FlexModel):
                 filename=ticket.declared.filename,
                 media_type=ticket.declared.media_type,
             ),
-            scopes=ticket.declared.scopes,
+            target=ticket.target,
             companion_text=ticket.declared.companion_text,
         )
 
@@ -219,8 +207,8 @@ class UploadBox(FlexModel):
         """Authorize the declaration now and mint one bounded single-use capability."""
         if declared.size > self.upload_byte_limit:
             raise ValueError(f"size must be less than or equal to {self.upload_byte_limit}")
-        user.write_scope(declared.scopes)
-        record = TicketRecord.pack(user, declared)
+        target = user.write_scope(declared.scopes)
+        record = TicketRecord.pack(user, declared, target)
         capability = secrets.token_urlsafe(32)
         now = datetime.now(UTC)
         async with User.system() as session:
@@ -265,7 +253,9 @@ class UploadBox(FlexModel):
             ).first()
         if row is None:
             raise UploadCapabilityError("upload capability is unknown or already used")
-        ticket, expires_at = row
+        # sqlmodel's `exec` overload for an `UpdateBase` returns `CursorResult[Any]`, which
+        # erases the two RETURNING columns, so ty cannot see the row's width here.
+        ticket, expires_at = cast("tuple[object, datetime]", row)
         if expires_at < datetime.now(UTC):
             raise UploadCapabilityError("upload capability expired")
         return TicketRecord.model_validate(ticket).restore()

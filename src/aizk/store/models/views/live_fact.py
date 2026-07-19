@@ -1,10 +1,10 @@
 from collections.abc import Collection
 from datetime import datetime
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from patos import sql
 from patos.sql import Column as C
-from pydantic import UUID5, UUID7
+from pydantic import UUID5, UUID7, JsonValue
 from sqlalchemy import (
     ColumnElement,
     Float,
@@ -65,7 +65,7 @@ class LiveFact(ViewBase):
     recorded: C[Range[datetime]]
     last_accessed: C[datetime | None]
     access_count: C[int]
-    attributes: C[dict]
+    attributes: C[dict[str, JsonValue]]
     perspective_key: C[str]
     source_chunk_id: C[UUID7 | None]
     promoted_from: C[UUID7 | None]
@@ -201,8 +201,8 @@ class LiveFact(ViewBase):
 
     @staticmethod
     def endpoints(
-        dense_facts: CTE, *extra: ColumnElement
-    ) -> tuple[SelectOfScalar, SelectOfScalar]:
+        dense_facts: CTE, *extra: ColumnElement[Any]
+    ) -> tuple[Select[Any] | SelectOfScalar[Any], Select[Any] | SelectOfScalar[Any]]:
         """One select per dense-fact endpoint, the object side guarded against nulls."""
         return (
             select(dense_facts.c.subject_id.label("entity_id"), *extra),
@@ -212,7 +212,7 @@ class LiveFact(ViewBase):
         )
 
     @classmethod
-    def neighbors(cls, dense_facts: CTE, context: QueryContext) -> SelectStatement:
+    def neighbors(cls, dense_facts: CTE, context: QueryContext) -> SelectStatement[Any]:
         """One-hop graph neighbors of the dense seeds as one fact part, ranked by
         distance.
 
@@ -293,7 +293,7 @@ class LiveFact(ViewBase):
         )
 
     @classmethod
-    def connected(cls, mass: CTE) -> SelectStatement:
+    def connected(cls, mass: CTE) -> SelectStatement[Any]:
         """The facts the accumulated mass connects, ordered by the weaker endpoint's
         mass.
 
@@ -321,7 +321,7 @@ class LiveFact(ViewBase):
         )
 
     @classmethod
-    def __view_select__(cls) -> SelectStatement:
+    def __view_select__(cls) -> SelectStatement[Any]:
         return (
             select(
                 FactClaim.id.label("id"),

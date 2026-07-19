@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import rls
 import sqlalchemy as sa
@@ -37,12 +37,12 @@ class Scoped(sql.Model):
     )
 
     @classmethod
-    def scope_sets(cls, *peers: type[Scoped]) -> CompoundSelect:
+    def scope_sets(cls, *peers: type[Scoped]) -> CompoundSelect[tuple[list[UUID5]]]:
         """Every distinct stored scope array across this table and its peers."""
         return select(cls.scopes).union(*(select(peer.scopes) for peer in peers))
 
     @staticmethod
-    def _authority(standing: ColumnElement, permission: str) -> ColumnElement[list[UUID5]]:
+    def _authority(standing: ColumnElement[Any], permission: str) -> ColumnElement[list[UUID5]]:
         """Turn one JSON scope permission into a native PostgreSQL UUID array."""
         values = (
             sa.func.jsonb_array_elements_text(standing.op("->")(permission))
@@ -65,8 +65,12 @@ class Scoped(sql.Model):
                 sa.column("scopes", ARRAY(Uuid())),
             )
             parent_id = cls.__table__.c[f"{parent_name}_id"]
-            read = cls.__table__.c[f"{parent_name}_id"].in_(select(parent.c.id))
-            parent_scope = sa.tuple_(parent_id, scopes).in_(select(parent.c.id, parent.c.scopes))
+            read: ColumnElement[bool] = cls.__table__.c[f"{parent_name}_id"].in_(
+                select(parent.c.id)
+            )
+            parent_scope: ColumnElement[bool] = sa.tuple_(parent_id, scopes).in_(
+                select(parent.c.id, parent.c.scopes)
+            )
         else:
             readable = cls._authority(standing, "read")
             public = cls._authority(standing, "public")

@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from patos import sql
 from pydantic import UUID5, UUID7
@@ -50,7 +50,10 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         ondelete="CASCADE",
         index=True,
     )
-    valid = sql.Field(Range[datetime] | None, sa_type=TSTZRANGE)
+    valid = sql.Field(
+        Range[datetime] | None,
+        sa_type=TSTZRANGE,
+    )
     recorded = sql.Field(
         Range[datetime],
         default=None,
@@ -149,7 +152,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         reference = self.last_accessed or self.recorded.lower
         assert reference is not None
         age_days = (now - reference) / timedelta(days=1)
-        return 0.5 ** (age_days / half_life_days) * (1 + self.access_count)
+        return cast(float, 0.5 ** (age_days / half_life_days) * (1 + self.access_count))
 
     @classmethod
     async def record_access(cls, session: Session, claim_ids: list[UUID7]) -> None:
@@ -214,7 +217,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
             .returning(inputs.c.ordinal, valid_to)
             .execution_options(**{settings.skip_live_gate: True})
         )
-        return dict(rows.all())
+        return dict(cast("Sequence[tuple[int, datetime | None]]", rows.all()))
 
     @classmethod
     async def archive_stale(

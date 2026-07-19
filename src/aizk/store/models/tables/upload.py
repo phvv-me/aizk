@@ -22,6 +22,10 @@ class UploadCapability(CreatedAt, Scoped, TableBase, table=True):
 
     __table_args__ = (Index("ix_upload_capability_scopes", "scopes", postgresql_using="gin"),)
 
-    capability = sql.Field(NonEmptyString, max_length=128, primary_key=True)
+    capability = sql.Field(
+        NonEmptyString,
+        max_length=128,
+        primary_key=True,
+    )
     ticket = sql.Field(dict, sa_type=sql.TypedJSONB)
     expires_at = sql.Field(datetime, index=True)

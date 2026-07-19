@@ -25,6 +25,7 @@ from .config import settings
 from .store import Usage
 from .store.engine import Database
 from .store.identity import User
+from .store.models.tables import UsageEvent
 
 _OPERATION = "aizk.operation"
 _USER = "aizk.user_id"
@@ -46,7 +47,7 @@ def annotate_caller(user: User) -> None:
     span.set_attribute(_ANONYMOUS, "true" if user.is_anonymous() else "false")
 
 
-def annotate_operation(operation: Usage.Event.Operation, targets: Iterable[UUID5] = ()) -> None:
+def annotate_operation(operation: UsageEvent.Operation, targets: Iterable[UUID5] = ()) -> None:
     """Stamp the accounted operation and the exact scopes it touched on the serving span.
 
     The operation layer calls this where the touched scopes are known, so usage is
@@ -96,7 +97,7 @@ class UsageCapture(QueuePayload):
 
     key: str
     user_id: UUID5
-    operation: Usage.Event.Operation
+    operation: UsageEvent.Operation
     targets: tuple[UUID5, ...]
     request_bytes: NonNegativeInt = 0
     response_bytes: NonNegativeInt = 0
@@ -105,7 +106,7 @@ class UsageCapture(QueuePayload):
     @staticmethod
     def accounted_operation(
         attributes: Mapping[str, AttributeValue],
-    ) -> Usage.Event.Operation | None:
+    ) -> UsageEvent.Operation | None:
         """The accounted operation of one successful identified request, or nothing.
 
         Anonymous callers, unannotated spans, and failures derive nothing. The

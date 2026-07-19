@@ -1,4 +1,8 @@
+from collections.abc import Callable
+from typing import cast
+
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.schema import ExecutableDDLElement
 from sqlalchemy.sql import ClauseElement
@@ -57,4 +61,5 @@ def compile_create_view(
 
 def postgresql_sql(statement: ClauseElement | ExecutableDDLElement) -> str:
     """Compile typed SQLAlchemy SQL for an external PostgreSQL driver."""
-    return str(statement.compile(dialect=postgresql.dialect())).strip()
+    dialect = cast("Callable[[], Dialect]", postgresql.dialect)()
+    return str(statement.compile(dialect=dialect)).strip()

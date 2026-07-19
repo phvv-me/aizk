@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from typing import Any
 
 from sqlalchemy import MetaData
 from sqlalchemy.sql import Select
@@ -16,7 +17,7 @@ class CreateView(SQLAlchemyCreateView):
 
     def __init__(
         self,
-        selectable: Select,
+        selectable: Select[Any],
         view_name: str,
         *,
         metadata: MetaData | None = None,

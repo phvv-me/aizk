@@ -1,7 +1,7 @@
 import uuid
 from functools import cache
 from pathlib import Path
-from typing import Annotated, Literal, Self, cast
+from typing import Annotated, Any, Literal, Self, cast
 from urllib.parse import urlsplit
 
 from loguru import logger
@@ -582,7 +582,7 @@ class Settings(BaseSettings):
         """The `chunk_denylist` comma-separated field, parsed into an immutable language set."""
         return frozenset(self.chunk_denylist.split(","))
 
-    def for_statement(self, statement: Select) -> dict[str, StatementValue]:
+    def for_statement(self, statement: Select[Any]) -> dict[str, StatementValue]:
         """The settings values a statement's required binds name, ready to execute with.
 
         Tunable binds carry their settings field names, so the statement itself selects
@@ -595,6 +595,6 @@ class Settings(BaseSettings):
 
 
 @cache
-def statement_binds(statement: Select) -> frozenset[str]:
+def statement_binds(statement: Select[Any]) -> frozenset[str]:
     """The named binds a statement requires at execution, read off its own compilation."""
     return frozenset(name for name, bind in statement.compile().binds.items() if bind.required)

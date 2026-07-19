@@ -15,7 +15,6 @@ export type {
   OrganizationProfile as Organization,
   Overview,
   RecentSource,
-  UploadGrant,
   UsageTotals
 } from './generated';
 

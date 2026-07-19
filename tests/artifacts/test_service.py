@@ -264,7 +264,7 @@ def test_accept_scans_stores_and_queues_exact_authorized_scopes() -> None:
         intake(scanner, storage, repository, enqueuer).accept(
             user,
             artifact,
-            scopes=None,
+            target=frozenset({owner}),
             observed_at=datetime(2026, 7, 1, tzinfo=UTC),
         )
     )
@@ -317,13 +317,15 @@ def test_failed_metadata_transaction_compensates_the_stored_object() -> None:
     storage, repository = Storage(), Repository()
     repository.fail_create = True
 
+    user = User.private(uuid5())
     with pytest.raises(SQLAlchemyError, match="unavailable"):
         asyncio.run(
             intake(Scanner(), storage, repository, Enqueuer()).accept(
-                User.private(uuid5()),
+                user,
                 ArtifactBytes(
                     content=b"paper", filename="paper.pdf", media_type="application/pdf"
                 ),
+                target=user.write_scope(None),
             )
         )
 
@@ -331,16 +333,16 @@ def test_failed_metadata_transaction_compensates_the_stored_object() -> None:
     assert storage.deleted == ["objects/0"]
 
 
-def test_scope_authorization_happens_before_scanning_or_storage() -> None:
+def test_scope_authorization_happens_before_fetching_scanning_or_storage() -> None:
     scanner, storage = Scanner(), Storage()
 
+    # `uri` resolves the write target before it reads the source, so an unauthorized
+    # caller never triggers a fetch, scan, or object write.
     with pytest.raises(ValueError, match="no writable scope"):
         asyncio.run(
-            intake(scanner, storage, Repository(), Enqueuer()).accept(
+            intake(scanner, storage, Repository(), Enqueuer()).uri(
                 User.private(uuid5()),
-                ArtifactBytes(
-                    content=b"paper", filename="paper.pdf", media_type="application/pdf"
-                ),
+                "https://files.example/paper.pdf",
                 scopes=["unknown"],
             )
         )

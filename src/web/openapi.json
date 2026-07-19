@@ -199,95 +199,6 @@
         ]
       }
     },
-    "/api/uploads": {
-      "post": {
-        "summary": "Request Upload",
-        "description": "Mint one single-use short-TTL capability PUT URL for a declared file.",
-        "operationId": "request_upload",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "filename": {
-                    "type": "string",
-                    "minLength": 1,
-                    "title": "Filename"
-                  },
-                  "media_type": {
-                    "type": "string",
-                    "minLength": 1,
-                    "title": "Media Type"
-                  },
-                  "size": {
-                    "type": "integer",
-                    "exclusiveMinimum": 0.0,
-                    "title": "Size"
-                  },
-                  "sha256": {
-                    "type": "string",
-                    "pattern": "^[0-9a-f]{64}$",
-                    "title": "Sha256"
-                  },
-                  "scopes": {
-                    "anyOf": [
-                      {
-                        "items": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "type": "array"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "companion_text": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Companion Text"
-                  }
-                },
-                "type": "object",
-                "required": [
-                  "filename",
-                  "media_type",
-                  "size",
-                  "sha256"
-                ],
-                "title": "UploadRequest",
-                "description": "One declared original a caller intends to upload as preserved memory."
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadGrant"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/api/uploads/{capability}": {
       "put": {
         "summary": "Receive Upload",
@@ -1042,25 +953,6 @@
         ],
         "title": "State",
         "description": "Durable processing state independent from PgQueuer's delivery state."
-      },
-      "UploadGrant": {
-        "properties": {
-          "url": {
-            "type": "string",
-            "title": "Url"
-          },
-          "expires_seconds": {
-            "type": "integer",
-            "title": "Expires Seconds"
-          }
-        },
-        "type": "object",
-        "required": [
-          "url",
-          "expires_seconds"
-        ],
-        "title": "UploadGrant",
-        "description": "One live single-use capability PUT URL and its remaining lifetime."
       },
       "UsageTotals": {
         "properties": {

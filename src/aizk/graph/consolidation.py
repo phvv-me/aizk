@@ -9,6 +9,7 @@ from ..config import settings
 from ..extract.models import BatchConsolidationVerdict, ConsolidationVerdict, TimedFact
 from ..serving.extract import LLM
 from ..store import Relation
+from ..store.models.tables import RelationPolicy
 
 _borderline_distance = 1.0 - settings.consolidation_borderline_floor
 _automatic_distance = 1.0 - settings.consolidation_auto_merge_threshold
@@ -37,7 +38,7 @@ class Consolidator(FrozenModel):
 
     def decide(
         self,
-        policy: Relation.Policy,
+        policy: RelationPolicy,
         object_id: UUID5 | None,
         matches: Sequence[FactMatch],
     ) -> ConsolidationVerdict | None:

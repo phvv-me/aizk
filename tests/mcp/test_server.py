@@ -38,6 +38,7 @@ from aizk.provenance import CaptureContext
 from aizk.retrieval import Candidate, Lane
 from aizk.store import Artifact
 from aizk.store.identity import OrganizationMember, OrganizationStanding, User
+from aizk.types import Scopes
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 server = mcp_probe.server
@@ -756,7 +757,7 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
         content_id=uuid7(),
         state=Artifact.Content.State.queued,
     )
-    accepted: list[tuple[User, ArtifactBytes, list[str] | None, str | None]] = []
+    accepted: list[tuple[User, ArtifactBytes, Scopes, str | None]] = []
 
     class Intake:
         async def accept(
@@ -764,10 +765,10 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
             user: User,
             artifact: ArtifactBytes,
             *,
-            scopes: list[str] | None = None,
+            target: Scopes,
             companion_text: str | None = None,
         ) -> ArtifactReceipt:
-            accepted.append((user, artifact, scopes, companion_text))
+            accepted.append((user, artifact, target, companion_text))
             return receipt
 
     accepted_ticket = dbutil.run(
@@ -799,11 +800,11 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
 
     assert response.status_code == 200
     assert response.json() == receipt.model_dump(mode="json")
-    (user, artifact, scopes, companion), *others = accepted
+    (user, artifact, target, companion), *others = accepted
     assert others == []
     assert user.id == as_caller.id
     assert user.scopes == as_caller.scopes
-    assert scopes is None
+    assert target == frozenset({as_caller.id})
     assert companion == "Signed original"
     assert (artifact.content, artifact.filename, artifact.media_type) == (
         b"data",
