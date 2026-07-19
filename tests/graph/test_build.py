@@ -20,6 +20,7 @@ from sqlmodel import select
 
 import aizk.graph.build as build
 from aizk.config import settings
+from aizk.extract.extractor import LLMExtractor
 from aizk.extract.models import (
     BatchConsolidationVerdict,
     ConsolidationVerdict,
@@ -35,7 +36,6 @@ from aizk.graph.build import (
     source_extraction,
     write_graph_slice,
 )
-from aizk.extract.extractor import LLMExtractor
 from aizk.graph.consolidation import Consolidator, FactMatch
 from aizk.graph.ids import entity_id, fact_id
 from aizk.graph.naming import normalize_name
@@ -50,9 +50,8 @@ from aizk.store import (
     Entity,
     Fact,
 )
-from aizk.store.identity import User
-
 from aizk.store.engine import Session
+from aizk.store.identity import User
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 

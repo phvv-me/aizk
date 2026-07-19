@@ -45,7 +45,7 @@ class FakeRuntime:
         self.extractor = Mock()
         self.closes = 0
 
-    async def __aenter__(self) -> "FakeRuntime":
+    async def __aenter__(self) -> FakeRuntime:
         return self
 
     async def __aexit__(self, *exc: object) -> None:

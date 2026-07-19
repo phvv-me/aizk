@@ -7,9 +7,8 @@ from pydantic import computed_field
 from sqlmodel import select
 
 from aizk.config import settings
-from aizk.extract.extractor import Extractor
-from aizk.graph.build import GraphClients
 from aizk.extract.models import Extraction
+from aizk.graph.build import GraphClients
 from aizk.provenance import CaptureContext
 from aizk.serving.gate import GateClient
 from aizk.store import Chunk

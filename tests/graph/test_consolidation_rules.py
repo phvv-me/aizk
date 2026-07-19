@@ -1,7 +1,7 @@
 import pytest
+from doubles import FakeLLM
 from hypothesis import given
 from hypothesis import strategies as st
-from doubles import FakeLLM
 from id_factory import uuid5, uuid7
 from pydantic import UUID5, UUID7
 
