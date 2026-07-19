@@ -1,4 +1,6 @@
+from collections.abc import Callable
 from datetime import datetime
+from typing import cast
 
 from loguru import logger
 from patos import FlexModel, FrozenModel, sql
@@ -16,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import Range, insert
 from sqlalchemy.sql.selectable import CTE
 from sqlmodel import select, tuple_
+from sqlmodel.sql.expression import Select
 
 from ..config import settings
 from ..extract.models import ConsolidationVerdict, TimedFact
@@ -23,12 +26,17 @@ from ..ontology import Ontology
 from ..provenance import CaptureContext
 from ..store import Entity, Fact, Relation
 from ..store.engine import Session
+from ..store.models.tables import EntityContent, FactContent
 from ..types import Scopes
 from .consolidation import Consolidator, FactMatch
 from .dedupe import ClaimField
 from .grounding import quote_interval
 from .ids import entity_id, fact_id
 from .naming import normalize_name
+
+# SQLModel synthesizes table-model keyword constructors outside the static signatures.
+_entity_content = cast("Callable[..., EntityContent]", Entity.Content)
+_fact_content = cast("Callable[..., FactContent]", Fact.Content)
 
 
 class PreparedEntity(FrozenModel):
@@ -103,7 +111,7 @@ class GraphWriter(FlexModel):
         if not usable:
             return {}
         contents = {
-            node: Entity.Content(
+            node: _entity_content(
                 id=node,
                 name=entity.name,
                 type=entity.type,
@@ -265,15 +273,20 @@ class GraphWriter(FlexModel):
         )
         matches: list[list[FactMatch]] = [[] for _ in range(count)]
         rows = await self.session.exec(
-            select(
-                inputs.c.ordinal,
-                ranked.c.id,
-                ranked.c.object_id,
-                ranked.c.statement,
+            # `add_columns` erases the sqlmodel `Select` subtype statically while the
+            # runtime object stays one, so the cast restores what `exec` requires.
+            cast(
+                "Select[tuple[int, UUID7 | None, UUID5 | None, str | None, float | None]]",
+                select(
+                    inputs.c.ordinal,
+                    ranked.c.id,
+                    ranked.c.object_id,
+                    ranked.c.statement,
+                )
+                .add_columns(ranked.c.distance)
+                .select_from(inputs.outerjoin(ranked, true()))
+                .order_by(inputs.c.ordinal, ranked.c.distance),
             )
-            .add_columns(ranked.c.distance)
-            .select_from(inputs.outerjoin(ranked, true()))
-            .order_by(inputs.c.ordinal, ranked.c.distance)
         )
         for ordinal, claim_id, object_id, statement, match_distance in rows:
             if claim_id is not None:
@@ -281,8 +294,8 @@ class GraphWriter(FlexModel):
                     FactMatch(
                         id=claim_id,
                         object_id=object_id,
-                        statement=statement,
-                        distance=match_distance,
+                        statement=cast(str, statement),
+                        distance=cast(float, match_distance),
                     )
                 )
         return matches
@@ -380,7 +393,7 @@ class GraphWriter(FlexModel):
         writes: list[_Write],
     ) -> list[tuple[int, UUID7, datetime | None, datetime | None]]:
         """Close every occupied state slot and only the chosen claim for other updates."""
-        revisions = []
+        revisions: list[tuple[int, UUID7, datetime | None, datetime | None]] = []
         for ordinal, plan, verdict in writes:
             if verdict.action != "UPDATE" or verdict.supersedes is None:
                 continue
@@ -406,7 +419,7 @@ class GraphWriter(FlexModel):
         writes: list[_Write],
         valid_ends: dict[int, datetime | None],
         source_chunk_id: UUID7,
-    ) -> list[tuple[Fact.Content, dict[str, ClaimField]]]:
+    ) -> list[tuple[FactContent, dict[str, ClaimField]]]:
         """Render decided writes using the temporal ends returned by PostgreSQL."""
         return [
             self._write_row(
@@ -424,12 +437,12 @@ class GraphWriter(FlexModel):
         plan: FactPlan,
         source_chunk_id: UUID7,
         valid_to: datetime | None,
-    ) -> tuple[Fact.Content, dict[str, ClaimField]]:
+    ) -> tuple[FactContent, dict[str, ClaimField]]:
         """Render one decided fact as immutable content and its scoped temporal claim."""
         candidate = plan.candidate
         fact = candidate.fact
         return (
-            Fact.Content(
+            _fact_content(
                 id=candidate.identity,
                 subject_id=candidate.subject_id,
                 object_id=candidate.object_id,

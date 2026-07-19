@@ -34,8 +34,13 @@ class ArtifactView(ScopedRow):
             status=status,
             detail=detail,
             date=cls.format_date(content.created_at),
-            scopes=tuple(sorted(scopes, key=lambda scope: (scope != "Private", scope.casefold()))),
+            scopes=tuple(sorted(scopes, key=cls.scope_order)),
         )
+
+    @staticmethod
+    def scope_order(label: str) -> tuple[bool, str]:
+        """Order scope labels with Private first, then case-insensitively."""
+        return (label != "Private", label.casefold())
 
     @staticmethod
     def describe(state: ArtifactContent.State) -> tuple[ArtifactStatus, str]:

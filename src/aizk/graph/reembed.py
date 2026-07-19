@@ -9,6 +9,7 @@ from ..serving.embed import EmbedClient
 from ..store import Chunk, Community, Entity, Fact, Profile
 from ..store.engine import Session
 from ..store.identity import User
+from ..store.models.tables import EntityContent, FactContent
 from ..types import Scopes
 
 ScopedEmbedded = Chunk | Community | Profile
@@ -19,13 +20,13 @@ _SCOPED_TARGETS: dict[type[ScopedEmbedded], str] = {
     Profile: "summary",
 }
 
-ContentEmbedded = Entity.Content | Fact.Content
+type ContentEmbedded = EntityContent | FactContent
 _CONTENT_TARGETS: dict[type[ContentEmbedded], str] = {
     Entity.Content: "name",
     Fact.Content: "statement",
 }
 
-EmbeddedTable = ScopedEmbedded | ContentEmbedded
+type EmbeddedTable = ScopedEmbedded | ContentEmbedded
 
 
 async def rewrite_embeddings(

@@ -16,6 +16,7 @@ from ..serving.embed import EmbedClient
 from ..serving.extract import LLM
 from ..store import Community, Entity, Fact
 from ..store.identity import User
+from ..store.models.views import LiveFact
 from ..types import Scopes
 from .models import CommunitySummary
 
@@ -29,10 +30,10 @@ class CommunityFact(FrozenModel):
 
 
 def detect(
-    facts: Sequence[CommunityFact | Fact.Live], min_size: int, backend: str = "networkx"
+    facts: Sequence[CommunityFact | LiveFact], min_size: int, backend: str = "networkx"
 ) -> list[set[UUID5]]:
     """Detect entity communities over the latest-fact graph by Louvain modularity."""
-    graph = Graph()
+    graph: Graph[UUID5] = Graph()
     graph.add_edges_from(
         (fact.subject_id, fact.object_id) for fact in facts if fact.object_id is not None
     )
@@ -54,7 +55,7 @@ class CommunityBuilder:
         self,
         scopes: Scopes,
         entities: dict[UUID5, str],
-        facts: Sequence[CommunityFact | Fact.Live],
+        facts: Sequence[CommunityFact | LiveFact],
     ) -> None:
         self.scopes = frozenset(scopes)
         self.entities = entities

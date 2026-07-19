@@ -1,14 +1,33 @@
 from functools import cache
+from typing import cast
 
+from pydantic import UUID5, UUID7
 from sqlalchemy import union_all
-from sqlalchemy.sql.selectable import Select
 from sqlmodel import select
+from sqlmodel.sql.expression import Select
 
 from ..models import Plan, QueryContext
+from ..models.lane import LaneSelect
+
+type RecallRow = tuple[
+    str,
+    UUID5 | UUID7,
+    str,
+    list[UUID5],
+    UUID7 | None,
+    UUID7 | None,
+    str | None,
+    str | None,
+    UUID7 | None,
+    UUID7 | None,
+    UUID5 | None,
+    bool,
+]
+type RecallSelect = Select[RecallRow]
 
 
 @cache
-def build_recall_statement(context: QueryContext, plan: Plan) -> Select:
+def build_recall_statement(context: QueryContext, plan: Plan) -> RecallSelect:
     """Build one recall as a single RLS-filtered SQL program returning ranked candidates.
 
         dense seeds -- neighbors -- ppr hops       dense -- bm25
@@ -32,15 +51,20 @@ def build_recall_statement(context: QueryContext, plan: Plan) -> Select:
     return ordered([lane(context) for lane in plan.lanes])
 
 
-def ordered(lanes: list[Select]) -> Select:
+def ordered(lanes: list[LaneSelect]) -> RecallSelect:
     """Union every lane and order the candidates by plan priority then lane rank.
 
     The materialized cut keeps the planner from re-evaluating the whole union per output
     row, so `ordered_context` must stay MATERIALIZED. Priority and ordering stay internal
     to the sort while the projected columns are exactly the Candidate payload.
+
+    `add_columns` erases the sqlmodel `Select` subtype back to a plain SQLAlchemy `Select`
+    statically, yet the runtime object stays a sqlmodel `Select`, so the cast restores the
+    type `AsyncSession.exec` requires without changing what runs.
     """
     candidates = union_all(*lanes).cte("ordered_context").prefix_with("MATERIALIZED")
-    return (
+    return cast(
+        "RecallSelect",
         select(
             candidates.c.lane,
             candidates.c.evidence_id,
@@ -57,5 +81,5 @@ def ordered(lanes: list[Select]) -> Select:
             candidates.c.created_by,
             candidates.c.direct,
         )
-        .order_by(candidates.c.priority, candidates.c.ordering, candidates.c.evidence_id)
+        .order_by(candidates.c.priority, candidates.c.ordering, candidates.c.evidence_id),
     )

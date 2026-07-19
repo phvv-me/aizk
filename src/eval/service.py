@@ -41,7 +41,7 @@ class Evaluation(FrozenModel):
         self,
         k: int = 8,
         per_stratum: int = 8,
-        strata: Sequence[str] = tuple(stratum.value for stratum in Stratum),
+        strata: Sequence[str] = tuple(Stratum),
     ) -> PlanStudyReport:
         """Benchmark the production maximal plan over real stratified memory."""
         return await RetrievalBenchmark(
@@ -55,7 +55,7 @@ class Evaluation(FrozenModel):
         self,
         path: Path = FROZEN_CORPUS_PATH,
         per_stratum: int = DEFAULT_PER_STRATUM,
-        strata: Sequence[str] = tuple(stratum.value for stratum in Stratum),
+        strata: Sequence[str] = tuple(Stratum),
     ) -> FrozenStudyCorpus:
         """Generate and fingerprint the committed retrieval question corpus."""
         return await freeze_corpus(
@@ -87,7 +87,7 @@ class Evaluation(FrozenModel):
         self,
         k: int = 8,
         per_stratum: int = 8,
-        strata: Sequence[str] = tuple(stratum.value for stratum in Stratum),
+        strata: Sequence[str] = tuple(Stratum),
         seeding: bool = True,
         gate_limit: int | None = None,
     ) -> PlanStudyReport:
@@ -120,7 +120,7 @@ class Evaluation(FrozenModel):
         self,
         root: Path,
         domain: str = "Finance",
-        kinds: Sequence[str] = tuple(kind.value for kind in QuestionKind),
+        kinds: Sequence[str] = tuple(QuestionKind),
         message_limit: int | None = None,
         question_limit: int | None = None,
         k: int = 10,

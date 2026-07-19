@@ -70,7 +70,11 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
     )
     # The reference to a content revision is carried by the composite foreign key in
     # `__table_args__` so PostgreSQL guarantees the pair belongs to `artifact_id`.
-    artifact_content_id = sql.Field(UUID7 | None, default=None, index=True)
+    artifact_content_id = sql.Field(
+        UUID7 | None,
+        default=None,
+        index=True,
+    )
     content_hash: C[UUID8] = Field(index=True)
     promoted_from: C[UUID7 | None] = Field(default=None, foreign_key="document.id")
 

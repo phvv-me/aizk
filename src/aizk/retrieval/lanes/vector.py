@@ -1,8 +1,7 @@
 from sqlalchemy import Integer, bindparam
-from sqlalchemy.sql.selectable import Select
 
 from ...store import Community, Profile, SessionItem
-from ..models.lane import Lane, QueryContext
+from ..models.lane import Lane, LaneSelect, QueryContext
 
 
 class VectorLane(Lane):
@@ -14,7 +13,7 @@ class VectorLane(Lane):
     route-independent limit since a zero limit simply yields an empty lane.
     """
 
-    def __call__(self, context: QueryContext) -> Select:
+    def __call__(self, context: QueryContext) -> LaneSelect:
         """This section's rows ranked by distance under its own configured limit."""
         match self.kind:
             case Lane.Kind.WORKING_MEMORY:

@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import Hashable
+from typing import cast
 
 from loguru import logger
 from mainboard.profiling import span
@@ -110,7 +112,7 @@ async def _execute(
     [vector] = embedded
     context = QueryContext(dimensions=len(vector), fuzzy=settings.graph_mention_fuzzy)
     rows = await user.exec[Candidate](
-        build_recall_statement(context, resolved),
+        build_recall_statement(cast("Hashable", context), cast("Hashable", resolved)),
         qvec=vector,
         qtext=search_query,
         qentities=named,

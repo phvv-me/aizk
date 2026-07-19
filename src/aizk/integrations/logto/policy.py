@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 from urllib.parse import quote
 
 from patos import FrozenModel
@@ -228,13 +228,16 @@ class LogtoPolicy:
                     method="POST",
                     path="api/roles",
                     message=f"create default user role {settings.logto_user_role}",
-                    payload={
-                        "name": settings.logto_user_role,
-                        "description": settings.logto_user_role_description,
-                        "type": "User",
-                        "isDefault": True,
-                        "scopeIds": required_scope_ids,
-                    },
+                    payload=cast(
+                        "dict[str, JsonValue]",
+                        {
+                            "name": settings.logto_user_role,
+                            "description": settings.logto_user_role_description,
+                            "type": "User",
+                            "isDefault": True,
+                            "scopeIds": required_scope_ids,
+                        },
+                    ),
                 )
             )
         else:
@@ -273,7 +276,7 @@ class LogtoPolicy:
                     method="POST",
                     path=f"api/roles/{quote(user_role.id, safe='')}/scopes",
                     message=f"grant API permissions to {settings.logto_user_role}",
-                    payload={"scopeIds": missing_ids},
+                    payload=cast("dict[str, JsonValue]", {"scopeIds": missing_ids}),
                 )
             )
         return tuple(changes)
@@ -353,13 +356,16 @@ class LogtoPolicy:
                     method="POST",
                     path="api/organization-roles",
                     message=f"create organization role {name}",
-                    payload={
-                        "name": name,
-                        "description": description,
-                        "type": "User",
-                        "organizationScopeIds": wanted_ids,
-                        "resourceScopeIds": [],
-                    },
+                    payload=cast(
+                        "dict[str, JsonValue]",
+                        {
+                            "name": name,
+                            "description": description,
+                            "type": "User",
+                            "organizationScopeIds": wanted_ids,
+                            "resourceScopeIds": [],
+                        },
+                    ),
                 ),
             )
         changes: list[_Change] = []

@@ -1,6 +1,8 @@
 import asyncio
 from collections import defaultdict
+from collections.abc import Sequence
 from itertools import batched
+from typing import cast
 
 from loguru import logger
 from patos import FrozenFlexModel, FrozenModel
@@ -104,7 +106,7 @@ class ProfileBuilder(FrozenFlexModel):
         """Upsert a complete profile batch and return IDs keyed by subject."""
         if not drafts:
             return {}
-        statement = insert(Profile).values(
+        base_statement = insert(Profile).values(
             [
                 {
                     "created_by": settings.system_user_id,
@@ -116,14 +118,15 @@ class ProfileBuilder(FrozenFlexModel):
                 for draft in drafts
             ]
         )
-        statement = statement.on_conflict_do_update(
+        statement = base_statement.on_conflict_do_update(
             index_elements=["scopes", "subject_id"],
             set_={
-                "summary": statement.excluded.summary,
-                "embedding": statement.excluded.embedding,
+                "summary": base_statement.excluded.summary,
+                "embedding": base_statement.excluded.embedding,
             },
         ).returning(Profile.subject_id, Profile.id)
-        return dict((await session.exec(statement)).all())
+        rows = cast("Sequence[tuple[UUID5, UUID7]]", (await session.exec(statement)).all())
+        return dict(rows)
 
 
 async def build_profile(

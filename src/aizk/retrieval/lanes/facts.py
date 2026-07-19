@@ -1,10 +1,13 @@
+from typing import cast
+
+from pydantic import UUID7
 from sqlalchemy import Integer, bindparam, func, union_all
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import Select
 from sqlmodel import select
 
 from ...store import Chunk, Document, Entity, Fact
-from ..models.lane import Lane, QueryContext
+from ..models.lane import Lane, LaneSelect, QueryContext
 
 
 class FactLane(Lane):
@@ -19,7 +22,7 @@ class FactLane(Lane):
     kind: Lane.Kind = Lane.Kind.FACTS
     hops: int = 0
 
-    def __call__(self, context: QueryContext) -> Select:
+    def __call__(self, context: QueryContext) -> LaneSelect:
         """The fact candidates: dense seeds, neighbors, and the optional graph walk.
 
         The walk is the personalized PageRank expansion: mention-seeded mass diffuses a
@@ -27,14 +30,22 @@ class FactLane(Lane):
         mass orders each connecting fact.
         """
         dense_facts = Fact.Live.dense(context)
-        seed_part = select(dense_facts.c.id, dense_facts.c.blended.label("ordering"))
-        parts: list[Select] = [seed_part, Fact.Live.neighbors(dense_facts, context)]
+        seed_part = cast(
+            "Select[tuple[UUID7, float]]",
+            select(dense_facts.c.id, dense_facts.c.blended.label("ordering")),
+        )
+        parts: list[Select[tuple[UUID7, float]]] = [
+            seed_part,
+            Fact.Live.neighbors(dense_facts, context),
+        ]
         if self.hops:
             seeds = Entity.seed_mass(dense_facts, context)
             parts.append(Fact.Live.connected(Fact.Live.diffused(seeds, self.hops)))
         return self.merged(parts, context)
 
-    def merged(self, parts: list[Select], context: QueryContext) -> Select:
+    def merged(
+        self, parts: list[Select[tuple[UUID7, float]]], context: QueryContext
+    ) -> LaneSelect:
         """The parts interleaved by rank, hydrated with attribution and provenance."""
         part_subqueries = [part.subquery(f"fact_part_{index}") for index, part in enumerate(parts)]
         ranked_parts = union_all(

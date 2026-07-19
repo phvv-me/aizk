@@ -1,11 +1,10 @@
 from datetime import datetime
 from enum import auto
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self, cast
 
 from patos import sql
-from pydantic import UUID5, UUID7, JsonValue
+from pydantic import UUID5, UUID7, UUID8, JsonValue
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint, false, func, literal, or_
-from sqlalchemy.sql.selectable import Select as SelectStatement
 from sqlmodel import Relationship, select
 from sqlmodel.sql.expression import Select
 
@@ -59,7 +58,12 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
         ),
     )
 
-    artifact_id = sql.Field(UUID7, foreign_key="artifact.id", ondelete="CASCADE", index=True)
+    artifact_id = sql.Field(
+        UUID7,
+        foreign_key="artifact.id",
+        ondelete="CASCADE",
+        index=True,
+    )
     blob_id = sql.FK(Blob.id, ondelete="RESTRICT", index=True)
     revision = sql.Field(sql.PositiveInt, default=1)
     state = sql.Field(
@@ -69,7 +73,11 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
     )
     companion_text = sql.Nullable(str)
     markdown = sql.Nullable(str)
-    docling_json = sql.Field(dict[str, JsonValue] | None, default=None, sa_type=sql.TypedJSONB)
+    docling_json = sql.Field(
+        dict[str, JsonValue] | None,
+        default=None,
+        sa_type=sql.TypedJSONB,
+    )
     details = sql.Field(
         dict[str, JsonValue],
         default_factory=dict,
@@ -82,9 +90,17 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
     blob: Blob = Relationship()
 
     @classmethod
-    def original(cls, artifact_id: UUID7, artifact_content_id: UUID7) -> SelectStatement:
-        """The authorized object-store fields locating one exact original revision."""
-        return (
+    def original(
+        cls, artifact_id: UUID7, artifact_content_id: UUID7
+    ) -> Select[tuple[str, UUID8, int, Blob.Encoding, list[UUID5], str | None, str | None]]:
+        """The authorized object-store fields locating one exact original revision.
+
+        `add_columns` widens the sqlmodel `Select` back to a plain SQLAlchemy `Select`
+        statically while the runtime object stays a sqlmodel `Select`, so the cast keeps
+        the type `AsyncSession.exec` needs without altering the query.
+        """
+        return cast(
+            "Select[tuple[str, UUID8, int, Blob.Encoding, list[UUID5], str | None, str | None]]",
             select(
                 Blob.storage_key,
                 Blob.content_hash,
@@ -97,7 +113,7 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
                 cls.artifact_id == artifact_id,
                 cls.id == artifact_content_id,
             )
-            .limit(1)
+            .limit(1),
         )
 
 
@@ -120,7 +136,12 @@ class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
     )
     description = sql.Nullable(str)
     source_uri = sql.Nullable(str)
-    promoted_from = sql.Field(UUID7 | None, default=None, foreign_key="artifact.id", index=True)
+    promoted_from = sql.Field(
+        UUID7 | None,
+        default=None,
+        foreign_key="artifact.id",
+        index=True,
+    )
     contents: list[ArtifactContent] = Relationship(
         cascade_delete=True,
         passive_deletes=True,
@@ -128,7 +149,7 @@ class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
     )
 
     @classmethod
-    def recent(cls, limit: int) -> Select:
+    def recent(cls, limit: int) -> Select[tuple[Self, ArtifactContent]]:
         """Visible originals joined to their revisions, newest accepted first.
 
         limit: how many revisions to keep.

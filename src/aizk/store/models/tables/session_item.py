@@ -19,7 +19,10 @@ class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
     kind = sql.Field(str, default="note", sa_type=String, server_default=None)
     text = sql.Field(str)
     provenance = sql.Field(dict, default_factory=dict, sa_type=sql.TypedJSONB)
-    promoted_at = sql.Field(datetime | None, index=True)
+    promoted_at = sql.Field(
+        datetime | None,
+        index=True,
+    )
 
     @declared_attr.directive
     def __table_args__(cls) -> tuple[Index | UniqueConstraint, ...]:

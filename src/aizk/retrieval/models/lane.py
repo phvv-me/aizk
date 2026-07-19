@@ -1,6 +1,7 @@
 import abc
+from collections.abc import Callable
 from enum import StrEnum, auto
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from patos import FrozenModel, sql
 from pgvector.sqlalchemy import HALFVEC
@@ -8,10 +9,40 @@ from pydantic import UUID5, UUID7
 from sqlalchemy import ColumnElement, Float, Integer, Text, bindparam, literal
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.selectable import Select
+from sqlalchemy.sql.type_api import TypeEngine
 from sqlmodel import select
 
 if TYPE_CHECKING:
     from patos.sql import Expr
+
+type LaneRow = tuple[
+    str,
+    int,
+    UUID5 | UUID7,
+    float,
+    str,
+    list[UUID5],
+    UUID7 | None,
+    UUID7 | None,
+    str | None,
+    str | None,
+    UUID7 | None,
+    UUID7 | None,
+    UUID5 | None,
+    bool,
+]
+type LaneSelect = Select[LaneRow]
+type OptionalUUID7Column = ColumnElement[UUID7] | ColumnElement[UUID7 | None] | None
+type OptionalStrColumn = ColumnElement[str] | ColumnElement[str | None] | None
+
+_provided_uuid7 = cast(
+    "Callable[[OptionalUUID7Column], ColumnElement[UUID7 | None]]",
+    sql.provided,
+)
+_provided_str = cast(
+    "Callable[[OptionalStrColumn], ColumnElement[str | None]]",
+    sql.provided,
+)
 
 
 class QueryContext(FrozenModel):
@@ -27,7 +58,7 @@ class QueryContext(FrozenModel):
     fuzzy: bool
 
     @property
-    def vector(self) -> ColumnElement:
+    def vector(self) -> ColumnElement[list[float]]:
         """The query embedding bind, typed to this context's vector width."""
         return bindparam("qvec", type_=HALFVEC(self.dimensions))
 
@@ -47,9 +78,9 @@ class QueryContext(FrozenModel):
         return bindparam("fusion_depth", type_=Integer)
 
     @property
-    def entities(self) -> ColumnElement:
+    def entities(self) -> ColumnElement[list[str]]:
         """The lowered entity names bind the graph expansion seeds from."""
-        return bindparam("qentities", type_=ARRAY(Text))
+        return bindparam("qentities", type_=cast("TypeEngine[list[str]]", ARRAY(Text)))
 
 
 class Lane(FrozenModel, abc.ABC):
@@ -76,7 +107,7 @@ class Lane(FrozenModel, abc.ABC):
     priority: int
 
     @abc.abstractmethod
-    def __call__(self, context: QueryContext) -> Select:
+    def __call__(self, context: QueryContext) -> LaneSelect:
         """This lane's candidates for one query, in the shared row shape."""
 
     def row(
@@ -93,24 +124,27 @@ class Lane(FrozenModel, abc.ABC):
         artifact_content_id: ColumnElement[UUID7 | None] | None = None,
         created_by: ColumnElement[UUID5] | None = None,
         direct: ColumnElement[bool] | None = None,
-    ) -> Select:
+    ) -> LaneSelect:
         """This lane's candidates in the shared column shape every lane unions into."""
-        return select(
-            literal(self.kind.value).label("lane"),
-            literal(self.priority).label("priority"),
-            evidence_id.label("evidence_id"),
-            ordering.label("ordering"),
-        ).add_columns(
-            line.label("line"),
-            scopes.label("scopes"),
-            sql.provided(fact_id).label("fact_id"),
-            sql.provided(source_chunk_id).label("source_chunk_id"),
-            sql.provided(source_title).label("source_title"),
-            sql.provided(source_uri).label("source_uri"),
-            sql.provided(artifact_id).label("artifact_id"),
-            sql.provided(artifact_content_id).label("artifact_content_id"),
-            sql.provided(created_by).label("created_by"),
-            (literal(False) if direct is None else direct).label("direct"),
+        return cast(
+            "LaneSelect",
+            select(
+                literal(self.kind.value).label("lane"),
+                literal(self.priority).label("priority"),
+                evidence_id.label("evidence_id"),
+                ordering.label("ordering"),
+            ).add_columns(
+                line.label("line"),
+                scopes.label("scopes"),
+                _provided_uuid7(fact_id).label("fact_id"),
+                _provided_uuid7(source_chunk_id).label("source_chunk_id"),
+                _provided_str(source_title).label("source_title"),
+                _provided_str(source_uri).label("source_uri"),
+                _provided_uuid7(artifact_id).label("artifact_id"),
+                _provided_uuid7(artifact_content_id).label("artifact_content_id"),
+                sql.provided(created_by).label("created_by"),
+                (literal(False) if direct is None else direct).label("direct"),
+            ),
         )
 
     def by_vector(
@@ -122,9 +156,9 @@ class Lane(FrozenModel, abc.ABC):
         scopes: Expr[list[UUID5]],
         limit: ColumnElement[int],
         *guards: ColumnElement[bool],
-        vector: ColumnElement,
+        vector: ColumnElement[list[float]],
         floor: ColumnElement[float],
-    ) -> Select:
+    ) -> LaneSelect:
         """This lane ranked by embedding distance, floored, ordered, and limited."""
         distance = embedding @ vector
         return (

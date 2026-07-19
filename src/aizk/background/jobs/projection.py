@@ -10,7 +10,7 @@ from ...store import Chunk, Watermark
 from ...store.identity import User
 from ...types import Scopes
 from ..enum import JobPriority
-from ..queue import Queue, QueueJob
+from ..queue import Queue, QueueJob, QueuePayload
 from .models import ChunkJob
 
 
@@ -18,7 +18,7 @@ class ChunkProjectionJob(QueueJob[ChunkJob]):
     """Build one chunk graph projection and mark its touched profiles dirty."""
 
     entrypoint: ClassVar[str] = "aizk_build_graph_chunk"
-    payload_type: ClassVar[type[ChunkJob]] = ChunkJob
+    payload_type: ClassVar[type[QueuePayload]] = ChunkJob
     priority: ClassVar[int] = JobPriority.chunk
     concurrency_limit: ClassVar[int] = settings.graph_build_concurrency
 

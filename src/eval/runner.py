@@ -134,7 +134,6 @@ class BenchmarkRunner:
         return TextSource(
             text=message.content,
             title=f"{message.channel} {message.id}",
-            kind="message",
             source_uri=(
                 f"groupmembench://{dataset.fingerprint}/{quote(dataset.domain, safe='')}/"
                 f"{quote(message.channel, safe='')}/{quote(message.id, safe='')}"

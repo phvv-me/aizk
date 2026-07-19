@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 
 from patos import sql
 from patos.sql import Column as C
-from pydantic import UUID7
+from pydantic import UUID7, JsonValue
 from sqlalchemy import Column as SAColumn
 from sqlalchemy import (
     ColumnElement,
@@ -37,7 +37,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
 
     mutable: ClassVar[bool] = True
     deletable: ClassVar[bool] = True
-    read_through: ClassVar[str] = "document"
+    read_through: ClassVar[str | None] = "document"
 
     document_id: C[UUID7] = Field(
         foreign_key="document.id", ondelete="CASCADE", nullable=False, index=True
@@ -46,7 +46,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
     text: C[str]
     lexical = sql.Nullable(str)
     tokens = sql.Nullable(int)
-    provenance: C[dict] = Field(
+    provenance: C[dict[str, JsonValue]] = Field(
         default_factory=dict, sa_type=sql.TypedJSONB, sa_column_kwargs={"server_default": "{}"}
     )
     processed_at: C[datetime | None] = Field(

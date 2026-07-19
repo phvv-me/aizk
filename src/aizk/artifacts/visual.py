@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from enum import StrEnum, auto
 from typing import Protocol
 
-from pydantic import UUID7
+from pydantic import UUID7, JsonValue
 
 from ..serving.embed import EmbedImage, ImageBytes
 from ..store import Chunk, Document
@@ -78,7 +78,7 @@ class DirectImageEnricher:
         )
         if len(vectors) != 1:
             raise ValueError("image embedder did not return exactly one vector")
-        provenance = {
+        provenance: dict[str, JsonValue] = {
             "modality": self.modality.value,
             "representation": "direct_embedding",
             "role": "supplemental",

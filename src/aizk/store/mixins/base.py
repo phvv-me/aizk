@@ -6,6 +6,8 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import registry
 from sqlalchemy.sql.selectable import ScalarSelect
 from sqlmodel import select
+
+# SQLModel does not publicly export its config TypedDict even though table models require it.
 from sqlmodel.main import SQLModelConfig
 
 type Json = bool | int | float | str | None | list["Json"] | dict[str, "Json"]

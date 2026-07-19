@@ -3,13 +3,13 @@ import os
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 from patos import FrozenModel
 from pydantic import SecretStr
 from sqlalchemy import func
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy.engine import URL, Dialect, make_url
 from sqlalchemy.sql import ClauseElement
 from sqlmodel import select
 
@@ -141,9 +141,10 @@ async def restore_database(path: str, database: str | None = None) -> RestoreRep
 def psql_sql(statement: ClauseElement) -> str:
     """Compile one bound SQLAlchemy statement into literal PostgreSQL for the `psql`
     boundary."""
+    dialect = cast("type[Dialect]", postgresql.dialect)()
     return str(
         statement.compile(
-            dialect=postgresql.dialect(),
+            dialect=dialect,
             compile_kwargs={"literal_binds": True},
         )
     )

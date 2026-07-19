@@ -27,6 +27,7 @@ from aizk.integrations.docling import ArtifactBytes
 from aizk.storage import ByteLimitExceeded
 from aizk.store import Artifact
 from aizk.store.identity import OrganizationStanding, User
+from aizk.types import Scopes
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
@@ -93,11 +94,14 @@ def test_mint_issues_one_capability_claimable_exactly_once(settings: Settings) -
     assert grant.expires_seconds == 60
     capability = grant.url.rsplit("/", 1)[-1]
     ticket = dbutil.run(capabilities.claim(capability))
+    # The restored caller is least-authority: writable to exactly the resolved target
+    # scope, carrying no read table or organization directory beyond it.
     assert ticket.user.id == user.id
     assert ticket.user.name == "Pedro Valois"
-    assert ticket.user.scopes == user.scopes
-    assert ticket.user.organizations == user.organizations
-    assert ticket.user.write_scope(["Lab"]) == frozenset({organization})
+    assert ticket.target == frozenset({organization})
+    assert ticket.user.scopes.write == frozenset({organization})
+    assert ticket.user.scopes.read == frozenset({organization})
+    assert ticket.user.organizations == ()
     assert ticket.declared == declared(scopes=["Lab"])
     with pytest.raises(UploadCapabilityError, match="unknown or already used"):
         dbutil.run(capabilities.claim(capability))
@@ -235,7 +239,7 @@ def test_deliver_runs_the_claimed_upload_through_secure_intake() -> None:
         content_id=uuid7(),
         state=Artifact.Content.State.queued,
     )
-    accepted: list[tuple[User, ArtifactBytes, list[str] | None, str | None]] = []
+    accepted: list[tuple[User, ArtifactBytes, Scopes, str | None]] = []
 
     class Intake:
         async def accept(
@@ -243,20 +247,20 @@ def test_deliver_runs_the_claimed_upload_through_secure_intake() -> None:
             user: User,
             artifact: ArtifactBytes,
             *,
-            scopes: list[str] | None = None,
+            target: Scopes,
             companion_text: str | None = None,
         ) -> ArtifactReceipt:
-            accepted.append((user, artifact, scopes, companion_text))
+            accepted.append((user, artifact, target, companion_text))
             return receipt
 
     user = User.private(uuid5())
-    ticket = UploadTicket(user=user, declared=declared())
+    ticket = UploadTicket(user=user, declared=declared(), target=frozenset({user.id}))
 
     assert dbutil.run(box(cast("ArtifactIntake", Intake())).deliver(ticket, b"data")) == receipt
-    (caller, artifact, scopes, companion), *others = accepted
+    (caller, artifact, target, companion), *others = accepted
     assert others == []
     assert caller == user
-    assert scopes is None
+    assert target == frozenset({user.id})
     assert companion == "Signed original"
     assert artifact.content == b"data"
     assert artifact.filename == "paper.pdf"
@@ -264,14 +268,16 @@ def test_deliver_runs_the_claimed_upload_through_secure_intake() -> None:
 
 
 def test_deliver_refuses_content_shorter_than_its_declaration() -> None:
-    ticket = UploadTicket(user=User.private(uuid5()), declared=declared(size=4))
+    user = User.private(uuid5())
+    ticket = UploadTicket(user=user, declared=declared(size=4), target=frozenset({user.id}))
 
     with pytest.raises(ValueError, match="declared byte size"):
         dbutil.run(box().deliver(ticket, b"da"))
 
 
 def test_inert_intake_refuses_to_deliver_anything() -> None:
-    ticket = UploadTicket(user=User.private(uuid5()), declared=declared(size=4))
+    user = User.private(uuid5())
+    ticket = UploadTicket(user=user, declared=declared(size=4), target=frozenset({user.id}))
 
     with pytest.raises(RuntimeError, match="schema generation"):
         dbutil.run(box().deliver(ticket, b"data"))

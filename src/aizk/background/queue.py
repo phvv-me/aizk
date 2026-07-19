@@ -66,7 +66,7 @@ class Queue(FrozenModel):
         """Open the queue connection."""
         assert self.__pydantic_private__ is not None
         self.__pydantic_private__["_connection"] = await asyncpg.connect(self.dsn)
-        self.__dict__.pop("queries", None)
+        cast("dict[str, object]", self.__dict__).pop("queries", None)
         return self
 
     async def __aexit__(
@@ -79,7 +79,7 @@ class Queue(FrozenModel):
         connection = self.connection
         assert self.__pydantic_private__ is not None
         self.__pydantic_private__["_connection"] = None
-        self.__dict__.pop("queries", None)
+        cast("dict[str, object]", self.__dict__).pop("queries", None)
         await connection.close()
 
     @property

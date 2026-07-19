@@ -234,7 +234,7 @@ class DocumentStore:
             )
             .execution_options(synchronize_session=False)
         )
-        return resolved
+        return cast(UUID7, resolved)
 
 
 class TextIngestor:

@@ -1,6 +1,8 @@
 import asyncio
 import math
+from collections.abc import Callable, Iterable
 from itertools import batched
+from typing import cast
 
 from loguru import logger
 from mainboard.profiling import span
@@ -18,11 +20,16 @@ from ..serving.embed import Embedder
 from ..serving.extract import LLM
 from ..store import Community, Entity, Fact
 from ..store.identity import User
+from ..store.models.tables import EntityClaim, EntityContent, FactClaim, FactContent
 from ..types import Scopes
 from .ids import entity_id, fact_id
 from .models import Node, RaptorReport
 
 _PART_OF = "part_of"
+
+# SQLModel synthesizes table-model keyword constructors outside the static signatures.
+_entity_content = cast("Callable[..., EntityContent]", Entity.Content)
+_fact_content = cast("Callable[..., FactContent]", Fact.Content)
 
 
 def to_floats(vector: HalfVector | list[float] | None) -> list[float]:
@@ -39,7 +46,7 @@ def cosine(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
 
 
-def modularity_groups(graph: Graph) -> list[list[int]]:
+def modularity_groups(graph: Graph[int]) -> list[list[int]]:
     """Partition one prepared similarity graph, preserving isolated nodes."""
     if graph.number_of_edges() == 0:
         return [[index] for index in graph.nodes]
@@ -67,12 +74,12 @@ class RaptorBuilder(FlexModel):
     scopes: Scopes
     llm: LLM
     embed: Embedder
-    contents: list[Entity.Content] = Field(default_factory=list)
-    claims: list[Entity.Claim] = Field(default_factory=list)
-    edges: list[Fact.Content] = Field(default_factory=list)
-    edge_claims: list[Fact.Claim] = Field(default_factory=list)
+    contents: list[EntityContent] = Field(default_factory=list)
+    claims: list[EntityClaim] = Field(default_factory=list)
+    edges: list[FactContent] = Field(default_factory=list)
+    edge_claims: list[FactClaim] = Field(default_factory=list)
 
-    def claim(self, content: Entity.Content, level: int, summary: str) -> Entity.Claim:
+    def claim(self, content: EntityContent, level: int, summary: str) -> EntityClaim:
         """Build one exact-scope summary claim."""
         return Entity.Claim(
             content_id=content.id,
@@ -85,7 +92,7 @@ class RaptorBuilder(FlexModel):
         """Stage one level-zero summary entity for every community."""
         nodes: list[Node] = []
         for community in communities:
-            content = Entity.Content(
+            content = _entity_content(
                 id=entity_id(community.label, System.Entity.RAPTOR_SUMMARY),
                 name=community.label,
                 type=System.Entity.RAPTOR_SUMMARY,
@@ -108,7 +115,7 @@ class RaptorBuilder(FlexModel):
     def connect(self, members: list[Node], parent: Node) -> None:
         """Stage part-of fact content and claims from each child to one parent."""
         for member in members:
-            edge = Fact.Content(
+            edge = _fact_content(
                 id=fact_id(
                     member.entity_id,
                     _PART_OF,
@@ -131,7 +138,7 @@ class RaptorBuilder(FlexModel):
 
     async def similarity_groups(self, embeddings: list[list[float]]) -> list[list[int]]:
         """Build a similarity graph with PostgreSQL vector comparisons."""
-        graph = Graph()
+        graph: Graph[int] = Graph()
         graph.add_nodes_from(range(len(embeddings)))
         if len(embeddings) < 2:
             return modularity_groups(graph)
@@ -153,7 +160,7 @@ class RaptorBuilder(FlexModel):
                     .select_from(left.join(right, left.c.ordinal < right.c.ordinal))
                     .where(distance <= 1.0 - settings.raptor_sim_threshold)
                 )
-                graph.add_edges_from(pairs)
+                graph.add_edges_from(cast("Iterable[tuple[int, int]]", pairs))
         return modularity_groups(graph)
 
     async def parent(
@@ -178,7 +185,7 @@ class RaptorBuilder(FlexModel):
         parent = redundant_parent(parents, vector, settings.raptor_redundancy_threshold)
         created = parent is None
         if parent is None:
-            content = Entity.Content(
+            content = _entity_content(
                 id=entity_id(report.label, System.Entity.RAPTOR_SUMMARY),
                 name=report.label,
                 type=System.Entity.RAPTOR_SUMMARY,

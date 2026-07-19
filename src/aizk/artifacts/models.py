@@ -5,7 +5,8 @@ from patos import FrozenModel
 from pydantic import UUID5, UUID7, UUID8, AfterValidator, JsonValue
 
 from ..common.templates import markdown_environment
-from ..store import Artifact, Blob
+from ..store import Blob
+from ..store.models.tables import ArtifactContent
 from ..types import Scopes
 
 _template = markdown_environment("aizk.artifacts").get_template("source.md.j2")
@@ -26,7 +27,7 @@ class ArtifactReceipt(FrozenModel):
 
     artifact_id: UUID7
     content_id: UUID7
-    state: Artifact.Content.State
+    state: ArtifactContent.State
 
 
 class OriginalDescription(FrozenModel):
@@ -78,7 +79,7 @@ class ArtifactDocument(FrozenModel):
     source_uri: str | None = None
     companion_text: Prose = None
     markdown: Prose = None
-    conversion_state: Artifact.Content.State
+    conversion_state: ArtifactContent.State
     details: dict[str, JsonValue] = {}
 
     @property

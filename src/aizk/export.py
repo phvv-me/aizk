@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
 
 from loguru import logger
 from patos import FrozenModel
@@ -15,8 +15,9 @@ from .store import (
 )
 from .store.engine import Session
 from .store.identity import User
+from .store.models.tables import EntityClaim, EntityContent, FactClaim, FactContent
 
-type Exported = Document | Chunk | Entity.Content | Entity.Claim | Fact.Content | Fact.Claim
+type Exported = Document | Chunk | EntityContent | EntityClaim | FactContent | FactClaim
 
 
 class ExportReport(FrozenModel):
@@ -46,8 +47,10 @@ async def _write_table(
         statement = statement.execution_options(**{settings.skip_live_gate: True})
     rows = await session.stream_scalars(statement)
     count = 0
+    # sqlmodel's scalar `select(model)` does not compose with SQLAlchemy's `stream_scalars`
+    # generic, so name each scalarized row as the model it is at runtime.
     async for row in rows:
-        output.write(json.dumps(row.record(), ensure_ascii=False) + "\n")
+        output.write(json.dumps(cast("Exported", row).record(), ensure_ascii=False) + "\n")
         count += 1
     return count
 

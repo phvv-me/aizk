@@ -1,9 +1,10 @@
 import math
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Iterable, Iterator
+from collections.abc import Awaitable, Callable, Hashable, Iterable, Iterator
 from functools import partial
 from itertools import batched
+from typing import cast
 
 import jinja2
 import numpy as np
@@ -72,7 +73,7 @@ _STATISTICS = sql_table(
 
 type Row = dict[
     str,
-    UUID5 | UUID7 | UUID8 | str | int | list[float] | list[UUID5] | dict | None,
+    UUID5 | UUID7 | UUID8 | str | int | list[float] | list[UUID5] | dict[str, object] | None,
 ]
 
 
@@ -249,12 +250,15 @@ class ScaleReport(FrozenModel):
             }
             for knee in self.knees
         ]
-        return _TEMPLATE.render(
-            sizes=self.sizes,
-            budget_recall_p95_ms=self.budget.recall_p95_ms,
-            points=points,
-            knees=knees,
-        ).strip()
+        return cast(
+            str,
+            _TEMPLATE.render(
+                sizes=self.sizes,
+                budget_recall_p95_ms=self.budget.recall_p95_ms,
+                points=points,
+                knees=knees,
+            ).strip(),
+        )
 
 
 def unit_vector(rng: np.random.Generator, dim: int) -> list[float]:
@@ -262,7 +266,7 @@ def unit_vector(rng: np.random.Generator, dim: int) -> list[float]:
     embedding."""
     vector = rng.standard_normal(dim)
     vector /= np.linalg.norm(vector) or 1.0
-    return vector.tolist()
+    return cast("list[float]", vector.tolist())
 
 
 def index_id(user_id: UUID5, kind: str, index: int) -> UUID7:
@@ -437,7 +441,7 @@ async def measure_lanes(
 
     async def retrieve(plan: Plan) -> None:
         context = QueryContext(dimensions=len(vector), fuzzy=settings.graph_mention_fuzzy)
-        statement = build_recall_statement(context, plan)
+        statement = build_recall_statement(cast("Hashable", context), cast("Hashable", plan))
         await session.exec(
             statement,
             params={

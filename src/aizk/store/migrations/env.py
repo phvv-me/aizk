@@ -1,4 +1,6 @@
 import asyncio
+from collections.abc import Iterable
+from typing import Any, cast
 
 import sqlalchemy as sa
 from rls.alembic import omit_runtime_table_info
@@ -9,6 +11,7 @@ from sqlmodel import select
 # Importing the store maps models and attaches their RLS declarations.
 from aizk.store import TableBase
 from alembic import context
+from alembic.runtime.environment import IncludeNameFn, IncludeObjectFn
 
 config = context.config
 target_metadata = TableBase.metadata
@@ -36,23 +39,33 @@ _pg_class = sa.table(
 def do_run_migrations(connection: Connection) -> None:
     """Run migrations on an already-open synchronous connection."""
 
-    views = target_metadata.info.get("views", set())
-    extension_owned = set(
-        connection.execute(
-            select(_pg_class.c.relname)
-            .join(_pg_depend, _pg_depend.c.objid == _pg_class.c.oid)
-            .join(_pg_extension, _pg_depend.c.refobjid == _pg_extension.c.oid)
-            .where(_pg_depend.c.deptype == "e")
-        ).scalars()
+    views: set[str] = target_metadata.info.get("views", set())
+    extension_owned: set[str] = set(
+        cast(
+            "Iterable[str]",
+            connection.execute(
+                select(_pg_class.c.relname)
+                .join(_pg_depend, _pg_depend.c.objid == _pg_class.c.oid)
+                .join(_pg_extension, _pg_depend.c.refobjid == _pg_extension.c.oid)
+                .where(_pg_depend.c.deptype == "e")
+            ).scalars(),
+        )
     )
 
-    def include_name(name, type_, parent_names) -> bool:
+    def include_name(name: str, type_: str, parent_names: dict[str, str | None]) -> bool:
         """Skip queue-owned tables and mapped views before Alembic reflects their children."""
+        del parent_names
         if type_ != "table":
             return True
         return not (name.startswith("pgqueuer") or name in views)
 
-    def include_object(object, name, type_, reflected, compare_to) -> bool:
+    def include_object(
+        object: Any,
+        name: str,
+        type_: str,
+        reflected: bool,
+        compare_to: Any | None,
+    ) -> bool:
         """Skip reflected objects that live outside the ORM metadata by deliberate design."""
         if type_ == "table" and object.info.get("is_view"):
             return False
@@ -74,8 +87,8 @@ def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        include_name=include_name,
-        include_object=include_object,
+        include_name=cast("IncludeNameFn", include_name),
+        include_object=cast("IncludeObjectFn", include_object),
         autogenerate_plugins=["alembic.autogenerate.*", "rls"],
         process_revision_directives=omit_runtime_table_info,
     )

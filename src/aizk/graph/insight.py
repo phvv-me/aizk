@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import cast
+
 from loguru import logger
 from patos import FrozenFlexModel
 from pydantic import UUID5
@@ -10,6 +13,7 @@ from ..serving.extract import LLM
 from ..store import Entity, Fact
 from ..store.engine import Session
 from ..store.identity import User
+from ..store.models.tables import EntityContent, FactContent
 from ..types import Scopes
 from .dedupe import claim_entity, claim_fact
 from .ids import entity_id, fact_id
@@ -18,6 +22,10 @@ from .models import InsightReport, Observation
 # the single node every observation hangs off, one per user, so the derived insights form one
 # small structural subgraph the recall fact lane already surfaces rather than a scattered set.
 OBSERVATION_NODE = "graph observations"
+
+# SQLModel synthesizes table-model keyword constructors outside the static signatures.
+_entity_content = cast("Callable[..., EntityContent]", Entity.Content)
+_fact_content = cast("Callable[..., FactContent]", Fact.Content)
 
 
 def kept_observations(report: InsightReport) -> list[Observation]:
@@ -56,7 +64,7 @@ async def write_observation(
     identity = fact_id(node_id, System.Relation.OBSERVES, None, obs.statement)
     if await observation_already_claimed(session, scopes, identity):
         return False
-    await Fact.Content(
+    await _fact_content(
         id=identity,
         subject_id=node_id,
         object_id=None,
@@ -100,7 +108,7 @@ class InsightBuilder(FrozenFlexModel):
         """Write gated observations as content-addressed, idempotent observes claims."""
         node_id = entity_id(OBSERVATION_NODE, System.Entity.OBSERVATION)
         async with User.system(self.scopes) as session:
-            await Entity.Content(
+            await _entity_content(
                 id=node_id,
                 name=OBSERVATION_NODE,
                 type=System.Entity.OBSERVATION,

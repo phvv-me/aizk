@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from inflection import underscore
 from loguru import logger
@@ -14,6 +14,7 @@ from ..extract.models import ExtractedEntity, TimedFact
 from ..serving.embed import EmbedClient
 from ..store.engine import Session
 from ..store.models import Entity, Relation
+from ..store.models.tables import RelationPolicy
 from .system import System
 
 
@@ -26,7 +27,7 @@ class Ontology(FrozenModel):
     relation_names: tuple[str, ...]
     entity_descriptions: dict[str, str]
     relation_descriptions: dict[str, str]
-    relation_policies: dict[str, Relation.Policy]
+    relation_policies: dict[str, RelationPolicy]
     prompt: str
 
     def entity_kind(self, name: str) -> str:
@@ -181,7 +182,7 @@ class Ontology(FrozenModel):
         name: str,
         description: str,
         domain: str,
-        policy: Relation.Policy = Relation.Policy.set,
+        policy: RelationPolicy = Relation.Policy.set,
     ) -> Ontology:
         """Create or refine one relation kind and rebuild the extraction prompt."""
         await session.exec(
@@ -236,9 +237,12 @@ class Ontology(FrozenModel):
             .select_from(inputs.outerjoin(nearest, true()))
             .order_by(inputs.c.ordinal)
         )
-        return {
-            suggestion: entity_type or System.Entity.CONCEPT for suggestion, entity_type in rows
-        }
+        # `inputs.c.suggestion` is an untyped CTE column, so its scalar widens to the full
+        # bind-value union; the runtime key is the `str` suggestion we passed in.
+        return cast(
+            "dict[str, str]",
+            {suggestion: entity_type or System.Entity.CONCEPT for suggestion, entity_type in rows},
+        )
 
     @classmethod
     async def normalize(

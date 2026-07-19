@@ -35,13 +35,11 @@ class GateReport(FrozenModel):
     timed_out: int
 
     @computed_field
-    @property
     def positive_rate(self) -> float:
         """The fraction of gated chunks the gate lets through to extraction."""
         return self.accepted / self.chunks if self.chunks else 0.0
 
     @computed_field
-    @property
     def false_negative_rate(self) -> float:
         """The fraction of rejected chunks whose forced extraction still finds facts."""
         return self.rejected_with_facts / self.rejected if self.rejected else 0.0

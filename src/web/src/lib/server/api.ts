@@ -1,13 +1,6 @@
 import type { LogtoClient } from '@logto/sveltekit';
 import { fail, type ActionFailure } from '@sveltejs/kit';
-import type {
-  Answer,
-  Me,
-  OrganizationDirectory,
-  Overview,
-  UploadGrant,
-  WriteReceipt
-} from '$lib/api';
+import type { Answer, Me, OrganizationDirectory, Overview, WriteReceipt } from '$lib/api';
 import * as sdk from '$lib/api/generated';
 import { createClient } from '$lib/api/generated/client';
 import { settings } from './settings';
@@ -81,17 +74,6 @@ export class ApiClient {
     preserve_source?: boolean;
   }): Promise<WriteReceipt> {
     return unwrap(await sdk.remember({ client: await this.client(), body: input }));
-  }
-
-  /** Mint a single-use capability for one declared file; the browser PUTs the bytes itself. */
-  async grantUpload(input: {
-    filename: string;
-    media_type: string;
-    size: number;
-    sha256: string;
-    companion_text?: string;
-  }): Promise<UploadGrant> {
-    return unwrap(await sdk.requestUpload({ client: await this.client(), body: input }));
   }
 
   async organizations(): Promise<OrganizationDirectory> {

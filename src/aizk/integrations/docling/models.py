@@ -102,7 +102,7 @@ class DoclingOptions(FrozenModel):
 
     def form_data(self) -> dict[str, str | list[str]]:
         """Serialize the supported stable v1 options as multipart form values."""
-        values = {
+        values: dict[str, str | list[str]] = {
             "to_formats": ["json", "md"],
             "image_export_mode": "placeholder",
             "pipeline": self.pipeline,

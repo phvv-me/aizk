@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddMemberData, AddMemberErrors, AddMemberResponses, CreateOrganizationData, CreateOrganizationResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RememberData, RememberResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, RequestUploadData, RequestUploadResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses } from './types.gen';
+import type { AddMemberData, AddMemberErrors, AddMemberResponses, CreateOrganizationData, CreateOrganizationResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RememberData, RememberResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -63,21 +63,6 @@ export const recall = <ThrowOnError extends boolean = false>(options: Options<Re
 export const remember = <ThrowOnError extends boolean = false>(options: Options<RememberData, ThrowOnError>): RequestResult<RememberResponses, unknown, ThrowOnError> => (options.client ?? client).post<RememberResponses, unknown, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/remember',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-/**
- * Request Upload
- *
- * Mint one single-use short-TTL capability PUT URL for a declared file.
- */
-export const requestUpload = <ThrowOnError extends boolean = false>(options: Options<RequestUploadData, ThrowOnError>): RequestResult<RequestUploadResponses, unknown, ThrowOnError> => (options.client ?? client).post<RequestUploadResponses, unknown, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/uploads',
     ...options,
     headers: {
         'Content-Type': 'application/json',

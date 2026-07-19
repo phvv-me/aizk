@@ -2,6 +2,7 @@ import asyncio
 import functools
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 
 from asyncpg.exceptions import TransactionRollbackError
 from loguru import logger
@@ -321,7 +322,7 @@ async def write_graph_slice(
     writer = GraphWriter(
         session=opened,
         created_by=chunk.created_by,
-        scopes=frozenset(chunk.scopes),
+        scopes=cast("list[UUID5]", frozenset(chunk.scopes)),
         consolidator=Consolidator(llm=clients.llm),
         capture=capture,
         source_text=chunk.text,

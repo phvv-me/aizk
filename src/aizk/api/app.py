@@ -19,9 +19,6 @@ from ..artifacts.service import ArtifactIntake
 from ..artifacts.uploads import (
     UploadBox,
     UploadCapabilityError,
-    UploadGrant,
-    UploadGrantLimitError,
-    UploadRequest,
     gather,
 )
 from ..auth import Auth, Caller
@@ -217,9 +214,10 @@ class AizkAPI:
     Every route authenticates a raw bearer token through the shared `Auth`
     verifier as the `verified` dependency, resolves the caller's current Logto
     authority, and leaves PostgreSQL row security as the final boundary. Upload
-    capabilities are minted here and by the MCP `remember` upload mode into one
-    PostgreSQL-backed store, while only this service redeems them. The FastAPI
-    response models make `FastAPI.openapi` the generated web client's contract.
+    capabilities are minted by the MCP `remember` upload mode into one
+    PostgreSQL-backed store, and only this service redeems them through the
+    capability PUT. The FastAPI response models make `FastAPI.openapi` the
+    generated web client's contract.
     """
 
     def __init__(self, auth: Auth, uploads: UploadBox, intake: ArtifactIntake) -> None:
@@ -241,7 +239,6 @@ class AizkAPI:
                     ValueError,
                     PermissionError,
                     UploadCapabilityError,
-                    UploadGrantLimitError,
                     MalwareRejectedError,
                     MalwareUnavailableError,
                     ObjectStoreError,
@@ -266,13 +263,6 @@ class AizkAPI:
             methods=["POST"],
             operation_id="remember",
             openapi_extra=json_body(RememberRequest),
-        )
-        api.add_api_route(
-            "/api/uploads",
-            self.request_upload,
-            methods=["POST"],
-            operation_id="request_upload",
-            openapi_extra=json_body(UploadRequest),
         )
         api.add_api_route(
             "/api/uploads/{capability}",
@@ -351,8 +341,6 @@ class AizkAPI:
                 return error.status_code
             case UploadCapabilityError():
                 return HTTPStatus.GONE
-            case UploadGrantLimitError():
-                return HTTPStatus.TOO_MANY_REQUESTS
             case ByteLimitExceeded():
                 return HTTPStatus.REQUEST_ENTITY_TOO_LARGE
             case ValidationError() | MalwareRejectedError():
@@ -401,14 +389,6 @@ class AizkAPI:
             scopes=ask.scopes,
             preserve_source=ask.preserve_source,
         )
-
-    async def request_upload(
-        self, request: Request, response: Response, who: Verified
-    ) -> UploadGrant:
-        """Mint one single-use short-TTL capability PUT URL for a declared file."""
-        response.headers["Cache-Control"] = "no-store"
-        declared = UploadRequest.model_validate_json(await self.payload(request))
-        return await self.uploads.mint(who.user, declared)
 
     async def receive_upload(
         self, capability: str, request: Request, response: Response

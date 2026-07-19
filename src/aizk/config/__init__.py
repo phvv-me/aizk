@@ -1,11 +1,13 @@
 import sys
+from collections.abc import Callable
+from typing import cast
 
 from loguru import logger
 
 from .settings import Settings
 
 # Shared process configuration
-settings = Settings()
+settings = cast("Callable[[], Settings]", Settings)()
 
 
 def configure_logging(level: str, serialize: bool = False) -> None:

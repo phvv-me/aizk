@@ -1,4 +1,13 @@
 # Squashed schema with Logto identity, the scope lattice, immutable content, and forced RLS.
+# This single revision folds the entire historical chain (former 0001..0006): the knowledge
+# graph, artifacts and usage accounting, the durable upload capability store, the blob
+# attachment guard, and the least-authority upload ticket. The purge migrations 0005 and 0006
+# only deleted rows from an already-empty table, so they leave no schema trace here.
+#
+# Fresh installs and CI build the whole schema from this file. The crimson production database
+# is already migrated to the old 0006 head with an identical schema, so it is reconciled not by
+# re-running anything but by restamping it onto this revision:
+#     alembic stamp 0001_init   (equivalently: UPDATE alembic_version SET version_num='0001_init')
 # Revision ID 0001_init
 
 from collections.abc import Sequence
@@ -9,7 +18,7 @@ from inflection import underscore
 from pgvector.sqlalchemy import HALFVEC
 from rls.alembic import AlterRLSOp
 from sqlalchemy import Select
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSTZRANGE
+from sqlalchemy.dialects.postgresql import ARRAY, ENUM, JSONB, TSTZRANGE
 from sqlmodel import select
 
 from aizk.config import settings
@@ -243,6 +252,10 @@ _SCOPED_TABLES = {
     "profile": (True, False, None),
     "session_item": (True, False, None),
     "watermark": (True, False, None),
+    "artifact": (True, False, None),
+    "artifact_content": (True, False, "artifact"),
+    # Usage rows are an append-only ledger: readable and insertable, never mutated.
+    "usage_event": (False, False, None),
 }
 
 # Immutable content is visible through claims.
@@ -327,6 +340,48 @@ def content_rls(table_name: str) -> rls.RLSState:
     )
 
 
+def blob_rls() -> rls.RLSState:
+    """Expose object metadata only through visible artifact revisions."""
+    blob = sa.table("blob", sa.column("id", sa.Uuid()))
+    content = sa.table("artifact_content", sa.column("blob_id", sa.Uuid()))
+    return rls.RLSState.declared(
+        (
+            rls.Policy.select(
+                "blob_read",
+                blob.c.id.in_(select(content.c.blob_id)),
+                roles=(APP_ROLE,),
+            ),
+            rls.Policy.insert("blob_insert", sa.true(), roles=(APP_ROLE,)),
+        )
+    )
+
+
+def upload_capability_rls() -> rls.RLSState:
+    """Compile the scope lattice for the single-use capability store: read, insert, delete."""
+    table = sa.table("upload_capability", sa.column("scopes", ARRAY(sa.Uuid())))
+    scopes = table.c.scopes
+    standing = rls.current_setting("scopes", JSONB(), prefix="app")
+    readable = _scope_authority(standing, "read")
+    writable = _scope_authority(standing, "write")
+    public = _scope_authority(standing, "public")
+    nonempty = sa.func.cardinality(scopes) > 0
+    read = sa.and_(
+        nonempty,
+        sa.or_(
+            scopes.op("<@")(readable),
+            sa.and_(sa.func.cardinality(scopes) == 1, scopes.op("<@")(public)),
+        ),
+    )
+    write = sa.and_(nonempty, scopes.op("<@")(writable), sa.true())
+    return rls.RLSState.declared(
+        (
+            rls.Policy.select("scope_read", read, roles=(APP_ROLE,)),
+            rls.Policy.insert("scope_insert", write, roles=(APP_ROLE,)),
+            rls.Policy.delete("scope_delete", write, roles=(APP_ROLE,)),
+        )
+    )
+
+
 def live_fact_select() -> Select:
     """Build the view against the exact claim columns created by this revision."""
     claim = sa.table(
@@ -391,6 +446,66 @@ def live_fact_select() -> Select:
 APP_ROLE = "aizk_app"
 
 
+# A caller may attach a blob to a new content row only when the blob is brand new (referenced by
+# nothing yet, the upload path) or already reachable through a content revision the caller can
+# read (the share path). The function runs as the migration owner, which bypasses row security,
+# so it sees the true global set of references rather than only the caller's own rows.
+_ATTACHABLE_FUNCTION = """
+CREATE OR REPLACE FUNCTION artifact_content_blob_attachable(target_blob uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  standing jsonb := coalesce(nullif(current_setting('app.scopes', true), ''), '{}')::jsonb;
+  readable uuid[] := ARRAY(
+    SELECT value::uuid FROM jsonb_array_elements_text(standing -> 'read')
+  );
+  shareable uuid[] := ARRAY(
+    SELECT value::uuid FROM jsonb_array_elements_text(standing -> 'public')
+  );
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM artifact_content WHERE blob_id = target_blob) THEN
+    RETURN true;
+  END IF;
+  RETURN EXISTS (
+    SELECT 1
+    FROM artifact_content c
+    WHERE c.blob_id = target_blob
+      AND (
+        c.scopes <@ readable
+        OR (cardinality(c.scopes) = 1 AND c.scopes <@ shareable)
+      )
+  );
+END;
+$$;
+"""
+
+# One guard on the mutable content table: reject a blob the caller cannot legitimately attach,
+# and keep `blob_id` immutable once set so a committed row can never be re-pointed at foreign
+# bytes.
+_GUARD_FUNCTION = """
+CREATE OR REPLACE FUNCTION artifact_content_guard_blob()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.blob_id IS DISTINCT FROM OLD.blob_id THEN
+    RAISE EXCEPTION 'artifact_content.blob_id is immutable'
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF TG_OP = 'INSERT' AND NOT artifact_content_blob_attachable(NEW.blob_id) THEN
+    RAISE EXCEPTION 'blob % is not attachable by this caller', NEW.blob_id
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+"""
+
+
 def upgrade() -> None:
     for extension in required_extensions(INDEX_BACKEND):
         op.execute(f"CREATE EXTENSION IF NOT EXISTS {extension}")
@@ -407,13 +522,16 @@ def upgrade() -> None:
         sa.Column("created_by", sa.Uuid(), nullable=False),
         sa.Column("scopes", ARRAY(sa.Uuid()), server_default=sa.text("'{}'"), nullable=False),
         sa.Column("id", sa.Uuid(), nullable=False),
-        sa.Column("title", sa.String(), nullable=True),
+        sa.Column("title", sa.Text(), nullable=True),
         sa.Column("subject_type", sa.Text(), nullable=True),
-        sa.Column("source_uri", sa.String(), nullable=True),
+        sa.Column("source_uri", sa.Text(), nullable=True),
         sa.Column("observed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("content_hash", sa.Uuid(), nullable=False),
         sa.Column("promoted_from", sa.Uuid(), nullable=True),
+        # A document may carry the source artifact revision it was ingested from.
+        sa.Column("artifact_id", sa.Uuid(), nullable=True),
+        sa.Column("artifact_content_id", sa.Uuid(), nullable=True),
         sa.ForeignKeyConstraint(["promoted_from"], ["document.id"]),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("source_uri", "scopes", name="uq_document_source_scope"),
@@ -432,6 +550,8 @@ def upgrade() -> None:
             sa.column("subject_type").is_not(None) & sa.column("title").is_not(None)
         ),
     )
+    op.create_index("ix_document_artifact_id", "document", ["artifact_id"])
+    op.create_index("ix_document_artifact_content_id", "document", ["artifact_content_id"])
 
     op.create_table(
         "chunk",
@@ -772,6 +892,190 @@ def upgrade() -> None:
     for statement in bm25_lexical_statements():
         op.execute(statement)
 
+    # Content-addressed object metadata shared by every artifact revision.
+    op.create_table(
+        "blob",
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("content_hash", sa.Uuid(), nullable=False),
+        sa.Column("size", sa.Integer(), nullable=False),
+        sa.Column("stored_size", sa.Integer(), nullable=False),
+        sa.Column(
+            "encoding",
+            ENUM("identity", "zstd", name="blob_encoding"),
+            server_default="identity",
+            nullable=False,
+        ),
+        sa.Column("storage_key", sa.String(512), nullable=False),
+        sa.Column("storage_version", sa.String(512), nullable=True),
+        sa.Column("media_type", sa.String(255), nullable=True),
+        sa.Column("etag", sa.String(512), nullable=True),
+        sa.Column("integrity_checked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("integrity_error", sa.String(1024), nullable=True),
+        sa.CheckConstraint("size >= 0", name="ck_blob_size_nonnegative"),
+        sa.CheckConstraint("stored_size >= 0", name="ck_blob_stored_size_nonnegative"),
+        sa.CheckConstraint("stored_size <= size", name="ck_blob_stored_size_bounded"),
+        sa.CheckConstraint("storage_key <> ''", name="ck_blob_storage_key_nonempty"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("storage_key"),
+    )
+    op.create_index("ix_blob_content_hash_size", "blob", ["content_hash", "size"])
+    op.create_index("ix_blob_integrity_checked_at", "blob", ["integrity_checked_at"])
+
+    # Immutable artifacts and their bytes-backed revisions.
+    op.create_table(
+        "artifact",
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column("created_by", sa.Uuid(), nullable=False),
+        sa.Column("scopes", ARRAY(sa.Uuid()), server_default=sa.text("'{}'"), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("name", sa.String(512), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("source_uri", sa.Text(), nullable=True),
+        sa.Column("promoted_from", sa.Uuid(), nullable=True),
+        sa.CheckConstraint("name <> ''", name="ck_artifact_name_nonempty"),
+        sa.ForeignKeyConstraint(["promoted_from"], ["artifact.id"]),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("promoted_from", "scopes", name="uq_artifact_promotion_scope"),
+        sa.UniqueConstraint("source_uri", "scopes", name="uq_artifact_source_scope"),
+    )
+    op.create_index("ix_artifact_created_by", "artifact", ["created_by"])
+    op.create_index("ix_artifact_promoted_from", "artifact", ["promoted_from"])
+    op.create_index("ix_artifact_scopes", "artifact", ["scopes"], postgresql_using="gin")
+
+    op.create_table(
+        "artifact_content",
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column("created_by", sa.Uuid(), nullable=False),
+        sa.Column("scopes", ARRAY(sa.Uuid()), server_default=sa.text("'{}'"), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("artifact_id", sa.Uuid(), nullable=False),
+        sa.Column("blob_id", sa.Uuid(), nullable=False),
+        sa.Column("revision", sa.Integer(), server_default="1", nullable=False),
+        sa.Column(
+            "state",
+            ENUM(
+                "pending", "queued", "processing", "ready", "failed", name="artifact_content_state"
+            ),
+            server_default="pending",
+            nullable=False,
+        ),
+        sa.Column("companion_text", sa.Text(), nullable=True),
+        sa.Column("markdown", sa.Text(), nullable=True),
+        sa.Column("docling_json", JSONB(), nullable=True),
+        sa.Column("details", JSONB(), server_default="{}", nullable=False),
+        sa.Column("observed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.Column("processed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.CheckConstraint("revision > 0", name="ck_artifact_content_revision_positive"),
+        sa.ForeignKeyConstraint(["artifact_id"], ["artifact.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["blob_id"], ["blob.id"], ondelete="RESTRICT"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("artifact_id", "revision", name="uq_artifact_content_revision"),
+        # Bind each blob to at most one revision of an artifact and expose the composite key
+        # the document pair foreign key points at.
+        sa.UniqueConstraint("artifact_id", "blob_id", name="uq_artifact_content_blob"),
+        sa.UniqueConstraint("artifact_id", "id", name="uq_artifact_content_artifact_id_id"),
+    )
+    op.create_index("ix_artifact_content_artifact_id", "artifact_content", ["artifact_id"])
+    op.create_index("ix_artifact_content_blob_id", "artifact_content", ["blob_id"])
+    op.create_index("ix_artifact_content_created_by", "artifact_content", ["created_by"])
+    op.create_index(
+        "ix_artifact_content_scopes", "artifact_content", ["scopes"], postgresql_using="gin"
+    )
+    op.create_index("ix_artifact_content_state", "artifact_content", ["state"])
+
+    # Append-only usage ledger.
+    op.create_table(
+        "usage_event",
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column("created_by", sa.Uuid(), nullable=False),
+        sa.Column("scopes", ARRAY(sa.Uuid()), server_default=sa.text("'{}'"), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column(
+            "operation",
+            ENUM(
+                "recall",
+                "remember_text",
+                "remember_file",
+                "share",
+                "artifact_read",
+                name="usage_event_operation",
+            ),
+            nullable=False,
+        ),
+        sa.Column("targets", ARRAY(sa.Uuid()), nullable=False),
+        sa.Column("request_bytes", sa.Integer(), server_default="0", nullable=False),
+        sa.Column("response_bytes", sa.Integer(), server_default="0", nullable=False),
+        sa.Column("items", sa.Integer(), server_default="1", nullable=False),
+        sa.Column("duration_ms", sa.Float(), server_default="0.0", nullable=False),
+        sa.CheckConstraint("request_bytes >= 0", name="ck_usage_request_bytes_nonnegative"),
+        sa.CheckConstraint("response_bytes >= 0", name="ck_usage_response_bytes_nonnegative"),
+        sa.CheckConstraint("items >= 0", name="ck_usage_items_nonnegative"),
+        sa.CheckConstraint("duration_ms >= 0", name="ck_usage_duration_ms_nonnegative"),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_usage_event_created_by", "usage_event", ["created_by"])
+    op.create_index("ix_usage_event_operation", "usage_event", ["operation"])
+    op.create_index("ix_usage_event_scopes", "usage_event", ["scopes"], postgresql_using="gin")
+    op.create_index("ix_usage_event_targets", "usage_event", ["targets"], postgresql_using="gin")
+
+    # Wire the document back to the artifact revision it was ingested from. The content link is a
+    # composite pair so a document can only point at a revision that truly belongs to its artifact.
+    op.create_foreign_key(
+        "fk_document_artifact_id_artifact",
+        "document",
+        "artifact",
+        ["artifact_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "fk_document_artifact_content_pair",
+        "document",
+        "artifact_content",
+        ["artifact_id", "artifact_content_id"],
+        ["artifact_id", "id"],
+        ondelete="SET NULL",
+    )
+
+    # Durable single-use upload capability store shared by every AIZK process.
+    op.create_table(
+        "upload_capability",
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+        ),
+        sa.Column("created_by", sa.Uuid(), nullable=False),
+        sa.Column("scopes", ARRAY(sa.Uuid()), server_default=sa.text("'{}'"), nullable=False),
+        sa.Column("capability", sa.String(128), nullable=False),
+        sa.Column("ticket", JSONB(), nullable=False),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("capability"),
+    )
+    op.create_index("ix_upload_capability_created_by", "upload_capability", ["created_by"])
+    op.create_index("ix_upload_capability_expires_at", "upload_capability", ["expires_at"])
+    op.create_index(
+        "ix_upload_capability_scopes", "upload_capability", ["scopes"], postgresql_using="gin"
+    )
+
+    for table in ("artifact", "artifact_content", "blob", "upload_capability", "usage_event"):
+        op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE {table} TO {APP_ROLE}")
+
     # Force declared policies on scoped and content tables.
     for table, (mutable, deletable, read_through) in _SCOPED_TABLES.items():
         op.invoke(
@@ -783,6 +1087,18 @@ def upgrade() -> None:
         )
     for table in _CONTENT_TABLES:
         op.invoke(AlterRLSOp(table, before=None, after=content_rls(table)))
+    op.invoke(AlterRLSOp("blob", before=None, after=blob_rls()))
+    op.invoke(AlterRLSOp("upload_capability", before=None, after=upload_capability_rls()))
+
+    # Guard the mutable content table so a caller can only attach a blob it legitimately owns or
+    # can already read, and so a committed `blob_id` can never be re-pointed at foreign bytes.
+    op.execute(_ATTACHABLE_FUNCTION)
+    op.execute(_GUARD_FUNCTION)
+    op.execute(
+        "CREATE TRIGGER artifact_content_guard_blob "
+        "BEFORE INSERT OR UPDATE ON artifact_content "
+        "FOR EACH ROW EXECUTE FUNCTION artifact_content_guard_blob()"
+    )
 
 
 def downgrade() -> None:

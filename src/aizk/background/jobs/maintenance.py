@@ -1,7 +1,7 @@
 import abc
 from collections.abc import Awaitable, Callable
 from functools import partial
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self, cast
 
 import inflection
 from loguru import logger
@@ -28,7 +28,7 @@ from ...store.engine import Session
 from ...store.identity import User
 from ...types import Scopes
 from ..enum import JobPriority
-from ..queue import QueueJob
+from ..queue import QueueJob, QueuePayload
 from .models import MaintenanceJob
 
 if TYPE_CHECKING:
@@ -56,11 +56,11 @@ class ScheduledJob(Registry, FrozenModel, abc.ABC):
 
     @property
     def expression(self) -> str:
-        return getattr(settings, f"{self.name}_cron")
+        return cast(str, getattr(settings, f"{self.name}_cron"))
 
     @property
     def enabled(self) -> bool:
-        return getattr(settings, f"{self.name}_enabled")
+        return cast(bool, getattr(settings, f"{self.name}_enabled"))
 
     def register_cron(
         self,
@@ -79,7 +79,7 @@ class ScheduledJob(Registry, FrozenModel, abc.ABC):
 class ScopedScheduledJob(ScheduledJob, QueueJob[MaintenanceJob], abc.ABC):
     """Scheduled work fanned out through one durable queue item per scope set."""
 
-    payload_type: ClassVar[type[MaintenanceJob]] = MaintenanceJob
+    payload_type: ClassVar[type[QueuePayload]] = MaintenanceJob
     priority: ClassVar[int] = JobPriority.maintenance
     concurrency_limit: ClassVar[int] = 1
     entrypoint: ClassVar[str]
@@ -160,7 +160,9 @@ class DecayJob(ScopedScheduledJob):
 class ArtifactDispatchJob(ScopedScheduledJob):
     """Recover accepted originals left pending by an interrupted queue handoff."""
 
-    model_config = ConfigDict(FrozenModel.model_config, arbitrary_types_allowed=True)
+    model_config = cast(
+        "ConfigDict", {**FrozenModel.model_config, "arbitrary_types_allowed": True}
+    )
 
     services: ArtifactServices
 
@@ -175,7 +177,9 @@ class ArtifactDispatchJob(ScopedScheduledJob):
 class ArtifactIntegrityJob(SystemScheduledJob):
     """Verify a bounded stale batch of immutable originals each day."""
 
-    model_config = ConfigDict(FrozenModel.model_config, arbitrary_types_allowed=True)
+    model_config = cast(
+        "ConfigDict", {**FrozenModel.model_config, "arbitrary_types_allowed": True}
+    )
 
     services: ArtifactServices
 
@@ -220,7 +224,9 @@ class ModelBackedJob(ScopedScheduledJob, abc.ABC):
     """A scheduled pass whose body consumes the runtime's generation and embedding
     clients."""
 
-    model_config = ConfigDict(FrozenModel.model_config, arbitrary_types_allowed=True)
+    model_config = cast(
+        "ConfigDict", {**FrozenModel.model_config, "arbitrary_types_allowed": True}
+    )
 
     llm: LLM
     embed: Embedder

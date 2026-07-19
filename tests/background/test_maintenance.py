@@ -10,7 +10,7 @@ from hypothesis import strategies as st
 from id_factory import uuid5
 from pgqueuer import PgQueuer
 from pgqueuer.models import Schedule
-from sqlalchemy.sql.selectable import Select
+from sqlmodel.sql.expression import Select
 
 import aizk.background.jobs.maintenance as jobs_mod
 from aizk.artifacts.service import ArtifactIntake, ArtifactIntegrity

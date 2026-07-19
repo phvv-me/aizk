@@ -60,13 +60,15 @@ dependencies = [
 aizk = "aizk.cli:app"
 aizk-eval = "eval.launcher:main"
 
-[project.optional-dependencies]
-docs = ["mkdocs-material>=9.5", "mkdocs-static-i18n>=1.2"]
-
 # Dev-only Python deps (PEP 735). chefe reads this group into the pixi dev env, and the built
-# wheel never carries it. The checkers are pinned exactly so a fresh CI solve reproduces the
-# monorepo's green gate: ty and pyrefly move fast, and an unpinned bump reintroduces stricter
-# diagnostics (ty 0.0.61 flags 11 `AsyncSession.exec` overloads that 0.0.59 does not).
+# wheel never carries it. The checkers ride their latest releases now that the sqlmodel `Select`
+# imprecision is fixed at the source: statements handed to `AsyncSession.exec` carry sqlmodel's
+# `Select` (not SQLAlchemy's), so the ty 0.0.59 pin that once hid the 11 exec-overload mismatches
+# is gone. pyrefly, ty, and mypy are the three wired gates. pyright is deliberately not among them:
+# its only distinct complaint here is a false positive against patos's `sql.Field`/`sql.PK` stub,
+# which types the column helpers as `type[T]` and so rejects the Pydantic annotated aliases and
+# unions aizk passes. The other three model those calls correctly, so gating on pyright would buy
+# nothing but a pile of inline suppressions. Fixing the patos stub upstream would let it rejoin.
 [dependency-groups]
 dev = [
     # eval + benchmark stack (src/eval and the benchmark tests import these)
@@ -87,9 +89,9 @@ dev = [
     "types-networkx>=3.6.1.20260624,<4",
     # checkers and linters, pinned to the versions the monorepo gate runs green on
     "ruff>=0.6",
-    "pyrefly==1.1.1",
-    "ty==0.0.59",
-    "mypy>=1.19.1,<2",
+    "pyrefly>=1.1.1,<2",
+    "ty>=0.0.61,<0.1",
+    "mypy>=2.3.0,<3",
     "import-linter>=2.3,<3",
     # test runner and plugins
     "pytest>=9.1.0,<10",
@@ -117,13 +119,6 @@ Issues = "https://github.com/phvv-me/aizk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aizk", "src/eval"]
-
-# uv's own override table, read by the uv-based docs workflow (`uv sync --extra docs`). It forces
-# the sqlalchemy 2.1 pre-release across transitive resolution, the same job [tool.chefe.python.
-# dependency-overrides] does for the chefe/pixi dev env. Each is its tool's native config; neither
-# restates the constraint, which lives in [project.dependencies].
-[tool.uv]
-override-dependencies = ["sqlalchemy[asyncio]>=2.1.0b3,<3"]
 
 [tool.ruff]
 line-length = 99
@@ -194,13 +189,6 @@ source_modules = [
 forbidden_modules = ["sqlmodel", "sqlalchemy"]
 allow_indirect_imports = true
 
-[tool.pyright]
-pythonVersion = "3.14"
-typeCheckingMode = "standard"
-venvPath = "../../.chefe/.pixi/envs"
-venv = "default"
-reportMissingModuleSource = false
-
 [tool.pyrefly]
 project-includes = ["src/aizk", "src/eval", "tests"]
 search-path = ["src", "tests"]
@@ -223,6 +211,29 @@ include = ["src/aizk", "src/eval"]
 include = ["src/aizk/store/mixins/base.py"]
 [tool.ty.overrides.rules]
 invalid-assignment = "warn"
+
+# mypy runs the SQLModel-calibrated strict profile as the third checker beside pyrefly and ty.
+# `strict` is the base; the two relaxations are the irreducible SQLModel typing gaps, not our
+# bugs, and the config leaves every other strict check on so a genuine mistake still fails:
+#   - implicit_reexport: aizk packages re-export through their `__init__` on purpose, and pyrefly
+#     and ty already enforce their own re-export view; mypy's strict no-implicit-reexport only
+#     re-flags 38 deliberate re-exports it cannot see the intent behind.
+#   - call-arg: a SQLModel `table=True` model synthesises its pydantic `__init__` through the
+#     metaclass at runtime, so mypy, which has no working sqlmodel plugin (the pydantic plugin
+#     miscounts table models into 386 errors), sees only `DeclarativeBase.__init__` and rejects
+#     every keyword construction across the codebase. The check is irreducible, not a real defect.
+[tool.mypy]
+python_version = "3.14"
+strict = true
+implicit_reexport = true
+disable_error_code = ["call-arg"]
+mypy_path = ["src", "typings"]
+exclude = ['src/aizk/store/migrations/versions/']
+
+# fire ships no py.typed marker and is imported only by the eval CLI entrypoint.
+[[tool.mypy.overrides]]
+module = ["fire", "fire.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-q -ra --strict-markers --import-mode=importlib -m 'not integration and not benchmark' --cov=aizk --cov=eval --cov-report=term-missing"
@@ -274,5 +285,5 @@ mainboard = { provider = "git", git = "https://github.com/phvv-me/mainboard", br
 [tool.chefe.tasks]
 lint = { run = "ruff check . && ruff format --check ." }
 lint-imports = "lint-imports"
-typecheck = { run = "pyrefly check --python-interpreter-path \"$CONDA_PREFIX/bin/python\" && ty check --python \"$CONDA_PREFIX\" --exit-zero-on-warning" }
+typecheck = { run = "pyrefly check --python-interpreter-path \"$CONDA_PREFIX/bin/python\" && ty check --python \"$CONDA_PREFIX\" --exit-zero-on-warning && mypy src/aizk src/eval" }
 test = { run = "python -m pytest -n 4 --dist loadscope --benchmark-disable --cov-fail-under=0 && COVERAGE_CORE=pytrace python -m pytest 'tests/graph/test_build.py::test_write_graph_slice_retries_a_transient_db_conflict' -o addopts='--import-mode=importlib' --cov=aizk --cov-append --cov-report=term-missing" }

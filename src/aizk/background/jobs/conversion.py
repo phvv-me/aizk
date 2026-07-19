@@ -5,7 +5,7 @@ from pydantic import UUID7
 from ...config import settings
 from ...types import Scopes
 from ..enum import JobPriority
-from ..queue import Queue, QueueJob
+from ..queue import Queue, QueueJob, QueuePayload
 from .models import ArtifactConversionJob
 
 
@@ -21,7 +21,7 @@ class DoclingConversionJob(QueueJob[ArtifactConversionJob]):
     """Convert one queued immutable original through the configured artifact processor."""
 
     entrypoint: ClassVar[str] = "aizk_convert_artifact"
-    payload_type: ClassVar[type[ArtifactConversionJob]] = ArtifactConversionJob
+    payload_type: ClassVar[type[QueuePayload]] = ArtifactConversionJob
     priority: ClassVar[int] = JobPriority.artifact
     concurrency_limit: ClassVar[int] = settings.docling_concurrency
 

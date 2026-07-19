@@ -1,9 +1,9 @@
 from collections.abc import Mapping, Sequence
 from enum import auto
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from patos import sql
-from pydantic import UUID5
+from pydantic import UUID5, JsonValue
 from sqlalchemy import BigInteger, Index, Text, UniqueConstraint, column, func, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
@@ -42,7 +42,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         sa_type=BigInteger,
     )
     payload = sql.Field(
-        dict,
+        dict[str, JsonValue],
         default_factory=dict,
         sa_type=sql.TypedJSONB,
     )
@@ -73,7 +73,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
             )
             .returning(cls.counter)
         )
-        return (await session.exec(statement)).scalar_one()
+        return cast(int, (await session.exec(statement)).scalar_one())
 
     @classmethod
     async def bump_many(
@@ -137,7 +137,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         scopes: Scopes,
         kind: Kind,
         ref: str = _GLOBAL_REF,
-    ) -> dict:
+    ) -> dict[str, JsonValue]:
         """Read a payload or an empty mapping when absent."""
         payload = (
             await session.exec(
@@ -210,7 +210,7 @@ class Watermark(Id, Scoped, Timestamped, TableBase, table=True):
         scopes: Scopes,
         kind: Kind,
         counter: int = 0,
-        payload: dict | None = None,
+        payload: dict[str, JsonValue] | None = None,
         ref: str = _GLOBAL_REF,
         created_by: UUID5 | None = None,
     ) -> None:

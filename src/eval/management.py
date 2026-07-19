@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import Sequence
 from math import ceil
 from time import perf_counter
-from typing import ClassVar, Literal
+from typing import ClassVar, Literal, TypeIs
 
 from patos import FrozenModel
 from pydantic import NonNegativeFloat, NonNegativeInt, PositiveInt
@@ -16,6 +16,11 @@ from aizk.store import Document
 from aizk.store.identity import User
 
 from .config import settings
+
+
+def _is_management_kind(value: str | None) -> TypeIs[Literal["area", "project"]]:
+    """Narrow a stored subject type to the two management kinds this report accepts."""
+    return value == "area" or value == "project"
 
 
 class ManagementQuestions(FrozenModel):
@@ -202,7 +207,7 @@ class ManagementBenchmark:
         return tuple(
             ManagementSubject(name=name, kind=kind)
             for name, kind in rows
-            if name is not None and kind in {"area", "project"}
+            if name is not None and _is_management_kind(kind)
         )
 
     def caller(self) -> User:

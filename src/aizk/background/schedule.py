@@ -1,6 +1,8 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from loguru import logger
+from pydantic import UUID5
+from sqlmodel.sql.expression import Select
 
 from ..config import settings
 from ..ontology import Ontology
@@ -37,7 +39,11 @@ async def fan_out(job: ScopedScheduledJob) -> None:
 async def scope_roster() -> list[Scopes]:
     """Every exact scope set with stored memory, read under the database administrator role."""
     async with User.system().owner as db:
-        rows = await db.exec(Document.scope_sets(SessionItem, Artifact))
+        # `scope_sets` unions to a `CompoundSelect`, which sqlmodel's `exec` runs (returning
+        # the same tuple rows a `Select` would) but does not cover in its overloads.
+        rows = await db.exec(
+            cast("Select[tuple[list[UUID5]]]", Document.scope_sets(SessionItem, Artifact))
+        )
         keys = {frozenset(scopes) for (scopes,) in rows if scopes}
         return sorted(keys, key=lambda scopes: sorted(scopes))
 

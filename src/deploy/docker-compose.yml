@@ -504,9 +504,9 @@ services:
       start_period: 30s
 
   # The browser JSON API authenticates the same Logto bearer tokens as MCP and receives only
-  # the forced-RLS app credential. Upload capabilities minted here or by the MCP request_upload
-  # tool live in the PostgreSQL upload_capability table, so a grant minted in the separate
-  # server container is redeemed here, and either service may scale to more replicas.
+  # the forced-RLS app credential. Upload capabilities minted by the MCP request_upload tool
+  # live in the PostgreSQL upload_capability table, so a grant minted in the separate server
+  # container is redeemed here, and either service may scale to more replicas.
   api:
     <<: *aizk-runtime
     profiles: ["public"]

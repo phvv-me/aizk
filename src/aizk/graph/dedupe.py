@@ -1,13 +1,13 @@
 from datetime import datetime
 
-from pydantic import UUID5, UUID7
+from pydantic import UUID5, UUID7, JsonValue
 from sqlalchemy.dialects.postgresql import Range, insert
 
 from ..store import Entity, Fact
 from ..store.engine import Session
 
 # Optional claim columns supplied to the PostgreSQL upsert
-type ClaimField = Range[datetime] | UUID5 | UUID7 | list[UUID5] | dict | str | None
+type ClaimField = Range[datetime] | UUID5 | UUID7 | list[UUID5] | dict[str, JsonValue] | str | None
 
 
 async def claim_entity(

@@ -13,7 +13,7 @@ from doubles import AsyncContext, FakeLLM, RecordingEmbedder
 from id_factory import uuid5, uuid7
 from pydantic import UUID5, UUID7
 from sqlalchemy import text
-from sqlalchemy.sql.selectable import Select
+from sqlmodel.sql.expression import Select
 
 import aizk.admin as admin
 from aizk.background.status import TasksStatus

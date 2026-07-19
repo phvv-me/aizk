@@ -18,7 +18,7 @@ from aizk.api.dashboard import Dashboard
 from aizk.api.organizations import OrganizationDirectory, OrganizationView
 from aizk.artifacts.models import ArtifactReceipt
 from aizk.artifacts.service import ArtifactIntake
-from aizk.artifacts.uploads import InertIntake, UploadBox
+from aizk.artifacts.uploads import InertIntake, UploadBox, UploadRequest
 from aizk.auth import Auth, Caller
 from aizk.config import settings
 from aizk.exceptions import ScopeNotFoundError
@@ -28,10 +28,22 @@ from aizk.integrations.logto import LogtoClient, OrganizationChange
 from aizk.memory import WriteResult
 from aizk.store import Artifact
 from aizk.store.identity import OrganizationStanding, User
+from aizk.types import Scopes
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 _DATA_SHA256 = hashlib.sha256(b"data").hexdigest()
+
+
+def upload_request(size: int = 4) -> UploadRequest:
+    """One declared four-byte original the MCP mint path would authorize."""
+    return UploadRequest(
+        filename="paper.pdf",
+        media_type="application/pdf",
+        size=size,
+        sha256=_DATA_SHA256,
+    )
+
 
 # Every route except the capability PUT, whose single-use grant is its own authorization.
 _PROTECTED = (
@@ -39,7 +51,6 @@ _PROTECTED = (
     ("GET", "/api/overview", "/api/overview"),
     ("POST", "/api/recall", "/api/recall"),
     ("POST", "/api/remember", "/api/remember"),
-    ("POST", "/api/uploads", "/api/uploads"),
     ("GET", "/api/organizations", "/api/organizations"),
     ("POST", "/api/organizations", "/api/organizations"),
     ("POST", "/api/organizations/{name}/members", "/api/organizations/Lab/members"),
@@ -73,10 +84,10 @@ class RecordingIntake:
         user: User,
         artifact: ArtifactBytes,
         *,
-        scopes: list[str] | None = None,
+        target: Scopes,
         companion_text: str | None = None,
     ) -> ArtifactReceipt:
-        del user, scopes, companion_text
+        del user, target, companion_text
         self.accepted.append(artifact)
         if isinstance(self.outcome, Exception):
             raise self.outcome
@@ -422,7 +433,7 @@ def test_status_mapping_rejects_an_unexpected_failure_family() -> None:
         AizkAPI.status_for(RuntimeError("not a domain failure"))
 
 
-def test_upload_capability_is_minted_with_auth_and_redeemed_without_it(
+def test_upload_capability_minted_by_the_mint_path_is_redeemed_by_the_put_without_auth(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     receipt = ArtifactReceipt(
@@ -431,27 +442,15 @@ def test_upload_capability_is_minted_with_auth_and_redeemed_without_it(
         state=Artifact.Content.State.queued,
     )
     intake = RecordingIntake(receipt)
+    who = verified()
     minting = api()
-    monkeypatch.setattr(minting.auth, "bearer", AsyncMock(return_value=verified()))
     # An independent store on the receiving service proves the grant crosses processes
     # through PostgreSQL rather than through shared interpreter state.
     receiving = api(box(intake))
     monkeypatch.setattr(receiving.auth, "bearer", AsyncMock(return_value=None))
 
-    grant = call(
-        minting,
-        "POST",
-        "/api/uploads",
-        json={
-            "filename": "paper.pdf",
-            "media_type": "application/pdf",
-            "size": 4,
-            "sha256": _DATA_SHA256,
-        },
-    )
-    assert grant.status_code == 200
-    assert set(grant.json()) == {"url", "expires_seconds"}
-    path = httpx.URL(grant.json()["url"]).path
+    grant = dbutil.run(minting.uploads.mint(who.user, upload_request()))
+    path = httpx.URL(grant.url).path
 
     first = call(receiving, "PUT", path, content=b"data")
     replay = call(receiving, "PUT", path, content=b"data")
@@ -470,21 +469,12 @@ def test_upload_put_enforces_the_declared_byte_budget_and_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     intake = RecordingIntake(MalwareRejectedError("infected"))
-    service = service_as(monkeypatch, verified(), uploads=box(intake))
+    who = verified()
+    service = service_as(monkeypatch, who, uploads=box(intake))
 
     def minted_path() -> str:
-        grant = call(
-            service,
-            "POST",
-            "/api/uploads",
-            json={
-                "filename": "paper.pdf",
-                "media_type": "application/pdf",
-                "size": 4,
-                "sha256": _DATA_SHA256,
-            },
-        )
-        return httpx.URL(grant.json()["url"]).path
+        grant = dbutil.run(service.uploads.mint(who.user, upload_request()))
+        return httpx.URL(grant.url).path
 
     oversize = call(service, "PUT", minted_path(), content=b"12345")
     short = call(service, "PUT", minted_path(), content=b"da")
@@ -504,81 +494,15 @@ def test_upload_put_maps_an_object_store_outage_to_a_stable_503(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     intake = RecordingIntake(PermissionDeniedError("Generic S3 error: ... 403 Forbidden"))
-    service = service_as(monkeypatch, verified(), uploads=box(intake))
-    grant = call(
-        service,
-        "POST",
-        "/api/uploads",
-        json={
-            "filename": "paper.pdf",
-            "media_type": "application/pdf",
-            "size": 4,
-            "sha256": _DATA_SHA256,
-        },
-    )
-    path = httpx.URL(grant.json()["url"]).path
+    who = verified()
+    service = service_as(monkeypatch, who, uploads=box(intake))
+    grant = dbutil.run(service.uploads.mint(who.user, upload_request()))
+    path = httpx.URL(grant.url).path
 
     response = call(service, "PUT", path, content=b"data")
 
     assert response.status_code == 503
     assert response.json() == {"detail": "object storage is temporarily unavailable"}
-
-
-def test_upload_minting_validates_declarations_and_write_standing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    who = verified()
-    service = service_as(monkeypatch, who)
-
-    oversize = call(
-        service,
-        "POST",
-        "/api/uploads",
-        json={
-            "filename": "paper.pdf",
-            "media_type": "application/pdf",
-            "size": settings.object_store_upload_byte_limit + 1,
-            "sha256": _DATA_SHA256,
-        },
-    )
-    unauthorized = call(
-        service,
-        "POST",
-        "/api/uploads",
-        json={
-            "filename": "paper.pdf",
-            "media_type": "application/pdf",
-            "size": 4,
-            "scopes": ["Lab"],
-            "sha256": _DATA_SHA256,
-        },
-    )
-
-    assert oversize.status_code == 400
-    assert unauthorized.status_code == 403
-    assert dbutil.run(dbutil.count_upload_grants(who.user.id)) == 0
-
-
-def test_upload_minting_returns_429_at_the_live_grant_cap(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service = api(box(live_grants_per_caller=1))
-    monkeypatch.setattr(service.auth, "bearer", AsyncMock(return_value=verified()))
-    declaration = {
-        "filename": "paper.pdf",
-        "media_type": "application/pdf",
-        "size": 4,
-        "sha256": _DATA_SHA256,
-    }
-
-    granted = call(service, "POST", "/api/uploads", json=declaration)
-    saturated = call(service, "POST", "/api/uploads", json=declaration)
-
-    assert granted.status_code == 200
-    assert saturated.status_code == 429
-    assert saturated.json() == {
-        "detail": "too many live upload grants, wait for one to expire or be used"
-    }
 
 
 def test_json_routes_refuse_bodies_past_the_api_byte_budget(

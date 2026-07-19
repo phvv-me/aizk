@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from enum import StrEnum, auto
 from types import TracebackType
-from typing import Self
+from typing import Self, cast
 
 import jinja2
 from ir_measures import RR, Success, iter_calc, nDCG
@@ -13,6 +13,7 @@ from patos import FrozenModel
 from pydantic import UUID5
 from sqlalchemy.orm import aliased
 from sqlmodel import select
+from sqlmodel.sql.expression import Select
 
 from aizk.config import settings
 from aizk.ontology import System
@@ -272,36 +273,39 @@ class PlanStudyReport(FrozenModel):
 
     def render(self) -> str:
         """Render the study as a compact text table, one row per stratum and arm."""
-        return _TEMPLATE.render(
-            k=self.k,
-            title=self.title,
-            strata=[
-                {
-                    "stratum": result.stratum.value,
-                    "n": result.n,
-                    "arms": [rounded_arm(arm) for arm in result.arms],
-                }
-                for result in self.strata
-            ],
-            seeding=(
-                {
-                    "n": self.seeding.n,
-                    "arms": [rounded_arm(arm) for arm in self.seeding.arms],
-                }
-                if self.seeding
-                else None
-            ),
-            routing=(
-                {
-                    "accuracy": round(self.routing.accuracy, 3),
-                    "n": self.routing.n,
-                    "confusion": self.routing.confusion,
-                }
-                if self.routing
-                else None
-            ),
-            gate=self.gate.render() if self.gate else None,
-        ).strip()
+        return cast(
+            str,
+            _TEMPLATE.render(
+                k=self.k,
+                title=self.title,
+                strata=[
+                    {
+                        "stratum": result.stratum.value,
+                        "n": result.n,
+                        "arms": [rounded_arm(arm) for arm in result.arms],
+                    }
+                    for result in self.strata
+                ],
+                seeding=(
+                    {
+                        "n": self.seeding.n,
+                        "arms": [rounded_arm(arm) for arm in self.seeding.arms],
+                    }
+                    if self.seeding
+                    else None
+                ),
+                routing=(
+                    {
+                        "accuracy": round(self.routing.accuracy, 3),
+                        "n": self.routing.n,
+                        "confusion": self.routing.confusion,
+                    }
+                    if self.routing
+                    else None
+                ),
+                gate=self.gate.render() if self.gate else None,
+            ).strip(),
+        )
 
 
 async def local_questions(user: User, n: int) -> list[StudyQuestion]:
@@ -389,18 +393,23 @@ async def graph_edges(user: User, cap: int) -> list[GraphEdge]:
     target = aliased(Entity.Content, name="target")
     async with user as session:
         rows = await session.exec(
-            select(
-                Fact.Live.subject_id,
-                subject.name,
-                Fact.Live.object_id,
-                target.name,
+            # `add_columns` erases the sqlmodel `Select` subtype statically while the
+            # runtime object stays one, so the cast restores what `exec` requires.
+            cast(
+                "Select[tuple[UUID5, str, UUID5, str, str]]",
+                select(
+                    Fact.Live.subject_id,
+                    subject.name,
+                    Fact.Live.object_id,
+                    target.name,
+                )
+                .add_columns(Fact.Live.statement)
+                .join(subject, subject.id == Fact.Live.subject_id)
+                .join(target, target.id == Fact.Live.object_id)
+                .where(Fact.Live.object_id.is_not(None))
+                .order_by(Fact.Live.id)
+                .limit(cap),
             )
-            .add_columns(Fact.Live.statement)
-            .join(subject, subject.id == Fact.Live.subject_id)
-            .join(target, target.id == Fact.Live.object_id)
-            .where(Fact.Live.object_id.is_not(None))
-            .order_by(Fact.Live.id)
-            .limit(cap)
         )
         return [
             GraphEdge(
