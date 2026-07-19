@@ -45,6 +45,11 @@ jobs:
   # Linux job; cross-platform parity is a v1 roadmap item.
   test:
     runs-on: ubuntu-latest
+    # the suite builds its DSNs from these; in production they come from .env, which CI has no
+    # copy of, so pass the service-container admin password and the bootstrapped app-role password
+    env:
+      AIZK_ADMIN_PASSWORD: aizk
+      AIZK_APP_PASSWORD: aizk_app
     services:
       db:
         image: tensorchord/vchord-suite:pg18-latest
