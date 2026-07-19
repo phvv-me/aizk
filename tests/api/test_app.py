@@ -1,3 +1,4 @@
+import hashlib
 from collections.abc import AsyncIterator, Mapping
 from types import SimpleNamespace
 from typing import cast
@@ -29,6 +30,8 @@ from aizk.store import Artifact
 from aizk.store.identity import OrganizationStanding, User
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
+
+_DATA_SHA256 = hashlib.sha256(b"data").hexdigest()
 
 # Every route except the capability PUT, whose single-use grant is its own authorization.
 _PROTECTED = (
@@ -439,7 +442,12 @@ def test_upload_capability_is_minted_with_auth_and_redeemed_without_it(
         minting,
         "POST",
         "/api/uploads",
-        json={"filename": "paper.pdf", "media_type": "application/pdf", "size": 4},
+        json={
+            "filename": "paper.pdf",
+            "media_type": "application/pdf",
+            "size": 4,
+            "sha256": _DATA_SHA256,
+        },
     )
     assert grant.status_code == 200
     assert set(grant.json()) == {"url", "expires_seconds"}
@@ -469,7 +477,12 @@ def test_upload_put_enforces_the_declared_byte_budget_and_capability(
             service,
             "POST",
             "/api/uploads",
-            json={"filename": "paper.pdf", "media_type": "application/pdf", "size": 4},
+            json={
+                "filename": "paper.pdf",
+                "media_type": "application/pdf",
+                "size": 4,
+                "sha256": _DATA_SHA256,
+            },
         )
         return httpx.URL(grant.json()["url"]).path
 
@@ -496,7 +509,12 @@ def test_upload_put_maps_an_object_store_outage_to_a_stable_503(
         service,
         "POST",
         "/api/uploads",
-        json={"filename": "paper.pdf", "media_type": "application/pdf", "size": 4},
+        json={
+            "filename": "paper.pdf",
+            "media_type": "application/pdf",
+            "size": 4,
+            "sha256": _DATA_SHA256,
+        },
     )
     path = httpx.URL(grant.json()["url"]).path
 
@@ -520,6 +538,7 @@ def test_upload_minting_validates_declarations_and_write_standing(
             "filename": "paper.pdf",
             "media_type": "application/pdf",
             "size": settings.object_store_upload_byte_limit + 1,
+            "sha256": _DATA_SHA256,
         },
     )
     unauthorized = call(
@@ -531,10 +550,11 @@ def test_upload_minting_validates_declarations_and_write_standing(
             "media_type": "application/pdf",
             "size": 4,
             "scopes": ["Lab"],
+            "sha256": _DATA_SHA256,
         },
     )
 
-    assert oversize.status_code == 422
+    assert oversize.status_code == 400
     assert unauthorized.status_code == 403
     assert dbutil.run(dbutil.count_upload_grants(who.user.id)) == 0
 
@@ -544,7 +564,12 @@ def test_upload_minting_returns_429_at_the_live_grant_cap(
 ) -> None:
     service = api(box(live_grants_per_caller=1))
     monkeypatch.setattr(service.auth, "bearer", AsyncMock(return_value=verified()))
-    declaration = {"filename": "paper.pdf", "media_type": "application/pdf", "size": 4}
+    declaration = {
+        "filename": "paper.pdf",
+        "media_type": "application/pdf",
+        "size": 4,
+        "sha256": _DATA_SHA256,
+    }
 
     granted = call(service, "POST", "/api/uploads", json=declaration)
     saturated = call(service, "POST", "/api/uploads", json=declaration)

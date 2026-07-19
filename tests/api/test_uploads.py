@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from collections.abc import AsyncIterator
 from typing import cast
 
@@ -6,7 +7,9 @@ import dbutil
 import pytest
 from id_factory import uuid5, uuid7
 from pydantic import AnyHttpUrl, ValidationError
+from starlette.requests import Request
 
+from aizk.api.app import AizkAPI
 from aizk.artifacts.models import ArtifactReceipt
 from aizk.artifacts.service import ArtifactIntake
 from aizk.artifacts.uploads import (
@@ -48,9 +51,20 @@ def declared(size: int = 4, scopes: list[str] | None = None) -> UploadRequest:
         filename="paper.pdf",
         media_type="application/pdf",
         size=size,
+        sha256=hashlib.sha256(b"data").hexdigest(),
         scopes=scopes,
         companion_text="Signed original",
     )
+
+
+def test_upload_route_errors_are_never_cached() -> None:
+    api = object.__new__(AizkAPI)
+    request = Request({"type": "http", "method": "PUT", "path": "/api/uploads/missing"})
+
+    response = dbutil.run(api.fail(request, UploadCapabilityError("missing")))
+
+    assert response.status_code == 410
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_mint_issues_one_capability_claimable_exactly_once(settings: Settings) -> None:
@@ -169,6 +183,16 @@ def test_mint_requires_current_write_standing(settings: Settings) -> None:
     assert dbutil.run(dbutil.count_upload_grants(stranger.id)) == 0
 
 
+def test_mint_rejects_declarations_over_its_configured_byte_limit(
+    settings: Settings,
+) -> None:
+    config = settings.model_copy(update={"object_store_upload_byte_limit": 3})
+    capabilities = UploadBox.from_settings(config, InertIntake())
+
+    with pytest.raises(ValueError, match="less than or equal to 3"):
+        dbutil.run(capabilities.mint(User.private(uuid5()), declared()))
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
@@ -176,7 +200,6 @@ def test_mint_requires_current_write_standing(settings: Settings) -> None:
         ("filename", " ", "at least 1 character"),
         ("media_type", "application/\x00pdf", "unsafe character"),
         ("size", 0, "greater than 0"),
-        ("size", 10_485_761, "less than or equal"),
         ("scopes", [f"org-{index}" for index in range(33)], "at most 32 entries"),
         ("companion_text", "x" * 65_537, "at most 65536 characters"),
     ],
@@ -188,6 +211,7 @@ def test_upload_request_rejects_unsafe_declarations(
         "filename": "paper.pdf",
         "media_type": "application/pdf",
         "size": 4,
+        "sha256": "0" * 64,
         field: value,
     }
 

@@ -19,14 +19,16 @@ export const actions: Actions = {
     const data = await request.formData();
     const filename = String(data.get('filename') ?? '').trim();
     const size = Number(data.get('size'));
-    if (!filename || !Number.isInteger(size) || size <= 0) {
+    const sha256 = String(data.get('sha256') ?? '').trim();
+    if (!filename || !Number.isInteger(size) || size <= 0 || !/^[0-9a-f]{64}$/.test(sha256)) {
       return fail(400, { message: 'Choose a non-empty file to upload.' });
     }
     try {
       const grant = await new ApiClient(locals.logtoClient).grantUpload({
         filename,
         media_type: String(data.get('media_type') ?? '').trim() || 'application/octet-stream',
-        size
+        size,
+        sha256
       });
       // The API advertises an absolute URL; only its path is same-origin for the browser.
       const url = new URL(grant.url);

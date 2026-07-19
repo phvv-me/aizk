@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import cast, get_type_hints
@@ -29,6 +30,7 @@ from aizk.auth import Auth
 from aizk.config import settings
 from aizk.integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from aizk.integrations.docling import ArtifactBytes
+from aizk.mcp import server as mcp_server
 from aizk.mcp.middleware import CallerRateLimit
 from aizk.mcp.server import AizkMCP
 from aizk.memory import ShareResult, WriteResult
@@ -49,10 +51,8 @@ _MCP_MAXIMUMS = {
     "documents": settings.mcp_share_documents_max,
     "filename": 255,
     "media_type": 255,
-    "size": settings.object_store_upload_byte_limit,
-    "companion_text": settings.web_artifact_companion_max_chars,
 }
-_UPLOAD_FIELDS = {"filename", "media_type", "size", "companion_text"}
+_UPLOAD_FIELDS = {"filename", "media_type"}
 
 
 def _no_intake() -> ArtifactIntake:
@@ -69,6 +69,7 @@ def test_registration_is_exactly_the_client_verbs(tools: dict[str, FunctionTool]
         "expires_at",
         "scopes",
         "preserve_source",
+        "upload",
     }
     assert "required" not in tools["remember"].parameters
     status_schema = tools["status"].output_schema
@@ -86,7 +87,7 @@ def test_tool_schemas_bound_expensive_inputs(tools: dict[str, FunctionTool]) -> 
     recall_properties = tools["recall"].parameters["properties"]
     remember_properties = tools["remember"].parameters["properties"]
     share_properties = tools["share"].parameters["properties"]
-    upload_properties = tools["request_upload"].parameters["properties"]
+    upload_properties = mcp_server._UploadDeclaration.model_json_schema()["properties"]
 
     assert recall_properties["query"]["maxLength"] == settings.mcp_recall_query_max_chars
     assert recall_properties["budget"]["maximum"] == settings.mcp_recall_budget_max_tokens
@@ -99,10 +100,6 @@ def test_tool_schemas_bound_expensive_inputs(tools: dict[str, FunctionTool]) -> 
     assert share_properties["documents"]["maxItems"] == settings.mcp_share_documents_max
     assert upload_properties["filename"]["maxLength"] == 255
     assert upload_properties["media_type"]["maxLength"] == 255
-    assert upload_properties["size"]["maximum"] == settings.object_store_upload_byte_limit
-    assert upload_properties["companion_text"]["anyOf"][0]["maxLength"] == (
-        settings.web_artifact_companion_max_chars
-    )
 
 
 _TOOL_FNS = tools_of(server)
@@ -110,16 +107,18 @@ _TOOL_FNS = tools_of(server)
 
 @given(field=st.sampled_from(tuple(_MCP_MAXIMUMS)), exceeds=st.booleans())
 def test_mcp_annotations_enforce_every_advertised_maximum(field: str, exceeds: bool) -> None:
-    function = (
-        _TOOL_FNS["recall"].fn
-        if field in {"query", "budget"}
-        else _TOOL_FNS["share"].fn
-        if field == "documents"
-        else _TOOL_FNS["request_upload"].fn
-        if field in _UPLOAD_FIELDS
-        else _TOOL_FNS["remember"].fn
-    )
-    adapter = TypeAdapter(get_type_hints(function, include_extras=True)[field])
+    if field in _UPLOAD_FIELDS:
+        annotation = mcp_server._UploadDeclaration.__annotations__[field]
+    else:
+        function = (
+            _TOOL_FNS["recall"].fn
+            if field in {"query", "budget"}
+            else _TOOL_FNS["share"].fn
+            if field == "documents"
+            else _TOOL_FNS["remember"].fn
+        )
+        annotation = get_type_hints(function, include_extras=True)[field]
+    adapter = TypeAdapter(annotation)
     size = _MCP_MAXIMUMS[field] + int(exceeds)
     value = (
         size
@@ -663,33 +662,36 @@ def test_remember_reports_ingestion_validation_as_a_tool_error(
         )
 
 
-def test_request_upload_mints_one_claimable_capability_with_instructions(
+def test_remember_upload_mints_one_claimable_capability(
     as_caller: User,
     caller_context: Context,
     tools: dict[str, FunctionTool],
 ) -> None:
-    directions = dbutil.run(
-        tools["request_upload"].fn(
-            filename="contract.pdf",
-            media_type="application/pdf",
-            size=1024,
-            companion_text="Signed original",
+    accepted = dbutil.run(
+        tools["remember"].fn(
+            text="Signed original",
+            upload=mcp_server._UploadDeclaration(
+                filename="contract.pdf",
+                media_type="application/pdf",
+                size=1024,
+                sha256="0" * 64,
+            ),
             context=caller_context,
         )
     )
 
-    assert directions.url.startswith(f"{settings.api_base_url}/api/uploads/")
-    assert directions.expires_seconds == settings.api_upload_ttl_seconds
-    assert directions.url in directions.instructions
-    assert "curl -fsS -T contract.pdf" in directions.instructions
-    ticket = dbutil.run(mcp_probe.runtime.uploads.claim(directions.url.rsplit("/", 1)[-1]))
+    assert isinstance(accepted, mcp_server.UploadTicketAccepted)
+    assert accepted.status == "accepted"
+    assert accepted.capability
+    ticket = dbutil.run(mcp_probe.runtime.uploads.claim(accepted.capability))
     assert ticket.user.id == as_caller.id
     assert ticket.user.scopes == as_caller.scopes
     assert ticket.declared.size == 1024
+    assert ticket.declared.sha256 == "0" * 64
     assert ticket.declared.companion_text == "Signed original"
 
 
-def test_request_upload_reports_grant_saturation_as_a_tool_error(
+def test_remember_upload_reports_grant_saturation_as_a_tool_error(
     monkeypatch: pytest.MonkeyPatch,
     caller_context: Context,
     tools: dict[str, FunctionTool],
@@ -701,57 +703,46 @@ def test_request_upload_reports_grant_saturation_as_a_tool_error(
 
     with pytest.raises(ToolError, match="too many live upload grants"):
         dbutil.run(
-            tools["request_upload"].fn(
-                filename="paper.pdf",
-                media_type="application/pdf",
-                size=4,
+            tools["remember"].fn(
+                upload=mcp_server._UploadDeclaration(
+                    filename="paper.pdf",
+                    media_type="application/pdf",
+                    size=4,
+                    sha256="0" * 64,
+                ),
                 context=caller_context,
             )
         )
 
 
-def test_request_upload_shell_quotes_a_hostile_filename(
-    caller_context: Context,
-    tools: dict[str, FunctionTool],
-) -> None:
-    hostile = "quarterly report$(reboot).pdf"
-
-    directions = dbutil.run(
-        tools["request_upload"].fn(
-            filename=hostile,
-            media_type="application/pdf",
-            size=8,
-            context=caller_context,
-        )
-    )
-
-    assert f"curl -fsS -T '{hostile}' {directions.url}" in directions.instructions
-
-
 @pytest.mark.parametrize(
-    ("overrides", "message"),
+    ("filename", "scopes", "message"),
     [
-        ({"filename": "../evil.pdf"}, "safe path component"),
-        ({"size": settings.object_store_upload_byte_limit + 1}, "less than or equal"),
-        ({"scopes": ["Nowhere"]}, "no writable scope"),
+        ("../evil.pdf", None, "safe path component"),
+        ("paper.pdf", ["Nowhere"], "no writable scope"),
     ],
-    ids=["unsafe-name", "oversize", "unauthorized-scope"],
+    ids=["unsafe-name", "unauthorized-scope"],
 )
-def test_request_upload_rejects_invalid_declarations_as_tool_errors(
+def test_remember_upload_rejects_invalid_declarations_as_tool_errors(
     caller_context: Context,
     tools: dict[str, FunctionTool],
-    overrides: dict[str, str | int | list[str]],
+    filename: str,
+    scopes: list[str] | None,
     message: str,
 ) -> None:
-    arguments: dict[str, str | int | list[str]] = {
-        "filename": "paper.pdf",
-        "media_type": "application/pdf",
-        "size": 8,
-        **overrides,
-    }
-
     with pytest.raises(ToolError, match=message):
-        dbutil.run(tools["request_upload"].fn(context=caller_context, **arguments))
+        dbutil.run(
+            tools["remember"].fn(
+                context=caller_context,
+                scopes=scopes,
+                upload=mcp_server._UploadDeclaration(
+                    filename=filename,
+                    media_type="application/pdf",
+                    size=8,
+                    sha256="0" * 64,
+                ),
+            )
+        )
 
 
 def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
@@ -779,12 +770,15 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
             accepted.append((user, artifact, scopes, companion_text))
             return receipt
 
-    directions = dbutil.run(
-        tools["request_upload"].fn(
-            filename="contract.pdf",
-            media_type="application/pdf",
-            size=4,
-            companion_text="Signed original",
+    accepted_ticket = dbutil.run(
+        tools["remember"].fn(
+            text="Signed original",
+            upload=mcp_server._UploadDeclaration(
+                filename="contract.pdf",
+                media_type="application/pdf",
+                size=4,
+                sha256=hashlib.sha256(b"data").hexdigest(),
+            ),
             context=caller_context,
         )
     )
@@ -799,7 +793,7 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
         )
         transport = httpx.ASGITransport(app=receiving.app())
         async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as client:
-            return await client.put(httpx.URL(directions.url).path, content=b"data")
+            return await client.put(f"/api/uploads/{accepted_ticket.capability}", content=b"data")
 
     response = dbutil.run(redeem())
 
@@ -824,14 +818,21 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
         ("remember", {"text": "a durable note"}),
         ("share", {"documents": [uuid7()]}),
         (
-            "request_upload",
-            {"filename": "paper.pdf", "media_type": "application/pdf", "size": 1},
+            "remember",
+            {
+                "upload": mcp_server._UploadDeclaration(
+                    filename="paper.pdf",
+                    media_type="application/pdf",
+                    size=1,
+                    sha256="0" * 64,
+                )
+            },
         ),
     ],
 )
 def test_write_verbs_refuse_the_anonymous_caller(
     tool_name: str,
-    arguments: dict[str, str | int | list[UUID7]],
+    arguments: dict[str, str | int | list[UUID7] | mcp_server._UploadDeclaration],
     tools: dict[str, FunctionTool],
 ) -> None:
     anonymous = context_for(User.private(settings.anonymous_user_id))

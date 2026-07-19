@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="320" viewBox="0 0 1280 320"
+     fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">aizk</title>
+  <desc id="desc">Memory your agents actually keep</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1e1b4b"/>
+      <stop offset="0.58" stop-color="#27246b"/>
+      <stop offset="1" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="88" y1="60" x2="288" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+    <linearGradient id="word" x1="0" y1="85" x2="0" y2="190" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c7d2fe"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="320" rx="32" fill="url(#background)"/>
+  <rect x="3" y="3" width="1274" height="314" rx="29"
+        stroke="#818cf8" stroke-width="3" opacity="0.22"/>
+
+  <circle cx="1110" cy="60" r="190" fill="#6366f1" opacity="0.12"/>
+  <circle cx="1190" cy="270" r="105" fill="#a5b4fc" opacity="0.08"/>
+
+  <g fill="none" stroke="#c7d2fe" stroke-width="3" opacity="0.10">
+    <rect x="1008" y="72" width="164" height="104" rx="18"
+          transform="rotate(8 1090 124)"/>
+    <rect x="970" y="102" width="164" height="104" rx="18"
+          transform="rotate(-7 1052 154)"/>
+    <path d="M890 267 C948 237 1000 294 1058 264 C1116 234 1167 287 1230 251"/>
+    <path d="M920 291 C978 261 1030 318 1088 288 C1146 258 1196 307 1250 278"/>
+  </g>
+
+  <rect x="88" y="60" width="200" height="200" rx="48" fill="url(#tile)"/>
+  <rect x="91" y="63" width="194" height="194" rx="45"
+        stroke="#c7d2fe" stroke-width="3" opacity="0.25"/>
+
+  <g transform="translate(108 80) scale(1.6)">
+    <rect x="30" y="17" width="48" height="42" rx="8"
+          transform="rotate(5 54 38)" fill="#c7d2fe" opacity="0.55"/>
+    <rect x="23" y="21" width="49" height="43" rx="8" fill="#eef2ff"/>
+
+    <path d="M31 39 C39 39 41 31 49 31 C57 31 59 40 67 40"
+          stroke="#6366f1" stroke-width="3.5" stroke-linecap="round"/>
+    <g fill="#6366f1">
+      <circle cx="31" cy="39" r="4"/>
+      <circle cx="49" cy="31" r="4"/>
+      <circle cx="67" cy="40" r="4"/>
+    </g>
+
+    <path d="M15 47 Q15 42 20 42 H80 Q85 42 85 47 L82 76 Q81 83 73 83 H27 Q19 83 18 76 Z"
+          fill="#ffffff"/>
+    <rect x="35" y="58" width="30" height="12" rx="6" fill="#6366f1"/>
+    <rect x="44" y="62.5" width="12" height="3" rx="1.5" fill="#c7d2fe"/>
+
+    <path d="M79 13 C80 18 83 21 88 22 C83 23 80 26 79 31 C78 26 75 23 70 22 C75 21 78 18 79 13 Z"
+          fill="#fbbf24"/>
+  </g>
+
+  <text x="370" y="174"
+        font-family="'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="128" font-weight="750" letter-spacing="-5"
+        fill="url(#word)">aizk</text>
+
+  <text x="376" y="226"
+        font-family="'Space Grotesk', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="31" font-weight="500" letter-spacing="0.4"
+        fill="#c7d2fe">memory your agents actually keep</text>
+</svg>

@@ -2,9 +2,9 @@
 
 Every client points at the same URL and discovers Aizk as an OAuth protected resource. FastMCP
 registers each client dynamically, proxies human sign-in through Logto, and stores encrypted
-registration and refresh state on the server. A connected client sees the five agent tools,
-`status`, `recall`, `remember`, `share`, and `request_upload` for uploading a local file, all
-described in the [API contract](api.md).
+registration and refresh state on the server. A connected client sees the four agent tools,
+`status`, `recall`, `remember`, and `share`, all described in the
+[API contract](api.md). `remember` handles text, preserved URIs, and local file uploads.
 
 ## Codex
 
@@ -53,6 +53,29 @@ Ask AIZK how to do AIZK onboarding and follow it.
 ```
 
 For a shared repository, commit the equivalent Aizk entry in `.mcp.json` instead.
+
+## Local file uploads
+
+For a local file, compute its exact size and lowercase SHA-256 before asking the client to call
+`remember` with an `upload` declaration.
+
+```sh
+sha256=$(sha256sum file | cut -d' ' -f1)
+size=$(wc -c < file)
+```
+
+Pass `filename`, `media_type`, `size`, and `sha256` under `upload`; pass optional companion
+information as `text`. The accepted response is only a short-lived ticket, not a stored artifact
+receipt. Redeem its opaque capability by PUTting exactly the declared bytes once.
+
+```sh
+capability='<opaque capability returned by remember>'
+curl -fsS -T file "https://aizk.phvv.me/api/uploads/$capability"
+```
+
+The endpoint is a single-use private bearer upload ticket. It is never a public or downloadable
+URL. Anyone holding an unexpired capability can perform its one authorized PUT, so do not log,
+share, or reuse it.
 
 ```json
 {

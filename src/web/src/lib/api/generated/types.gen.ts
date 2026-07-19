@@ -481,6 +481,10 @@ export type RequestUploadData = {
          * Size
          */
         size: number;
+        /**
+         * Sha256
+         */
+        sha256: string;
         scopes?: Array<string> | null;
         /**
          * Companion Text

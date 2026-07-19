@@ -1,7 +1,6 @@
-import shlex
 from collections.abc import Callable, Coroutine
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from fastmcp import FastMCP
@@ -14,7 +13,7 @@ from pydantic import UUID5, UUID7, UUID8, Field, StringConstraints
 
 from ..artifacts.models import ArtifactReceipt
 from ..artifacts.service import ArtifactIntake
-from ..artifacts.uploads import UploadBox, UploadGrantLimitError, UploadRequest
+from ..artifacts.uploads import Sha256Hex, UploadBox, UploadGrantLimitError, UploadRequest
 from ..auth import Auth
 from ..config import Settings
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
@@ -39,12 +38,28 @@ class _ArtifactObject(FrozenModel):
     media_type: str | None = None
 
 
-class UploadDirections(FrozenModel):
-    """Where and how an agent PUTs one approved original file."""
+class _UploadDeclaration(FrozenModel):
+    """One local file whose exact bytes an agent intends to preserve."""
 
-    url: str
-    expires_seconds: int
-    instructions: str
+    filename: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+    media_type: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+    size: Annotated[int, Field(gt=0)]
+    sha256: Sha256Hex
+
+
+class UploadTicketAccepted(FrozenModel):
+    """Acknowledge one short-lived private upload ticket."""
+
+    status: Literal["accepted"] = "accepted"
+    capability: str
+    instruction: str
+
+
+type _RememberResult = WriteResult | ArtifactReceipt | UploadTicketAccepted
 
 
 class AizkMCP(FastMCP):
@@ -82,7 +97,6 @@ class AizkMCP(FastMCP):
             self.recall_tool(),
             self.remember_tool(),
             self.share_tool(),
-            self.request_upload_tool(),
         ):
             self.tool(verb)
         self.resource(
@@ -143,7 +157,7 @@ class AizkMCP(FastMCP):
 
         return recall
 
-    def remember_tool(self) -> Callable[..., Coroutine[None, None, WriteResult | ArtifactReceipt]]:
+    def remember_tool(self) -> Callable[..., Coroutine[None, None, _RememberResult]]:
         """Build the `remember` tool with input bounds from this server's settings."""
         config = self.settings
 
@@ -167,12 +181,13 @@ class AizkMCP(FastMCP):
             scopes: Annotated[ScopeNames, Field(max_length=config.mcp_scope_names_max)]
             | None = None,
             preserve_source: bool = False,
-        ) -> WriteResult | ArtifactReceipt:
-            """Store text now or preserve one URI original with optional companion information.
+            upload: _UploadDeclaration | None = None,
+        ) -> _RememberResult:
+            """Store text, preserve one URI original, or prepare one local file upload.
 
             text: self-describing Markdown, plain text, or companion information for a
-                preserved file.
-            source_uri: original website or file URL. Omission keeps this a text-only document.
+                preserved URI or uploaded file.
+            source_uri: original website or file URL. Omission keeps text mode local.
             observed_at: optional time when the statement became applicable. Normally omitted.
             expires_at: known time after which the statement stops being true. It is not a
                 reminder. Normally omitted.
@@ -180,9 +195,46 @@ class AizkMCP(FastMCP):
             preserve_source: download and retain `source_uri` as an original file. Omit this
                 unless the exact contract, form, presentation, paper, or other source may be
                 needed later. A URI without `text` is always preserved.
+            upload: exact filename, media type, byte size, and SHA-256 for one local file.
+                This mode cannot be combined with URI or temporal inputs. It returns a
+                short-lived one-time private upload ticket, not a stored artifact receipt.
             """
             if text is not None:
                 text = text.strip() or None
+            if upload is not None:
+                if (
+                    source_uri is not None
+                    or preserve_source
+                    or observed_at is not None
+                    or expires_at is not None
+                ):
+                    raise ToolError(
+                        "file upload cannot be combined with source_uri, preserve_source, "
+                        "observed_at, or expires_at"
+                    )
+                user = await self.user(context, identified=True)
+                try:
+                    declared = UploadRequest(
+                        filename=upload.filename,
+                        media_type=upload.media_type,
+                        size=upload.size,
+                        sha256=upload.sha256,
+                        scopes=scopes,
+                        companion_text=text,
+                    )
+                    grant = await self.uploads.mint(user, declared)
+                except ValueError as invalid:
+                    raise ToolError(str(invalid)) from invalid
+                except UploadGrantLimitError as saturated:
+                    raise ToolError(str(saturated)) from saturated
+                return UploadTicketAccepted(
+                    capability=grant.url.rsplit("/", 1)[-1],
+                    instruction=(
+                        "PUT the exact declared bytes once to the private single-use upload "
+                        f"endpoint {grant.url}. It expires shortly, in "
+                        f"{grant.expires_seconds} seconds."
+                    ),
+                )
             if text is None and source_uri is None:
                 raise ToolError("remember requires text or a source URI")
             user = await self.user(context, identified=True)
@@ -229,62 +281,6 @@ class AizkMCP(FastMCP):
             return await self.memory(user).share(documents, scopes)
 
         return share
-
-    def request_upload_tool(self) -> Callable[..., Coroutine[None, None, UploadDirections]]:
-        """Build the `request_upload` tool with input bounds from this server's settings."""
-        config = self.settings
-
-        async def request_upload(
-            filename: Annotated[
-                str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
-            ],
-            media_type: Annotated[
-                str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
-            ],
-            size: Annotated[int, Field(gt=0, le=config.object_store_upload_byte_limit)],
-            context: Context,
-            scopes: Annotated[ScopeNames, Field(max_length=config.mcp_scope_names_max)]
-            | None = None,
-            companion_text: Annotated[
-                str, StringConstraints(max_length=config.web_artifact_companion_max_chars)
-            ]
-            | None = None,
-        ) -> UploadDirections:
-            """Mint one single-use PUT URL that uploads a local file into preserved memory.
-
-            filename: plain file name with its extension and no path separators.
-            media_type: MIME type of the exact bytes that will be uploaded.
-            size: exact byte length of the file, enforced as the upload budget.
-            scopes: optional authorized Logto organization names. Omission means private memory.
-            companion_text: optional context stored when the file alone may not explain itself.
-            """
-            user = await self.user(context, identified=True)
-            try:
-                declared = UploadRequest(
-                    filename=filename,
-                    media_type=media_type,
-                    size=size,
-                    scopes=scopes,
-                    companion_text=companion_text,
-                )
-                grant = await self.uploads.mint(user, declared)
-            except ValueError as invalid:
-                raise ToolError(str(invalid)) from invalid
-            except UploadGrantLimitError as saturated:
-                raise ToolError(str(saturated)) from saturated
-            command = shlex.join(("curl", "-fsS", "-T", declared.filename, grant.url))
-            return UploadDirections(
-                url=grant.url,
-                expires_seconds=grant.expires_seconds,
-                instructions=(
-                    f"Run `{command}` within "
-                    f"{grant.expires_seconds} seconds. The URL is single use, accepts one PUT of "
-                    f"exactly {declared.size} bytes, and replies with the artifact receipt as "
-                    "JSON."
-                ),
-            )
-
-        return request_upload
 
     def artifact_resource(self) -> Callable[..., Coroutine[None, None, ResourceResult]]:
         """Build the artifact resource reader over this server's byte store."""

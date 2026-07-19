@@ -41,4 +41,5 @@ archive/ts/pnpm-lock.yaml
 
 # lote SQLite runtime sidecars
 .lote/*.sqlite-*
-artifacts/
+# benchmark run outputs at the package root only, never the src/aizk/artifacts or tests/artifacts packages
+/artifacts/

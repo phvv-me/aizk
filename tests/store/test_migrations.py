@@ -159,7 +159,7 @@ def test_upgrade_from_deployed_0001_preserves_rows_and_installs_artifacts() -> N
                 }
                 assert all(forced.values())
                 assert "(document_id, scopes) IN" in chunk_check
-                assert revision == "0004_blob_attachment_guard"
+                assert revision == "0005_upload_content_hash"
             finally:
                 await engine.dispose()
         finally:

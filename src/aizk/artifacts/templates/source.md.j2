@@ -1,0 +1,25 @@
+# {{ document.filename }}
+{% if document.companion_text %}
+
+{{ document.companion_text }}
+{% endif %}
+
+## Source file
+
+Name {{ document.filename }}
+
+Media type {{ document.media_type }}
+
+Original size {{ document.size }} bytes
+
+Conversion state {{ document.conversion_state.value }}
+{% if document.source_uri %}
+
+Source {{ document.source_uri }}
+{% endif %}
+{% if document.markdown %}
+
+## Extracted content
+
+{{ document.markdown }}
+{% endif %}

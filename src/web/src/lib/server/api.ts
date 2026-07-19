@@ -88,6 +88,7 @@ export class ApiClient {
     filename: string;
     media_type: string;
     size: number;
+    sha256: string;
     companion_text?: string;
   }): Promise<UploadGrant> {
     return unwrap(await sdk.requestUpload({ client: await this.client(), body: input }));

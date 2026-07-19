@@ -1,12 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="aizk">
-  <title>aizk</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="title desc">
+  <title id="title">aizk</title>
+  <desc id="desc">A shared memory slip-box</desc>
   <defs>
-    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#fbbf24"/>
-      <stop offset="1" stop-color="#d97706"/>
+    <linearGradient id="indigo" x1="8" y1="5" x2="92" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4338ca"/>
     </linearGradient>
   </defs>
-  <rect width="64" height="64" rx="15" fill="url(#brand)"/>
-  <text x="32" y="34" fill="#ffffff" font-family="'Space Grotesk', system-ui, sans-serif"
-        font-size="38" font-weight="700" text-anchor="middle" dominant-baseline="central">a</text>
+
+  <rect width="100" height="100" rx="23" fill="url(#indigo)"/>
+
+  <rect x="30" y="17" width="48" height="42" rx="8"
+        transform="rotate(5 54 38)" fill="#c7d2fe" opacity="0.55"/>
+  <rect x="23" y="21" width="49" height="43" rx="8" fill="#eef2ff"/>
+
+  <path d="M31 39 C39 39 41 31 49 31 C57 31 59 40 67 40"
+        fill="none" stroke="#6366f1" stroke-width="3.5"
+        stroke-linecap="round"/>
+  <g fill="#6366f1">
+    <circle cx="31" cy="39" r="4"/>
+    <circle cx="49" cy="31" r="4"/>
+    <circle cx="67" cy="40" r="4"/>
+  </g>
+
+  <path d="M15 47 Q15 42 20 42 H80 Q85 42 85 47 L82 76 Q81 83 73 83 H27 Q19 83 18 76 Z"
+        fill="#ffffff"/>
+  <rect x="35" y="58" width="30" height="12" rx="6" fill="#6366f1"/>
+  <rect x="44" y="62.5" width="12" height="3" rx="1.5" fill="#c7d2fe"/>
+
+  <path d="M79 13 C80 18 83 21 88 22 C83 23 80 26 79 31 C78 26 75 23 70 22 C75 21 78 18 79 13 Z"
+        fill="#fbbf24"/>
 </svg>

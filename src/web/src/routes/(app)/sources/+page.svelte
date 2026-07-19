@@ -61,10 +61,15 @@
 
   /** Declare the file to the `grant` action and read back the same-origin PUT path. */
   async function grantPath(file: File): Promise<string | null> {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    const sha256 = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
     const declaration = new FormData();
     declaration.set('filename', file.name);
     declaration.set('media_type', file.type || 'application/octet-stream');
     declaration.set('size', String(file.size));
+    declaration.set('sha256', sha256);
     const response = await fetch('?/grant', {
       method: 'POST',
       headers: { 'x-sveltekit-action': 'true' },

@@ -1,8 +1,43 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
-  <title>aizk</title>
-  <rect x="7" y="7" width="86" height="86" rx="20"
-        stroke="#eab308" stroke-width="6"/>
-  <text x="50" y="54" text-anchor="middle" dominant-baseline="central"
-        font-family="'Space Grotesk', system-ui, sans-serif" font-weight="700" font-size="46"
-        fill="#eab308">A</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">aizk</title>
+  <desc id="desc">Interlinked memory cards rising from a slip-box</desc>
+  <defs>
+    <linearGradient id="memory" x1="14" y1="45" x2="86" y2="91" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#4338ca"/>
+    </linearGradient>
+    <linearGradient id="card" x1="22" y1="17" x2="78" y2="65" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#eef2ff"/>
+      <stop offset="1" stop-color="#c7d2fe"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="27" y="11" width="57" height="52" rx="9"
+        transform="rotate(5 55.5 37)" fill="#818cf8" opacity="0.62"/>
+  <rect x="17" y="16" width="58" height="51" rx="9"
+        transform="rotate(-5 46 41.5)" fill="#a5b4fc"/>
+  <rect x="22" y="19" width="58" height="51" rx="9" fill="url(#card)"/>
+
+  <g stroke="#4f46e5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M31 38 C40 38 42 29 51 29 C60 29 60 39 70 39"/>
+    <path d="M31 38 C39 38 40 48 49 48"/>
+  </g>
+  <g fill="#6366f1">
+    <circle cx="31" cy="38" r="4"/>
+    <circle cx="51" cy="29" r="4"/>
+    <circle cx="70" cy="39" r="4"/>
+    <circle cx="49" cy="48" r="4"/>
+  </g>
+
+  <path d="M9 50 Q9 45 14 45 H86 Q91 45 91 50 L87 83 Q86 91 77 91 H23 Q14 91 13 83 Z"
+        fill="url(#memory)"/>
+  <path d="M10 51 Q10 46 15 46 H85 Q90 46 90 51 V56 H10 Z"
+        fill="#818cf8"/>
+  <path d="M16 59 V78 Q16 85 23 87" stroke="#ffffff" stroke-width="3"
+        stroke-linecap="round" opacity="0.18"/>
+  <rect x="33" y="63" width="34" height="13" rx="6.5" fill="#eef2ff"/>
+  <rect x="43" y="68" width="14" height="3" rx="1.5" fill="#6366f1"/>
+
+  <path d="M85 8 C86 14 89 17 95 18 C89 19 86 22 85 28 C84 22 81 19 75 18 C81 17 84 14 85 8 Z"
+        fill="#fbbf24"/>
 </svg>

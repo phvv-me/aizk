@@ -1,6 +1,6 @@
 # API
 
-The public network surface has five MCP tools. Maintenance and evaluation stay on the SSH-only
+The public network surface has four MCP tools. Maintenance and evaluation stay on the SSH-only
 CLI so a client token cannot rebuild, export, promote, or erase data.
 
 ## MCP tools
@@ -9,9 +9,8 @@ CLI so a client token cannot rebuild, export, promote, or erase data.
 |---|---|
 | `status()` | Return the current Logto user and organization directory |
 | `recall(query, budget)` | Return one Markdown string from the token-budgeted context pack |
-| `remember(text, source_uri, observed_at, expires_at, scopes, preserve_source)` | Store text now or preserve and queue one public HTTPS source |
+| `remember(text, source_uri, observed_at, expires_at, scopes, preserve_source, upload)` | Store text, preserve and queue one public HTTPS source, or mint a private local-file upload ticket |
 | `share(documents, scopes)` | Copy visible documents into one authorized destination and return the copied count |
-| `request_upload(filename, media_type, size, scopes, companion_text)` | Mint one single-use PUT URL that uploads a local file into preserved memory |
 
 Every tool derives scope authority from the verified Logto user. The MCP path uses a short
 coalesced Logto Management API cache, so repeated tool calls do not reload the same account and
@@ -48,8 +47,8 @@ omitted, AIZK fetches the source once, scans and stores its immutable bytes, and
 conversion. Set `preserve_source` only when both text and the exact original should belong to the
 same remembered document. The text then becomes companion information rather than a second source.
 Browser users can upload a file directly from the personal dashboard. MCP clients never embed a
-large file in a tool call. An agent sends a public HTTPS URI, or calls `request_upload` when the
-file only exists locally.
+large file in a tool call. An agent sends a public HTTPS URI or uses the `remember` file-upload mode
+when the file only exists locally.
 
 Text is the preferred input. Preserve a file when the exact bytes may be needed later, such as a
 contract, form, paper, signed record, or presentation. The file limit is 10 MiB. If Docling cannot
@@ -59,18 +58,51 @@ Markdown, Docling JSON, companion text, and conversion metadata live in PostgreS
 
 ## Agent uploads
 
-`request_upload` preserves a local file that has no public URI. The agent declares the exact
-`filename`, `media_type`, and byte `size`, with optional `scopes` and `companion_text`, and
-receives one single-use capability PUT URL with a short lifetime plus ready-to-run instructions.
+The file-upload mode of `remember` preserves a local file that has no public URI. The agent declares
+the exact `filename`, `media_type`, byte `size`, and lowercase `sha256`, with optional `scopes`.
+`text` becomes companion information. File upload cannot be combined with `source_uri`,
+`preserve_source`, `observed_at`, or `expires_at`.
+
+Compute the declaration from the same file that will be PUT.
 
 ```sh
-curl -fsS -T contract.pdf 'https://aizk.phvv.me/api/uploads/<capability>'
+sha256=$(sha256sum file | cut -d' ' -f1)
+size=$(wc -c < file)
 ```
 
-The PUT must arrive before the grant expires, accepts at most the declared size, and works exactly
-once. Aizk authorizes the declaration at mint time against the verified caller, so the PUT itself
-carries no token. The reply is the same artifact receipt a preserved `remember` returns, and the
-uploaded original then flows through the normal safety scan and Docling conversion intake.
+The agent then calls `remember` with the declaration.
+
+```text
+remember(
+  text="Companion information for this exact original.",
+  upload={
+    "filename": "file",
+    "media_type": "application/octet-stream",
+    "size": <size>,
+    "sha256": "<sha256>"
+  }
+)
+
+{
+  "status": "accepted",
+  "capability": "<opaque capability>",
+  "instruction": "PUT the exact declared bytes once to the private single-use upload endpoint."
+}
+```
+
+The accepted response is a ticket mint, not a stored artifact receipt. Redeem the opaque capability
+by PUTting exactly the bytes whose size and SHA-256 were declared.
+
+```sh
+capability='<opaque capability returned by remember>'
+curl -fsS -T file "https://aizk.phvv.me/api/uploads/$capability"
+```
+
+The endpoint is a short-lived, single-use private bearer upload ticket. It is never a public or
+downloadable URL. The PUT carries no Logto token because possession of the unexpired capability
+authorizes its one upload. Aizk rejects a different size or content hash before artifact intake.
+A successful reply is the artifact receipt, and the original then flows through the normal safety
+scan and Docling conversion intake.
 
 ## Agent-managed lifecycle and temporal inputs
 

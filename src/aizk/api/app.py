@@ -12,7 +12,7 @@ from pydantic.types import JsonValue
 from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 
 from ..artifacts.models import ArtifactReceipt
 from ..artifacts.service import ArtifactIntake
@@ -217,7 +217,7 @@ class AizkAPI:
     Every route authenticates a raw bearer token through the shared `Auth`
     verifier as the `verified` dependency, resolves the caller's current Logto
     authority, and leaves PostgreSQL row security as the final boundary. Upload
-    capabilities are minted here and by the MCP `request_upload` tool into one
+    capabilities are minted here and by the MCP `remember` upload mode into one
     PostgreSQL-backed store, while only this service redeems them. The FastAPI
     response models make `FastAPI.openapi` the generated web client's contract.
     """
@@ -321,7 +321,11 @@ class AizkAPI:
 
     async def fail(self, request: Request, error: Exception) -> JSONResponse:
         """Translate one expected domain failure into its JSON status."""
-        return JSONResponse({"detail": self.detail_for(error)}, status_code=self.status_for(error))
+        return JSONResponse(
+            {"detail": self.detail_for(error)},
+            status_code=self.status_for(error),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @staticmethod
     def detail_for(error: Exception) -> str:
@@ -398,13 +402,19 @@ class AizkAPI:
             preserve_source=ask.preserve_source,
         )
 
-    async def request_upload(self, request: Request, who: Verified) -> UploadGrant:
+    async def request_upload(
+        self, request: Request, response: Response, who: Verified
+    ) -> UploadGrant:
         """Mint one single-use short-TTL capability PUT URL for a declared file."""
+        response.headers["Cache-Control"] = "no-store"
         declared = UploadRequest.model_validate_json(await self.payload(request))
         return await self.uploads.mint(who.user, declared)
 
-    async def receive_upload(self, capability: str, request: Request) -> ArtifactReceipt:
+    async def receive_upload(
+        self, capability: str, request: Request, response: Response
+    ) -> ArtifactReceipt:
         """Accept one capability's raw bytes through the malware-scanned intake path."""
+        response.headers["Cache-Control"] = "no-store"
         ticket = await self.uploads.claim(capability)
         annotate_caller(ticket.user)
         content = await gather(request.stream(), ticket.declared.size)

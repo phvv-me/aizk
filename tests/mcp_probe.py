@@ -26,7 +26,6 @@ from aizk.usage import UsageAccountingJob, UsageCapture, UsageProcessor
 USER_TOOLS = {
     "recall",
     "remember",
-    "request_upload",
     "share",
     "status",
 }
