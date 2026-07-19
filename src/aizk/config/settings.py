@@ -274,7 +274,7 @@ class Settings(BaseSettings):
     object_store_compression_min_savings: float = Field(0.05, ge=0.0, lt=1.0)
     object_store_internal_download_lifetime_seconds: PositiveInt = 300
     object_store_secret_key: SecretStr = SecretStr("")
-    object_store_upload_byte_limit: PositiveInt = 134_217_728
+    object_store_upload_byte_limit: PositiveInt = 100_663_296
     ontology_match_threshold: float = 0.85
     ontology_prompt_template: str = (
         "\nUse only this controlled graph vocabulary.\n\n"
