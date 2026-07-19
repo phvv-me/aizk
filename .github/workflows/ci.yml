@@ -18,7 +18,8 @@ jobs:
       - run: uv run --no-sync ruff format --check .
       # layered import contracts from pyproject [tool.importlinter], defined in docs/architecture.md
       - run: uv run --no-sync lint-imports
-      - run: uv run --no-sync pyrefly check
+        # override the pyproject monorepo interpreter pin with the CI uv venv, as ty does below
+      - run: uv run --no-sync pyrefly check --python-interpreter-path .venv/bin/python
       # second checker; known third-party gaps are per-file warnings in [tool.ty.overrides],
       # any new error still fails. --python overrides the local pixi path from pyproject.
       - run: uv run --no-sync ty check --python .venv --exit-zero-on-warning
