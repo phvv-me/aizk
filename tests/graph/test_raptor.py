@@ -85,7 +85,9 @@ async def seed_communities(owner: UUID5 | UUID7, axes: list[int]) -> None:
 
 
 def test_similarity_groups_preserves_one_vector(owner: UUID5 | UUID7) -> None:
-    builder = RaptorBuilder(scopes=frozenset({owner}), llm=FakeLLM().llm, embed=RecordingEmbedder())
+    builder = RaptorBuilder(
+        scopes=frozenset({owner}), llm=FakeLLM().llm, embed=RecordingEmbedder()
+    )
     assert dbutil.run(builder.similarity_groups([basis(0)])) == [[0]]
 
 

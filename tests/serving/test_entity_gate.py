@@ -67,9 +67,12 @@ def test_client_raises_on_an_error_status() -> None:
     )
     with pytest.raises(httpx.HTTPStatusError):
         run(
-            GateClient(client=client, throttle=asyncio.Semaphore(1), gate_threshold=settings.gliner_gate_threshold, gate_floor=settings.gliner_gate_floor).post(
-                "/classify", ClassifyRequest(text="where", tasks={}), ClassifyResponse
-            )
+            GateClient(
+                client=client,
+                throttle=asyncio.Semaphore(1),
+                gate_threshold=settings.gliner_gate_threshold,
+                gate_floor=settings.gliner_gate_floor,
+            ).post("/classify", ClassifyRequest(text="where", tasks={}), ClassifyResponse)
         )
 
 
@@ -225,7 +228,12 @@ def test_call_queues_behind_the_per_variant_throttle(monkeypatch: pytest.MonkeyP
 
     async def burst() -> None:
         request = ClassifyRequest(text="note", tasks={"present": ["Person"]})
-        gate = GateClient(client=client, throttle=request_throttle("http://gliner.test", 2), gate_threshold=settings.gliner_gate_threshold, gate_floor=settings.gliner_gate_floor)
+        gate = GateClient(
+            client=client,
+            throttle=request_throttle("http://gliner.test", 2),
+            gate_threshold=settings.gliner_gate_threshold,
+            gate_floor=settings.gliner_gate_floor,
+        )
         async with asyncio.TaskGroup() as group:
             for _ in range(10):
                 group.create_task(gate.post("/classify", request, ClassifyResponse))

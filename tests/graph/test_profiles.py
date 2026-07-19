@@ -56,8 +56,12 @@ def test_build_profile_upserts_one_row_and_is_idempotent(
 ) -> None:
     async def probe() -> tuple[UUID5 | UUID7, UUID5 | UUID7, str | None]:
         subject = await seed_entity_with_facts(owner, "Leech lattice")
-        first = await build_profile(subject, fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
-        second = await build_profile(subject, fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+        first = await build_profile(
+            subject, fake_llm.llm, fake_embedder, scopes=frozenset({owner})
+        )
+        second = await build_profile(
+            subject, fake_llm.llm, fake_embedder, scopes=frozenset({owner})
+        )
         return first, second, await stored_summary(owner, subject)
 
     first, second, summary = dbutil.run(probe())
@@ -71,7 +75,11 @@ def test_refresh_profiles_rebuilds_the_visible_related_graph_in_one_batch(
 ) -> None:
     async def probe() -> tuple[int, str | None, str | None]:
         if not entity_count:
-            return await refresh_profiles(fake_llm.llm, fake_embedder, scopes=frozenset({owner})), None, None
+            return (
+                await refresh_profiles(fake_llm.llm, fake_embedder, scopes=frozenset({owner})),
+                None,
+                None,
+            )
         alpha = await seed_entity_with_facts(owner, "alpha")
         beta = await seed_entity_with_facts(owner, "beta")
         async with dbutil.actor(owner) as session:
