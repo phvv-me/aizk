@@ -21,6 +21,9 @@ classifiers = [
 ]
 dependencies = [
   "sqlalchemy[asyncio]>=2.1.0b3,<3",
+  # sqlalchemy's asyncio extra needs greenlet at runtime; pixi's PyPI resolver drops it as a
+  # marker-only transitive, so name it directly (pip already pulls it in via the extra).
+  "greenlet>=3,<4",
   "sqlmodel>=0.0.39,<0.1",
   "asyncpg>=0.31,<0.32",
   "alembic>=1.18.5,<2",
@@ -60,7 +63,15 @@ aizk = "aizk.cli:app"
 aizk-eval = "eval.launcher:main"
 
 [project.optional-dependencies]
+docs = ["mkdocs-material>=9.5", "mkdocs-static-i18n>=1.2"]
+
+# Dev-only Python deps (PEP 735). chefe reads this group into the pixi dev env, and the built
+# wheel never carries it. The checkers are pinned exactly so a fresh CI solve reproduces the
+# monorepo's green gate: ty and pyrefly move fast, and an unpinned bump reintroduces stricter
+# diagnostics (ty 0.0.61 flags 11 `AsyncSession.exec` overloads that 0.0.59 does not).
+[dependency-groups]
 dev = [
+  # eval + benchmark stack (src/eval and the benchmark tests import these)
   "fire>=0.7.1,<0.8",
   "pydantic-evals>=2.8,<3",
   "ir-measures>=0.4.3,<0.5",
@@ -68,21 +79,37 @@ dev = [
   "autorank>=1.3.0,<2",
   "statsmodels>=0.14.6,<0.15",
   "pytest-regressions>=2.11.0,<3",
+  # numeric and image libs the eval + serving tests import (scipy rides in via statsmodels)
   "numpy>=2.4.6,<3",
+  "pandas>=3.0.3,<4",
+  "pillow>=12,<13",
+  # third-party type stubs: the crux of the old uv divergence (pyrefly could not type these)
+  "asyncpg-stubs>=0.31.2,<0.32",
+  "types-dateparser>=1.4.1.20260617,<2",
+  "types-networkx>=3.6.1.20260624,<4",
+  # checkers and linters, pinned to the versions the monorepo gate runs green on
   "ruff>=0.6",
+  "pyrefly==1.1.1",
+  "ty==0.0.59",
+  "mypy>=1.19.1,<2",
   "import-linter>=2.3,<3",
-  "pyrefly>=1",
-  "ty>=0.0.59,<0.1",
-  "mypy>=1.11",
-  "pytest>=8",
-  "pytest-cov>=5",
-  "hypothesis>=6.100",
-  "polyfactory>=2.22,<3",
+  # test runner and plugins
+  "pytest>=9.1.0,<10",
+  "pytest-cov>=7.1.0,<8",
+  "pytest-randomly>=4.1.0,<5",
+  "pytest-xdist>=3.8.0,<4",
+  "pytest-mock>=3.15.1,<4",
+  "pytest-subprocess>=1.6.0,<2",
+  "pytest-benchmark>=5.2.3,<6",
+  "pytest-clarity>=1.0.1,<2",
+  "pytest-rerunfailures>=16.3,<17",
+  "pytest-timeout>=2.4.0,<3",
+  "hypothesis>=6.155.3,<7",
+  "polyfactory>=2.22.4,<3",
+  "faker>=40.23.0,<41",
+  "syrupy>=5.3.2,<6",
+  "dirty-equals>=0.11,<0.12",
 ]
-docs = ["mkdocs-material>=9.5", "mkdocs-static-i18n>=1.2"]
-
-[tool.uv]
-override-dependencies = ["sqlalchemy[asyncio]>=2.1.0b3,<3"]
 
 [project.urls]
 Homepage = "https://phvv.me/aizk"
@@ -92,6 +119,13 @@ Issues = "https://github.com/phvv-me/aizk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aizk", "src/eval"]
+
+# uv's own override table, read by the uv-based docs workflow (`uv sync --extra docs`). It forces
+# the sqlalchemy 2.1 pre-release across transitive resolution, the same job [tool.chefe.python.
+# dependency-overrides] does for the chefe/pixi dev env. Each is its tool's native config; neither
+# restates the constraint, which lives in [project.dependencies].
+[tool.uv]
+override-dependencies = ["sqlalchemy[asyncio]>=2.1.0b3,<3"]
 
 [tool.ruff]
 line-length = 99
@@ -217,3 +251,29 @@ exclude_lines = [
   "if __name__ == .__main__.:",
   "\\.\\.\\.",
 ]
+
+# chefe reads this table as the dev-env manifest (compiled to pixi). Runtime deps come from
+# [project.dependencies], dev tools from [dependency-groups].dev; this table adds only the conda
+# interpreter, the git routing for the house packages (PyPI lags their source at the same version
+# number), the sqlalchemy pre-release solver hint, and the CI tasks. The pyrefly/ty interpreter is
+# pointed at the compiled pixi env at task time, so it works standalone in CI and never depends on
+# the monorepo path baked into [tool.pyrefly]/[tool.ty] (which still serves the monorepo gates).
+[tool.chefe.workspace]
+platforms = ["linux-64"]
+
+[tool.chefe.conda]
+python = ">=3.14.6,<3.15"
+
+[tool.chefe.python.dependency-overrides]
+sqlalchemy = ">=2.1.0b3"
+
+[tool.chefe.sources]
+patos = { provider = "git", git = "https://github.com/phvv-me/patos", branch = "main" }
+rlsalchemy = { provider = "git", git = "https://github.com/phvv-me/rls", branch = "main" }
+mainboard = { provider = "git", git = "https://github.com/phvv-me/mainboard", branch = "main" }
+
+[tool.chefe.tasks]
+lint = { run = "ruff check . && ruff format --check ." }
+lint-imports = "lint-imports"
+typecheck = { run = "pyrefly check --python-interpreter-path \"$CONDA_PREFIX/bin/python\" && ty check --python \"$CONDA_PREFIX\" --exit-zero-on-warning" }
+test = { run = "python -m pytest -n 4 --dist loadscope --benchmark-disable --cov-fail-under=0 && COVERAGE_CORE=pytrace python -m pytest 'tests/graph/test_build.py::test_write_graph_slice_retries_a_transient_db_conflict' -o addopts='--import-mode=importlib' --cov=aizk --cov-append --cov-report=term-missing" }

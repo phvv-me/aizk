@@ -1,5 +1,12 @@
 name: CI
 
+# One manifest, one environment. CI provisions the same chefe/pixi dev env the monorepo uses,
+# compiled from the `[tool.chefe]` table in pyproject.toml (plus `[project.dependencies]` and
+# `[dependency-groups]`), so a fresh solve reproduces the local gate instead of drifting. A
+# separate `uv sync` used to diverge here: a stale `uv.lock` and three missing type stubs left
+# 187 pyrefly errors that `chefe run typecheck` never saw. chefe closes that gap by building the
+# identical environment, pinning the fast-moving checkers, and routing the house packages to
+# their git source (PyPI lags their source at the same version number).
 on:
   pull_request:
   workflow_call: # publish.yml runs this exact gate on main before publishing
@@ -12,23 +19,30 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.14"
-          enable-cache: true
-      - run: uv sync --extra dev
-      - run: uv run --no-sync ruff check .
-      - run: uv run --no-sync ruff format --check .
-      # layered import contracts from pyproject [tool.importlinter], defined in docs/architecture.md
-      - run: uv run --no-sync lint-imports
-        # override the pyproject monorepo interpreter pin with the CI uv venv, as ty does below
-      - run: uv run --no-sync pyrefly check --python-interpreter-path .venv/bin/python
-      # second checker; known third-party gaps are per-file warnings in [tool.ty.overrides],
-      # any new error still fails. --python overrides the local pixi path from pyproject.
-      - run: uv run --no-sync ty check --python .venv --exit-zero-on-warning
+      # chefe owns dependencies, environments, and tasks. It installs pixi (the solver it compiles
+      # to) on first use, so `uv tool install` is the whole bootstrap; nothing else is set up here.
+      - name: install chefe
+        run: |
+          uv tool install "chefe>=0.0.25"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: cache the pixi binary and solved packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pixi
+            ~/.cache/rattler
+            .chefe/.pixi
+          key: chefe-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+      - run: chefe install
+      - run: chefe run lint
+      - run: chefe run lint-imports
+      - run: chefe run typecheck
 
   # The suite is hermetic above the database seam (every model endpoint is faked), but the
-  # database itself is real: the same VectorChord image the compose file ships, on the same
-  # host port, with the same restricted app role initdb/roles.sh creates, so forced row level
-  # security is exercised exactly as in production. macOS carries no service containers, so
-  # tests are a Linux job; cross-platform parity is a v1 roadmap item.
+  # database itself is real: the same VectorChord image the compose file ships, on the same host
+  # port, with the same restricted app role initdb/roles.sh creates, so forced row level security
+  # is exercised exactly as in production. macOS carries no service containers, so tests are a
+  # Linux job; cross-platform parity is a v1 roadmap item.
   test:
     runs-on: ubuntu-latest
     services:
@@ -50,9 +64,20 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.14"
-          enable-cache: true
-      # the role bootstrap initdb/roles.sh performs against a compose volume; a service
-      # container cannot mount repo files, so the same statements run here over the wire
+      - name: install chefe
+        run: |
+          uv tool install "chefe>=0.0.25"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: cache the pixi binary and solved packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pixi
+            ~/.cache/rattler
+            .chefe/.pixi
+          key: chefe-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+      # the role bootstrap initdb/roles.sh performs against a compose volume; a service container
+      # cannot mount repo files, so the same statements run here over the wire
       - name: bootstrap app role
         run: |
           PGPASSWORD=aizk psql -h localhost -p 5433 -U aizk_admin -d aizk -v ON_ERROR_STOP=1 <<'SQL'
@@ -63,12 +88,8 @@ jobs:
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT USAGE, SELECT ON SEQUENCES TO aizk_app;
           SQL
-      - run: uv sync --extra dev
-      # Two-pass coverage union: the default sysmon core cannot emit one async-with enter
-      # arc (graph/build.py retry loop), so that single test re-runs under the pytrace
-      # core and appends before the 100% gate is enforced on the union.
-      - run: uv run --no-sync pytest -q --cov-fail-under=0
-      - run: >
-          COVERAGE_CORE=pytrace uv run --no-sync pytest -q
-          'tests/graph/test_build.py::test_write_graph_slice_retries_a_transient_db_conflict'
-          -o addopts='--import-mode=importlib' --cov=aizk --cov-append --cov-report=term-missing
+      - run: chefe install
+      # `chefe run test` runs the two-pass coverage union: the default sysmon core cannot emit one
+      # async-with enter arc (graph/build.py retry loop), so that single test re-runs under the
+      # pytrace core and appends before the 100% gate is enforced on the union.
+      - run: chefe run test
