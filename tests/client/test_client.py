@@ -12,6 +12,7 @@ from fastmcp.client.client import CallToolResult
 from id_factory import uuid7
 from key_value.aio.stores.keyring import KeyringStore
 from key_value.aio.stores.memory import MemoryStore
+from mcp.shared.auth import OAuthToken
 from pydantic import JsonValue
 
 import aizk.client.client as client_module
@@ -215,6 +216,30 @@ def test_noninteractive_authentication_status_never_starts_login(
 
     assert result.authenticated is False
     assert result.status is None
+
+
+def test_noninteractive_oauth_fails_before_opening_a_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = MemoryClient(profile("oauth"), token_storage=MemoryStore())
+    connection = pytest.fail
+    monkeypatch.setattr(client, "connection", connection)
+
+    result = dbutil.run(client.authentication_status())
+
+    assert result.authenticated is False
+    assert result.status is None
+
+
+def test_noninteractive_oauth_accepts_stored_credentials() -> None:
+    client = MemoryClient(profile("oauth"), token_storage=MemoryStore())
+
+    async def exercise() -> None:
+        adapter = client.oauth(interactive=False).token_storage_adapter
+        await adapter.set_tokens(OAuthToken(access_token="secret"))
+        await client.require_credentials()
+
+    dbutil.run(exercise())
 
 
 def test_login_and_authenticated_status_return_the_typed_report(
@@ -534,7 +559,7 @@ def test_status_parses_the_expanded_typed_report(
     remote = ToolClient(expected.model_dump(mode="json"))
     monkeypatch.setattr(MemoryClient, "connection", lambda self, interactive=False: remote)
 
-    result = dbutil.run(MemoryClient(profile()).status(days=14))
+    result = dbutil.run(MemoryClient(profile()).status(days=14, interactive=True))
 
     assert result == expected
     assert remote.calls == [("status", {"days": 14})]

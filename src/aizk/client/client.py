@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
+from warnings import catch_warnings, filterwarnings
 
 import anyio
 import httpx
@@ -58,7 +59,13 @@ class MemoryClient:
         if token_storage is not None:
             self.token_storage = token_storage
         elif profile.auth == "oauth":
-            self.token_storage = KeyringStore(service_name="aizk.oauth")
+            with catch_warnings():
+                filterwarnings(
+                    "ignore",
+                    message="A configured store is unstable and may change.*",
+                    category=UserWarning,
+                )
+                self.token_storage = KeyringStore(service_name="aizk.oauth")
         else:
             self.token_storage = None
         self.upload_http = upload_http
@@ -106,8 +113,17 @@ class MemoryClient:
         if self.profile.auth == "oauth":
             await self.oauth(interactive=False).token_storage_adapter.clear()
 
+    async def require_credentials(self) -> None:
+        """Fail cleanly before FastMCP attempts an interactive OAuth flow."""
+        if self.profile.auth == "oauth":
+            tokens = await self.oauth(interactive=False).token_storage_adapter.get_tokens()
+            if tokens is None:
+                raise LoginRequiredError("run `aizk auth login` first")
+
     async def status(self, days: int = 30, *, interactive: bool = False) -> StatusReport:
         """Return caller identity, durable usage, and processing health."""
+        if not interactive:
+            await self.require_credentials()
         async with self.connection(interactive) as client:
             result = await client.call_tool("status", {"days": days})
         return TypeAdapter(StatusReport).validate_python(result.data)
@@ -117,6 +133,7 @@ class MemoryClient:
         arguments: dict[str, str | int] = {"query": query}
         if budget is not None:
             arguments["budget"] = budget
+        await self.require_credentials()
         async with self.connection() as client:
             result = await client.call_tool("recall", arguments)
         return TypeAdapter(str).validate_python(result.data)
@@ -124,6 +141,7 @@ class MemoryClient:
     async def remember(self, request: RememberRequest) -> RememberResult:
         """Remember text, a URI, or one local file through the two-step upload flow."""
         declaration = request.upload.declaration() if request.upload is not None else None
+        await self.require_credentials()
         async with self.connection() as client:
             result = await client.call_tool(
                 "remember",
@@ -140,6 +158,7 @@ class MemoryClient:
 
     async def share(self, request: ShareRequest) -> ShareResult:
         """Copy visible documents into one authorized destination."""
+        await self.require_credentials()
         async with self.connection() as client:
             result = await client.call_tool("share", request.tool_arguments())
         return TypeAdapter(ShareResult).validate_python(result.data)
