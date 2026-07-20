@@ -56,6 +56,8 @@ def test_session_scope_rejects_invalid_lifecycle(migrated_db: None) -> None:
 
     with pytest.raises(RuntimeError, match="not open"):
         dbutil.run(scope.__aexit__(None, None, None))
+    with pytest.raises(RuntimeError, match="not open"):
+        dbutil.run(User.system().__aexit__(None, None, None))
 
     async def enter_twice() -> None:
         scope = User.system().app

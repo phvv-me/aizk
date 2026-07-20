@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 
 import dbutil
@@ -258,5 +259,31 @@ def test_anonymous_session_reads_no_personal_row() -> None:
         assert not await dbutil.can_read_document(settings.anonymous_user_id, personal)
         async with User.private(settings.anonymous_user_id) as database:
             assert database.user.id == settings.anonymous_user_id
+
+    dbutil.run(body())
+
+
+def test_one_user_can_own_overlapping_task_transactions() -> None:
+    async def body() -> None:
+        user = User.private(uuid5())
+        first_open = asyncio.Event()
+        second_open = asyncio.Event()
+        first_closed = asyncio.Event()
+
+        async def first() -> None:
+            async with user as session:
+                first_open.set()
+                await second_open.wait()
+                await session.exec(select(Entity.Kind).limit(1))
+            first_closed.set()
+
+        async def second() -> None:
+            await first_open.wait()
+            async with user as session:
+                second_open.set()
+                await first_closed.wait()
+                await session.exec(select(Entity.Kind).limit(1))
+
+        await asyncio.gather(first(), second())
 
     dbutil.run(body())

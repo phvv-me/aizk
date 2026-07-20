@@ -1,4 +1,5 @@
 from collections.abc import Iterable, Sequence
+from contextvars import ContextVar
 from functools import cache, cached_property
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -24,7 +25,31 @@ from .. import engine
 from .organization import OrganizationStanding
 
 if TYPE_CHECKING:
-    from ..engine import Session
+    from ..engine import Session, SessionScope
+
+
+class _TransactionScopes:
+    """Keep nested transaction scopes isolated within each asynchronous task."""
+
+    __slots__ = ("current",)
+
+    def __init__(self) -> None:
+        self.current = ContextVar[tuple["SessionScope", ...]]("aizk_user_transactions", default=())
+
+    def push(self, transaction: engine.SessionScope) -> None:
+        """Add one scope to the current task's nesting stack."""
+        self.current.set((*self.current.get(), transaction))
+
+    def pop(self) -> engine.SessionScope:
+        """Remove and return the current task's innermost scope."""
+        transactions = self.current.get()
+        if not transactions:
+            raise RuntimeError("user transaction scope is not open")
+        self.current.set(transactions[:-1])
+        return transactions[-1]
+
+
+_TRANSACTION_SCOPES = _TransactionScopes()
 
 
 class ScopeTable(FrozenModel):
@@ -54,7 +79,7 @@ class User(rls.Context, prefix="app"):
     cannot leak one caller's standing into the next request.
     """
 
-    _transactions: list[engine.SessionScope] = PrivateAttr(default_factory=list)
+    _transactions: _TransactionScopes = PrivateAttr(default_factory=lambda: _TRANSACTION_SCOPES)
 
     id: UUID5 = Field(exclude=True)
     name: str | None = Field(default=None, exclude=True)
@@ -113,7 +138,7 @@ class User(rls.Context, prefix="app"):
         """Open one short app-role transaction acting as this caller."""
         transaction = self.app
         opened = await transaction.__aenter__()
-        self._transactions.append(transaction)
+        self._transactions.push(transaction)
         return opened
 
     async def __aexit__(
