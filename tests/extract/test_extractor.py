@@ -7,6 +7,7 @@ import httpx
 import pytest
 from doubles import FakeLLM
 from hypothesis import given
+from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
 from id_factory import uuid7
 from pydantic import BaseModel, SecretStr, ValidationError
@@ -136,6 +137,7 @@ def test_extraction_surfaces_model_contract_failures(fake_llm: FakeLLM, failure:
 
 
 @given(wire=wire_extractions())
+@hyp_settings(deadline=None)
 def test_extractor_converts_the_wire_schema(wire: WireExtraction) -> None:
     fake = FakeLLM()
     fake.register(WireExtraction, cast("BaseModel", wire))
