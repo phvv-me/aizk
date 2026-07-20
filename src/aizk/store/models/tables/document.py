@@ -103,9 +103,25 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
 
     @classmethod
     def named_in_query(cls) -> ColumnElement[bool]:
-        """Whether the query contains the source's complete title."""
-        query = func.lower(bindparam("qtext", type_=Text))
-        return func.strpos(query, cls.title.lower()) > 0
+        """Whether the query contains the source's complete normalized title."""
+        pattern = "[^[:alnum:]]+"
+        query = func.btrim(
+            func.regexp_replace(
+                func.lower(bindparam("qtext", type_=Text)),
+                pattern,
+                " ",
+                "g",
+            )
+        )
+        title = func.btrim(func.regexp_replace(cls.title.lower(), pattern, " ", "g"))
+        return and_(
+            func.length(title) >= 3,
+            func.strpos(
+                func.concat(" ", query, " "),
+                func.concat(" ", title, " "),
+            )
+            > 0,
+        )
 
     @classmethod
     def identifies(

@@ -565,6 +565,66 @@ def test_processor_keeps_metadata_recallable_and_marks_conversion_failures(
     assert repository.states[-1][2] is Artifact.Content.State.failed
 
 
+def test_processor_persists_invalid_imported_metadata_as_a_failed_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = original()
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+
+    async def reject_declaration(
+        ingestor: TextIngestor, submitted: TextSource
+    ) -> tuple[UUID7, bool]:
+        del ingestor, submitted
+        raise ValueError("unknown ontology entity type 'classification'")
+
+    monkeypatch.setattr("aizk.artifacts.service.TextIngestor.ingest", reject_declaration)
+    processor = ArtifactProcessor(
+        cast(DoclingClient, Converter(docling_response())),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+    )
+
+    with pytest.raises(ValueError, match="unknown ontology entity type"):
+        asyncio.run(processor.process(source.content_id, source.scopes))
+
+    assert repository.states[-1][2:] == (
+        Artifact.Content.State.failed,
+        "unknown ontology entity type 'classification'",
+    )
+
+
+def test_processor_persists_conversion_database_errors_as_a_failed_state() -> None:
+    source = original()
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+
+    async def reject_json(
+        user: User,
+        original: OriginalArtifact,
+        markdown: str,
+        docling_json: dict[str, JsonValue],
+        details: dict[str, JsonValue],
+    ) -> None:
+        del user, original, markdown, docling_json, details
+        raise SQLAlchemyError("unsupported Unicode escape sequence")
+
+    repository.store_conversion = reject_json
+    processor = ArtifactProcessor(
+        cast(DoclingClient, Converter(docling_response())),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+    )
+
+    with pytest.raises(SQLAlchemyError, match="unsupported Unicode escape"):
+        asyncio.run(processor.process(source.content_id, source.scopes))
+
+    assert repository.states[-1][2:] == (
+        Artifact.Content.State.failed,
+        "unsupported Unicode escape sequence",
+    )
+
+
 def test_docling_rejection_keeps_a_metadata_document_without_retrying(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

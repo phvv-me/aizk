@@ -2,7 +2,7 @@ from functools import cached_property
 from typing import Protocol, runtime_checkable
 
 from patos import FrozenFlexModel
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModelSettings
@@ -21,6 +21,7 @@ class LLM(FrozenFlexModel):
     timeout: float = 300.0
     response_max_tokens: int = 512
     chat_template_kwargs: dict[str, bool] = {}
+    extra_body: dict[str, JsonValue] = {}
 
     @cached_property
     def agent(self) -> Agent[None, str]:
@@ -32,12 +33,22 @@ class LLM(FrozenFlexModel):
         """Build the service from explicit extraction settings."""
         return cls(
             model=llm_model(
-                config.llm_url, config.llm_api_key, config.llm_model, config.llm_timeout
+                config.llm_url,
+                config.llm_api_key,
+                config.llm_model,
+                config.llm_timeout,
+                tuple(
+                    sorted(
+                        (name, value.get_secret_value())
+                        for name, value in config.llm_headers.items()
+                    )
+                ),
             ),
             temperature=config.llm_temperature,
             timeout=config.llm_timeout,
             response_max_tokens=config.llm_response_max_tokens,
             chat_template_kwargs=config.llm_chat_template_kwargs,
+            extra_body=config.llm_extra_body,
         )
 
     async def generate[ResponseT: BaseModel](
@@ -56,8 +67,15 @@ class LLM(FrozenFlexModel):
             timeout=self.timeout if timeout is None else timeout,
             max_tokens=self.response_max_tokens if max_tokens is None else max_tokens,
         )
+        extra_body = dict(self.extra_body)
         if self.chat_template_kwargs:
-            model_settings["extra_body"] = {"chat_template_kwargs": self.chat_template_kwargs}
+            configured_template = extra_body.get("chat_template_kwargs")
+            extra_body["chat_template_kwargs"] = {
+                **(configured_template if isinstance(configured_template, dict) else {}),
+                **self.chat_template_kwargs,
+            }
+        if extra_body:
+            model_settings["extra_body"] = extra_body
         return (
             await self.agent.run(
                 user,

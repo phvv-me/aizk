@@ -96,8 +96,8 @@ role, organization roles, and organization permissions. Admin receives `write:me
 write or management permission. AIZK has no invitation workflow. The retired `invite:member`
 permission is revoked from managed roles and removed by policy reconciliation.
 
-Every field is an `AIZK_` setting that `.env` can override. `aizk logto audit` reports drift and
-exits nonzero when repair is needed. `aizk logto apply` reconciles the policy through the Logto
+Every field is an `AIZK_` setting that `.env` can override. `aizk admin auth audit` reports drift and
+exits nonzero when repair is needed. `aizk admin auth apply` reconciles the policy through the Logto
 Management API. It deletes obsolete global user roles under the configured managed prefix and
 explicitly retired AIZK organization permissions while preserving unrelated roles and permissions.
 

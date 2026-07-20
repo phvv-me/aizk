@@ -1,3 +1,5 @@
+from typing import Literal
+
 from patos import FrozenModel
 
 
@@ -7,6 +9,10 @@ class RerankRequest(FrozenModel):
     model: str
     query: str
     documents: list[str]
+    max_tokens_per_query: int
+    max_tokens_per_doc: int
+    truncate_prompt_tokens: int = -1
+    truncation_side: Literal["left", "right"] = "left"
 
 
 class RerankResult(FrozenModel):

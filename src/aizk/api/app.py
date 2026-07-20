@@ -12,7 +12,7 @@ from pydantic.types import JsonValue
 from starlette.exceptions import HTTPException
 from starlette.middleware import Middleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from ..artifacts.models import ArtifactReceipt
 from ..artifacts.service import ArtifactIntake
@@ -26,14 +26,16 @@ from ..config import settings
 from ..exceptions import ScopeNotFoundError
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from ..integrations.logto import OrganizationChange, OrganizationManager
-from ..memory import Memory, WriteResult
+from ..memory import Memory
+from ..status import StatusReport
 from ..storage import ByteLimitExceeded
 from ..store.identity import User
-from ..types import ScopeNames
 from ..usage import annotate_caller
 from .artifacts import ArtifactDashboard, ArtifactView
 from .dashboard import Dashboard, KnowledgeTotals, RecentSource, UsageTotals
+from .explorer import FindingPage, GraphSlice, SourcePage, SubjectPage, ThemePage
 from .middleware import UsageMiddleware
+from .operations import ProcessingReport, ProcessingUpdates, UsageReport
 from .organizations import OrganizationDirectory
 
 
@@ -60,29 +62,6 @@ class RecallRequest(FrozenModel):
     def effective_budget(self) -> int:
         """The declared budget, or the configured default evidence cap."""
         return self.budget or settings.context_token_budget
-
-
-class RememberRequest(FrozenModel):
-    """One browser memory write, text now or a preserved source URI."""
-
-    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] | None = None
-    source_uri: str | None = None
-    scopes: ScopeNames | None = None
-    preserve_source: bool = False
-
-    @model_validator(mode="after")
-    def within_deployment_bounds(self) -> Self:
-        """Enforce the live deployment limits at validation time instead of import time."""
-        if self.text is not None and len(self.text) > settings.mcp_remember_max_chars:
-            raise ValueError(f"text must be at most {settings.mcp_remember_max_chars} characters")
-        source = self.source_uri or ""
-        if len(source) > settings.mcp_source_uri_max_chars:
-            raise ValueError(
-                f"source_uri must be at most {settings.mcp_source_uri_max_chars} characters"
-            )
-        if self.scopes is not None and len(self.scopes) > settings.mcp_scope_names_max:
-            raise ValueError(f"scopes must name at most {settings.mcp_scope_names_max} entries")
-        return self
 
 
 class OrganizationRequest(FrozenModel):
@@ -207,6 +186,13 @@ _RAW_BODY: JsonSchemaValue = {
     }
 }
 
+_EVENT_STREAM: dict[int | str, dict[str, JsonValue]] = {
+    HTTPStatus.OK: {
+        "description": "Caller-visible processing snapshots",
+        "content": {"text/event-stream": {"schema": {"type": "string"}}},
+    }
+}
+
 
 class AizkAPI:
     """Serve the browser JSON surface with the same Logto verification as MCP.
@@ -248,21 +234,30 @@ class AizkAPI:
             middleware=[Middleware(UsageMiddleware)],
         )
         api.state.service = self
+        api.add_api_route("/healthz", self.health, operation_id="health")
         api.add_api_route("/api/me", self.me, operation_id="me")
+        api.add_api_route("/api/status", self.status, operation_id="status")
         api.add_api_route("/api/overview", self.overview, operation_id="overview")
+        api.add_api_route("/api/usage", self.usage, operation_id="usage")
+        api.add_api_route("/api/processing", self.processing, operation_id="processing")
+        api.add_api_route(
+            "/api/processing/events",
+            self.processing_events,
+            operation_id="processing_events",
+            response_class=StreamingResponse,
+            responses=_EVENT_STREAM,
+        )
+        api.add_api_route("/api/sources", self.sources, operation_id="sources")
+        api.add_api_route("/api/findings", self.findings, operation_id="findings")
+        api.add_api_route("/api/subjects", self.subjects, operation_id="subjects")
+        api.add_api_route("/api/themes", self.themes, operation_id="themes")
+        api.add_api_route("/api/graph", self.graph, operation_id="graph")
         api.add_api_route(
             "/api/recall",
             self.recall,
             methods=["POST"],
             operation_id="recall",
             openapi_extra=json_body(RecallRequest),
-        )
-        api.add_api_route(
-            "/api/remember",
-            self.remember,
-            methods=["POST"],
-            operation_id="remember",
-            openapi_extra=json_body(RememberRequest),
         )
         api.add_api_route(
             "/api/uploads/{capability}",
@@ -300,6 +295,11 @@ class AizkAPI:
             operation_id="remove_member",
         )
         return api
+
+    @staticmethod
+    async def health() -> Response:
+        """Confirm that the API process can accept HTTP requests."""
+        return Response(status_code=HTTPStatus.NO_CONTENT)
 
     def manager(self, who: Caller) -> OrganizationManager:
         """Return the narrow Logto mutation surface acting as this verified caller."""
@@ -368,27 +368,82 @@ class AizkAPI:
         """Return the caller's label and current organization standing from Logto."""
         return Me.from_user(who.user)
 
+    async def status(self, who: Verified, days: int = 30) -> StatusReport:
+        """Return caller authority, durable usage, and processing health."""
+        if not 1 <= days <= 365:
+            raise ValueError("days must be between 1 and 365")
+        return await StatusReport.load(who.user, days)
+
     async def overview(self, who: Verified) -> Overview:
         """Return knowledge totals, usage, recent sources, and artifact processing states."""
         dashboard = await Dashboard.load(who.user)
         artifacts = await ArtifactDashboard.load(who.user)
         return Overview(**dashboard.model_dump(), **artifacts.model_dump())
 
+    async def usage(self, who: Verified, days: int = 30) -> UsageReport:
+        """Return durable caller-owned operation history for one bounded date range."""
+        if not 1 <= days <= 365:
+            raise ValueError("days must be between 1 and 365")
+        return await UsageReport.load(who.user, days)
+
+    async def processing(self, who: Verified) -> ProcessingReport:
+        """Return caller-visible processing backlog, throughput, and queue health."""
+        return await ProcessingReport.load(who.user)
+
+    async def processing_events(self, request: Request, who: Verified) -> StreamingResponse:
+        """Stream caller-visible processing snapshots without buffering or token exposure."""
+        updates = ProcessingUpdates(who.user, request.is_disconnected)
+        return StreamingResponse(
+            updates.events(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @staticmethod
+    def page(limit: int, offset: int) -> tuple[int, int]:
+        """Validate one bounded catalog page request."""
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        if offset < 0:
+            raise ValueError("offset must be nonnegative")
+        return limit, offset
+
+    async def sources(
+        self, who: Verified, search: str = "", limit: int = 50, offset: int = 0
+    ) -> SourcePage:
+        """Return one read-only page of visible source documents."""
+        return await SourcePage.load(who.user, search.strip(), *self.page(limit, offset))
+
+    async def findings(
+        self, who: Verified, search: str = "", limit: int = 50, offset: int = 0
+    ) -> FindingPage:
+        """Return one chronological page of visible current findings."""
+        return await FindingPage.load(who.user, search.strip(), *self.page(limit, offset))
+
+    async def subjects(
+        self, who: Verified, search: str = "", limit: int = 50, offset: int = 0
+    ) -> SubjectPage:
+        """Return one page of visible subject claims and graph degrees."""
+        return await SubjectPage.load(who.user, search.strip(), *self.page(limit, offset))
+
+    async def themes(self, who: Verified) -> ThemePage:
+        """Return every visible graph theme and its bounded member preview."""
+        return await ThemePage.load(who.user)
+
+    async def graph(self, who: Verified, limit: int = 40) -> GraphSlice:
+        """Return one bounded latest-finding relationship graph."""
+        if not 1 <= limit <= 80:
+            raise ValueError("limit must be between 1 and 80")
+        return await GraphSlice.load(who.user, limit)
+
     async def recall(self, request: Request, who: Verified) -> Answer:
         """Answer one recall question with merit-ordered Markdown evidence."""
         ask = RecallRequest.model_validate_json(await self.payload(request))
         result = await self.memory(who).recall(ask.query, ask.effective_budget)
         return Answer(markdown=await result.to_markdown())
-
-    async def remember(self, request: Request, who: Verified) -> WriteResult | ArtifactReceipt:
-        """Store text now or preserve one URI original, returning its write receipt."""
-        ask = RememberRequest.model_validate_json(await self.payload(request))
-        return await self.memory(who).remember(
-            ask.text,
-            source_uri=ask.source_uri,
-            scopes=ask.scopes,
-            preserve_source=ask.preserve_source,
-        )
 
     async def receive_upload(
         self, capability: str, request: Request, response: Response

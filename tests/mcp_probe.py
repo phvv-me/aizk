@@ -20,7 +20,7 @@ from aizk.mcp.server import AizkMCP
 from aizk.runtime import Runtime
 from aizk.storage import ByteStore
 from aizk.store.identity import User
-from aizk.usage import UsageAccountingJob, UsageCapture, UsageProcessor
+from aizk.usage import UsageAccountingJob, UsageCapture, capture_usage
 
 # Complete MCP surface available to an authenticated caller
 USER_TOOLS = {
@@ -70,10 +70,9 @@ def context_for(user: User | None = None) -> Context:
     return context
 
 
-# Every probe transport span ends in this list as its derived usage capture.
+# Every probe transport call records its derived usage capture here.
 captured: list[UsageCapture] = []
 provider = TracerProvider()
-provider.add_span_processor(UsageProcessor(captured.append))
 tracer = provider.get_tracer("aizk-test-transport")
 
 
@@ -87,9 +86,22 @@ class StubAuth:
         return self.user
 
 
+async def capture_account(
+    request_bytes: int,
+    response_bytes: int,
+    started_at: float,
+    status_code: int | None,
+) -> None:
+    """Record one transport capture without touching the durable test queue."""
+    del started_at
+    capture = capture_usage(request_bytes, response_bytes, 0.0, status_code)
+    if capture is not None:
+        captured.append(capture)
+
+
 def transport_middleware(user: User) -> IdentityMiddleware:
     """The real identity middleware bound to one already verified caller."""
-    return IdentityMiddleware(cast("Auth", StubAuth(user)))
+    return IdentityMiddleware(cast("Auth", StubAuth(user)), capture_account)
 
 
 async def through_transport[ResultT](call: Callable[[], Awaitable[ResultT]]) -> ResultT:

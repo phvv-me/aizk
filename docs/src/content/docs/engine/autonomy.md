@@ -77,12 +77,12 @@ is not the maintenance partition.
 
 ## Operations
 
-`aizk db setup` migrates to head, installs the queue schema, and grants the application role.
+`aizk admin database setup` migrates to head, installs the queue schema, and grants the application role.
 Compose runs it in the one-shot `setup` service before either long-lived Aizk process starts. The
 public `server` has `AIZK_AUTO_SETUP=0` and no owner credential. The private `worker` owns queue
 execution, scheduled maintenance, and backups.
 
-`aizk db health` reports migration currency, row security drift, row counts, queue depth, model
+`aizk admin health` reports migration currency, row security drift, row counts, queue depth, model
 identity, per-scope projection progress, and one bounded recall. Operational commands are CLI-only
 and are not registered on the network MCP server. In Compose, run the command inside `worker`
 because only that private process carries owner maintenance authority.

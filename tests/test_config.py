@@ -73,6 +73,40 @@ def test_chunk_denylist_parses_to_an_immutable_language_set() -> None:
     assert isinstance(cfg.chunk_denylist_languages, frozenset)
 
 
+def test_llm_extra_body_parses_nested_json_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "AIZK_LLM_EXTRA_BODY",
+        '{"provider":{"zdr":true,"require_parameters":true},"reasoning":{"enabled":false}}',
+    )
+
+    config = Settings(_env_file=None)
+
+    assert config.llm_extra_body == {
+        "provider": {"zdr": True, "require_parameters": True},
+        "reasoning": {"enabled": False},
+    }
+
+
+def test_llm_headers_parse_as_redacted_secrets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "AIZK_LLM_HEADERS",
+        '{"Modal-Key":"wk-test","Modal-Secret":"ws-test"}',
+    )
+
+    config = Settings(_env_file=None)
+
+    assert config.llm_headers["Modal-Key"].get_secret_value() == "wk-test"
+    assert config.llm_headers["Modal-Secret"].get_secret_value() == "ws-test"
+    assert config.model_dump(mode="json")["llm_headers"] == {
+        "Modal-Key": "**********",
+        "Modal-Secret": "**********",
+    }
+
+
 def test_complete_logto_configuration_derives_the_resource() -> None:
     assert Settings().mcp_resource_id == ""
     cfg = Settings(

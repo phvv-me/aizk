@@ -17,6 +17,7 @@
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
     "dompurify": "^3.3.1",
+    "es-toolkit": "^1.49.0",
     "marked": "^16.4.2",
     "svelte-sonner": "^1.1.1",
     "tailwind-merge": "^3.6.0",

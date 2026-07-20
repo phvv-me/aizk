@@ -133,8 +133,12 @@ class RecordingQueue:
         return True
 
     async def requeue_failed[PayloadT: QueuePayload](
-        self, job: QueueJob[PayloadT], limit: int = 100
+        self,
+        job: QueueJob[PayloadT],
+        limit: int = 100,
+        max_cycles: int | None = None,
     ) -> int:
+        del max_cycles
         self.failed_requeues.append((job.entrypoint, limit))
         return 4
 

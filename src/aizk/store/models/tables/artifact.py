@@ -90,6 +90,34 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
     blob: Blob = Relationship()
 
     @classmethod
+    def processing_counts(
+        cls, one_hour_ago: datetime, six_hours_ago: datetime, day_ago: datetime
+    ) -> Select[tuple[int, int, int, int, int, int, datetime | None]]:
+        """Caller-visible conversion backlog and recent completions in one row."""
+        active = (cls.State.pending, cls.State.queued, cls.State.processing)
+        return cast(
+            "Select[tuple[int, int, int, int, int, int, datetime | None]]",
+            select(
+                cls.id.count()
+                .filter(cls.state.in_((cls.State.pending, cls.State.queued)))
+                .label("queued"),
+                cls.id.count().filter(cls.state == cls.State.processing).label("running"),
+                cls.id.count().filter(cls.state == cls.State.failed).label("failed"),
+                cls.id.count()
+                .filter(cls.state == cls.State.ready, cls.processed_at >= one_hour_ago)
+                .label("completed_1h"),
+            ).add_columns(
+                cls.id.count()
+                .filter(cls.state == cls.State.ready, cls.processed_at >= six_hours_ago)
+                .label("completed_6h"),
+                cls.id.count()
+                .filter(cls.state == cls.State.ready, cls.processed_at >= day_ago)
+                .label("completed_24h"),
+                cls.created_at.min().filter(cls.state.in_(active)).label("oldest_at"),
+            ),
+        )
+
+    @classmethod
     def original(
         cls, artifact_id: UUID7, artifact_content_id: UUID7
     ) -> Select[tuple[str, UUID8, int, Blob.Encoding, list[UUID5], str | None, str | None]]:
@@ -198,6 +226,7 @@ class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
         if pair is None:
             raise NotVisibleError("the document's original artifact is not visible")
         artifact, content = pair
+        target = sorted(set(target), key=str)
         dedup_key = artifact.source_uri if artifact.source_uri is not None else str(artifact.id)
         await session.exec(
             select(
@@ -224,9 +253,16 @@ class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
         ).first()
         if target_artifact is None:
             target_artifact = cls(
-                name=artifact.name,
-                description=artifact.description,
-                source_uri=artifact.source_uri,
+                **artifact.model_dump(
+                    exclude={
+                        "id",
+                        "created_at",
+                        "updated_at",
+                        "created_by",
+                        "scopes",
+                        "promoted_from",
+                    }
+                ),
                 promoted_from=artifact.id,
                 created_by=user_id,
                 scopes=target,
@@ -251,18 +287,19 @@ class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
             )
         ).one() + 1
         shared = ArtifactContent(
+            **content.model_dump(
+                exclude={
+                    "id",
+                    "artifact_id",
+                    "revision",
+                    "created_at",
+                    "updated_at",
+                    "created_by",
+                    "scopes",
+                }
+            ),
             artifact_id=target_artifact.id,
-            blob_id=content.blob_id,
             revision=revision,
-            state=content.state,
-            companion_text=content.companion_text,
-            markdown=content.markdown,
-            docling_json=content.docling_json,
-            details=dict(content.details),
-            observed_at=content.observed_at,
-            expires_at=content.expires_at,
-            error=content.error,
-            processed_at=content.processed_at,
             created_by=user_id,
             scopes=target,
         )

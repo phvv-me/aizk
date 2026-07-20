@@ -2,11 +2,11 @@ from datetime import UTC, datetime
 
 import dbutil
 import pytest
+from id_factory import uuid5, uuid7
 
 from aizk.background.jobs.projection import ChunkProjectionJob
 from aizk.background.status import tasks_overview
 
-# Required pgqueuer fields not read by the status query
 _STAMP = datetime(2020, 1, 1, tzinfo=UTC)
 
 
@@ -34,12 +34,13 @@ async def seed_log(status: str, created: datetime) -> None:
 
 
 @pytest.mark.parametrize("populated", [False, True], ids=["empty", "populated"])
-def test_tasks_overview_summarizes_empty_and_populated_queues(
+def test_tasks_overview_reads_bounded_queue_truth_and_pending_chunks(
     migrated_db: None, populated: bool
 ) -> None:
-    last = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+    successful = datetime(2025, 1, 1, tzinfo=UTC)
 
     async def body() -> None:
+        await dbutil.reset_db()
         await clear_queue()
         if not populated:
             return
@@ -49,13 +50,25 @@ def test_tasks_overview_summarizes_empty_and_populated_queues(
         await seed_job("picked", ChunkProjectionJob.entrypoint)
         await seed_job("failed", ChunkProjectionJob.entrypoint)
         await seed_job("failed", "aizk_task_decay")
-        await seed_log("exception", datetime(2026, 1, 1, tzinfo=UTC))
-        await seed_log("exception", last)
-        await seed_log("successful", datetime(2025, 1, 1, tzinfo=UTC))
+        await seed_log("successful", successful)
+        await seed_log("exception", datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC))
+        owner = uuid5()
+        document = await dbutil.seed_document(owner, [owner])
+        await dbutil.admin_exec(
+            "INSERT INTO chunk (id, document_id, created_by, scopes, ord, text) "
+            "VALUES (:id, :document, :owner, ARRAY[:owner]::uuid[], 0, 'pending')",
+            {"id": uuid7(), "document": document, "owner": owner},
+        )
 
     dbutil.run(body())
     status = dbutil.run(tasks_overview())
 
-    expected_counts = (3, 1, 2, 2) if populated else (0, 0, 0, 0)
-    assert (status.pending, status.running, status.failed, status.lag) == expected_counts
-    assert status.last_run == (last.isoformat() if populated else None)
+    expected_counts = (3, 1, 2, 1) if populated else (0, 0, 0, 0)
+    assert (
+        status.pending,
+        status.running,
+        status.failed,
+        status.projection_pending,
+    ) == expected_counts
+    assert status.last_success == (successful.isoformat() if populated else None)
+    assert status.oldest_queued == (_STAMP.isoformat() if populated else None)

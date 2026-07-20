@@ -10,7 +10,7 @@ CLI so a client token cannot rebuild, export, promote, or erase data.
 
 | Tool | Purpose |
 |---|---|
-| `status()` | Return the current Logto user and organization directory |
+| `status(days)` | Return the caller, organization directory, durable usage, and processing state |
 | `recall(query, budget)` | Return one Markdown string from the token-budgeted context pack |
 | `remember(text, source_uri, observed_at, expires_at, scopes, preserve_source, upload)` | Store text, preserve and queue one public HTTPS source, or mint a private local-file upload ticket |
 | `share(documents, scopes)` | Copy visible documents into one authorized destination and return the copied count |
@@ -65,12 +65,16 @@ sequenceDiagram
     S-->>A: {shared: 1}
 ```
 
-`status` returns safe profile fields and global roles. Each organization carries its Logto name,
-description, custom data, members, member roles, caller roles, effective permissions, public flag,
-and derived writable flag. Recall reads the caller's complete visible union, including personal,
-organization, and eligible intersection rows. Each evidence item names its exact scope set, and the
-response includes the Logto description of every shared organization represented in the result.
-Use `status` for roles, permissions, public standing, and write authority.
+`status` returns safe profile fields, global roles, durable usage totals, and processing estimates.
+Each organization carries its Logto name, description, custom data, members, member roles, caller
+roles, effective permissions, public flag, and derived writable flag. Its optional `days` input
+selects the bounded usage window from 1 through 365 days. Processing stages include queued,
+running, failed, throughput, and ETA fields without exposing private source content.
+
+Recall reads the caller's complete visible union, including personal, organization, and eligible
+intersection rows. Each evidence item names its exact scope set, and the response includes the
+Logto description of every shared organization represented in the result. Use `status` for roles,
+permissions, public standing, write authority, usage, and queue progress.
 Writes default to the personal singleton. Passing organization names chooses one explicit
 destination, including an intersection such as A and B, and succeeds only when the caller may write
 every member.
@@ -285,20 +289,32 @@ reusing the same physical Blob. The original is not uploaded again. Each destina
 independent RLS boundary and later source revisions do not silently change an earlier shared
 snapshot.
 
-## Operator CLI
+## CLI
 
 Run commands through `chefe run aizk` from the monorepo root.
 
 | Command group | Commands |
 |---|---|
-| `aizk graph` | `rebuild`, `decay`, `reembed`, `communities`, `raptor`, `forget` |
-| `aizk ontology` | `define-entity`, `define-relation`, `list` |
-| `aizk data` | `ingest`, `promote`, `export`, `audit` |
-| `aizk eval` | `bench`, `plans`, `trace`, `management`, `extraction`, `gate`, `scale`, `groupmem` |
-| `aizk db` | `setup`, `health`, `migrate`, `makemigrations`, `install-queue`, `backup`, `restore`, `reset`, `check-rls`, `tasks-status` |
+| `aizk auth` | `login`, `logout`, `status` |
+| `aizk` | `recall`, `remember`, `share`, `status` |
+| `aizk admin server` | `mcp`, `api`, `worker` |
+| `aizk admin queue` | `status`, `doctor`, `retry conversion`, `retry graph` |
+| `aizk admin database` | `setup`, `migrate`, `make-migration`, `install-queue`, `check-rls`, `backup`, `restore`, `reset` |
+| `aizk admin graph` | `rebuild`, `decay`, `reembed`, `communities`, `raptor`, `forget`, `diagnose-extraction` |
+| `aizk admin ontology` | `define-entity`, `define-relation`, `list` |
+| `aizk admin data` | `ingest`, `promote`, `export`, `audit` |
+| `aizk admin auth` | `audit`, `apply`, `check-public`, `check-web` |
+| `aizk admin settings` | `show`, `validate` |
+| `aizk admin api` | `openapi` |
 
-The top-level process commands are `serve-mcp`, `worker`, `recall-context`, `capture-session`, and
-`profile-report`.
+Client commands use the same authenticated MCP contract as an agent. `remember` accepts text,
+public source URLs, and local file paths. Local paths are hashed, declared, and uploaded by the
+CLI, so callers do not handle upload tickets.
+
+```sh
+aizk remember report.pdf notes.md
+aizk remember report.pdf --text "Companion information for the exact original."
+```
 
 There are no local user, organization, membership, role, or acceptance commands. Logto is the source
 of truth for those concerns.

@@ -41,7 +41,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
             target_url.render_as_string(hide_password=False).replace("%", "%%"),
         )
         try:
-            # The whole schema is one revision, so head installs it in a single upgrade.
+            # Head installs the fused base and the durable usage follow-up.
             ops.run_alembic(command.upgrade, config, "head")
             document_id = uuid7()
             chunk_id = uuid7()
@@ -159,7 +159,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                 }
                 assert all(forced.values())
                 assert "(document_id, scopes) IN" in chunk_check
-                assert revision == "0001_init"
+                assert revision == "0002_durable_usage"
             finally:
                 await engine.dispose()
         finally:

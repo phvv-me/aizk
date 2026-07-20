@@ -87,7 +87,7 @@ identity or membership mirror.
 | fast entity gate | [GLiNER2](https://github.com/fastino-ai/GLiNER2) and [GLiNER2 large](https://huggingface.co/fastino/gliner2-large-v1) | a cheap GPU gate and an experimental extractor, not the production graph authority |
 | production embedding | [Qwen3-VL-Embedding-2B](https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B) | text and image vectors through a generic client |
 | production reranking | [Qwen3-Reranker-4B](https://huggingface.co/Qwen/Qwen3-Reranker-4B) | cross-encoder merit ordering across all retrieval lanes |
-| production extraction | [Gemma 4 31B](https://huggingface.co/google/gemma-4-31B-it-qat-w4a16-ct) | grounded graph extraction through the generic `LLM` client |
+| production extraction | [Gemma 4 12B](https://huggingface.co/google/gemma-4-12B-it-qat-w4a16-ct) | grounded graph extraction through the generic `LLM` client |
 | profiling | the house `mainboard` package | stage timing, memory sizing, and production bottleneck evidence |
 | environments and remote operation | the house `chefe` and `lote` packages | reproducible tasks and Crimson deployment |
 | typed patterns | the house `patos` package | shared model and registry abstractions where they reduce code |

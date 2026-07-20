@@ -14,6 +14,7 @@ import eval.cli as cli_module
 import eval.database as database_module
 import eval.launcher as launcher_module
 import eval.service as service_module
+from aizk.config import Settings
 from aizk.retrieval import RecallTrace
 from eval.cli import EvaluationCLI
 from eval.database import EvaluationDatabase
@@ -87,8 +88,21 @@ class RecordingEvaluation:
         assert limit == 7
         return Rendered(text="gate")
 
-    async def extraction(self, path: Path, model: str) -> Rendered:
-        assert (path, model) == (Path("cases.jsonl"), "extractor")
+    async def extraction(
+        self,
+        path: Path,
+        model: str,
+        backend: str,
+        concurrency: int,
+        backlog: int,
+    ) -> Rendered:
+        assert (path, model, backend, concurrency, backlog) == (
+            Path("cases.jsonl"),
+            "extractor",
+            "gliner",
+            1,
+            10_704,
+        )
         return Rendered(text="extraction")
 
     async def groupmem(
@@ -126,7 +140,7 @@ def test_cli_maps_strings_to_typed_evaluation_arguments(
     assert command.management("area", 3, 500, user) == "management"
     assert command.plans(3, 4, "multihop", False, 5, user) == "plans"
     assert command.gate(7, user) == "gate"
-    assert command.extraction("cases.jsonl", "extractor") == "extraction"
+    assert command.extraction("cases.jsonl", "extractor", "gliner") == "extraction"
     assert command.groupmem("corpus", "Lab", "temporal", 2, 3, 4, False, True) == "groupmem"
     assert command.scale("10,20", 3, 4, 50.0) == "scale"
 
@@ -307,6 +321,7 @@ def test_evaluation_orchestrates_isolated_benchmarks(
     extraction_report = MagicMock()
     extraction_run = AsyncMock(return_value=extraction_report)
     extractor = MagicMock()
+    extraction_configs: list[Settings] = []
     cases = MagicMock()
     session = EvaluationSession()
     monkeypatch.setattr(service_module.EvaluationDatabase, "reset", reset)
@@ -315,11 +330,15 @@ def test_evaluation_orchestrates_isolated_benchmarks(
     monkeypatch.setattr(
         service_module.GraphClients,
         "from_settings",
-        classmethod(lambda cls, config: SimpleNamespace(extractor=extractor)),
+        classmethod(
+            lambda cls, config: (
+                extraction_configs.append(config) or SimpleNamespace(extractor=extractor)
+            )
+        ),
     )
     monkeypatch.setattr(service_module, "load_extraction_cases", lambda path: cases)
     extraction = MagicMock()
-    extraction.return_value.run = extraction_run
+    extraction.return_value.run_concurrent = extraction_run
     monkeypatch.setattr(service_module, "ExtractionBenchmark", extraction)
 
     dataset = BenchmarkDataset(
@@ -344,7 +363,7 @@ def test_evaluation_orchestrates_isolated_benchmarks(
     evaluation = Evaluation()
 
     async def body() -> None:
-        assert await evaluation.extraction(path, "model") is extraction_report
+        assert await evaluation.extraction(path, "model", "gliner", 8, 123) is extraction_report
         assert (
             await evaluation.groupmem(
                 root,
@@ -365,7 +384,10 @@ def test_evaluation_orchestrates_isolated_benchmarks(
     assert reset.await_count == 3
     ensure.assert_awaited_once_with(session.session)
     extraction.assert_called_once_with(extractor)
-    extraction_run.assert_awaited_once_with(cases, "model")
+    extraction_run.assert_awaited_once_with(cases, "gliner:model", 8, 123)
+    assert len(extraction_configs) == 1
+    assert extraction_configs[0].extract_backend == "gliner"
+    assert extraction_configs[0].llm_model == "model"
     assert groupmem.call_args.kwargs == {"root": root}
     runner.configured.assert_called_with(k=10)
     assert runner.configured.return_value.run.await_count == 2

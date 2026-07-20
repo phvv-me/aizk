@@ -81,7 +81,7 @@ the longest prefix of candidates whose chars-per-token cost fits the budget. The
 builds a typed `RecallResult`. Each evidence object carries source text, public provenance, and
 exact Logto scope objects with names and descriptions. A Jinja template then renders one string.
 The public provenance classes are source excerpt, derived memory, and recent session memory.
-Internal lane names and retrieval scores stay in `aizk eval trace` rather than leaking into the
+Internal lane names and retrieval scores stay in `chefe run aizk-eval trace` rather than leaking into the
 prompt. Only selected facts receive access counter updates.
 
 Area and Project catalogs are database-derived source candidates. The Project catalog includes

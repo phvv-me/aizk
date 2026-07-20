@@ -53,9 +53,9 @@ class _Server:
         return self.identity
 
 
-def _upload() -> mcp_server._UploadDeclaration:
+def upload() -> mcp_server.UploadDeclaration:
     content = b"declared upload"
-    return mcp_server._UploadDeclaration(
+    return mcp_server.UploadDeclaration(
         filename="evidence.txt",
         media_type="text/plain",
         size=len(content),
@@ -73,19 +73,17 @@ def test_remember_upload_mints_minimal_hash_bound_ticket() -> None:
             context=cast(Context, object()),
             text="Companion context.",
             scopes=["Research"],
-            upload=_upload(),
+            upload=upload(),
         )
     )
 
     assert isinstance(result, UploadTicketAccepted)
-    assert set(result.model_dump()) == {"status", "capability", "instruction"}
+    assert set(result.model_dump()) == {"status", "upload_url", "expires_seconds"}
     assert result.status == "accepted"
-    assert result.capability == "opaque-capability"
-    assert "url" not in result.model_dump()
-    assert "private single-use upload endpoint" in result.instruction
-    assert "expires shortly" in result.instruction
+    assert result.upload_url == "https://aizk.example/api/uploads/opaque-capability"
+    assert result.expires_seconds == 600
     assert uploads.declared is not None
-    assert uploads.declared.sha256 == _upload().sha256
+    assert uploads.declared.sha256 == upload().sha256
     assert uploads.declared.companion_text == "Companion context."
     assert uploads.declared.scopes == ["Research"]
 
@@ -117,7 +115,7 @@ def test_remember_upload_rejects_uri_and_temporal_modes(
                 preserve_source=preserve_source,
                 observed_at=observed_at,
                 expires_at=expires_at,
-                upload=_upload(),
+                upload=upload(),
             )
         )
 
@@ -125,12 +123,12 @@ def test_remember_upload_rejects_uri_and_temporal_modes(
 
 
 def test_upload_declaration_advertises_and_validates_sha256() -> None:
-    schema = mcp_server._UploadDeclaration.model_json_schema()
+    schema = mcp_server.UploadDeclaration.model_json_schema()
 
     assert "sha256" in schema["required"]
     assert schema["properties"]["sha256"]["pattern"] == "^[0-9a-f]{64}$"
     with pytest.raises(ValidationError):
-        mcp_server._UploadDeclaration(
+        mcp_server.UploadDeclaration(
             filename="evidence.txt",
             media_type="text/plain",
             size=8,
@@ -153,4 +151,4 @@ def test_remember_upload_translates_mint_failures(
     remember = AizkMCP.remember_tool(server)
 
     with pytest.raises(ToolError, match=message):
-        dbutil.run(remember(context=cast(Context, object()), upload=_upload()))
+        dbutil.run(remember(context=cast(Context, object()), upload=upload()))

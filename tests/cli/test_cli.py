@@ -1,552 +1,594 @@
-import json
-import uuid
-from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, Mock
 
+import dbutil
+import httpx
 import pytest
-from id_factory import uuid5, uuid7
-from pydantic import UUID5, UUID7, AnyHttpUrl
+from id_factory import uuid7
+from pydantic import ValidationError
 
 import aizk.cli as cli
-from aizk.config import Settings
-from aizk.integrations.logto import PolicyReport
-from aizk.retrieval import Candidate, Lane
-from aizk.store.identity import User
+import aizk.commands.client as commands
+from aizk.artifacts.models import ArtifactReceipt
+from aizk.client import (
+    AuthenticationStatus,
+    ClientProfile,
+    ProtocolError,
+    RememberBatchResult,
+    RememberedFile,
+)
+from aizk.mcp.models import UploadTicketAccepted
+from aizk.memory import ShareResult, WriteResult
+from aizk.status import (
+    CallerStatus,
+    OrganizationStatus,
+    ProcessingStatus,
+    StageEstimate,
+    StatusReport,
+    UsageStatus,
+    UsageSummary,
+)
+from aizk.store import Artifact
 
-_DOC_ID = uuid7()
-_USER_ID = uuid7()
-_OTHER_USER_ID = uuid5()
 
-
-class Rendered:
-    def __init__(self, text: str) -> None:
-        self.text = text
-
-    def render(self) -> str:
-        return self.text
-
-
-class FakeRuntime:
-    """The runtime double the CLI opens as an async context and threads through."""
+class Profiles:
+    """In-memory nonsecret profile store."""
 
     def __init__(self) -> None:
-        self.auth = Mock()
-        self.store = Mock()
-        self.uploads = Mock()
-        self.database = Mock()
-        self.artifacts = SimpleNamespace(intake=Mock(), conversion=Mock())
-        self.settings = cli.settings
-        self.graph = Mock()
-        self.llm = Mock()
-        self.embed = Mock()
-        self.extractor = Mock()
-        self.closes = 0
+        self.current = ClientProfile(server="https://stored.example/mcp")
+        self.saved: ClientProfile | None = None
 
-    async def __aenter__(self) -> FakeRuntime:
-        return self
+    def load(self) -> ClientProfile:
+        return self.current
 
-    async def __aexit__(self, *exc: object) -> None:
-        self.closes += 1
+    def save(self, profile: ClientProfile) -> Path:
+        self.saved = profile
+        return Path("profile.json")
 
 
-class Seams:
-    def __init__(self) -> None:
-        self.runtime = FakeRuntime()
-        self.observe = Mock()
-        self.run_alembic = Mock()
-        self.alembic_config = Mock(return_value="CONFIG")
-        self.setup = AsyncMock(return_value=SimpleNamespace(migrated_to="head"))
-        self.rls = AsyncMock(return_value=[])
-        self.profile = MagicMock()
-        self.profile.report.return_value = "profile"
-        self.profiler = Mock(return_value=self.profile)
-        self.profiler.Feature = cli.Profiler.Feature
-        self.worker = AsyncMock()
-        self.install_queue = AsyncMock()
-        self.retry_failed_chunks = AsyncMock(return_value=4)
-        self.serve_http = AsyncMock()
-        self.recall = AsyncMock(
-            return_value=(Candidate(lane=Lane.Kind.FACTS, line="codec shipped"),),
-        )
-        self.ingest = AsyncMock(return_value=_DOC_ID)
-        self.enqueue = AsyncMock()
-        self.backup = AsyncMock(return_value=SimpleNamespace(bytes=7, path="/tmp/x.dump"))
-        self.restore = AsyncMock(return_value=SimpleNamespace(path="/tmp/x.dump", database="aizk"))
-
-
-@pytest.fixture
-def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
-    seams = Seams()
-    monkeypatch.setattr(cli.ops, "run_alembic", seams.run_alembic)
-    monkeypatch.setattr(cli.ops, "alembic_config", seams.alembic_config)
-    monkeypatch.setattr(cli.ops, "setup", seams.setup)
-    monkeypatch.setattr(cli.ops, "scoped_rls_violations", seams.rls)
-    monkeypatch.setattr(cli, "Profiler", seams.profiler)
-    monkeypatch.setattr(cli, "run_worker", seams.worker)
-    monkeypatch.setattr(cli, "install_queue_schema", seams.install_queue)
-    monkeypatch.setattr(cli, "retry_failed_chunks", seams.retry_failed_chunks)
-    monkeypatch.setattr(cli, "recall", seams.recall)
-    monkeypatch.setattr(cli, "ingest_text", seams.ingest)
-    monkeypatch.setattr(cli, "enqueue_pending", seams.enqueue)
-    monkeypatch.setattr(cli.backup_ops, "backup_database", seams.backup)
-    monkeypatch.setattr(cli.backup_ops, "restore_database", seams.restore)
-    monkeypatch.setattr(cli, "observe", seams.observe)
-    monkeypatch.setattr(cli.Runtime, "assemble", classmethod(lambda cls, config: seams.runtime))
-    monkeypatch.setattr(
-        cli, "AizkMCP", Mock(return_value=SimpleNamespace(run_http_async=seams.serve_http))
+def report(
+    *,
+    label: str | None = "Pedro",
+    username: str | None = "pedro",
+    stages: tuple[StageEstimate, ...] = (),
+) -> StatusReport:
+    """Build one complete status response for terminal rendering."""
+    now = datetime(2026, 7, 20, tzinfo=UTC)
+    return StatusReport(
+        generated_at=now,
+        caller=CallerStatus(
+            label=label,
+            username=username,
+            organizations=(OrganizationStatus(name="Research"),),
+        ),
+        usage=UsageStatus(
+            generated_at=now,
+            recorded_through=now,
+            days=30,
+            start=now,
+            summary=UsageSummary(
+                requests=7,
+                recalls=2,
+                remembers=3,
+                files=1,
+                shares=1,
+            ),
+            lifetime=UsageSummary(requests=12, items=8),
+        ),
+        processing=ProcessingStatus(
+            generated_at=now,
+            state="active",
+            stages=stages,
+        ),
     )
-    return seams
 
 
-def dispatch(tokens: list[str]) -> None:
-    cli.app(tokens, exit_on_error=False, result_action="return_value")
+def command_names(app: commands.App) -> set[str]:
+    return set(app.resolved_commands()) - set(app.help_flags) - set(app.version_flags)
 
 
-_COMMANDS = [
-    (
-        "db migrate",
-        ["db", "migrate"],
-        "run_alembic",
-        (cli.command.upgrade, "CONFIG", "head"),
-        {"sql": False},
-        "done",
-    ),
-    (
-        "db migrate offline",
-        ["db", "migrate", "--sql"],
-        "run_alembic",
-        (cli.command.upgrade, "CONFIG", "head"),
-        {"sql": True},
-        None,
-    ),
-    (
-        "db makemigrations",
-        ["db", "makemigrations", "add col"],
-        "run_alembic",
-        (cli.command.revision, "CONFIG"),
-        {"message": "add col", "autogenerate": True},
-        "done",
-    ),
-    ("db install-queue", ["db", "install-queue"], "install_queue", (), {}, "done"),
-    (
-        "db retry-failed-chunks",
-        ["db", "retry-failed-chunks", "--limit", "7"],
-        "retry_failed_chunks",
-        (7,),
-        {},
-        "requeued 4 failed chunk jobs",
-    ),
-    (
-        "db backup",
-        ["db", "backup", "/tmp/x.dump"],
-        "backup",
-        ("/tmp/x.dump",),
-        {},
-        "backed up 7 bytes to /tmp/x.dump",
-    ),
-    (
-        "db restore",
-        ["db", "restore", "/tmp/x.dump"],
-        "restore",
-        ("/tmp/x.dump",),
-        {},
-        "restored /tmp/x.dump into aizk",
-    ),
-]
+def test_root_tree_has_only_client_and_admin_surfaces() -> None:
+    assert command_names(cli.app) == {
+        "admin",
+        "auth",
+        "recall",
+        "remember",
+        "share",
+        "status",
+    }
+    assert command_names(commands.auth_app) == {"login", "logout", "status"}
+
+
+def test_main_runs_the_command_tree(monkeypatch: pytest.MonkeyPatch) -> None:
+    command_tree = Mock()
+    monkeypatch.setattr(cli, "app", command_tree)
+
+    cli.main()
+
+    command_tree.assert_called_once_with()
 
 
 @pytest.mark.parametrize(
-    ("tokens", "recorder_name", "expected_args", "expected_kwargs", "expected_output"),
-    [case[1:] for case in _COMMANDS],
-    ids=[case[0] for case in _COMMANDS],
+    "error",
+    [
+        FileNotFoundError("run `aizk auth login`"),
+        PermissionError("login required"),
+        ProtocolError("invalid response"),
+        ValidationError.from_exception_data("status", []),
+        ValueError("invalid input"),
+        httpx.ConnectError("server unavailable"),
+    ],
 )
-def test_command_dispatches_argv_to_its_boundary(
-    tokens: list[str],
-    recorder_name: str,
-    expected_args: tuple[Callable[..., None] | str | int, ...],
-    expected_kwargs: dict[str, str | bool],
-    expected_output: str | None,
-    seams: Seams,
+def test_main_renders_expected_errors_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error: Exception,
+) -> None:
+    monkeypatch.setattr(cli, "app", Mock(side_effect=error))
+
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+
+    assert stopped.value.code == 2
+    assert capsys.readouterr().err == f"error: {error}\n"
+
+
+def test_profile_resolves_explicit_and_stored_servers() -> None:
+    profiles = Profiles()
+    subject = commands.ClientCommands(cast("commands.ProfileStore", profiles))
+
+    assert str(subject.profile().server) == "https://stored.example/mcp"
+    assert str(subject.profile("https://explicit.example/mcp").server) == (
+        "https://explicit.example/mcp"
+    )
+
+
+def test_login_persists_only_after_remote_authentication(
+    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    dispatch(tokens)
-    recorder = cast("Mock", getattr(seams, recorder_name))
-    out = capsys.readouterr().out
-    assert recorder.call_count == 1
-    assert recorder.call_args.args == expected_args
-    assert recorder.call_args.kwargs == expected_kwargs
-    assert (expected_output in out) if expected_output is not None else (out == "")
+    profiles = Profiles()
+    login = AsyncMock(return_value=report())
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(login=login)),
+    )
+    subject = commands.ClientCommands(cast("commands.ProfileStore", profiles))
+
+    dbutil.run(subject.login("https://new.example/mcp", "none", "localhost", 9000, 14, False))
+
+    assert login.await_args is not None
+    assert login.await_args.args == (14,)
+    assert profiles.saved is not None
+    assert str(profiles.saved.server) == "https://new.example/mcp"
+    assert profiles.saved.callback_port == 9000
+    assert "signed in as Pedro" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("profiling", [True, False])
-def test_worker_profiles_only_when_enabled(
-    seams: Seams, settings: Settings, monkeypatch: pytest.MonkeyPatch, profiling: bool
+def test_login_reuses_stored_server_and_can_render_json(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(settings, "profiling", profiling)
+    profiles = Profiles()
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(login=AsyncMock(return_value=report()))),
+    )
 
-    dispatch(["worker", "--batch-size", "7"])
+    dbutil.run(
+        commands.ClientCommands(cast("commands.ProfileStore", profiles)).login(
+            None,
+            "oauth",
+            "127.0.0.1",
+            8912,
+            30,
+            True,
+        )
+    )
 
-    assert seams.worker.call_args.kwargs["batch_size"] == 7
-    assert seams.profiler.call_count == int(profiling)
-    assert seams.profile.report.call_count == int(profiling)
+    assert '"caller"' in capsys.readouterr().out
+    assert profiles.saved is not None
+    assert str(profiles.saved.server) == "https://stored.example/mcp"
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_logout_clears_credentials_and_renders_both_modes(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
+    logout = AsyncMock()
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(logout=logout)),
+    )
+
+    dbutil.run(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).logout(
+            None,
+            json_output,
+        )
+    )
+
+    logout.assert_awaited_once_with()
+    output = capsys.readouterr().out
+    assert ('"server"' in output) is json_output
+    assert ("signed out" in output) is not json_output
 
 
 @pytest.mark.parametrize(
-    ("tokens", "expected_query", "expected_user", "candidates", "expected_output"),
+    ("result", "json_output", "expected"),
     [
         (
-            ["recall-context", "hello world", "--k", "3", "--user", str(_OTHER_USER_ID)],
-            "hello world",
-            _OTHER_USER_ID,
-            (Candidate(lane=Lane.Kind.FACTS, line="codec shipped"),),
-            "codec shipped",
+            AuthenticationStatus(
+                server="https://stored.example/mcp",
+                authenticated=True,
+                status=report(),
+            ),
+            False,
+            "authenticated as Pedro",
         ),
         (
-            ["recall-context"],
-            "recent decisions, patterns, gotchas, and project context",
-            cli.settings.system_user_id,
-            (Candidate(lane=Lane.Kind.FACTS, line="codec shipped"),),
-            "codec shipped",
+            AuthenticationStatus(
+                server="https://stored.example/mcp",
+                authenticated=False,
+            ),
+            False,
+            "not authenticated",
         ),
         (
-            ["recall-context"],
-            "recent decisions, patterns, gotchas, and project context",
-            cli.settings.system_user_id,
-            (),
-            "no context recalled",
+            AuthenticationStatus(
+                server="https://stored.example/mcp",
+                authenticated=True,
+                status=report(),
+            ),
+            True,
+            '"authenticated": true',
         ),
     ],
-    ids=["explicit", "default", "empty"],
 )
-def test_recall_context_resolves_query_user_and_output(
-    seams: Seams,
-    capsys: pytest.CaptureFixture[str],
-    tokens: list[str],
-    expected_query: str,
-    expected_user: UUID5 | UUID7,
-    candidates: tuple[Candidate, ...],
-    expected_output: str,
-) -> None:
-    seams.recall.return_value = candidates
-    dispatch(tokens)
-
-    assert seams.recall.call_args.args[0] == expected_query
-    assert seams.recall.call_args.kwargs["user"] == User.system((expected_user,))
-    assert expected_output in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("violations", [[], ["fact_claim: FORCE row level security missing"]])
-def test_check_rls_gates_on_violations(
-    seams: Seams, capsys: pytest.CaptureFixture[str], violations: list[str]
-) -> None:
-    seams.rls.return_value = violations
-
-    if violations:
-        with pytest.raises(SystemExit) as exit_info:
-            dispatch(["db", "check-rls"])
-        assert exit_info.value.code == 1
-        assert violations[0] in capsys.readouterr().out
-    else:
-        dispatch(["db", "check-rls"])
-        assert "ok" in capsys.readouterr().out
-
-
-def test_check_web_requires_and_reports_the_exact_callback(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(cli.settings, "web_public_url", None)
-    with pytest.raises(RuntimeError, match="web_public_url"):
-        dispatch(["check-web"])
-
-    monkeypatch.setattr(cli.settings, "web_public_url", AnyHttpUrl("https://memory.test"))
-    dispatch(["check-web"])
-    assert "https://memory.test/auth/sign-in-callback" in capsys.readouterr().out
-
-
-def test_check_public_reports_complete_configuration(capsys: pytest.CaptureFixture[str]) -> None:
-    dispatch(["check-public"])
-
-    assert "configuration is complete" in capsys.readouterr().out
-
-
-def test_openapi_writes_the_browser_api_schema_for_the_client_generator(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    target = tmp_path / "openapi.json"
-
-    dispatch(["openapi", str(target)])
-
-    schema = json.loads(target.read_text(encoding="utf-8"))
-    assert {"/api/recall", "/api/organizations", "/api/uploads/{capability}"} <= set(
-        schema["paths"]
-    )
-    assert {"Me", "Overview", "Answer", "WriteResult"} <= set(schema["components"]["schemas"])
-    assert f"wrote {target}" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize(
-    ("command_name", "clean", "exits"),
-    [("audit", True, False), ("audit", False, True), ("apply", True, False)],
-    ids=["audit-clean", "audit-drift", "apply"],
-)
-def test_logto_commands_report_policy_and_close_the_client(
+def test_authentication_status_is_noninteractive_and_clear(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    command_name: str,
-    clean: bool,
-    exits: bool,
-) -> None:
-    client = SimpleNamespace(close=AsyncMock())
-    report = PolicyReport(clean=clean, changes=() if clean else ("repair role",))
-    reconciler = SimpleNamespace(
-        audit=AsyncMock(return_value=report),
-        apply=AsyncMock(return_value=report),
-    )
-    monkeypatch.setattr(cli, "LogtoClient", Mock(return_value=client))
-    monkeypatch.setattr(cli, "LogtoPolicy", Mock(return_value=reconciler))
-
-    if exits:
-        with pytest.raises(SystemExit) as exit_info:
-            dispatch(["logto", command_name])
-        assert exit_info.value.code == 1
-    else:
-        dispatch(["logto", command_name])
-
-    assert getattr(reconciler, command_name).call_count == 1
-    assert client.close.call_count == 1
-    assert f'"clean": {str(clean).lower()}' in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("with_worker", [True, False])
-@pytest.mark.parametrize("auto_setup", [True, False])
-def test_serve_mcp_runs_http_and_optionally_the_worker(
-    seams: Seams,
-    settings: Settings,
-    monkeypatch: pytest.MonkeyPatch,
-    with_worker: bool,
-    auto_setup: bool,
-) -> None:
-    monkeypatch.setattr(settings, "mcp_port", 9999)
-    monkeypatch.setattr(settings, "serve_with_worker", with_worker)
-    monkeypatch.setattr(settings, "auto_setup", auto_setup)
-    monkeypatch.setattr(settings, "profiling", with_worker)
-
-    dispatch(["serve-mcp"])
-
-    assert seams.serve_http.call_count == 1
-    assert seams.serve_http.call_args.kwargs["port"] == 9999
-    assert seams.worker.call_count == (1 if with_worker else 0)
-    assert seams.setup.call_count == int(auto_setup)
-    assert seams.profiler.call_count == int(with_worker)
-
-
-@pytest.mark.parametrize("auto_setup", [True, False])
-def test_serve_api_runs_uvicorn_on_the_configured_endpoint(
-    seams: Seams,
-    settings: Settings,
-    monkeypatch: pytest.MonkeyPatch,
-    auto_setup: bool,
-) -> None:
-    monkeypatch.setattr(settings, "api_port", 9001)
-    monkeypatch.setattr(settings, "auto_setup", auto_setup)
-    serve = AsyncMock()
-    config = Mock(return_value="CONFIG")
-    server = Mock(return_value=SimpleNamespace(serve=serve))
-    monkeypatch.setattr(cli, "uvicorn", SimpleNamespace(Config=config, Server=server))
-
-    dispatch(["serve-api"])
-
-    assert serve.await_count == 1
-    assert server.call_args.args == ("CONFIG",)
-    assert config.call_args.kwargs == {"host": settings.api_host, "port": 9001}
-    assert seams.setup.call_count == int(auto_setup)
-
-
-@pytest.mark.parametrize("state", ["present", "unset", "missing-file"])
-def test_capture_session_handles_present_and_missing_transcripts(
-    seams: Seams,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    state: str,
-) -> None:
-    transcript = tmp_path / "session.jsonl"
-    if state == "present":
-        transcript.write_text("decided to ship the codec", encoding="utf-8")
-        monkeypatch.setenv("AIZK_SESSION_TRANSCRIPT", str(transcript))
-    elif state == "unset":
-        monkeypatch.delenv("AIZK_SESSION_TRANSCRIPT", raising=False)
-    else:
-        monkeypatch.setenv("AIZK_SESSION_TRANSCRIPT", str(transcript))
-
-    dispatch(["capture-session"])
-
-    if state == "present":
-        assert seams.ingest.call_args.args[0] == cli.User.system((cli.settings.system_user_id,))
-        assert seams.ingest.call_args.args[1] == "decided to ship the codec"
-        assert seams.ingest.call_args.kwargs["title"] == "session"
-        assert seams.ingest.call_args.kwargs["created_by"] == cli.settings.system_user_id
-        assert seams.enqueue.call_count == 1
-        assert str(_DOC_ID) in capsys.readouterr().out
-    else:
-        assert seams.ingest.call_count == 0
-        assert seams.enqueue.call_count == 0
-        assert "no session transcript" in capsys.readouterr().out
-
-
-_OPERATOR_COMMANDS = [
-    (["graph", "rebuild", "--limit", "5"], "rebuild", (3, 7), "3 entities and 7 facts"),
-    (["graph", "decay", "--half-life-days", "30"], "decay", 4, "archived 4"),
-    (["graph", "reembed"], "reembed", 9, "re-embedded 9"),
-    (["graph", "communities"], "communities", 3, "built 3 communities"),
-    (["graph", "raptor"], "raptor", 2, "built 2 summaries"),
-    (
-        ["graph", "forget", "wrong note"],
-        "forget",
-        SimpleNamespace(claims=6, documents=["A", "B"]),
-        "retracted 6 claims from 2 notes",
-    ),
-    (["data", "promote", str(_DOC_ID), "team"], "promote", 5, "promoted 5 document into team"),
-    (["data", "ingest", "notes/"], "ingest", 4, "ingested 4 documents"),
-    (["data", "export", "dump.jsonl"], "export_scope", Rendered("EXPORT-DUMP"), "EXPORT-DUMP"),
-    (
-        ["ontology", "define-entity", "Area", "a domain"],
-        "define_entity_kind",
-        None,
-        "entity kind Area defined",
-    ),
-    (
-        ["ontology", "define-relation", "funds", "x funds y"],
-        "define_relation_kind",
-        None,
-        "relation kind funds defined",
-    ),
-    (
-        ["db", "setup"],
-        "setup",
-        SimpleNamespace(migrated_from="abc123", migrated_to="def456"),
-        "migrated abc123 -> def456",
-    ),
-]
-
-type _CommandResult = int | UUID7 | tuple[int, int] | SimpleNamespace | Rendered | None
-
-
-@pytest.mark.parametrize(
-    ("tokens", "fn_name", "ret", "expected"),
-    _OPERATOR_COMMANDS,
-    ids=[" ".join(tokens[:2]) for tokens, _, _, _ in _OPERATOR_COMMANDS],
-)
-def test_operator_command_routes_to_admin_and_prints(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    tokens: list[str],
-    fn_name: str,
-    ret: _CommandResult,
+    result: AuthenticationStatus,
+    json_output: bool,
     expected: str,
 ) -> None:
-    recorder = AsyncMock(return_value=ret)
-    monkeypatch.setattr(cli.admin, fn_name, recorder)
+    status = AsyncMock(return_value=result)
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(authentication_status=status)),
+    )
 
-    dispatch(tokens)
+    dbutil.run(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).authentication_status(
+            None,
+            14,
+            json_output,
+        )
+    )
 
-    assert recorder.call_count == 1
+    status.assert_awaited_once_with(14)
     assert expected in capsys.readouterr().out
 
 
-def test_audit_renders_each_write_with_scopes(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    scope = uuid.UUID("44444444-4444-4444-4444-444444444444")
-    docs = [
-        SimpleNamespace(id=_DOC_ID, subject_type="project", scopes=[scope], title="Shared note"),
-        SimpleNamespace(id=_USER_ID, subject_type=None, scopes=[], title=None),
-    ]
-    monkeypatch.setattr(cli.admin, "audit", AsyncMock(return_value=docs))
-
-    dispatch(["data", "audit", "--limit", "5"])
-
-    out = capsys.readouterr().out
-    assert f"{_DOC_ID}  project  [{scope}]  Shared note" in out
-    assert f"{_USER_ID}  source  [private]  -" in out
-
-
-def test_list_ontology_marks_structural_kinds(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    rows = [
-        SimpleNamespace(kind="entity", name="Concept", domain="general", uses=3, structural=False),
-        SimpleNamespace(
-            kind="entity", name="RaptorSummary", domain="core", uses=1, structural=True
-        ),
-    ]
-    monkeypatch.setattr(cli.admin, "list_ontology", AsyncMock(return_value=rows))
-
-    dispatch(["ontology", "list"])
-
-    out = capsys.readouterr().out.splitlines()
-    concept = next(line for line in out if "Concept" in line)
-    raptor = next(line for line in out if "RaptorSummary" in line)
-    assert concept.startswith("  ") and "uses=3" in concept  # unmarked, extractable
-    assert raptor.startswith("* ") and "uses=1" in raptor  # starred, structural
-
-
-class Jsonable:
-    def __init__(self, payload: str) -> None:
-        self.payload = payload
-
-    def model_dump_json(self, indent: int | None = None) -> str:
-        return self.payload
-
-
-def test_extraction_diagnostic_prints_the_model_dump(
+@pytest.mark.parametrize("json_output", [False, True])
+def test_recall_forwards_query_budget_and_output_mode(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    json_output: bool,
 ) -> None:
-    recorder = AsyncMock(return_value=Jsonable('{"grounding": []}'))
-    monkeypatch.setattr(cli.admin, "diagnose_extraction", recorder)
+    recall = AsyncMock(return_value="Evidence")
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(recall=recall)),
+    )
 
-    dispatch(["graph", "diagnose-extraction", str(_DOC_ID)])
+    dbutil.run(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).recall(
+            "Question",
+            512,
+            None,
+            json_output,
+        )
+    )
 
-    assert recorder.call_args.args[-1] == _DOC_ID
-    assert '{"grounding": []}' in capsys.readouterr().out
+    recall.assert_awaited_once_with("Question", 512)
+    expected = '"Evidence"' if json_output else "Evidence"
+    assert expected in capsys.readouterr().out
+
+
+def test_recall_rejects_missing_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(commands.CommandInput, "text", Mock(return_value=None))
+
+    with pytest.raises(ValueError, match="requires a query"):
+        dbutil.run(
+            commands.ClientCommands(cast("commands.ProfileStore", Profiles())).recall(
+                None,
+                None,
+                None,
+                False,
+            )
+        )
 
 
 @pytest.mark.parametrize(
-    ("tokens", "fn_name"),
-    [(["db", "tasks-status"], "tasks_status"), (["db", "health"], "health")],
-    ids=["tasks-status", "health"],
+    ("source_uri", "observed_at", "expires_at", "preserve_source", "message"),
+    [
+        ("https://example.com", None, None, False, "source or time"),
+        (None, datetime(2026, 1, 1, tzinfo=UTC), None, False, "source or time"),
+        (None, None, datetime(2026, 1, 1, tzinfo=UTC), False, "source or time"),
+        (None, None, None, True, "preserve-source"),
+    ],
 )
-def test_json_command_prints_the_model_dump(
+def test_file_paths_reject_source_only_options(
+    monkeypatch: pytest.MonkeyPatch,
+    source_uri: str | None,
+    observed_at: datetime | None,
+    expires_at: datetime | None,
+    preserve_source: bool,
+    message: str,
+) -> None:
+    monkeypatch.setattr(commands.CommandInput, "text", Mock(return_value=None))
+    subject = commands.ClientCommands(cast("commands.ProfileStore", Profiles()))
+
+    with pytest.raises(ValueError, match=message):
+        dbutil.run(
+            subject.remember(
+                (Path("file.pdf"),),
+                None,
+                source_uri,
+                observed_at,
+                expires_at,
+                (),
+                preserve_source,
+                None,
+                False,
+            )
+        )
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_remember_files_accepts_paths_directly(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    tokens: list[str],
-    fn_name: str,
+    json_output: bool,
 ) -> None:
-    monkeypatch.setattr(cli.admin, fn_name, AsyncMock(return_value=Jsonable('{"ok": true}')))
-
-    dispatch(tokens)
-
-    assert '{"ok": true}' in capsys.readouterr().out
-
-
-def test_database_reset_requires_the_exact_name_then_prints_the_result(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    recorder = AsyncMock(
-        return_value=SimpleNamespace(database=cli.settings.db_name, migrated_to="0001_init"),
+    first, second = Path("first.pdf"), Path("second.md")
+    receipt = ArtifactReceipt(
+        artifact_id=uuid7(),
+        content_id=uuid7(),
+        state=Artifact.Content.State.queued,
     )
-    monkeypatch.setattr(cli.admin, "reset_database", recorder)
+    result = RememberBatchResult(
+        files=(
+            RememberedFile(path=first, receipt=receipt),
+            RememberedFile(path=second, receipt=receipt),
+        )
+    )
+    remember_files = AsyncMock(return_value=result)
+    monkeypatch.setattr(commands.CommandInput, "text", Mock(return_value="Companion"))
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(remember_files=remember_files)),
+    )
 
-    with pytest.raises(ValueError, match="confirmation"):
-        dispatch(["db", "reset", "wrong-database"])
-    assert recorder.call_count == 0
+    dbutil.run(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).remember(
+            (first, second),
+            "Companion",
+            None,
+            None,
+            None,
+            ("Research",),
+            False,
+            None,
+            json_output,
+        )
+    )
 
-    dispatch(["db", "reset", cli.settings.db_name])
+    call = remember_files.await_args
+    assert call is not None
+    assert [upload.path for upload in call.args[0]] == [first, second]
+    assert call.kwargs == {
+        "companion_text": "Companion",
+        "scopes": ["Research"],
+    }
+    output = capsys.readouterr().out
+    assert ('"files"' in output) is json_output
+    assert ("accepted 2 files" in output) is not json_output
 
-    assert recorder.call_count == 1
-    assert f"reset {cli.settings.db_name} at 0001_init" in capsys.readouterr().out
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_remember_text_maps_to_the_mcp_request(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
+    remembered = WriteResult(id=uuid7())
+    remember = AsyncMock(return_value=remembered)
+    monkeypatch.setattr(commands.CommandInput, "text", Mock(return_value="A durable fact"))
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(remember=remember)),
+    )
+
+    dbutil.run(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).remember(
+            (),
+            "A durable fact",
+            "https://example.com/source",
+            None,
+            None,
+            (),
+            False,
+            None,
+            json_output,
+        )
+    )
+
+    assert remember.await_args is not None
+    request = remember.await_args.args[0]
+    assert request.text == "A durable fact"
+    assert request.source_uri == "https://example.com/source"
+    output = capsys.readouterr().out
+    assert ('"id"' in output) is json_output
+    assert ("remembered document" in output) is not json_output
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_share_forwards_documents_and_scopes(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
+    share = AsyncMock(return_value=ShareResult(shared=2))
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(share=share)),
+    )
+    documents = (uuid7(), uuid7())
+
+    dbutil.run(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).share(
+            documents,
+            ("Research",),
+            None,
+            json_output,
+        )
+    )
+
+    assert share.await_args is not None
+    request = share.await_args.args[0]
+    assert tuple(request.documents) == documents
+    assert request.scopes == ["Research"]
+    output = capsys.readouterr().out
+    assert ('"shared"' in output) is json_output
+    assert ("shared 2 documents" in output) is not json_output
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_expanded_status_includes_usage_and_processing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    json_output: bool,
+) -> None:
+    stage = StageEstimate(
+        key="graph_projection",
+        queued=12,
+        running=None,
+        failed=None,
+        throughput_per_hour=8.5,
+        lower_seconds=3600,
+        upper_seconds=5400,
+        confidence="medium",
+        eta_status="estimating",
+    )
+    status = AsyncMock(return_value=report(stages=(stage,)))
+    monkeypatch.setattr(
+        commands,
+        "MemoryClient",
+        Mock(return_value=SimpleNamespace(status=status)),
+    )
+
+    dbutil.run(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).status(
+            30,
+            None,
+            json_output,
+        )
+    )
+
+    status.assert_awaited_once_with(30)
+    output = capsys.readouterr().out
+    assert ('"processing"' in output) is json_output
+    assert ("Usage over 30 days" in output) is not json_output
+    assert ("ETA 1 hr to 1 hr 30 min" in output) is not json_output
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected"),
+    [
+        (StageEstimate(key="conversion", eta_status="complete"), "complete"),
+        (
+            StageEstimate(key="conversion", failed=1, eta_status="blocked"),
+            "blocked",
+        ),
+        (
+            StageEstimate(key="conversion", eta_status="insufficient_history"),
+            "ETA needs more history",
+        ),
+    ],
+)
+def test_eta_reasons_are_explicit(stage: StageEstimate, expected: str) -> None:
+    assert commands.ClientCommands.render_eta(stage) == expected
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (1, "1 min"),
+        (3600, "1 hr"),
+        (3660, "1 hr 1 min"),
+    ],
+)
+def test_duration_avoids_false_precision(seconds: int, expected: str) -> None:
+    assert commands.ClientCommands.duration(seconds) == expected
+
+
+def test_remember_renderers_cover_every_protocol_result() -> None:
+    receipt = ArtifactReceipt(
+        artifact_id=uuid7(),
+        content_id=uuid7(),
+        state=Artifact.Content.State.queued,
+    )
+    ticket = UploadTicketAccepted(
+        upload_url="https://example.com/upload",
+        expires_seconds=60,
+    )
+
+    assert "accepted file" in commands.ClientCommands.render_remember(receipt)
+    assert commands.ClientCommands.render_remember(ticket) == "accepted upload ticket"
+
+
+def test_command_adapters_delegate_without_business_logic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instance = SimpleNamespace(
+        login=AsyncMock(),
+        logout=AsyncMock(),
+        authentication_status=AsyncMock(),
+        recall=AsyncMock(),
+        remember=AsyncMock(),
+        share=AsyncMock(),
+        status=AsyncMock(),
+    )
+    monkeypatch.setattr(commands, "ClientCommands", Mock(return_value=instance))
+    document = uuid7()
+
+    dbutil.run(commands.login("https://example.com/mcp"))
+    dbutil.run(commands.logout())
+    dbutil.run(commands.authentication_status())
+    dbutil.run(commands.recall("question"))
+    dbutil.run(commands.remember(Path("file.pdf")))
+    dbutil.run(commands.share(document))
+    dbutil.run(commands.status())
+
+    instance.login.assert_awaited_once()
+    instance.logout.assert_awaited_once()
+    instance.authentication_status.assert_awaited_once()
+    instance.recall.assert_awaited_once()
+    instance.remember.assert_awaited_once()
+    instance.share.assert_awaited_once()
+    instance.status.assert_awaited_once()

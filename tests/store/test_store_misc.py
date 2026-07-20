@@ -123,3 +123,43 @@ def test_scope_boundaries_store_one_nonempty_canonical_key(migrated_db: None) ->
             await session.rollback()
 
     dbutil.run(persist())
+
+
+def test_direct_source_identity_requires_a_complete_normalized_title(
+    migrated_db: None,
+) -> None:
+    owner = uuid5()
+
+    async def match(query: str, titles: list[str]) -> dict[str, bool]:
+        async with dbutil.actor(owner) as session:
+            documents = [
+                Document(
+                    title=title,
+                    created_by=owner,
+                    scopes=[owner],
+                    content_hash=uuid8(),
+                )
+                for title in titles
+            ]
+            session.add_all(documents)
+            await session.flush()
+            rows = await session.exec(
+                select(Document.title, Document.named_in_query()).where(
+                    Document.id.in_([document.id for document in documents])
+                ),
+                params={"qtext": query},
+            )
+            await session.rollback()
+        return {title: direct for title, direct in rows}
+
+    assert dbutil.run(
+        match(
+            "What are the current Research projects in Open SWE Book.md?",
+            ["en", "Research", "Open SWE Book.md", "SWE Book"],
+        )
+    ) == {
+        "en": False,
+        "Research": True,
+        "Open SWE Book.md": True,
+        "SWE Book": True,
+    }

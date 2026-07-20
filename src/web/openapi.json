@@ -5,6 +5,23 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Health",
+        "description": "Confirm that the API process can accept HTTP requests.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/me": {
       "get": {
         "summary": "Me",
@@ -29,6 +46,52 @@
         ]
       }
     },
+    "/api/status": {
+      "get": {
+        "summary": "Status",
+        "description": "Return caller authority, durable usage, and processing health.",
+        "operationId": "status",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/overview": {
       "get": {
         "summary": "Overview",
@@ -51,6 +114,368 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/usage": {
+      "get": {
+        "summary": "Usage",
+        "description": "Return durable caller-owned operation history for one bounded date range.",
+        "operationId": "usage",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 30,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/processing": {
+      "get": {
+        "summary": "Processing",
+        "description": "Return caller-visible processing backlog, throughput, and queue health.",
+        "operationId": "processing",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessingReport"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/processing/events": {
+      "get": {
+        "summary": "Processing Events",
+        "description": "Stream caller-visible processing snapshots without buffering or token exposure.",
+        "operationId": "processing_events",
+        "responses": {
+          "200": {
+            "description": "Caller-visible processing snapshots",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/sources": {
+      "get": {
+        "summary": "Sources",
+        "description": "Return one read-only page of visible source documents.",
+        "operationId": "sources",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/findings": {
+      "get": {
+        "summary": "Findings",
+        "description": "Return one chronological page of visible current findings.",
+        "operationId": "findings",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/subjects": {
+      "get": {
+        "summary": "Subjects",
+        "description": "Return one page of visible subject claims and graph degrees.",
+        "operationId": "subjects",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/themes": {
+      "get": {
+        "summary": "Themes",
+        "description": "Return every visible graph theme and its bounded member preview.",
+        "operationId": "themes",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemePage"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/graph": {
+      "get": {
+        "summary": "Graph",
+        "description": "Return one bounded latest-finding relationship graph.",
+        "operationId": "graph",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 40,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GraphSlice"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/recall": {
@@ -99,94 +524,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Answer"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/remember": {
-      "post": {
-        "summary": "Remember",
-        "description": "Store text now or preserve one URI original, returning its write receipt.",
-        "operationId": "remember",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "properties": {
-                  "text": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Text"
-                  },
-                  "source_uri": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Source Uri"
-                  },
-                  "scopes": {
-                    "anyOf": [
-                      {
-                        "items": {
-                          "type": "string",
-                          "minLength": 1
-                        },
-                        "type": "array"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "preserve_source": {
-                    "type": "boolean",
-                    "title": "Preserve Source",
-                    "default": false
-                  }
-                },
-                "type": "object",
-                "title": "RememberRequest",
-                "description": "One browser memory write, text now or a preserved source URI."
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/WriteResult"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ArtifactReceipt"
-                    }
-                  ],
-                  "title": "Response Remember"
                 }
               }
             }
@@ -623,6 +960,327 @@
         "title": "ArtifactView",
         "description": "Human-facing progress for one visible original without storage internals."
       },
+      "CallerStatus": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Username"
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
+          },
+          "anonymous": {
+            "type": "boolean",
+            "title": "Anonymous",
+            "default": false
+          },
+          "organizations": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationStatus"
+            },
+            "type": "array",
+            "title": "Organizations",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "username",
+          "avatar",
+          "label",
+          "roles",
+          "anonymous",
+          "organizations"
+        ],
+        "title": "CallerStatus",
+        "description": "Directory-safe caller identity and current Logto-derived authority."
+      },
+      "Confidence": {
+        "type": "string",
+        "enum": [
+          "high",
+          "medium",
+          "low",
+          "unavailable"
+        ]
+      },
+      "ETAStatus": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "estimating",
+          "insufficient_history",
+          "blocked"
+        ]
+      },
+      "FindingPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/FindingView"
+            },
+            "type": "array",
+            "title": "Rows",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "offset",
+          "limit",
+          "rows"
+        ],
+        "title": "FindingPage",
+        "description": "One bounded chronological finding page."
+      },
+      "FindingView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Id"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "predicate": {
+            "type": "string",
+            "title": "Predicate"
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid5",
+            "title": "Subject Id"
+          },
+          "subject_name": {
+            "type": "string",
+            "title": "Subject Name"
+          },
+          "object_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid5"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Id"
+          },
+          "object_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Object Name"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded At"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid7"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Title"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "statement",
+          "predicate",
+          "subject_id",
+          "subject_name",
+          "object_id",
+          "object_name",
+          "recorded_at",
+          "source_id",
+          "source_title",
+          "scopes"
+        ],
+        "title": "FindingView",
+        "description": "One visible current finding and its graph endpoints."
+      },
+      "GraphEdge": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "format": "uuid5",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "format": "uuid5",
+            "title": "Target"
+          },
+          "predicate": {
+            "type": "string",
+            "title": "Predicate"
+          },
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "target",
+          "predicate",
+          "statement"
+        ],
+        "title": "GraphEdge",
+        "description": "One labeled current finding connecting two subject nodes."
+      },
+      "GraphNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid5",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "degree": {
+            "type": "integer",
+            "title": "Degree"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "degree"
+        ],
+        "title": "GraphNode",
+        "description": "One subject node in the deterministic relationship graph."
+      },
+      "GraphSlice": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "type": "array",
+            "title": "Nodes",
+            "default": []
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges",
+            "default": []
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges",
+          "truncated"
+        ],
+        "title": "GraphSlice",
+        "description": "One hard-bounded latest-finding graph with an accessible edge list."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -697,6 +1355,18 @@
         ],
         "title": "Me",
         "description": "The signed-in caller's label and current organization standing from Logto."
+      },
+      "Operation": {
+        "type": "string",
+        "enum": [
+          "recall",
+          "remember_text",
+          "remember_file",
+          "share",
+          "artifact_read"
+        ],
+        "title": "Operation",
+        "description": "Public AIZK operations whose resource use needs attribution."
       },
       "OrganizationChange": {
         "properties": {
@@ -821,6 +1491,62 @@
         "title": "OrganizationProfile",
         "description": "One organization membership exactly as `GET /api/me` discloses it."
       },
+      "OrganizationStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Permissions",
+            "default": []
+          },
+          "writable": {
+            "type": "boolean",
+            "title": "Writable",
+            "default": false
+          },
+          "public": {
+            "type": "boolean",
+            "title": "Public",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "roles",
+          "permissions",
+          "writable",
+          "public"
+        ],
+        "title": "OrganizationStatus",
+        "description": "One caller-visible organization and its current effective authority."
+      },
       "OrganizationView": {
         "properties": {
           "name": {
@@ -904,6 +1630,173 @@
         "title": "Overview",
         "description": "Knowledge totals, usage, recent sources, and artifact processing states."
       },
+      "ProcessingReport": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProcessingState"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/StageEstimate"
+            },
+            "type": "array",
+            "title": "Stages"
+          },
+          "recallable_lower_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recallable Lower Seconds"
+          },
+          "recallable_upper_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recallable Upper Seconds"
+          },
+          "enriched_lower_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enriched Lower Seconds"
+          },
+          "enriched_upper_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enriched Upper Seconds"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactView"
+            },
+            "type": "array",
+            "title": "Recent",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "state",
+          "stages",
+          "recallable_lower_seconds",
+          "recallable_upper_seconds",
+          "enriched_lower_seconds",
+          "enriched_upper_seconds",
+          "recent"
+        ],
+        "title": "ProcessingReport",
+        "description": "Browser processing status with recent caller-visible source states."
+      },
+      "ProcessingState": {
+        "type": "string",
+        "enum": [
+          "idle",
+          "active",
+          "delayed"
+        ]
+      },
+      "ProcessingStatus": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProcessingState"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/StageEstimate"
+            },
+            "type": "array",
+            "title": "Stages"
+          },
+          "recallable_lower_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recallable Lower Seconds"
+          },
+          "recallable_upper_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recallable Upper Seconds"
+          },
+          "enriched_lower_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enriched Lower Seconds"
+          },
+          "enriched_upper_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enriched Upper Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "state",
+          "stages",
+          "recallable_lower_seconds",
+          "recallable_upper_seconds",
+          "enriched_lower_seconds",
+          "enriched_upper_seconds"
+        ],
+        "title": "ProcessingStatus",
+        "description": "Caller-visible processing stages and honest ETA ranges."
+      },
       "RecentSource": {
         "properties": {
           "source_uri": {
@@ -942,6 +1835,224 @@
         "title": "RecentSource",
         "description": "Presentation metadata for one source without exposing internal identifiers."
       },
+      "SourcePage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/SourceView"
+            },
+            "type": "array",
+            "title": "Rows",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "offset",
+          "limit",
+          "rows"
+        ],
+        "title": "SourcePage",
+        "description": "One bounded source catalog page."
+      },
+      "SourceView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "source_uri": {
+            "type": "string",
+            "title": "Source Uri",
+            "default": ""
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "kind",
+          "source_uri",
+          "observed_at",
+          "updated_at",
+          "scopes"
+        ],
+        "title": "SourceView",
+        "description": "One visible source with stable navigation and provenance metadata."
+      },
+      "StageEstimate": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "queued": {
+            "type": "integer",
+            "title": "Queued",
+            "default": 0
+          },
+          "running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running"
+          },
+          "failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed"
+          },
+          "completed_1h": {
+            "type": "integer",
+            "title": "Completed 1H",
+            "default": 0
+          },
+          "completed_24h": {
+            "type": "integer",
+            "title": "Completed 24H",
+            "default": 0
+          },
+          "progress_percent": {
+            "type": "integer",
+            "title": "Progress Percent",
+            "default": 0
+          },
+          "throughput_per_hour": {
+            "type": "number",
+            "title": "Throughput Per Hour",
+            "default": 0.0
+          },
+          "throughput_window_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Throughput Window Hours"
+          },
+          "lower_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lower Seconds"
+          },
+          "upper_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upper Seconds"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/Confidence",
+            "default": "unavailable"
+          },
+          "eta_status": {
+            "$ref": "#/components/schemas/ETAStatus",
+            "default": "insufficient_history"
+          },
+          "oldest_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "queued",
+          "running",
+          "failed",
+          "completed_1h",
+          "completed_24h",
+          "progress_percent",
+          "throughput_per_hour",
+          "throughput_window_hours",
+          "lower_seconds",
+          "upper_seconds",
+          "confidence",
+          "eta_status",
+          "oldest_at"
+        ],
+        "title": "StageEstimate",
+        "description": "One processing stage's visible workload and recent drain estimate."
+      },
       "State": {
         "type": "string",
         "enum": [
@@ -953,6 +2064,401 @@
         ],
         "title": "State",
         "description": "Durable processing state independent from PgQueuer's delivery state."
+      },
+      "StatusReport": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "caller": {
+            "$ref": "#/components/schemas/CallerStatus"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageStatus"
+          },
+          "processing": {
+            "$ref": "#/components/schemas/ProcessingStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "caller",
+          "usage",
+          "processing"
+        ],
+        "title": "StatusReport",
+        "description": "Identity, durable usage, and processing health for one caller."
+      },
+      "SubjectPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/SubjectView"
+            },
+            "type": "array",
+            "title": "Rows",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "offset",
+          "limit",
+          "rows"
+        ],
+        "title": "SubjectPage",
+        "description": "One bounded subject catalog page."
+      },
+      "SubjectView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Id"
+          },
+          "content_id": {
+            "type": "string",
+            "format": "uuid5",
+            "title": "Content Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "finding_count": {
+            "type": "integer",
+            "title": "Finding Count"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "content_id",
+          "name",
+          "type",
+          "updated_at",
+          "finding_count",
+          "scopes"
+        ],
+        "title": "SubjectView",
+        "description": "One visible subject claim with its current graph degree."
+      },
+      "ThemePage": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ThemeView"
+            },
+            "type": "array",
+            "title": "Rows",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows"
+        ],
+        "title": "ThemePage",
+        "description": "Every visible graph theme ordered by membership size."
+      },
+      "ThemeView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members",
+            "default": []
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "summary",
+          "member_count",
+          "members",
+          "updated_at",
+          "scopes"
+        ],
+        "title": "ThemeView",
+        "description": "One visible graph community with a bounded member preview."
+      },
+      "UsagePoint": {
+        "properties": {
+          "bucket": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Bucket"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/Operation"
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests"
+          },
+          "items": {
+            "type": "integer",
+            "title": "Items"
+          },
+          "request_bytes": {
+            "type": "integer",
+            "title": "Request Bytes"
+          },
+          "response_bytes": {
+            "type": "integer",
+            "title": "Response Bytes"
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "bucket",
+          "operation",
+          "requests",
+          "items",
+          "request_bytes",
+          "response_bytes",
+          "duration_ms"
+        ],
+        "title": "UsagePoint",
+        "description": "One operation's durable UTC daily usage bucket."
+      },
+      "UsageReport": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "recorded_through": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded Through"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/UsageSummary"
+          },
+          "lifetime": {
+            "$ref": "#/components/schemas/UsageSummary"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/UsagePoint"
+            },
+            "type": "array",
+            "title": "Points",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "recorded_through",
+          "days",
+          "start",
+          "summary",
+          "lifetime",
+          "points"
+        ],
+        "title": "UsageReport",
+        "description": "Selected-period and lifetime durable usage for the authenticated caller."
+      },
+      "UsageStatus": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "recorded_through": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recorded Through"
+          },
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/UsageSummary"
+          },
+          "lifetime": {
+            "$ref": "#/components/schemas/UsageSummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "generated_at",
+          "recorded_through",
+          "days",
+          "start",
+          "summary",
+          "lifetime"
+        ],
+        "title": "UsageStatus",
+        "description": "Compact period and lifetime usage without daily chart buckets."
+      },
+      "UsageSummary": {
+        "properties": {
+          "recalls": {
+            "type": "integer",
+            "title": "Recalls",
+            "default": 0
+          },
+          "remembers": {
+            "type": "integer",
+            "title": "Remembers",
+            "default": 0
+          },
+          "files": {
+            "type": "integer",
+            "title": "Files",
+            "default": 0
+          },
+          "shares": {
+            "type": "integer",
+            "title": "Shares",
+            "default": 0
+          },
+          "artifact_reads": {
+            "type": "integer",
+            "title": "Artifact Reads",
+            "default": 0
+          },
+          "requests": {
+            "type": "integer",
+            "title": "Requests",
+            "default": 0
+          },
+          "items": {
+            "type": "integer",
+            "title": "Items",
+            "default": 0
+          },
+          "request_bytes": {
+            "type": "integer",
+            "title": "Request Bytes",
+            "default": 0
+          },
+          "response_bytes": {
+            "type": "integer",
+            "title": "Response Bytes",
+            "default": 0
+          },
+          "uploaded_bytes": {
+            "type": "integer",
+            "title": "Uploaded Bytes",
+            "default": 0
+          },
+          "downloaded_bytes": {
+            "type": "integer",
+            "title": "Downloaded Bytes",
+            "default": 0
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "recalls",
+          "remembers",
+          "files",
+          "shares",
+          "artifact_reads",
+          "requests",
+          "items",
+          "request_bytes",
+          "response_bytes",
+          "uploaded_bytes",
+          "downloaded_bytes",
+          "duration_ms"
+        ],
+        "title": "UsageSummary",
+        "description": "Durable operation, item, transfer, and execution totals for one caller."
       },
       "UsageTotals": {
         "properties": {
@@ -1032,21 +2538,6 @@
           "type"
         ],
         "title": "ValidationError"
-      },
-      "WriteResult": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid7",
-            "title": "Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id"
-        ],
-        "title": "WriteResult",
-        "description": "Identify the durable source document created or updated by `remember`."
       }
     },
     "securitySchemes": {

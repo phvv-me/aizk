@@ -117,20 +117,38 @@ class Queue(FrozenModel):
         return True
 
     async def requeue_failed[PayloadT: QueuePayload](
-        self, job: type[QueueJob[PayloadT]], limit: int = 100
+        self,
+        job: type[QueueJob[PayloadT]],
+        limit: int = 100,
+        max_cycles: int | None = None,
     ) -> int:
         """Requeue up to `limit` retained failures for one typed job.
 
         The entrypoint filter runs in the query itself, so failures of other job types
-        can never occupy the window and hide this job's retained failures.
+        can never occupy the window and hide this job's retained failures. Automatic
+        recovery may cap terminal failure cycles while an explicit operator retry can
+        omit the cap.
         """
-        table = self.queries.qbe.settings.queue_table
-        rows = await self.queries.driver.fetch(
-            f"SELECT id FROM {table} WHERE status = 'failed' AND entrypoint = $1"
-            " ORDER BY created DESC LIMIT $2",
-            job.entrypoint,
-            limit,
-        )
+        names = self.queries.qbe.settings
+        if max_cycles is None:
+            rows = await self.queries.driver.fetch(
+                f"SELECT id FROM {names.queue_table}"
+                " WHERE status = 'failed' AND entrypoint = $1"
+                " ORDER BY updated LIMIT $2",
+                job.entrypoint,
+                limit,
+            )
+        else:
+            rows = await self.queries.driver.fetch(
+                f"SELECT job.id FROM {names.queue_table} AS job"
+                " WHERE job.status = 'failed' AND job.entrypoint = $1"
+                f" AND (SELECT count(*) FROM {names.queue_table_log} AS log"
+                " WHERE log.job_id = job.id AND log.status = 'failed') < $3"
+                " ORDER BY job.updated LIMIT $2",
+                job.entrypoint,
+                limit,
+                max_cycles,
+            )
         ids = [row["id"] for row in rows]
         if ids:
             await self.queries.requeue_jobs(ids)

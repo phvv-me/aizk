@@ -1,6 +1,7 @@
 <script lang="ts">
   import { enhance } from '$app/forms';
   import { Sparkles } from '@lucide/svelte';
+  import InfoTip from '$lib/components/InfoTip.svelte';
   import Markdown from '$lib/components/Markdown.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { Button } from '$lib/components/ui/button';
@@ -21,7 +22,13 @@
   class="mb-8 space-y-3"
   use:enhance={feedback('Recalled.', { reset: false, pending: (active) => (asking = active) })}
 >
-  <Label for="query">Question</Label>
+  <div class="flex items-center gap-2">
+    <Label for="query">Question</Label>
+    <InfoTip
+      label="How Recall works"
+      text="Recall searches source excerpts, current findings, themes, and recent session memory that your scopes allow. Evidence is ordered by merit and includes provenance labels."
+    />
+  </div>
   <Textarea
     id="query"
     name="query"
@@ -56,7 +63,8 @@
         <Markdown source={form.markdown} />
       {:else}
         <p class="text-muted-foreground text-sm" role="status">
-          Nothing recalled for this question yet. Add sources and try again.
+          Nothing recalled for this question yet. Add sources through a connected AIZK client and
+          try again.
         </p>
       {/if}
     </Card.Content>

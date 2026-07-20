@@ -67,8 +67,8 @@ for a deployment. Credentials and application secrets exist only in `.env`.
 Operators can inspect or repair the policy without using the dashboard.
 
 ```sh
-aizk logto audit
-aizk logto apply
+aizk admin auth audit
+aizk admin auth apply
 ```
 
 `write:memory` is an organization permission, not the `control` API resource permission carried by

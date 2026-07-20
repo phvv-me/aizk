@@ -2,6 +2,7 @@
   import { enhance } from '$app/forms';
   import { Plus, Trash2, UserPlus } from '@lucide/svelte';
   import { memberRoles } from '$lib/api';
+  import InfoTip from '$lib/components/InfoTip.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import { Badge } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
@@ -20,13 +21,19 @@
 
 <PageHeader
   title="Organizations"
-  description="Your memberships, roles and the member directories you may manage."
+  description="Review collaboration scopes and manage membership when your Logto role permits it."
 />
 
 <Card.Root class="mb-8">
   <Card.Header>
-    <Card.Title>Create an organization</Card.Title>
-    <Card.Description>Start a shared memory space and invite members to it.</Card.Description>
+    <div class="flex items-center gap-2">
+      <Card.Title>Create an organization</Card.Title>
+      <InfoTip
+        label="What an organization does"
+        text="An organization is a Logto-owned collaboration scope. Membership grants shared recall, while viewer, editor, and admin roles control collaboration permissions."
+      />
+    </div>
+    <Card.Description>Start a shared memory space and manage its members here.</Card.Description>
   </Card.Header>
   <Card.Content>
     <form

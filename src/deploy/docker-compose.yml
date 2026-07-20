@@ -24,15 +24,17 @@ x-aizk-runtime: &aizk-runtime
     AIZK_DB_HOST: db
     AIZK_DB_PORT: "5432"
     AIZK_EMBED_URL: http://vllm-emb:8000/v1
-    AIZK_LLM_URL: http://vllm-llm:8000/v1
+    # `.env` also supports host-side CLI access through AIZK_LLM_URL. Keep the container route
+    # separate so a host localhost URL cannot silently break worker access to the Compose service.
+    AIZK_LLM_URL: ${AIZK_RUNTIME_LLM_URL:-http://vllm-llm:8000/v1}
     AIZK_RERANK_URL: http://vllm-rerank:8000
     AIZK_GLINER_URL: http://gliner:8000
     AIZK_EMBED_MODEL: ${AIZK_EMBED_MODEL:-qwen3-vl-emb}
     AIZK_LLM_MODEL: ${AIZK_LLM_MODEL:-extractor}
-    AIZK_LLM_EXTRACT_MAX_TOKENS: ${AIZK_LLM_EXTRACT_MAX_TOKENS:-1024}
+    AIZK_LLM_EXTRACT_MAX_TOKENS: ${AIZK_LLM_EXTRACT_MAX_TOKENS:-768}
     AIZK_LLM_RESPONSE_MAX_TOKENS: ${AIZK_LLM_RESPONSE_MAX_TOKENS:-512}
     AIZK_RERANK_MODEL: ${AIZK_RERANK_MODEL:-qwen3-reranker}
-    AIZK_GRAPH_BUILD_CONCURRENCY: ${AIZK_GRAPH_BUILD_CONCURRENCY:-48}
+    AIZK_GRAPH_BUILD_CONCURRENCY: ${AIZK_GRAPH_BUILD_CONCURRENCY:-4}
     AIZK_LOG_JSON: ${AIZK_LOG_JSON:-1}
     AIZK_QUEUE_BATCH_SIZE: ${AIZK_QUEUE_BATCH_SIZE:-64}
     AIZK_DISPLAY_TIMEZONE: ${AIZK_DISPLAY_TIMEZONE:-Asia/Tokyo}
@@ -300,24 +302,24 @@ services:
               device_ids: ["${AIZK_EMBED_GPU_DEVICE:-0}"]
               capabilities: ["gpu"]
 
-  # vLLM serves schema-constrained graph extraction. Every sizing knob stays in the shared env
-  # file, which supports either a small co-resident model or a dedicated-GPU model with no second
-  # Compose file. The served alias must match AIZK_LLM_MODEL.
+  # vLLM serves schema-constrained graph extraction. Gemma 4 12B occupies the dedicated second
+  # GPU while the embedding, reranking, and GLiNER lanes share the first GPU. Every sizing knob
+  # stays in the shared env file. The served alias must match AIZK_LLM_MODEL.
   vllm-llm:
     image: vllm/vllm-openai:v0.24.0
     environment:
       HF_XET_HIGH_PERFORMANCE: "${AIZK_HF_XET_HIGH_PERFORMANCE:-0}"
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
     command:
-      - "${AIZK_LLM_CHECKPOINT:-google/gemma-4-E2B-it-qat-w4a16-ct}"
+      - "${AIZK_LLM_CHECKPOINT:-google/gemma-4-12B-it-qat-w4a16-ct}"
       - "--quantization"
       - "${AIZK_LLM_QUANTIZATION:-compressed-tensors}"
       - "--gpu-memory-utilization"
-      - "${AIZK_LLM_GPU_MEM_UTIL:-0.45}"
+      - "${AIZK_LLM_GPU_MEM_UTIL:-0.97}"
       - "--max-model-len"
       - "${AIZK_LLM_MAX_MODEL_LEN:-8192}"
       - "--max-num-seqs"
-      - "${AIZK_LLM_MAX_NUM_SEQS:-48}"
+      - "${AIZK_LLM_MAX_NUM_SEQS:-4}"
       - "--kv-cache-dtype"
       - "${AIZK_LLM_KV_CACHE_DTYPE:-bfloat16}"
       - "--enable-prefix-caching"
@@ -348,7 +350,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["${AIZK_LLM_GPU_DEVICE:-0}"]
+              device_ids: ["${AIZK_LLM_GPU_DEVICE:-1}"]
               capabilities: ["gpu"]
 
   # vLLM serves Qwen3-Reranker-4B over /v1/rerank, the cross-encoder second pass recall
@@ -446,7 +448,7 @@ services:
   # service carries the database-owner credential and exits before public traffic is accepted.
   setup:
     <<: *aizk-runtime
-    command: ["db", "setup"]
+    command: ["admin", "database", "setup"]
     depends_on:
       cloudflared:
         condition: service_healthy
@@ -510,7 +512,7 @@ services:
   api:
     <<: *aizk-runtime
     profiles: ["public"]
-    command: ["serve-api"]
+    command: ["admin", "server", "api"]
     depends_on:
       web-check:
         condition: service_completed_successfully
@@ -535,7 +537,7 @@ services:
       AIZK_API_HOST: 0.0.0.0
       AIZK_API_PORT: "8010"
     healthcheck:
-      test: ["CMD", "curl", "-sS", "--max-time", "2", "-o", "/dev/null", "http://127.0.0.1:8010/api/me"]
+      test: ["CMD", "curl", "-fsS", "--max-time", "2", "-o", "/dev/null", "http://127.0.0.1:8010/healthz"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -546,7 +548,7 @@ services:
   web-check:
     <<: *aizk-runtime
     profiles: ["public"]
-    command: ["check-web"]
+    command: ["admin", "auth", "check-web"]
     depends_on:
       public-check:
         condition: service_completed_successfully
@@ -641,7 +643,7 @@ services:
   # in the MCP server therefore cannot obtain the owner connection through its environment.
   worker:
     <<: *aizk-runtime
-    command: ["worker"]
+    command: ["admin", "server", "worker"]
     depends_on:
       setup:
         condition: service_completed_successfully
@@ -825,7 +827,7 @@ services:
   logto-setup:
     <<: *aizk-runtime
     profiles: ["public"]
-    command: ["logto", "apply"]
+    command: ["admin", "auth", "apply"]
     depends_on:
       cloudflared:
         condition: service_healthy
@@ -841,7 +843,7 @@ services:
   public-check:
     <<: *aizk-runtime
     profiles: ["public"]
-    command: ["check-public"]
+    command: ["admin", "auth", "check-public"]
     depends_on:
       logto-setup:
         condition: service_completed_successfully

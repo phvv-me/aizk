@@ -53,6 +53,7 @@ class Memory:
         annotate_operation(
             Usage.Event.Operation.recall,
             frozenset().union(*(candidate.scopes for candidate in candidates)),
+            len(candidates),
         )
         scope_details = {self.user.id: RecallResult.Scope(name="private")} | {
             organization.id: RecallResult.Scope(
@@ -110,6 +111,6 @@ class Memory:
     async def share(self, documents: list[UUID7], scopes: ScopeNames | None = None) -> ShareResult:
         """Copy visible documents into one authorized destination without moving sources."""
         target = self.user.write_scope(scopes)
-        annotate_operation(Usage.Event.Operation.share, target)
         shared = await graph.promote(documents, target, self.user)
+        annotate_operation(Usage.Event.Operation.share, target, shared)
         return ShareResult(shared=shared)

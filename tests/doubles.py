@@ -140,6 +140,7 @@ class FakeLLM:
             timeout=settings.llm_timeout,
             response_max_tokens=settings.llm_response_max_tokens,
             chat_template_kwargs=settings.llm_chat_template_kwargs,
+            extra_body=settings.llm_extra_body,
         )
 
     def register(self, schema: type[BaseModel], response: BaseModel) -> None:

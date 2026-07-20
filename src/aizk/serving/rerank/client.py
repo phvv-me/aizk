@@ -10,6 +10,8 @@ class RerankClient(HttpService):
     instruction: str
     query_template: str
     document_template: str
+    query_max_tokens: int
+    document_max_tokens: int
 
     @classmethod
     def from_settings(cls, config: Settings) -> RerankClient:
@@ -25,6 +27,8 @@ class RerankClient(HttpService):
             instruction=config.rerank_instruction,
             query_template=config.rerank_query_template,
             document_template=config.rerank_document_template,
+            query_max_tokens=config.rerank_query_max_tokens,
+            document_max_tokens=config.rerank_document_max_tokens,
         )
 
     def templated(self, query: str, texts: list[str]) -> tuple[str, list[str]]:
@@ -47,7 +51,13 @@ class RerankClient(HttpService):
         wrapped_query, wrapped_texts = self.templated(query, texts)
         response = await self.post(
             "rerank",
-            RerankRequest(model=self.model, query=wrapped_query, documents=wrapped_texts),
+            RerankRequest(
+                model=self.model,
+                query=wrapped_query,
+                documents=wrapped_texts,
+                max_tokens_per_query=self.query_max_tokens,
+                max_tokens_per_doc=self.document_max_tokens,
+            ),
             RerankResponse,
         )
         if len(response.results) != len(texts):

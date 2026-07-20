@@ -1,5 +1,5 @@
-# The aizk image, one image for the server, the worker, and the backup, since `serve-mcp` gathers
-# the worker on its own event loop and the backup is a scheduled task that worker fires.
+# The aizk image, one image for the server, the worker, and backups, since the MCP server gathers
+# the worker on its own event loop and backup is a scheduled task that worker fires.
 #
 # Multi-stage: the builder carries a C toolchain because on Python 3.14 a few dependencies
 # (asyncpg among them) ship no wheel yet and compile from source, while the runtime stays slim,
@@ -17,8 +17,8 @@ COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS runtime
-# postgresql-client-18, version-matched to the vchord pg18 server, so `aizk backup`/`restore` run
-# right inside this container against the db service with no docker-exec-into-a-sibling
+# postgresql-client-18, version-matched to the vchord pg18 server, so the admin backup and restore
+# commands run right inside this container against the db service with no docker-exec-into-a-sibling
 # gymnastics. The PGDG apt repo carries the 18 client the base's own
 # older client would refuse to dump an 18 server with.
 RUN apt-get update \
@@ -56,7 +56,7 @@ RUN uv pip install --python .venv --reinstall --no-deps /tmp/patos \
 # The built environment is immutable at runtime, so the command needs no resolver wrapper.
 USER 10001:10001
 ENTRYPOINT ["aizk"]
-CMD ["serve-mcp"]
+CMD ["admin", "server", "mcp"]
 
 # Build the SvelteKit interface with pnpm and keep only its production node_modules. The API
 # origin and every Logto credential are runtime environment, so the build bakes no deployment
@@ -86,7 +86,7 @@ CMD ["node", "build"]
 # the production runtime remains free of test tools.
 FROM runtime AS integration-test
 USER root
-RUN uv sync --frozen --extra dev \
+RUN uv sync --frozen --group dev \
     && uv pip install --python .venv --reinstall --no-deps /tmp/patos \
     && uv pip install --python .venv --reinstall --no-deps /tmp/rls \
     && uv pip install --python .venv --reinstall --no-deps /tmp/mainboard \

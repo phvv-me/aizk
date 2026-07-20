@@ -65,6 +65,186 @@ export type ArtifactView = {
 };
 
 /**
+ * CallerStatus
+ *
+ * Directory-safe caller identity and current Logto-derived authority.
+ */
+export type CallerStatus = {
+    /**
+     * Name
+     */
+    name: string | null;
+    /**
+     * Username
+     */
+    username: string | null;
+    /**
+     * Avatar
+     */
+    avatar: string | null;
+    /**
+     * Label
+     */
+    label: string | null;
+    /**
+     * Roles
+     */
+    roles: Array<string>;
+    /**
+     * Anonymous
+     */
+    anonymous: boolean;
+    /**
+     * Organizations
+     */
+    organizations: Array<OrganizationStatus>;
+};
+
+export type Confidence = 'high' | 'medium' | 'low' | 'unavailable';
+
+export type EtaStatus = 'complete' | 'estimating' | 'insufficient_history' | 'blocked';
+
+/**
+ * FindingPage
+ *
+ * One bounded chronological finding page.
+ */
+export type FindingPage = {
+    /**
+     * Total
+     */
+    total: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Rows
+     */
+    rows: Array<FindingView>;
+};
+
+/**
+ * FindingView
+ *
+ * One visible current finding and its graph endpoints.
+ */
+export type FindingView = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Statement
+     */
+    statement: string;
+    /**
+     * Predicate
+     */
+    predicate: string;
+    /**
+     * Subject Id
+     */
+    subject_id: string;
+    /**
+     * Subject Name
+     */
+    subject_name: string;
+    /**
+     * Object Id
+     */
+    object_id: string | null;
+    /**
+     * Object Name
+     */
+    object_name: string | null;
+    /**
+     * Recorded At
+     */
+    recorded_at: string;
+    /**
+     * Source Id
+     */
+    source_id: string | null;
+    /**
+     * Source Title
+     */
+    source_title: string | null;
+    /**
+     * Scopes
+     */
+    scopes: Array<string>;
+};
+
+/**
+ * GraphEdge
+ *
+ * One labeled current finding connecting two subject nodes.
+ */
+export type GraphEdge = {
+    /**
+     * Source
+     */
+    source: string;
+    /**
+     * Target
+     */
+    target: string;
+    /**
+     * Predicate
+     */
+    predicate: string;
+    /**
+     * Statement
+     */
+    statement: string;
+};
+
+/**
+ * GraphNode
+ *
+ * One subject node in the deterministic relationship graph.
+ */
+export type GraphNode = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Degree
+     */
+    degree: number;
+};
+
+/**
+ * GraphSlice
+ *
+ * One hard-bounded latest-finding graph with an accessible edge list.
+ */
+export type GraphSlice = {
+    /**
+     * Nodes
+     */
+    nodes: Array<GraphNode>;
+    /**
+     * Edges
+     */
+    edges: Array<GraphEdge>;
+    /**
+     * Truncated
+     */
+    truncated: boolean;
+};
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -113,6 +293,13 @@ export type Me = {
      */
     organizations: Array<OrganizationProfile>;
 };
+
+/**
+ * Operation
+ *
+ * Public AIZK operations whose resource use needs attribution.
+ */
+export type Operation = 'recall' | 'remember_text' | 'remember_file' | 'share' | 'artifact_read';
 
 /**
  * OrganizationChange
@@ -195,6 +382,38 @@ export type OrganizationProfile = {
 };
 
 /**
+ * OrganizationStatus
+ *
+ * One caller-visible organization and its current effective authority.
+ */
+export type OrganizationStatus = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Description
+     */
+    description: string | null;
+    /**
+     * Roles
+     */
+    roles: Array<string>;
+    /**
+     * Permissions
+     */
+    permissions: Array<string>;
+    /**
+     * Writable
+     */
+    writable: boolean;
+    /**
+     * Public
+     */
+    public: boolean;
+};
+
+/**
  * OrganizationView
  *
  * One current membership and its exact live administration capabilities.
@@ -245,6 +464,78 @@ export type Overview = {
 };
 
 /**
+ * ProcessingReport
+ *
+ * Browser processing status with recent caller-visible source states.
+ */
+export type ProcessingReport = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    state: ProcessingState;
+    /**
+     * Stages
+     */
+    stages: Array<StageEstimate>;
+    /**
+     * Recallable Lower Seconds
+     */
+    recallable_lower_seconds: number | null;
+    /**
+     * Recallable Upper Seconds
+     */
+    recallable_upper_seconds: number | null;
+    /**
+     * Enriched Lower Seconds
+     */
+    enriched_lower_seconds: number | null;
+    /**
+     * Enriched Upper Seconds
+     */
+    enriched_upper_seconds: number | null;
+    /**
+     * Recent
+     */
+    recent: Array<ArtifactView>;
+};
+
+export type ProcessingState = 'idle' | 'active' | 'delayed';
+
+/**
+ * ProcessingStatus
+ *
+ * Caller-visible processing stages and honest ETA ranges.
+ */
+export type ProcessingStatus = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    state: ProcessingState;
+    /**
+     * Stages
+     */
+    stages: Array<StageEstimate>;
+    /**
+     * Recallable Lower Seconds
+     */
+    recallable_lower_seconds: number | null;
+    /**
+     * Recallable Upper Seconds
+     */
+    recallable_upper_seconds: number | null;
+    /**
+     * Enriched Lower Seconds
+     */
+    enriched_lower_seconds: number | null;
+    /**
+     * Enriched Upper Seconds
+     */
+    enriched_upper_seconds: number | null;
+};
+
+/**
  * RecentSource
  *
  * Presentation metadata for one source without exposing internal identifiers.
@@ -273,11 +564,397 @@ export type RecentSource = {
 };
 
 /**
+ * SourcePage
+ *
+ * One bounded source catalog page.
+ */
+export type SourcePage = {
+    /**
+     * Total
+     */
+    total: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Rows
+     */
+    rows: Array<SourceView>;
+};
+
+/**
+ * SourceView
+ *
+ * One visible source with stable navigation and provenance metadata.
+ */
+export type SourceView = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Title
+     */
+    title: string;
+    /**
+     * Kind
+     */
+    kind: string;
+    /**
+     * Source Uri
+     */
+    source_uri: string;
+    /**
+     * Observed At
+     */
+    observed_at: string | null;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Scopes
+     */
+    scopes: Array<string>;
+};
+
+/**
+ * StageEstimate
+ *
+ * One processing stage's visible workload and recent drain estimate.
+ */
+export type StageEstimate = {
+    /**
+     * Key
+     */
+    key: string;
+    /**
+     * Queued
+     */
+    queued: number;
+    /**
+     * Running
+     */
+    running: number | null;
+    /**
+     * Failed
+     */
+    failed: number | null;
+    /**
+     * Completed 1H
+     */
+    completed_1h: number;
+    /**
+     * Completed 24H
+     */
+    completed_24h: number;
+    /**
+     * Progress Percent
+     */
+    progress_percent: number;
+    /**
+     * Throughput Per Hour
+     */
+    throughput_per_hour: number;
+    /**
+     * Throughput Window Hours
+     */
+    throughput_window_hours: number | null;
+    /**
+     * Lower Seconds
+     */
+    lower_seconds: number | null;
+    /**
+     * Upper Seconds
+     */
+    upper_seconds: number | null;
+    confidence: Confidence;
+    eta_status: EtaStatus;
+    /**
+     * Oldest At
+     */
+    oldest_at: string | null;
+};
+
+/**
  * State
  *
  * Durable processing state independent from PgQueuer's delivery state.
  */
 export type State = 'pending' | 'queued' | 'processing' | 'ready' | 'failed';
+
+/**
+ * StatusReport
+ *
+ * Identity, durable usage, and processing health for one caller.
+ */
+export type StatusReport = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    caller: CallerStatus;
+    usage: UsageStatus;
+    processing: ProcessingStatus;
+};
+
+/**
+ * SubjectPage
+ *
+ * One bounded subject catalog page.
+ */
+export type SubjectPage = {
+    /**
+     * Total
+     */
+    total: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Limit
+     */
+    limit: number;
+    /**
+     * Rows
+     */
+    rows: Array<SubjectView>;
+};
+
+/**
+ * SubjectView
+ *
+ * One visible subject claim with its current graph degree.
+ */
+export type SubjectView = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Content Id
+     */
+    content_id: string;
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Type
+     */
+    type: string;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Finding Count
+     */
+    finding_count: number;
+    /**
+     * Scopes
+     */
+    scopes: Array<string>;
+};
+
+/**
+ * ThemePage
+ *
+ * Every visible graph theme ordered by membership size.
+ */
+export type ThemePage = {
+    /**
+     * Rows
+     */
+    rows: Array<ThemeView>;
+};
+
+/**
+ * ThemeView
+ *
+ * One visible graph community with a bounded member preview.
+ */
+export type ThemeView = {
+    /**
+     * Id
+     */
+    id: string;
+    /**
+     * Label
+     */
+    label: string;
+    /**
+     * Summary
+     */
+    summary: string;
+    /**
+     * Member Count
+     */
+    member_count: number;
+    /**
+     * Members
+     */
+    members: Array<string>;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Scopes
+     */
+    scopes: Array<string>;
+};
+
+/**
+ * UsagePoint
+ *
+ * One operation's durable UTC daily usage bucket.
+ */
+export type UsagePoint = {
+    /**
+     * Bucket
+     */
+    bucket: string;
+    operation: Operation;
+    /**
+     * Requests
+     */
+    requests: number;
+    /**
+     * Items
+     */
+    items: number;
+    /**
+     * Request Bytes
+     */
+    request_bytes: number;
+    /**
+     * Response Bytes
+     */
+    response_bytes: number;
+    /**
+     * Duration Ms
+     */
+    duration_ms: number;
+};
+
+/**
+ * UsageReport
+ *
+ * Selected-period and lifetime durable usage for the authenticated caller.
+ */
+export type UsageReport = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    /**
+     * Recorded Through
+     */
+    recorded_through: string;
+    /**
+     * Days
+     */
+    days: number;
+    /**
+     * Start
+     */
+    start: string;
+    summary: UsageSummary;
+    lifetime: UsageSummary;
+    /**
+     * Points
+     */
+    points: Array<UsagePoint>;
+};
+
+/**
+ * UsageStatus
+ *
+ * Compact period and lifetime usage without daily chart buckets.
+ */
+export type UsageStatus = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    /**
+     * Recorded Through
+     */
+    recorded_through: string;
+    /**
+     * Days
+     */
+    days: number;
+    /**
+     * Start
+     */
+    start: string;
+    summary: UsageSummary;
+    lifetime: UsageSummary;
+};
+
+/**
+ * UsageSummary
+ *
+ * Durable operation, item, transfer, and execution totals for one caller.
+ */
+export type UsageSummary = {
+    /**
+     * Recalls
+     */
+    recalls: number;
+    /**
+     * Remembers
+     */
+    remembers: number;
+    /**
+     * Files
+     */
+    files: number;
+    /**
+     * Shares
+     */
+    shares: number;
+    /**
+     * Artifact Reads
+     */
+    artifact_reads: number;
+    /**
+     * Requests
+     */
+    requests: number;
+    /**
+     * Items
+     */
+    items: number;
+    /**
+     * Request Bytes
+     */
+    request_bytes: number;
+    /**
+     * Response Bytes
+     */
+    response_bytes: number;
+    /**
+     * Uploaded Bytes
+     */
+    uploaded_bytes: number;
+    /**
+     * Downloaded Bytes
+     */
+    downloaded_bytes: number;
+    /**
+     * Duration Ms
+     */
+    duration_ms: number;
+};
 
 /**
  * UsageTotals
@@ -335,16 +1012,18 @@ export type ValidationError = {
     };
 };
 
-/**
- * WriteResult
- *
- * Identify the durable source document created or updated by `remember`.
- */
-export type WriteResult = {
+export type HealthData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/healthz';
+};
+
+export type HealthResponses = {
     /**
-     * Id
+     * Successful Response
      */
-    id: string;
+    200: unknown;
 };
 
 export type MeData = {
@@ -363,6 +1042,36 @@ export type MeResponses = {
 
 export type MeResponse = MeResponses[keyof MeResponses];
 
+export type StatusData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Days
+         */
+        days?: number;
+    };
+    url: '/api/status';
+};
+
+export type StatusErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type StatusError = StatusErrors[keyof StatusErrors];
+
+export type StatusResponses = {
+    /**
+     * Successful Response
+     */
+    200: StatusReport;
+};
+
+export type StatusResponse = StatusResponses[keyof StatusResponses];
+
 export type OverviewData = {
     body?: never;
     path?: never;
@@ -378,6 +1087,228 @@ export type OverviewResponses = {
 };
 
 export type OverviewResponse = OverviewResponses[keyof OverviewResponses];
+
+export type UsageData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Days
+         */
+        days?: number;
+    };
+    url: '/api/usage';
+};
+
+export type UsageErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type UsageError = UsageErrors[keyof UsageErrors];
+
+export type UsageResponses = {
+    /**
+     * Successful Response
+     */
+    200: UsageReport;
+};
+
+export type UsageResponse = UsageResponses[keyof UsageResponses];
+
+export type ProcessingData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/processing';
+};
+
+export type ProcessingResponses = {
+    /**
+     * Successful Response
+     */
+    200: ProcessingReport;
+};
+
+export type ProcessingResponse = ProcessingResponses[keyof ProcessingResponses];
+
+export type ProcessingEventsData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/processing/events';
+};
+
+export type ProcessingEventsResponses = {
+    /**
+     * Caller-visible processing snapshots
+     */
+    200: string;
+};
+
+export type ProcessingEventsResponse = ProcessingEventsResponses[keyof ProcessingEventsResponses];
+
+export type SourcesData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search
+         */
+        search?: string;
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/sources';
+};
+
+export type SourcesErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type SourcesError = SourcesErrors[keyof SourcesErrors];
+
+export type SourcesResponses = {
+    /**
+     * Successful Response
+     */
+    200: SourcePage;
+};
+
+export type SourcesResponse = SourcesResponses[keyof SourcesResponses];
+
+export type FindingsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search
+         */
+        search?: string;
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/findings';
+};
+
+export type FindingsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type FindingsError = FindingsErrors[keyof FindingsErrors];
+
+export type FindingsResponses = {
+    /**
+     * Successful Response
+     */
+    200: FindingPage;
+};
+
+export type FindingsResponse = FindingsResponses[keyof FindingsResponses];
+
+export type SubjectsData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Search
+         */
+        search?: string;
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
+    url: '/api/subjects';
+};
+
+export type SubjectsErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type SubjectsError = SubjectsErrors[keyof SubjectsErrors];
+
+export type SubjectsResponses = {
+    /**
+     * Successful Response
+     */
+    200: SubjectPage;
+};
+
+export type SubjectsResponse = SubjectsResponses[keyof SubjectsResponses];
+
+export type ThemesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/themes';
+};
+
+export type ThemesResponses = {
+    /**
+     * Successful Response
+     */
+    200: ThemePage;
+};
+
+export type ThemesResponse = ThemesResponses[keyof ThemesResponses];
+
+export type GraphData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+    };
+    url: '/api/graph';
+};
+
+export type GraphErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type GraphError = GraphErrors[keyof GraphErrors];
+
+export type GraphResponses = {
+    /**
+     * Successful Response
+     */
+    200: GraphSlice;
+};
+
+export type GraphResponse = GraphResponses[keyof GraphResponses];
 
 export type RecallData = {
     /**
@@ -408,43 +1339,6 @@ export type RecallResponses = {
 };
 
 export type RecallResponse = RecallResponses[keyof RecallResponses];
-
-export type RememberData = {
-    /**
-     * RememberRequest
-     *
-     * One browser memory write, text now or a preserved source URI.
-     */
-    body: {
-        /**
-         * Text
-         */
-        text?: string | null;
-        /**
-         * Source Uri
-         */
-        source_uri?: string | null;
-        scopes?: Array<string> | null;
-        /**
-         * Preserve Source
-         */
-        preserve_source?: boolean;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/remember';
-};
-
-export type RememberResponses = {
-    /**
-     * Response Remember
-     *
-     * Successful Response
-     */
-    200: WriteResult | ArtifactReceipt;
-};
-
-export type RememberResponse = RememberResponses[keyof RememberResponses];
 
 export type ReceiveUploadData = {
     body: Blob | File;

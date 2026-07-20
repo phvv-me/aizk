@@ -1,6 +1,18 @@
 import type { LogtoClient } from '@logto/sveltekit';
 import { fail, type ActionFailure } from '@sveltejs/kit';
-import type { Answer, Me, OrganizationDirectory, Overview, WriteReceipt } from '$lib/api';
+import type {
+  Answer,
+  FindingPage,
+  GraphSlice,
+  Me,
+  OrganizationDirectory,
+  Overview,
+  ProcessingReport,
+  SourcePage,
+  SubjectPage,
+  ThemePage,
+  UsageReport
+} from '$lib/api';
 import * as sdk from '$lib/api/generated';
 import { createClient } from '$lib/api/generated/client';
 import { settings } from './settings';
@@ -64,16 +76,50 @@ export class ApiClient {
     return unwrap(await sdk.overview({ client: await this.client() }));
   }
 
-  async recall(query: string): Promise<Answer> {
-    return unwrap(await sdk.recall({ client: await this.client(), body: { query } }));
+  async usage(days = 30): Promise<UsageReport> {
+    return unwrap(await sdk.usage({ client: await this.client(), query: { days } }));
   }
 
-  async remember(input: {
-    text?: string;
-    source_uri?: string;
-    preserve_source?: boolean;
-  }): Promise<WriteReceipt> {
-    return unwrap(await sdk.remember({ client: await this.client(), body: input }));
+  async processing(): Promise<ProcessingReport> {
+    return unwrap(await sdk.processing({ client: await this.client() }));
+  }
+
+  async processingEvents(signal: AbortSignal): Promise<Response> {
+    const token = await this.logtoClient.getAccessToken(settings.apiResource);
+    return fetch(`${settings.apiUrl}/api/processing/events`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal
+    });
+  }
+
+  async sources(search = '', limit = 50, offset = 0): Promise<SourcePage> {
+    return unwrap(
+      await sdk.sources({ client: await this.client(), query: { search, limit, offset } })
+    );
+  }
+
+  async findings(search = '', limit = 50, offset = 0): Promise<FindingPage> {
+    return unwrap(
+      await sdk.findings({ client: await this.client(), query: { search, limit, offset } })
+    );
+  }
+
+  async subjects(search = '', limit = 50, offset = 0): Promise<SubjectPage> {
+    return unwrap(
+      await sdk.subjects({ client: await this.client(), query: { search, limit, offset } })
+    );
+  }
+
+  async themes(): Promise<ThemePage> {
+    return unwrap(await sdk.themes({ client: await this.client() }));
+  }
+
+  async graph(limit = 40): Promise<GraphSlice> {
+    return unwrap(await sdk.graph({ client: await this.client(), query: { limit } }));
+  }
+
+  async recall(query: string): Promise<Answer> {
+    return unwrap(await sdk.recall({ client: await this.client(), body: { query } }));
   }
 
   async organizations(): Promise<OrganizationDirectory> {

@@ -1,9 +1,10 @@
 import asyncio
-from types import SimpleNamespace
+from collections.abc import Callable
+from types import ModuleType, SimpleNamespace
 from typing import cast
 
 import pytest
-from bg_doubles import RecordingPg, fake_artifact_services, fake_runtime
+from bg_doubles import RecordingPg, RecordingQueue, fake_artifact_services, fake_runtime
 from doubles import AsyncContext
 from hypothesis import given
 from hypothesis import strategies as st
@@ -18,6 +19,8 @@ from aizk.background.jobs.maintenance import (
     ArtifactDispatchJob,
     ArtifactIntegrityJob,
     BackupJob,
+    ChunkDispatchJob,
+    ChunkRecoveryJob,
     CommunitiesJob,
     DecayJob,
     DedupJob,
@@ -29,6 +32,7 @@ from aizk.background.jobs.maintenance import (
     ScopedScheduledJob,
     SessionPromoteJob,
     SystemScheduledJob,
+    retry_failed_profile_projections,
 )
 from aizk.config import settings
 from aizk.store import Watermark
@@ -37,7 +41,7 @@ from aizk.types import Scopes
 
 
 @given(
-    flags=st.lists(st.booleans(), min_size=11, max_size=11),
+    flags=st.lists(st.booleans(), min_size=13, max_size=13),
     cron=st.sampled_from(["0 3 * * *", "30 4 * * 0"]),
 )
 def test_job_registry_names_and_settings_are_coherent(
@@ -55,6 +59,8 @@ def test_job_registry_names_and_settings_are_coherent(
         "insight",
         "backup",
         "artifact_dispatch",
+        "chunk_dispatch",
+        "chunk_recovery",
         "artifact_integrity",
     }
     scoped = [job for job in jobs if isinstance(job, ScopedScheduledJob)]
@@ -113,6 +119,43 @@ def test_artifact_dispatch_recovers_pending_originals() -> None:
     asyncio.run(ArtifactDispatchJob.assemble(fake_runtime(artifacts=services)).execute(scopes))
 
     assert calls == [scopes]
+
+
+def test_chunk_dispatch_recovers_pending_graph_work(monkeypatch: pytest.MonkeyPatch) -> None:
+    scopes = frozenset({uuid5()})
+    calls: list[tuple[int, Scopes]] = []
+
+    async def enqueue(limit: int, target: Scopes) -> int:
+        calls.append((limit, target))
+        return 3
+
+    monkeypatch.setattr(jobs_mod, "enqueue_pending", enqueue)
+    asyncio.run(ChunkDispatchJob().execute(scopes))
+
+    assert calls == [(settings.chunk_dispatch_batch_size, scopes)]
+
+
+def test_chunk_recovery_bounds_automatic_retry_cycles(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[int, int | None]] = []
+
+    async def retry(limit: int, max_cycles: int | None) -> int:
+        calls.append((limit, max_cycles))
+        return 3
+
+    monkeypatch.setattr(jobs_mod, "retry_failed_chunks", retry)
+    asyncio.run(ChunkRecoveryJob().execute())
+
+    assert calls == [(settings.chunk_recovery_batch_size, settings.chunk_recovery_max_cycles)]
+
+
+def test_profile_projection_recovery_uses_its_typed_queue_boundary(
+    queue_seam: Callable[[ModuleType], RecordingQueue],
+) -> None:
+    recorder = queue_seam(jobs_mod)
+
+    assert asyncio.run(retry_failed_profile_projections(limit=7)) == 4
+    assert recorder.failed_requeues == [(ProfileProjectionJob.entrypoint, 7)]
+    assert recorder.opened == recorder.closed == 1
 
 
 def test_artifact_integrity_runs_as_one_system_cron(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -215,7 +258,7 @@ def test_backup_job_fire_cron_runs_the_scheduled_backup(monkeypatch: pytest.Monk
     assert ran == [True]
 
 
-@pytest.mark.parametrize("job_type", [BackupJob, ArtifactIntegrityJob])
+@pytest.mark.parametrize("job_type", [BackupJob, ArtifactIntegrityJob, ChunkRecoveryJob])
 @pytest.mark.parametrize("enabled", [True, False])
 def test_system_jobs_register_only_the_cron_and_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch, job_type: type[SystemScheduledJob], enabled: bool

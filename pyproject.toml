@@ -33,6 +33,7 @@ dependencies = [
     "cyclopts>=4.21,<5",
     "loguru>=0.7.3,<0.8",
     "fastmcp>=3.4.4,<4",
+    "py-key-value-aio[keyring]>=0.4.5,<0.5",
     "fastapi>=0.128,<1",
     "networkx>=3.6.1,<4",
     "openai>=2.45,<3",
@@ -57,7 +58,7 @@ dependencies = [
 ]
 
 [project.scripts]
-aizk = "aizk.cli:app"
+aizk = "aizk.cli:main"
 aizk-eval = "eval.launcher:main"
 
 # Dev-only Python deps (PEP 735). chefe reads this group into the pixi dev env, and the built
@@ -79,6 +80,7 @@ dev = [
     "autorank>=1.3.0,<2",
     "statsmodels>=0.14.6,<0.15",
     "pytest-regressions>=2.11.0,<3",
+    "modal>=1.5.2,<2",
     # numeric and image libs the eval + serving tests import (scipy rides in via statsmodels)
     "numpy>=2.4.6,<3",
     "pandas>=3.0.3,<4",
@@ -149,10 +151,11 @@ type = "layers"
 containers = ["aizk"]
 exhaustive = true
 layers = [
-    "cli",
-    "admin | runtime",
+    "cli : commands",
+    "admin | client | runtime",
     "mcp | api | ops",
     "memory",
+    "status",
     "artifacts : background : graph : retrieval : extract : serving : ontology : usage",
     "auth | backup | export",
     "integrations | storage",
@@ -173,8 +176,10 @@ type = "forbidden"
 source_modules = [
     "aizk.api",
     "aizk.auth",
+    "aizk.client",
     "aizk.cli",
     "aizk.common",
+    "aizk.commands",
     "aizk.exceptions",
     "aizk.integrations",
     "aizk.mcp",
@@ -183,6 +188,7 @@ source_modules = [
     "aizk.runtime",
     "aizk.serving",
     "aizk.storage",
+    "aizk.status",
     "aizk.types",
     "aizk.usage",
 ]

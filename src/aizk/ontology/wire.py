@@ -45,10 +45,10 @@ class WireExtraction(FrozenModel):
     """Combined entity and fact extraction response."""
 
     e: list[WireEntity] = Field(
-        max_length=8,
-        description="the highest-value entities, with no more than 8 per source window",
+        max_length=16,
+        description="the highest-value entities, with no more than 16 per source window",
     )
     f: list[WireFact] = Field(
-        max_length=4,
-        description="the highest-value supported facts, with no more than 4 per source window",
+        max_length=8,
+        description="the highest-value supported facts, with no more than 8 per source window",
     )

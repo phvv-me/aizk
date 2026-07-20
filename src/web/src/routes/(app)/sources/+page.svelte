@@ -1,121 +1,157 @@
 <script lang="ts">
-  import { enhance } from '$app/forms';
-  import { invalidateAll } from '$app/navigation';
-  import { Link, RefreshCw } from '@lucide/svelte';
-  import type { ArtifactView } from '$lib/api';
+  import { Search } from '@lucide/svelte';
+  import HorizontalBars from '$lib/components/HorizontalBars.svelte';
+  import InfoTip from '$lib/components/InfoTip.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
   import ScopeBadges from '$lib/components/ScopeBadges.svelte';
-  import { Badge, type BadgeVariant } from '$lib/components/ui/badge';
   import { Button } from '$lib/components/ui/button';
   import * as Card from '$lib/components/ui/card';
   import { Input } from '$lib/components/ui/input';
-  import { Label } from '$lib/components/ui/label';
-  import { feedback } from '$lib/forms';
-  import { cn, webHref } from '$lib/utils';
+  import { rankedCounts } from '$lib/collections';
+  import { formatDateTime } from '$lib/format';
+  import { webHref } from '$lib/utils';
   import type { PageServerData } from './$types';
 
   let { data }: { data: PageServerData } = $props();
 
-  let intaking = $state(false);
-  let refreshing = $state(false);
-
-  const statusVariants: Record<ArtifactView['status'], BadgeVariant> = {
-    queued: 'outline',
-    processing: 'secondary',
-    ready: 'default',
-    failed: 'destructive'
-  };
-
-  async function refresh() {
-    refreshing = true;
-    await invalidateAll();
-    refreshing = false;
-  }
+  const types = $derived(rankedCounts(data.sources?.rows ?? [], (source) => source.kind));
 </script>
 
-<PageHeader title="Sources" description="Intake https links and follow their processing." />
+<PageHeader
+  title="Sources"
+  description="Browse the original notes, pages, papers, and files that ground your memory."
+/>
 
-<div class="mb-8">
+<form method="GET" class="mb-6 flex flex-col gap-3 sm:flex-row" aria-label="Filter sources">
+  <div class="relative flex-1">
+    <Search
+      class="text-muted-foreground pointer-events-none absolute top-2.5 left-3 size-4"
+      aria-hidden="true"
+    />
+    <Input
+      name="search"
+      value={data.search}
+      placeholder="Search titles or source links"
+      class="pl-9"
+    />
+  </div>
+  <Button type="submit" variant="secondary">Filter</Button>
+</form>
+
+{#if !data.sources}
   <Card.Root>
     <Card.Header>
-      <Card.Title>Intake a link</Card.Title>
-      <Card.Description>Remember a page or document reachable over https.</Card.Description>
-    </Card.Header>
-    <Card.Content>
-      <form
-        method="POST"
-        action="?/intake"
-        class="space-y-3"
-        use:enhance={feedback('Link accepted for processing.', {
-          pending: (active) => (intaking = active)
-        })}
+      <Card.Title>Sources unavailable</Card.Title>
+      <Card.Description
+        >The source catalog will return once the AIZK API answers again.</Card.Description
       >
-        <Label for="source_uri">Https link</Label>
-        <Input
-          id="source_uri"
-          name="source_uri"
-          type="url"
-          required
-          placeholder="https://example.com/paper.pdf"
-        />
-        <div class="flex justify-end">
-          <Button type="submit" variant="secondary" disabled={intaking}>
-            <Link aria-hidden="true" />
-            {intaking ? 'Intaking' : 'Intake'}
-          </Button>
-        </div>
-      </form>
-    </Card.Content>
+    </Card.Header>
   </Card.Root>
-</div>
+{:else}
+  <div class="mb-6 grid gap-6 xl:grid-cols-[1fr_1.4fr]">
+    <Card.Root>
+      <Card.Header>
+        <div class="flex items-center gap-2">
+          <Card.Title>{data.sources.total.toLocaleString('en-US')} visible sources</Card.Title>
+          <InfoTip
+            label="What a source is"
+            text="A source is one remembered document or note. Findings and subjects inherit their provenance and visibility from these sources."
+          />
+        </div>
+        <Card.Description>
+          Showing {data.sources.rows.length.toLocaleString('en-US')} sources on this page.
+        </Card.Description>
+      </Card.Header>
+    </Card.Root>
+    <Card.Root>
+      <Card.Content class="pt-6">
+        <HorizontalBars
+          title="Source types on this page"
+          description="This chart groups the currently displayed sources by their declared ontology type. Use the table below for the full source details."
+          items={types}
+        />
+      </Card.Content>
+    </Card.Root>
+  </div>
 
-<section aria-label="Processing states">
   <Card.Root>
     <Card.Header>
-      <Card.Title>Processing</Card.Title>
-      <Card.Description>Your latest originals and where they stand.</Card.Description>
-      <Card.Action>
-        <Button variant="ghost" size="sm" onclick={refresh} disabled={refreshing}>
-          <RefreshCw class={cn(refreshing && 'animate-spin')} aria-hidden="true" />
-          Refresh
-        </Button>
-      </Card.Action>
+      <div class="flex items-center gap-2">
+        <Card.Title>Source catalog</Card.Title>
+        <InfoTip
+          label="How to read the source catalog"
+          text="Observed is when the source says it was true or published. Updated is when AIZK last stored this source. Scope badges show who can see it."
+        />
+      </div>
+      <Card.Description>Newest stored sources appear first.</Card.Description>
     </Card.Header>
     <Card.Content>
-      {#if !data.overview}
-        <p class="text-muted-foreground text-sm">
-          Processing states will appear once the AIZK API answers again.
-        </p>
-      {:else if data.overview.artifacts.length === 0}
-        <p class="text-muted-foreground text-sm">
-          No links yet. Intake a link above to get started.
-        </p>
+      {#if data.sources.rows.length === 0}
+        <p class="text-muted-foreground text-sm">No sources match this filter.</p>
       {:else}
-        <ul class="divide-border divide-y">
-          {#each data.overview.artifacts as artifact, index (index)}
-            {@const href = webHref(artifact.source_uri)}
-            <li class="flex flex-wrap items-center gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0">
-              <div class="min-w-0 flex-1">
-                {#if href}
-                  <a
-                    {href}
-                    target="_blank"
-                    rel="noreferrer"
-                    class="hover:text-primary block truncate text-sm font-medium underline-offset-4 hover:underline"
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[760px] text-left text-sm">
+            <caption class="sr-only">Visible source documents</caption>
+            <thead>
+              <tr class="border-b">
+                <th class="pb-3 font-medium">Source</th>
+                <th class="pb-3 font-medium">Type</th>
+                <th class="pb-3 font-medium">Observed</th>
+                <th class="pb-3 font-medium">Updated</th>
+                <th class="pb-3 font-medium">Scope</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each data.sources.rows as source (source.id)}
+                {@const href = webHref(source.source_uri)}
+                <tr class="border-b last:border-0">
+                  <td class="max-w-sm py-3 pr-4">
+                    {#if href}
+                      <a
+                        {href}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="font-medium hover:underline"
+                      >
+                        {source.title}
+                      </a>
+                    {:else}
+                      <span class="font-medium">{source.title}</span>
+                    {/if}
+                    {#if source.source_uri}
+                      <p class="text-muted-foreground mt-1 truncate text-xs">{source.source_uri}</p>
+                    {/if}
+                  </td>
+                  <td class="py-3 pr-4">{source.kind}</td>
+                  <td class="text-muted-foreground py-3 pr-4"
+                    >{formatDateTime(source.observed_at)}</td
                   >
-                    {artifact.name}
-                  </a>
-                {:else}
-                  <p class="truncate text-sm font-medium">{artifact.name}</p>
-                {/if}
-                <p class="text-muted-foreground text-xs">{artifact.detail} · {artifact.date}</p>
-              </div>
-              <ScopeBadges scopes={artifact.scopes} />
-              <Badge variant={statusVariants[artifact.status]}>{artifact.status}</Badge>
-            </li>
-          {/each}
-        </ul>
+                  <td class="text-muted-foreground py-3 pr-4"
+                    >{formatDateTime(source.updated_at)}</td
+                  >
+                  <td class="py-3"><ScopeBadges scopes={source.scopes} /></td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
+      <div class="mt-5 flex items-center justify-between">
+        {#if data.sources.offset > 0}
+          <a
+            href={`?search=${encodeURIComponent(data.search)}&offset=${Math.max(0, data.sources.offset - data.sources.limit)}`}
+            class="text-primary text-sm font-medium hover:underline">Previous page</a
+          >
+        {:else}
+          <span></span>
+        {/if}
+        {#if data.sources.offset + data.sources.rows.length < data.sources.total}
+          <a
+            href={`?search=${encodeURIComponent(data.search)}&offset=${data.sources.offset + data.sources.limit}`}
+            class="text-primary text-sm font-medium hover:underline">Next page</a
+          >
+        {/if}
+      </div>
     </Card.Content>
   </Card.Root>
-</section>
+{/if}

@@ -13,6 +13,14 @@ Add the endpoint to Codex, Claude Code, or OpenCode with the project configurati
 [MCP clients](/mcp-clients) page. Then start OAuth from that client. No OAuth client ID or secret
 belongs in the repository.
 
+The standalone CLI uses the same MCP contract and stores its own OAuth session in the operating
+system keyring.
+
+```sh
+aizk auth login --server https://aizk.phvv.me/mcp
+aizk status
+```
+
 For Codex the login command is
 
 ```sh
@@ -82,6 +90,13 @@ it, `remember` writes to the caller's private scope.
 Open the personal dashboard to upload one bounded file or submit one public HTTPS URI. Choose
 private memory or one writable organization. The browser shows queued, processing, ready, and
 failed states. It never exposes the worker's internal graph machinery.
+
+The CLI accepts one or more local paths directly and completes the ticket and upload flow itself.
+
+```sh
+aizk remember report.pdf notes.md
+aizk remember report.pdf --text "Companion information for the exact original."
+```
 
 Text remains the preferred input. Preserve a source when its exact original may be needed later,
 such as a contract, form, paper, signed record, or presentation. An MCP client can submit a website
@@ -168,7 +183,7 @@ invitations, expose the tenant user directory, or allow removal or demotion of t
 Check the whole deployment in under five seconds.
 
 ```sh
-docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker aizk db health
+docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker aizk admin health
 ```
 
 The report covers migrations, RLS, queue state, model aliases, context sizes, per-scope graph counts,

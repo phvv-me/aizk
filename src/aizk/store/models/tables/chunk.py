@@ -24,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import declared_attr
 from sqlalchemy.sql.selectable import CTE
 from sqlmodel import Field, select
-from sqlmodel.sql.expression import SelectOfScalar
+from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from ...mixins import Embedded, Id, Scoped, TableBase
 
@@ -63,6 +63,18 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
                 "id",
                 postgresql_where=SAColumn("processed_at").is_(None),
             ),
+        )
+
+    @classmethod
+    def processing_counts(
+        cls, one_hour_ago: datetime, six_hours_ago: datetime, day_ago: datetime
+    ) -> Select[tuple[int, int, int, int]]:
+        """Caller-visible graph backlog and recent chunk completions in one row."""
+        return select(
+            cls.id.count().filter(cls.processed_at.is_(None)).label("queued"),
+            cls.id.count().filter(cls.processed_at >= one_hour_ago).label("completed_1h"),
+            cls.id.count().filter(cls.processed_at >= six_hours_ago).label("completed_6h"),
+            cls.id.count().filter(cls.processed_at >= day_ago).label("completed_24h"),
         )
 
     @classmethod

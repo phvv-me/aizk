@@ -1,7 +1,10 @@
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import dbutil
+import pytest
 from pydantic import ConfigDict
+from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from aizk.extract.extractor import Extractor
 from aizk.extract.models import ExtractedEntity, Extraction, TimedFact
@@ -19,11 +22,11 @@ from eval.extraction import (
 class StaticExtractor(Extractor):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    extraction: Extraction | ValueError
+    extraction: Extraction | UnexpectedModelBehavior | ValueError
 
     async def extract(self, text: str) -> Extraction:
         assert text
-        if isinstance(self.extraction, ValueError):
+        if isinstance(self.extraction, UnexpectedModelBehavior | ValueError):
             raise self.extraction
         return self.extraction
 
@@ -91,7 +94,12 @@ def test_extraction_benchmark_scores_grounding_aliases_and_semantic_metadata() -
     assert report.results[0].accepted[0].subject == "Aizk"
     assert report.results[0].accepted[0].object_ == "Postgres"
     assert report.results[0].quality.missing_quote == 1
+    assert report.concurrency == 1
+    assert report.cases_per_hour > 0.0
+    assert report.backlog == 10_704
+    assert report.backlog_hours > 0.0
     assert "f1=0.667" in report.render()
+    assert "backlog_eta=" in report.render()
 
 
 def test_extraction_target_reports_wrong_metadata_and_missing_matches() -> None:
@@ -126,6 +134,8 @@ def test_extraction_reports_define_failure_and_empty_boundaries() -> None:
     assert failed.failed == 1
     assert failed.accepted_recall == 0.0
     assert failed.metadata_accuracy == 1.0
+    assert failed.cases_per_hour == 0.0
+    assert failed.backlog_hours == 0.0
     assert failed.results[0].error == "ValueError: no parsed output"
     assert "bad-json error=ValueError" in failed.render()
 
@@ -139,7 +149,29 @@ def test_extraction_reports_define_failure_and_empty_boundaries() -> None:
     assert empty.metadata_accuracy == 1.0
     assert empty.p50_ms == 0.0
     assert empty.p95_ms == 0.0
+    assert empty.wall_ms == 0.0
+    assert empty.cases_per_hour == 0.0
+    assert empty.backlog_hours == 0.0
     assert empty.render().startswith("empty extraction")
+
+
+def test_extraction_keeps_model_behavior_failures_inside_the_report() -> None:
+    case = ExtractionCase(id="malformed-json", text="source", targets=(target(),))
+    benchmark = ExtractionBenchmark(
+        StaticExtractor(extraction=UnexpectedModelBehavior("invalid structured response"))
+    )
+
+    report = dbutil.run(benchmark.run([case], "model"))
+
+    assert report.failed == 1
+    assert report.results[0].error == ("UnexpectedModelBehavior: invalid structured response")
+
+
+def test_extraction_benchmark_rejects_nonpositive_concurrency() -> None:
+    benchmark = ExtractionBenchmark(StaticExtractor(extraction=Extraction(entities=[], facts=[])))
+
+    with pytest.raises(ValueError, match="concurrency must be positive"):
+        dbutil.run(benchmark.run_concurrent([], "model", concurrency=0))
 
 
 def test_load_extraction_cases_reads_nonblank_jsonl(tmp_path) -> None:
@@ -153,3 +185,12 @@ def test_load_extraction_cases_reads_nonblank_jsonl(tmp_path) -> None:
 
     assert len(cases) == 1
     assert cases[0].id == "one"
+
+
+def test_committed_extraction_corpus_is_bounded_and_loadable() -> None:
+    path = Path(__file__).parent / "data" / "extraction_cases.jsonl"
+
+    cases = load_extraction_cases(path)
+
+    assert len(cases) == 16
+    assert all(case.text and len(case.targets) <= 2 for case in cases)

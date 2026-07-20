@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Literal
 
 from patos import FrozenModel
 from pydantic import UUID5
@@ -107,13 +108,26 @@ class Evaluation(FrozenModel):
         """Replay the extraction gate over the selected live corpus."""
         return await measure_gate(self.user.scopes.write, limit)
 
-    async def extraction(self, path: Path, model: str) -> ExtractionReport:
-        """Reset the isolated database and score grounded graph extraction."""
+    async def extraction(
+        self,
+        path: Path,
+        model: str,
+        backend: Literal["llm", "gliner"] = settings.extract_backend,
+        concurrency: int = 1,
+        backlog: int = 10_704,
+    ) -> ExtractionReport:
+        """Reset the isolated database and score one explicit extraction backend."""
         await EvaluationDatabase().reset()
         async with User.system() as session:
             await Ontology.ensure(session)
-        return await ExtractionBenchmark(GraphClients.from_settings(settings).extractor).run(
-            load_extraction_cases(path), model
+        config = settings.model_copy(update={"extract_backend": backend, "llm_model": model})
+        return await ExtractionBenchmark(
+            GraphClients.from_settings(config).extractor
+        ).run_concurrent(
+            load_extraction_cases(path),
+            f"{backend}:{model}",
+            concurrency,
+            backlog,
         )
 
     async def groupmem(

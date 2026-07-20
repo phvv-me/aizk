@@ -9,19 +9,19 @@ history into an isolated scope before it asks any question.
 
 ## Internal evaluation
 
-`aizk eval bench` samples visible local facts, global summaries, and two-hop fact paths from the
+`chefe run aizk-eval bench` samples visible local facts, global summaries, and two-hop fact paths from the
 stored corpus. The LLM turns each source into a probe, and the benchmark scores the maximal plan that
 production recall always uses. It reports hit rate, nDCG, MRR, optional answerability judging, and
 median latency for each stratum. This is useful for regression checks on a real corpus. It is not
 an external benchmark score. Pass `--user` when the corpus lives outside the default system scope.
 
-`aizk eval plans` is the diagnostic study. It compares the production plan with retired forced
+`chefe run aizk-eval plans` is the diagnostic study. It compares the production plan with retired forced
 plans and the retired router without changing production behavior. It can also replay graph
-seeding variants and the extraction gate. `aizk eval scale` grows an isolated synthetic corpus and
+seeding variants and the extraction gate. `chefe run aizk-eval scale` grows an isolated synthetic corpus and
 records the point where latency or storage crosses its declared budget.
 
-`aizk eval trace` shows statement rank, cross-encoder score, final merit rank, and the packing cut
-without updating access history. `aizk eval management` discovers every visible Area and Project
+`chefe run aizk-eval trace` shows statement rank, cross-encoder score, final merit rank, and the packing cut
+without updating access history. `chefe run aizk-eval management` discovers every visible Area and Project
 brief and runs twenty grounded questions for each one. The strict score requires the subject's own
 current brief to rank first, while hit rate still records whether it survived anywhere in the
 packed context. The report includes MRR plus end-to-end p50 and p95 latency. This makes the current
@@ -155,7 +155,7 @@ domain. Every message keeps its author, role, channel, reply, phase, topic, deci
 source time. Every question recalls as its named asking user.
 
 ```sh
-aizk eval groupmem /path/to/GroupMemBench --domain Finance --question-limit 2
+chefe run aizk-eval groupmem /path/to/GroupMemBench --domain Finance --question-limit 2
 ```
 
 The runner performs the complete path. It batches message embeddings, stores distinct message

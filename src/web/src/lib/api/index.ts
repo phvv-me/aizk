@@ -2,11 +2,14 @@
  * Typed browser API surface, re-exported from the client generated out of the
  * server's OpenAPI schema (`pnpm generate`) under the page-facing names.
  */
-import type { ArtifactReceipt, WriteResult } from './generated';
-
 export type {
   Answer,
   ArtifactView,
+  FindingPage,
+  FindingView,
+  GraphEdge,
+  GraphNode,
+  GraphSlice,
   KnowledgeTotals,
   Me,
   OrganizationDirectory,
@@ -14,12 +17,20 @@ export type {
   OrganizationView as OrganizationEntry,
   OrganizationProfile as Organization,
   Overview,
+  ProcessingReport,
   RecentSource,
+  SourcePage,
+  SourceView,
+  StageEstimate,
+  SubjectPage,
+  SubjectView,
+  ThemePage,
+  ThemeView,
+  UsagePoint,
+  UsageReport,
+  UsageSummary,
   UsageTotals
 } from './generated';
-
-/** Receipt for one accepted write, either a direct document or a queued artifact. */
-export type WriteReceipt = WriteResult | ArtifactReceipt;
 
 /** The organization roles a member can hold, least to most capable. */
 export const memberRoles = ['viewer', 'editor', 'admin'] as const;

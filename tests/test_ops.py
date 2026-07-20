@@ -58,7 +58,8 @@ def test_usage_health_attributes_operations_and_deduplicated_storage() -> None:
         for index, (operation, targets, request_bytes, response_bytes) in enumerate(events):
             await job.handle(
                 UsageCapture(
-                    key=f"span-{index}",
+                    capture_key=f"span-{index}",
+                    occurred_at=datetime.now(UTC),
                     user_id=actor,
                     operation=operation,
                     targets=targets,
@@ -534,7 +535,14 @@ def test_setup_installs_the_queue_on_a_fresh_database(migrated_db: None) -> None
 
 
 def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    queue = TasksStatus(pending=3, running=1, failed=0, last_run=None, lag=2)
+    queue = TasksStatus(
+        pending=3,
+        running=1,
+        failed=0,
+        last_success=None,
+        oldest_queued=None,
+        projection_pending=2,
+    )
     expected_corpus = corpus()
     recall = ops.RecallHealth(
         query="probe",

@@ -2,6 +2,7 @@ import abc
 
 from loguru import logger
 from patos import FrozenFlexModel
+from pydantic_ai.exceptions import ModelHTTPError
 
 from ..config import Settings, settings
 from ..ontology import Ontology, System, WireExtraction
@@ -47,8 +48,9 @@ class LLMExtractor(Extractor):
 
     async def extract(self, text: str) -> Extraction:
         extracted = [
-            await self._extract_window(window)
+            wire
             for window in chunk_text(text, settings.extract_window_size)
+            for wire in await self._extract_bounded(window)
         ]
         extraction = Extraction(
             entities=[
@@ -85,6 +87,37 @@ class LLMExtractor(Extractor):
             WireExtraction,
             max_tokens=settings.llm_extract_max_tokens,
         )
+
+    async def _extract_bounded(self, text: str) -> list[WireExtraction]:
+        """Retry only a context-overflowing window as smaller source spans."""
+        try:
+            return [await self._extract_window(text)]
+        except ModelHTTPError as error:
+            if not self._context_overflow(error) or len(text) < 2:
+                raise
+            spans = chunk_text(text, max(1, len(text) // 2))
+            if len(spans) < 2:
+                raise
+            logger.warning(
+                "extractor context overflow for {} chars, retrying as {} bounded spans",
+                len(text),
+                len(spans),
+            )
+            return [wire for span in spans for wire in await self._extract_bounded(span)]
+
+    @staticmethod
+    def _context_overflow(error: ModelHTTPError) -> bool:
+        """Recognize the vLLM context-limit response without masking other HTTP failures."""
+        if error.status_code != 400:
+            return False
+        if isinstance(error.body, str):
+            message = error.body
+        elif isinstance(error.body, dict):
+            value = error.body.get("message")
+            message = value if isinstance(value, str) else ""
+        else:
+            message = ""
+        return "maximum context length" in message.casefold()
 
     @staticmethod
     def log(extraction: Extraction, text: str) -> None:

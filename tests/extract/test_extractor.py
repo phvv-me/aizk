@@ -9,8 +9,9 @@ from doubles import FakeLLM
 from hypothesis import given
 from hypothesis import strategies as st
 from id_factory import uuid7
-from pydantic import BaseModel, ValidationError
-from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic import BaseModel, SecretStr, ValidationError
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
+from pydantic_ai.models import Model
 from strategies import predicates, wire_extractions
 
 from aizk.config import Settings, settings
@@ -18,6 +19,7 @@ from aizk.extract.extractor import Extractor, GLiNERExtractor, LLMExtractor
 from aizk.extract.models import (
     BatchConsolidationVerdict,
     ConsolidationVerdict,
+    Extraction,
     TimedFact,
 )
 from aizk.graph.consolidation import Consolidator, FactMatch
@@ -49,6 +51,15 @@ def test_llm_forwards_the_typed_generation_contract(
     expected_tokens: int,
 ) -> None:
     monkeypatch.setattr(settings, "llm_chat_template_kwargs", {"enable_thinking": False})
+    monkeypatch.setattr(
+        settings,
+        "llm_extra_body",
+        {
+            "provider": {"zdr": True, "require_parameters": True},
+            "reasoning": {"enabled": False},
+            "chat_template_kwargs": {"custom_flag": True, "enable_thinking": True},
+        },
+    )
     schema = WireExtraction
     asyncio.run(
         LLM.from_settings(settings).generate(
@@ -67,7 +78,11 @@ def test_llm_forwards_the_typed_generation_contract(
     ]
     assert call.response_model is schema
     assert (call.temperature, call.timeout, call.max_tokens) == (0.3, 5.0, expected_tokens)
-    assert call.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert call.extra_body == {
+        "provider": {"zdr": True, "require_parameters": True},
+        "reasoning": {"enabled": False},
+        "chat_template_kwargs": {"custom_flag": True, "enable_thinking": False},
+    }
 
 
 @given(collection=st.sampled_from(("e", "f")), exceeds=st.booleans())
@@ -78,11 +93,11 @@ def test_wire_schemas_bound_graph_expansion_and_preserve_uuid_strings(
     schema = WireExtraction.model_json_schema()
     properties = schema["properties"]
     definitions = schema["$defs"]
-    assert properties["e"]["maxItems"] == 8
-    assert properties["f"]["maxItems"] == 4
+    assert properties["e"]["maxItems"] == 16
+    assert properties["f"]["maxItems"] == 8
     assert definitions["WireEntity"]["properties"]["n"]["maxLength"] == 160
     assert definitions["WireFact"]["properties"]["statement"]["maxLength"] == 384
-    limit = 8 if collection == "e" else 4
+    limit = 16 if collection == "e" else 8
     item = (
         WireEntity(n="entity", t="concept")
         if collection == "e"
@@ -150,10 +165,94 @@ def test_extractor_uses_the_live_ontology_prompt_for_every_bounded_source_window
     )
 
 
+def test_extractor_uses_one_model_turn_for_one_stored_chunk(fake_llm: FakeLLM) -> None:
+    source = ("one supported source claim " * 75).strip()
+    assert len(source) < settings.chunk_size
+
+    asyncio.run(LLMExtractor(llm=fake_llm.llm).extract(source))
+
+    assert len(fake_llm.completions.calls) == 1
+    assert fake_llm.completions.calls[0].messages[1]["content"] == (
+        f"<document>\n{source}\n</document>"
+    )
+    assert fake_llm.completions.calls[0].max_tokens == settings.llm_extract_max_tokens
+    assert Settings.model_fields["llm_extract_max_tokens"].default == 768
+
+
+def test_extractor_retries_only_context_overflow_as_smaller_spans(
+    fake_llm: FakeLLM,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    async def generate(
+        self: LLM,
+        system: str,
+        user: str,
+        schema: type[BaseModel],
+        *,
+        temperature: float | None = None,
+        timeout: float | None = None,
+        max_tokens: int | None = None,
+    ) -> BaseModel:
+        calls.append(user)
+        if len(calls) == 1:
+            raise ModelHTTPError(
+                400,
+                "extractor",
+                {"message": "This model's maximum context length is 3072 tokens."},
+            )
+        return WireExtraction(e=[], f=[])
+
+    monkeypatch.setattr(LLM, "generate", generate)
+    source = ("one supported source claim " * 75).strip()
+
+    extraction = asyncio.run(LLMExtractor(llm=fake_llm.llm).extract(source))
+
+    assert extraction == Extraction(entities=[], facts=[])
+    assert len(calls) == 3
+    assert all(len(call) < len(calls[0]) for call in calls[1:])
+
+
+def test_extractor_preserves_an_unsplittable_context_overflow(
+    fake_llm: FakeLLM,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = ModelHTTPError(400, "extractor", "maximum context length")
+    fake_llm.completions.error = error
+    monkeypatch.setattr(extractor_module, "chunk_text", lambda text, size: [text])
+
+    with pytest.raises(ModelHTTPError) as raised:
+        asyncio.run(LLMExtractor(llm=fake_llm.llm)._extract_bounded("dense source"))
+
+    assert raised.value is error
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ModelHTTPError(503, "extractor", {"message": "maximum context length"}),
+        ModelHTTPError(400, "extractor", {"message": "invalid guided JSON schema"}),
+        ModelHTTPError(400, "extractor", None),
+    ],
+)
+def test_extractor_does_not_split_other_model_http_failures(
+    fake_llm: FakeLLM,
+    error: ModelHTTPError,
+) -> None:
+    fake_llm.completions.error = error
+
+    with pytest.raises(ModelHTTPError) as raised:
+        asyncio.run(LLMExtractor(llm=fake_llm.llm).extract("dense source"))
+
+    assert raised.value is error
+
+
 def test_default_extraction_configuration_and_selectable_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert Settings().llm_chat_template_kwargs == {}
+    assert Settings().llm_extra_body == {}
     llm = FakeLLM().llm
     gliner = GLiNER.from_settings(settings)
     assert isinstance(Extractor.configured(settings, llm, gliner), LLMExtractor)
@@ -161,6 +260,46 @@ def test_default_extraction_configuration_and_selectable_backend(
     assert isinstance(Extractor.configured(settings, llm, gliner), GLiNERExtractor)
     monkeypatch.setattr(settings, "extract_backend", "llm")
     assert isinstance(Extractor.configured(settings, llm, gliner), LLMExtractor)
+
+
+def test_llm_forwards_authenticated_endpoint_headers(
+    fake_llm: FakeLLM,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = (("Modal-Key", "wk-test"), ("Modal-Secret", "ws-test"))
+    calls: list[tuple[str, str, str, float, tuple[tuple[str, str], ...]]] = []
+
+    def model(
+        url: str,
+        api_key: str,
+        name: str,
+        timeout: float,
+        endpoint_headers: tuple[tuple[str, str], ...] = (),
+    ) -> Model:
+        calls.append((url, api_key, name, timeout, endpoint_headers))
+        return fake_llm.model
+
+    monkeypatch.setattr(extract_client_module, "llm_model", model)
+    config = settings.model_copy(
+        update={
+            "llm_headers": {
+                "Modal-Secret": SecretStr("ws-test"),
+                "Modal-Key": SecretStr("wk-test"),
+            }
+        }
+    )
+
+    LLM.from_settings(config)
+
+    assert calls == [
+        (
+            config.llm_url,
+            config.llm_api_key,
+            config.llm_model,
+            config.llm_timeout,
+            headers,
+        )
+    ]
 
 
 def test_gliner_extractor_builds_grounded_facts_and_closes_relation_entities() -> None:

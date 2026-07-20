@@ -28,8 +28,9 @@ from ...store.engine import Session
 from ...store.identity import User
 from ...types import Scopes
 from ..enum import JobPriority
-from ..queue import QueueJob, QueuePayload
+from ..queue import Queue, QueueJob, QueuePayload
 from .models import MaintenanceJob
+from .projection import enqueue_pending, retry_failed_chunks
 
 if TYPE_CHECKING:
     from ...runtime import Runtime
@@ -174,6 +175,24 @@ class ArtifactDispatchJob(ScopedScheduledJob):
         await self.services.intake.dispatch_pending(scopes)
 
 
+class ChunkDispatchJob(ScopedScheduledJob):
+    """Recover every visible pending chunk left outside the durable graph queue."""
+
+    async def execute(self, scopes: Scopes) -> None:
+        await enqueue_pending(settings.chunk_dispatch_batch_size, scopes)
+
+
+class ChunkRecoveryJob(SystemScheduledJob):
+    """Recover a bounded batch of retained transient graph failures."""
+
+    async def execute(self) -> None:
+        recovered = await retry_failed_chunks(
+            settings.chunk_recovery_batch_size,
+            settings.chunk_recovery_max_cycles,
+        )
+        logger.info("requeued {} retained graph failures", recovered)
+
+
 class ArtifactIntegrityJob(SystemScheduledJob):
     """Verify a bounded stale batch of immutable originals each day."""
 
@@ -254,6 +273,12 @@ class ProfileProjectionJob(ModelBackedJob):
 
     async def execute(self, scopes: Scopes) -> None:
         await refresh_dirty_profiles(self.llm, self.embed, scopes=scopes)
+
+
+async def retry_failed_profile_projections(limit: int = 100) -> int:
+    """Requeue retained profile projection failures after model recovery."""
+    async with Queue(dsn=settings.asyncpg_dsn) as queue:
+        return await queue.requeue_failed(ProfileProjectionJob, limit)
 
 
 class ProfileRefreshJob(ModelBackedJob):

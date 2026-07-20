@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Callable
+from datetime import UTC, datetime
 from functools import partial
 from types import ModuleType, SimpleNamespace
 from typing import ClassVar, cast
@@ -108,7 +109,19 @@ def test_queue_contract_dedupes_and_requeues_only_its_own_entrypoint(migrated_db
             )
             # The entrypoint filter hides this failure from a different job type.
             assert await queue.requeue_failed(other, 3) == 0
-            assert await queue.requeue_failed(ExampleJob, 3) == 1
+            job_id = await queue.connection.fetchval(
+                f"SELECT id FROM {table} WHERE dedupe_key = 'same'"
+            )
+            log = queue.queries.qbe.settings.queue_table_log
+            await queue.connection.execute(
+                f"INSERT INTO {log} (job_id, status, priority, entrypoint)"
+                " VALUES ($1, 'failed', 0, $2)",
+                job_id,
+                ExampleJob.entrypoint,
+            )
+            # Automatic recovery respects its cycle cap while an operator may omit it.
+            assert await queue.requeue_failed(ExampleJob, 3, max_cycles=1) == 0
+            assert await queue.requeue_failed(ExampleJob, 3, max_cycles=2) == 1
             # Requeue flipped it back to queued, so nothing failed remains.
             assert await queue.requeue_failed(ExampleJob, 3) == 0
 
@@ -255,7 +268,7 @@ def test_process_chunk_dirties_exactly_the_entities_the_slice_touched(
     monkeypatch: pytest.MonkeyPatch, touched: set[UUID5]
 ) -> None:
     scope = uuid5()
-    chunk = SimpleNamespace(text="some text", scopes=[scope], id=uuid7())
+    chunk = SimpleNamespace(text="some text", scopes=[scope], id=uuid7(), processed_at=None)
     bumped = patch_chunk_pipeline(monkeypatch, chunk, touched)
 
     asyncio.run(
@@ -280,7 +293,9 @@ def test_process_chunk_skips_a_chunk_it_cannot_see(monkeypatch: pytest.MonkeyPat
     )
     assert bumped == [] and extracted == []
 
-    wrong_scope = SimpleNamespace(text="some text", scopes=[uuid5()], id=uuid7())
+    wrong_scope = SimpleNamespace(
+        text="some text", scopes=[uuid5()], id=uuid7(), processed_at=None
+    )
     bumped = patch_chunk_pipeline(monkeypatch, wrong_scope, set())
     asyncio.run(
         chunk_projection_job().handle(
@@ -288,6 +303,32 @@ def test_process_chunk_skips_a_chunk_it_cannot_see(monkeypatch: pytest.MonkeyPat
         )
     )
     assert bumped == []
+
+
+def test_process_chunk_skips_an_already_projected_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scope = uuid5()
+    chunk = SimpleNamespace(
+        text="some text",
+        scopes=[scope],
+        id=uuid7(),
+        processed_at=datetime.now(UTC),
+    )
+    extracted: list[Chunk | SimpleNamespace] = []
+    bumped = patch_chunk_pipeline(monkeypatch, chunk, set())
+
+    async def guard(built_chunk: Chunk | SimpleNamespace, clients: GraphClients) -> set[UUID5]:
+        extracted.append(built_chunk)
+        raise AssertionError("extract must not rerun for a completed chunk")
+
+    monkeypatch.setattr(projection_mod, "extract_and_consolidate", guard)
+
+    asyncio.run(
+        chunk_projection_job().handle(ChunkJob(chunk_id=chunk.id, scopes=frozenset({scope})))
+    )
+
+    assert bumped == [] and extracted == []
 
 
 @pytest.mark.parametrize("index_current", [False, True])

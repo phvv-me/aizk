@@ -53,19 +53,35 @@ class OpenAIBackend(Protocol):
 
 
 @cache
-def openai_client(url: str, api_key: str, timeout: float) -> AsyncOpenAI:
+def openai_client(
+    url: str,
+    api_key: str,
+    timeout: float,
+    headers: tuple[tuple[str, str], ...] = (),
+) -> AsyncOpenAI:
     """Intern one OpenAI-compatible client per endpoint configuration."""
-    client = AsyncOpenAI(base_url=url, api_key=api_key or "local", timeout=timeout)
+    client = AsyncOpenAI(
+        base_url=url,
+        api_key=api_key or "local",
+        timeout=timeout,
+        default_headers=dict(headers),
+    )
     _open_clients.append(client)
     return client
 
 
 @cache
-def llm_model(url: str, api_key: str, name: str, timeout: float) -> Model:
+def llm_model(
+    url: str,
+    api_key: str,
+    name: str,
+    timeout: float,
+    headers: tuple[tuple[str, str], ...] = (),
+) -> Model:
     """Intern one provider-neutral structured generation model per endpoint."""
     return OpenAIChatModel(
         name,
-        provider=OpenAIProvider(openai_client=openai_client(url, api_key, timeout)),
+        provider=OpenAIProvider(openai_client=openai_client(url, api_key, timeout, headers)),
         profile=ModelProfile(
             supports_json_schema_output=True,
             default_structured_output_mode="native",

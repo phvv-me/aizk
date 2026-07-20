@@ -20,6 +20,25 @@ _TAG = re.compile(
 _JOURNAL = re.compile(r"^-\s*(\d{4}-\d{2}-\d{2})(?:\s*\([^)]*\))?:\s*(.+)$", re.MULTILINE)
 
 
+def _declaration_block(text: str, heading: re.Match[str] | None) -> str:
+    """Return only the leading ontology metadata beside the source title.
+
+    Converted documents often contain ordinary bullets beginning with `Type`.
+    AIZK declarations are a compact prelude after the level-one title, so prose,
+    another heading, or any other body line closes that prelude.
+    """
+    tail = text[heading.end() :] if heading is not None else text
+    declared: list[str] = []
+    for line in tail.splitlines():
+        if not line.strip():
+            continue
+        if _TYPE.fullmatch(line) or _RELATION.fullmatch(line) or _TAG.fullmatch(line):
+            declared.append(line)
+            continue
+        break
+    return "\n".join(declared)
+
+
 def clean_name(value: str) -> str:
     """Strip Markdown wiki-link decoration while preserving the canonical label."""
     value = value.strip()
@@ -56,15 +75,16 @@ class SourceDeclaration(FrozenModel):
         """Parse the heading, optional subject type, and generic relation lines."""
         heading = _TITLE.search(text)
         declared_title = heading["title"].strip().rstrip("#").strip() if heading else title
+        prelude = _declaration_block(text, heading)
         tags = tuple(
             cls.Tag(
                 object_type=match["kind"].strip(),
                 object_name=clean_name(match["object"]),
                 quote=match.group(0),
             )
-            for match in _TAG.finditer(text)
+            for match in _TAG.finditer(prelude)
         )
-        type_match = _TYPE.search(text)
+        type_match = _TYPE.search(prelude)
         explicit_type = type_match["kind"].strip() if type_match else None
         self_types = {
             underscore(tag.object_type)
@@ -87,7 +107,7 @@ class SourceDeclaration(FrozenModel):
                     object_name=clean_name(match["object"]),
                     quote=match.group(0),
                 )
-                for match in _RELATION.finditer(text)
+                for match in _RELATION.finditer(prelude)
             )
             if subject_type is not None
             else ()

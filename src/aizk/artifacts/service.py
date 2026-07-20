@@ -240,6 +240,8 @@ class ArtifactProcessor:
             ByteLimitExceeded,
             DoclingConversionError,
             IntegrityMismatch,
+            SQLAlchemyError,
+            ValueError,
             httpx.HTTPStatusError,
         ) as error:
             await self.repository.set_state(
@@ -247,7 +249,7 @@ class ArtifactProcessor:
                 content_id,
                 scopes,
                 Artifact.Content.State.failed,
-                str(error),
+                str(error)[:1024],
             )
             raise
 

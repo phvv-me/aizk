@@ -1,44 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import type { Me, Organization } from '../src/lib/api';
 import { navigation } from '../src/lib/nav';
 
-const organization = (over: Partial<Organization>): Organization => ({
-  name: 'toshiba',
-  description: '',
-  roles: ['viewer'],
-  permissions: ['read:memory'],
-  writable: false,
-  public: false,
-  ...over
-});
-
-const me = (organizations: Organization[]): Me => ({ label: 'Pedro', organizations });
-
 describe('navigation', () => {
-  it('always offers the four base destinations to a signed-in user', () => {
-    const links = navigation(me([])).flatMap((section) => section.links);
-    expect(links.map((link) => link.href)).toEqual([
+  it('offers the fixed product destinations in their information architecture', () => {
+    const sections = navigation();
+    expect(sections.map((section) => section.label)).toEqual([
+      'Knowledge',
+      'Explore',
+      'Operations',
+      'Collaboration'
+    ]);
+    expect(sections.flatMap((section) => section.links).map((link) => link.href)).toEqual([
       '/dashboard',
       '/recall',
       '/sources',
+      '/findings',
+      '/subjects',
+      '/themes',
+      '/usage',
+      '/processing',
       '/organizations'
     ]);
   });
 
-  it('hides member management when no organization grants it', () => {
-    const sections = navigation(me([organization({})]));
+  it('keeps organization management inside Collaboration without sidebar duplication', () => {
+    const sections = navigation();
     expect(sections.map((section) => section.label)).not.toContain('Member management');
-  });
-
-  it('links member management only for organizations the caller may manage', () => {
-    const sections = navigation(
-      me([
-        organization({ name: 'toshiba', permissions: ['manage:member'] }),
-        organization({ name: 'family', permissions: ['delete:member'] }),
-        organization({ name: 'public-reads', permissions: ['read:memory'] })
-      ])
-    );
-    const management = sections.find((section) => section.label === 'Member management');
-    expect(management?.links.map((link) => link.label)).toEqual(['toshiba', 'family']);
+    expect(sections.at(-1)?.links).toEqual([
+      { label: 'Organizations', href: '/organizations', icon: 'organizations' }
+    ]);
   });
 });

@@ -74,6 +74,28 @@ def test_memory_store_round_trips_immutable_randomly_keyed_bytes() -> None:
     dbutil.run(body())
 
 
+def test_stored_bytes_serializes_directly_to_blob_columns() -> None:
+    stored = StoredBytes(
+        key="objects/serialized",
+        content_hash=sql.uuid8(b"serialized"),
+        size=5,
+        stored_size=4,
+        encoding=Blob.Encoding.zstd,
+        etag="etag",
+        version="version",
+    )
+
+    assert stored.model_dump(by_alias=True) == {
+        "storage_key": stored.key,
+        "content_hash": stored.content_hash,
+        "size": stored.size,
+        "stored_size": stored.stored_size,
+        "encoding": stored.encoding,
+        "etag": stored.etag,
+        "storage_version": stored.version,
+    }
+
+
 def test_size_limit_applies_before_upload_and_before_download_materialization() -> None:
     async def body() -> None:
         backend = MemoryStore()

@@ -155,12 +155,7 @@ class DoclingResponse(FrozenModel):
         """Return conversion diagnostics separately from the native document tree."""
         return cast(
             dict[str, JsonValue],
-            {
-                "status": self.status,
-                "processing_time": self.processing_time,
-                "timings": self.timings,
-                "errors": self.errors,
-            },
+            self.model_dump(mode="json", exclude={"document"}),
         )
 
 

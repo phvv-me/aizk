@@ -143,19 +143,34 @@ caught and fixed during this rework.
 | Serving | Ollama, 8 slots | vLLM continuous batching, 48 seqs | |
 
 These numbers describe the earlier E2B deployment and are retained as historical evidence. They
-must not be used to size the current 31B deployment. The 31B checkpoint has one dedicated
-RTX 3090 at 98.5 percent memory allocation and a 3,072-token context. Its measured 3,494-token
-KV cache supports 1.14 full requests, so every LLM-backed graph stage uses at most two in-flight
-requests and lets vLLM queue the second. A production RAPTOR run with five concurrent rollups
-needed another 100 MiB of activation memory after the GPU had only 76 MiB free and killed the
-engine. The two-request limit had already completed all 164 source chunks and is now shared by
-source extraction, community summaries, and RAPTOR rollups.
+must not be used to size the current 12B deployment. The preceding 31B checkpoint had one
+dedicated RTX 3090 at 98.5 percent memory allocation and a 3,072-token context. Its final serving
+configuration provided a 3,141-token KV cache. This supported about 1.02 full requests, so every
+LLM-backed graph stage used at most two in-flight requests and let vLLM queue the second. Four
+client requests produced one running request and three waiting requests. They did not increase
+GPU throughput.
+
+The observed model request averaged about 150 seconds. About 136 seconds were queue admission and
+only about 14 seconds were inference. Lowering graph concurrency from four to two reduced a
+representative extraction from 243 to 148 seconds under load without changing its nine entities,
+eight facts, or complete grounding. This improves fairness, but the lasting capacity fix is to
+move the extractor to a larger dedicated GPU host or a schema-capable external API.
+
+The RTX 3090 uses compute capability 8.6. vLLM's Triton FP8 KV attention requires compute
+capability 8.9 or newer, so this deployment keeps `AIZK_LLM_KV_CACHE_DTYPE=bfloat16`. A bounded
+FP8 startup probe failed before accepting any request and the service was restored to bfloat16.
+
+New extraction uses Gemma 4 12B QAT on the dedicated card. This is an operational switch rather
+than a graph migration. Completed chunks retain their current graph projections, while queued and
+new chunks use 12B. Its first production setting permits four scheduled sequences and matches
+that width in each LLM-backed graph stage.
 
 ## Model selection, measured not guessed
 
 | Model | Valid / 40 | Faithful | Truncation | VRAM | Verdict |
 |---|---|---|---|---|---|
-| Gemma 4 31B w4a16 | 20 / 20 facts | 100% deterministic grounding | 0% | 22.8 GB | production on dedicated GPU 1 |
+| Gemma 4 31B w4a16 | 20 / 20 facts | 100% deterministic grounding | 0% | 22.8 GB | previous production baseline |
+| Gemma 4 12B w4a16 | – | – | – | 10.3 GB weights | current extractor, production validation pending |
 | Gemma 4 E2B w4a16 | 35 / 40 responses | 68.6% judge faithfulness | 12.5% | 7.2 to 9.5 GB | lower resource baseline, not production |
 | Gemma 4 E4B | – | – | – | 9.2 GB | cannot emit valid structured JSON on vLLM 0.24, also over budget |
 | Qwen3.5-4B | – | – | – | – | Mamba-hybrid cache caps real concurrency near 13 |

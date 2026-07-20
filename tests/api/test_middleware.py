@@ -1,31 +1,16 @@
 import dbutil
-from id_factory import uuid5
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.trace import SpanKind, Tracer
+import pytest
 from starlette.types import Message, Receive, Scope, Send
 
 from aizk.api.middleware import UsageMiddleware
-from aizk.store import Usage
-from aizk.store.identity import User
-from aizk.usage import UsageCapture, UsageProcessor, annotate_caller, annotate_operation
 
 
-def capture_pipeline() -> tuple[list[UsageCapture], Tracer]:
-    """One isolated tracer whose finished spans land in the returned capture list."""
-    captured: list[UsageCapture] = []
-    provider = TracerProvider()
-    provider.add_span_processor(UsageProcessor(captured.append))
-    return captured, provider.get_tracer("aizk-api-transport-test")
-
-
-def test_http_body_bytes_are_measured_onto_the_server_span() -> None:
-    captured, tracer = capture_pipeline()
-    user = User.private(uuid5())
+def test_http_reply_waits_for_durable_accounting_with_exact_body_sizes() -> None:
+    accounted: list[tuple[int, int, int]] = []
+    sent: list[Message] = []
 
     async def app(scope: Scope, receive: Receive, send: Send) -> None:
         del scope
-        annotate_caller(user)
-        annotate_operation(Usage.Event.Operation.remember_text, (user.id,))
         message = await receive()
         assert message["body"] == b"hello"
         await send({"type": "http.response.start", "status": 200})
@@ -34,28 +19,49 @@ def test_http_body_bytes_are_measured_onto_the_server_span() -> None:
     async def receive() -> Message:
         return {"type": "http.request", "body": b"hello"}
 
-    sent: list[Message] = []
-
     async def send(message: Message) -> None:
         sent.append(message)
 
-    async def body() -> None:
-        with tracer.start_as_current_span("POST /api/remember", kind=SpanKind.SERVER) as span:
-            span.set_attribute("http.route", "/api/remember")
-            span.set_attribute("http.response.status_code", 200)
-            await UsageMiddleware(app)({"type": "http"}, receive, send)
+    async def account(
+        request_bytes: int,
+        response_bytes: int,
+        started_at: float,
+        status_code: int | None,
+    ) -> None:
+        del started_at
+        assert sent == []
+        accounted.append((request_bytes, response_bytes, status_code or 0))
 
-    dbutil.run(body())
+    dbutil.run(UsageMiddleware(app, account)({"type": "http"}, receive, send))
 
+    assert accounted == [(len(b"hello"), len(b"worldwide"), 200)]
     assert [message["type"] for message in sent] == [
         "http.response.start",
         "http.response.body",
     ]
-    [derived] = captured
-    assert derived.operation is Usage.Event.Operation.remember_text
-    assert derived.user_id == user.id
-    assert derived.request_bytes == len(b"hello")
-    assert derived.response_bytes == len(b"worldwide")
+
+
+def test_accounting_failure_prevents_a_successful_http_reply() -> None:
+    sent: list[Message] = []
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        del scope, receive
+        await send({"type": "http.response.start", "status": 200})
+        await send({"type": "http.response.body", "body": b"result"})
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b""}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    async def fail(*args: int | float | None) -> None:
+        del args
+        raise OSError("queue unavailable")
+
+    with pytest.raises(OSError, match="queue unavailable"):
+        dbutil.run(UsageMiddleware(app, fail)({"type": "http"}, receive, send))
+    assert sent == []
 
 
 def test_non_http_connections_pass_through_unmeasured() -> None:
@@ -74,3 +80,30 @@ def test_non_http_connections_pass_through_unmeasured() -> None:
     dbutil.run(UsageMiddleware(app)({"type": "lifespan"}, receive, send))
 
     assert relayed == ["lifespan"]
+
+
+def test_event_streams_pass_through_without_response_buffering() -> None:
+    relayed: list[str] = []
+    accounted = False
+
+    async def app(scope: Scope, receive: Receive, send: Send) -> None:
+        del receive
+        relayed.append(scope["path"])
+        await send({"type": "http.response.start", "status": 200})
+
+    async def receive() -> Message:
+        raise AssertionError("the stream does not read a request body")
+
+    async def send(message: Message) -> None:
+        assert message["type"] == "http.response.start"
+
+    async def account(*args: int | float | None) -> None:
+        del args
+        nonlocal accounted
+        accounted = True
+
+    scope = {"type": "http", "path": "/api/processing/events"}
+    dbutil.run(UsageMiddleware(app, account)(scope, receive, send))
+
+    assert relayed == ["/api/processing/events"]
+    assert not accounted

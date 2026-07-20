@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import cast
 
 from pydantic import UUID7, JsonValue
 from sqlalchemy import or_
@@ -10,6 +11,17 @@ from ..store.identity import User
 from ..store.models.tables import ArtifactContent
 from ..types import Scopes
 from .models import ArtifactReceipt, OriginalArtifact, OriginalDescription
+
+
+def _postgres_json(value: JsonValue) -> JsonValue:
+    """Replace only NUL code points that PostgreSQL JSONB cannot represent."""
+    if isinstance(value, str):
+        return value.replace("\x00", "\ufffd")
+    if isinstance(value, list):
+        return [_postgres_json(item) for item in value]
+    if isinstance(value, dict):
+        return {key.replace("\x00", "\ufffd"): _postgres_json(item) for key, item in value.items()}
+    return value
 
 
 class ArtifactRepository:
@@ -54,24 +66,18 @@ class ArtifactRepository:
                 )
             ).one() + 1
             blob = Blob(
-                content_hash=stored.content_hash,
-                size=stored.size,
-                stored_size=stored.stored_size,
-                encoding=stored.encoding,
-                storage_key=stored.key,
-                storage_version=stored.version,
+                **stored.model_dump(by_alias=True),
                 media_type=described.media_type,
-                etag=stored.etag,
             )
             session.add(blob)
             await session.flush()
             content = Artifact.Content(
+                **described.model_dump(
+                    exclude={"filename", "media_type", "source_uri"},
+                ),
                 artifact_id=artifact.id,
                 blob_id=blob.id,
                 revision=revision,
-                companion_text=described.companion_text,
-                observed_at=described.observed_at,
-                expires_at=described.expires_at,
                 created_by=user.id,
                 scopes=ordered_scopes,
             )
@@ -227,5 +233,11 @@ class ArtifactRepository:
             if content is None or frozenset(content.scopes) != original.scopes:
                 raise LookupError("artifact original is not visible in its conversion scopes")
             content.markdown = markdown
-            content.docling_json = docling_json
-            content.details = details
+            content.docling_json = cast(
+                "dict[str, JsonValue]",
+                _postgres_json(docling_json),
+            )
+            content.details = cast(
+                "dict[str, JsonValue]",
+                _postgres_json(details),
+            )

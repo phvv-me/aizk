@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
@@ -6,6 +7,7 @@ from time import perf_counter
 from openai import LengthFinishReasonError
 from patos import FrozenModel
 from pydantic import ValidationError
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 
 from aizk.extract.extractor import Extractor
 from aizk.extract.models import TimedFact
@@ -89,10 +91,23 @@ class ExtractionReport(FrozenModel):
     metadata_accuracy: float
     p50_ms: float
     p95_ms: float
+    wall_ms: float
+    concurrency: int
+    cases_per_hour: float
+    backlog: int
+    backlog_hours: float
     results: tuple[ExtractionCaseResult, ...]
 
     @classmethod
-    def score(cls, model: str, results: Sequence[ExtractionCaseResult]) -> ExtractionReport:
+    def score(
+        cls,
+        model: str,
+        results: Sequence[ExtractionCaseResult],
+        *,
+        wall_ms: float | None = None,
+        concurrency: int = 1,
+        backlog: int = 10_704,
+    ) -> ExtractionReport:
         """Aggregate case results without hiding failed model turns."""
         targets = sum(result.targets for result in results)
         proposed = sum(result.quality.proposed_facts for result in results)
@@ -102,6 +117,11 @@ class ExtractionReport(FrozenModel):
         metadata_checked = sum(result.metadata_checked for result in results)
         precision = ratio(accepted_matches, accepted)
         recall = ratio(accepted_matches, targets)
+        measured_wall_ms = (
+            sum(result.duration_ms for result in results) if wall_ms is None else wall_ms
+        )
+        successful = sum(result.error is None for result in results)
+        cases_per_hour = ratio(successful * 3_600_000.0, measured_wall_ms)
         return cls(
             model=model,
             cases=len(results),
@@ -119,6 +139,11 @@ class ExtractionReport(FrozenModel):
             ),
             p50_ms=percentile([result.duration_ms for result in results], 50),
             p95_ms=percentile([result.duration_ms for result in results], 95),
+            wall_ms=measured_wall_ms,
+            concurrency=concurrency,
+            cases_per_hour=cases_per_hour,
+            backlog=backlog,
+            backlog_hours=ratio(backlog, cases_per_hour),
             results=tuple(results),
         )
 
@@ -129,7 +154,9 @@ class ExtractionReport(FrozenModel):
             f"f1={self.accepted_f1:.3f} precision={self.accepted_precision:.3f} "
             f"recall={self.accepted_recall:.3f} proposal_recall={self.proposed_recall:.3f} "
             f"grounded={self.grounding_rate:.3f} metadata={self.metadata_accuracy:.3f} "
-            f"p50={self.p50_ms:.1f}ms p95={self.p95_ms:.1f}ms"
+            f"p50={self.p50_ms:.1f}ms p95={self.p95_ms:.1f}ms "
+            f"wall={self.wall_ms:.1f}ms concurrency={self.concurrency} "
+            f"rate={self.cases_per_hour:.1f}/h backlog_eta={self.backlog_hours:.2f}h"
         )
         failures = "\n".join(
             f"{result.id} error={result.error}" for result in self.results if result.error
@@ -150,7 +177,13 @@ class ExtractionBenchmark:
         started = perf_counter()
         try:
             extraction = await self.extractor.extract(case.text)
-        except (LengthFinishReasonError, ValidationError, ValueError) as error:
+        except (
+            LengthFinishReasonError,
+            ModelHTTPError,
+            UnexpectedModelBehavior,
+            ValidationError,
+            ValueError,
+        ) as error:
             return self.failed(case, started, error)
         grounded = GroundedProjection.from_extraction(extraction, case.text)
         proposed_matches, _, _ = self.matches(case.targets, extraction.facts)
@@ -173,7 +206,13 @@ class ExtractionBenchmark:
     def failed(
         case: ExtractionCase,
         started: float,
-        error: LengthFinishReasonError | ValidationError | ValueError,
+        error: (
+            LengthFinishReasonError
+            | ModelHTTPError
+            | UnexpectedModelBehavior
+            | ValidationError
+            | ValueError
+        ),
     ) -> ExtractionCaseResult:
         """Represent one bounded model output failure without inventing predictions."""
         return ExtractionCaseResult(
@@ -218,7 +257,37 @@ class ExtractionBenchmark:
 
     async def run(self, cases: Sequence[ExtractionCase], model: str) -> ExtractionReport:
         """Run cases sequentially so latency and memory remain comparable across models."""
-        return ExtractionReport.score(model, [await self.case(case) for case in cases])
+        return await self.run_concurrent(cases, model)
+
+    async def run_concurrent(
+        self,
+        cases: Sequence[ExtractionCase],
+        model: str,
+        concurrency: int = 1,
+        backlog: int = 10_704,
+    ) -> ExtractionReport:
+        """Measure bounded parallel extraction and project the configured backlog."""
+        if concurrency < 1:
+            raise ValueError("extraction benchmark concurrency must be positive")
+        limiter = asyncio.Semaphore(concurrency)
+        started = perf_counter()
+        results = await asyncio.gather(*(self._limited_case(case, limiter) for case in cases))
+        return ExtractionReport.score(
+            model,
+            results,
+            wall_ms=(perf_counter() - started) * 1000.0,
+            concurrency=concurrency,
+            backlog=backlog,
+        )
+
+    async def _limited_case(
+        self,
+        case: ExtractionCase,
+        limiter: asyncio.Semaphore,
+    ) -> ExtractionCaseResult:
+        """Run one case inside the benchmark-wide concurrency bound."""
+        async with limiter:
+            return await self.case(case)
 
 
 def load_extraction_cases(path: Path) -> tuple[ExtractionCase, ...]:

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from obstore import sign_async
 from obstore.store import ObjectStoreMethods, S3Store
 from patos import FrozenFlexModel, FrozenModel, sql
-from pydantic import UUID7, UUID8
+from pydantic import UUID7, UUID8, Field
 
 from .store.models.tables.blob import Blob
 
@@ -30,13 +30,13 @@ class DownloadUnavailable(RuntimeError):
 class StoredBytes(FrozenModel):
     """Metadata needed to create one immutable PostgreSQL `Blob` row."""
 
-    key: str
+    key: str = Field(serialization_alias="storage_key")
     content_hash: UUID8
     size: int
     stored_size: int
     encoding: Blob.Encoding
     etag: str | None = None
-    version: str | None = None
+    version: str | None = Field(default=None, serialization_alias="storage_version")
 
 
 class StoredObject(FrozenModel):

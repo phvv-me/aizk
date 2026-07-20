@@ -47,6 +47,10 @@ def test_rerank_scores_come_back_aligned_to_the_input_order(rerank_endpoint: lis
     assert scores == [1.0, 0.5, 1.0 / 3]
     [request] = rerank_endpoint
     assert request["model"] == settings.rerank_model
+    assert request["max_tokens_per_query"] == settings.rerank_query_max_tokens
+    assert request["max_tokens_per_doc"] == settings.rerank_document_max_tokens
+    assert request["truncate_prompt_tokens"] == -1
+    assert request["truncation_side"] == "left"
     assert request["query"] == settings.rerank_query_template.format(
         instruction=settings.rerank_instruction, query="what holds"
     )
@@ -65,7 +69,15 @@ def test_rerank_sends_raw_texts_when_the_templates_are_empty(
     run(rerank("what holds", ["first"]))
 
     assert rerank_endpoint == [
-        {"model": settings.rerank_model, "query": "what holds", "documents": ["first"]}
+        {
+            "model": settings.rerank_model,
+            "query": "what holds",
+            "documents": ["first"],
+            "max_tokens_per_query": settings.rerank_query_max_tokens,
+            "max_tokens_per_doc": settings.rerank_document_max_tokens,
+            "truncate_prompt_tokens": -1,
+            "truncation_side": "left",
+        }
     ]
 
 

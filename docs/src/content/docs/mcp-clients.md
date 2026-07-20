@@ -59,8 +59,24 @@ For a shared repository, commit the equivalent Aizk entry in `.mcp.json` instead
 
 ## Local file uploads
 
-For a local file, compute its exact size and lowercase SHA-256 before asking the client to call
-`remember` with an `upload` declaration.
+The AIZK CLI handles the complete local file flow.
+
+```sh
+aizk auth login --server https://aizk.phvv.me/mcp
+aizk remember report.pdf notes.md
+```
+
+It hashes each file, asks for its private upload ticket, streams the bytes, and returns the stored
+artifact receipts. Callers do not need to coordinate separate MCP and HTTP requests. Add companion
+information once for the whole batch when it helps explain the originals.
+
+```sh
+aizk remember report.pdf notes.md --text "Primary references for the current retrieval design."
+```
+
+The lower-level MCP contract remains useful for clients that implement uploads themselves. Such a
+client computes the exact size and lowercase SHA-256 before calling `remember` with an `upload`
+declaration.
 
 ```sh
 sha256=$(sha256sum file | cut -d' ' -f1)

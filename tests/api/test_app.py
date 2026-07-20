@@ -1,5 +1,6 @@
 import hashlib
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from datetime import UTC, datetime, time
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
@@ -9,6 +10,7 @@ import httpx
 import pytest
 from id_factory import uuid5, uuid7
 from obstore.exceptions import PermissionDeniedError
+from patos import FrozenModel
 from starlette.routing import Route
 
 import aizk.api.app as app_module
@@ -25,7 +27,14 @@ from aizk.exceptions import ScopeNotFoundError
 from aizk.integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from aizk.integrations.docling import ArtifactBytes
 from aizk.integrations.logto import LogtoClient, OrganizationChange
-from aizk.memory import WriteResult
+from aizk.status import (
+    CallerStatus,
+    ProcessingStatus,
+    StatusReport,
+    UsageReport,
+    UsageStatus,
+    UsageSummary,
+)
 from aizk.store import Artifact
 from aizk.store.identity import OrganizationStanding, User
 from aizk.types import Scopes
@@ -33,6 +42,18 @@ from aizk.types import Scopes
 pytestmark = pytest.mark.usefixtures("migrated_db")
 
 _DATA_SHA256 = hashlib.sha256(b"data").hexdigest()
+
+
+class NestedBody(FrozenModel):
+    """One nested schema used to verify local `$ref` inlining."""
+
+    value: str
+
+
+class ParentBody(FrozenModel):
+    """One request schema containing a named nested model."""
+
+    nested: NestedBody
 
 
 def upload_request(size: int = 4) -> UploadRequest:
@@ -48,9 +69,17 @@ def upload_request(size: int = 4) -> UploadRequest:
 # Every route except the capability PUT, whose single-use grant is its own authorization.
 _PROTECTED = (
     ("GET", "/api/me", "/api/me"),
+    ("GET", "/api/status", "/api/status"),
     ("GET", "/api/overview", "/api/overview"),
+    ("GET", "/api/usage", "/api/usage"),
+    ("GET", "/api/processing", "/api/processing"),
+    ("GET", "/api/processing/events", "/api/processing/events"),
+    ("GET", "/api/sources", "/api/sources"),
+    ("GET", "/api/findings", "/api/findings"),
+    ("GET", "/api/subjects", "/api/subjects"),
+    ("GET", "/api/themes", "/api/themes"),
+    ("GET", "/api/graph", "/api/graph"),
     ("POST", "/api/recall", "/api/recall"),
-    ("POST", "/api/remember", "/api/remember"),
     ("GET", "/api/organizations", "/api/organizations"),
     ("POST", "/api/organizations", "/api/organizations"),
     ("POST", "/api/organizations/{name}/members", "/api/organizations/Lab/members"),
@@ -167,8 +196,24 @@ def test_the_protected_route_list_covers_every_registered_surface() -> None:
     }
 
     assert exposed == {(method, template) for method, template, _ in _PROTECTED} | {
-        ("PUT", "/api/uploads/{capability}")
+        ("PUT", "/api/uploads/{capability}"),
+        ("GET", "/healthz"),
     }
+
+
+def test_health_check_is_cheap_and_unauthenticated() -> None:
+    response = call(api(), "GET", "/healthz")
+
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+def test_json_body_inlines_nested_model_definitions() -> None:
+    body = app_module.json_body(ParentBody)
+    schema = body["requestBody"]["content"]["application/json"]["schema"]
+
+    assert "$defs" not in str(schema)
+    assert schema["properties"]["nested"]["properties"]["value"]["type"] == "string"
 
 
 def test_bearer_verification_receives_only_bearer_scheme_tokens(
@@ -208,7 +253,7 @@ def test_me_returns_the_label_and_exact_organization_standing(
 
     response = call(service_as(monkeypatch, verified(user)), "GET", "/api/me")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.json() == {
         "label": "Pedro Valois",
         "organizations": [
@@ -224,6 +269,41 @@ def test_me_returns_the_label_and_exact_organization_standing(
     }
 
 
+def test_status_returns_combined_caller_usage_and_processing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    who = verified()
+    now = datetime(2026, 7, 20, tzinfo=UTC)
+    report = StatusReport(
+        generated_at=now,
+        caller=CallerStatus.from_user(who.user),
+        usage=UsageStatus.from_report(
+            UsageReport(
+                generated_at=now,
+                recorded_through=now,
+                days=7,
+                start=datetime.combine(now.date(), time.min, tzinfo=UTC),
+                summary=UsageSummary(requests=2),
+                lifetime=UsageSummary(requests=5),
+            )
+        ),
+        processing=ProcessingStatus(generated_at=now, state="idle", stages=()),
+    )
+    load = AsyncMock(return_value=report)
+    monkeypatch.setattr(app_module.StatusReport, "load", load)
+    service = service_as(monkeypatch, who)
+
+    response = call(service, "GET", "/api/status?days=7")
+    invalid = call(service, "GET", "/api/status?days=0")
+
+    assert response.status_code == 200
+    assert response.json()["caller"]["anonymous"] is False
+    assert response.json()["usage"]["lifetime"]["requests"] == 5
+    assert response.json()["processing"]["state"] == "idle"
+    assert invalid.status_code == 400
+    load.assert_awaited_once_with(who.user, 7)
+
+
 def test_overview_merges_knowledge_usage_sources_and_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -235,10 +315,102 @@ def test_overview_merges_knowledge_usage_sources_and_artifacts(
 
     response = call(service_as(monkeypatch, who), "GET", "/api/overview")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert set(response.json()) == {"totals", "usage", "recent_sources", "artifacts"}
     assert dashboard.await_args is not None and dashboard.await_args.args == (who.user,)
     assert artifacts.await_args is not None and artifacts.await_args.args == (who.user,)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/usage?days=30",
+        "/api/processing",
+        "/api/sources",
+        "/api/findings",
+        "/api/subjects",
+        "/api/themes",
+        "/api/graph",
+    ],
+)
+def test_read_only_analysis_routes_execute_against_postgres(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+) -> None:
+    response = call(service_as(monkeypatch, verified()), "GET", path)
+
+    assert response.status_code == 200, response.text
+
+
+def test_processing_events_stream_authenticated_snapshots_without_buffering(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    who = verified()
+    seen: dict[str, User] = {}
+
+    class FiniteProcessingUpdates:
+        def __init__(
+            self,
+            user: User,
+            disconnected: Callable[[], Awaitable[bool]],
+        ) -> None:
+            del disconnected
+            seen["user"] = user
+
+        async def events(self) -> AsyncIterator[bytes]:
+            yield b"event: processing\ndata: {}\n\n"
+
+    monkeypatch.setattr(app_module, "ProcessingUpdates", FiniteProcessingUpdates)
+
+    response = call(
+        service_as(monkeypatch, who),
+        "GET",
+        "/api/processing/events",
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache, no-transform"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.content == b"event: processing\ndata: {}\n\n"
+    assert seen == {"user": who.user}
+
+
+@pytest.mark.parametrize(
+    ("path", "detail"),
+    [
+        ("/api/usage?days=0", "days must be between 1 and 365"),
+        ("/api/usage?days=366", "days must be between 1 and 365"),
+        ("/api/sources?limit=0", "limit must be between 1 and 100"),
+        ("/api/sources?limit=101", "limit must be between 1 and 100"),
+        ("/api/sources?offset=-1", "offset must be nonnegative"),
+        ("/api/graph?limit=0", "limit must be between 1 and 80"),
+        ("/api/graph?limit=81", "limit must be between 1 and 80"),
+    ],
+)
+def test_read_only_analysis_routes_reject_out_of_bounds_queries(
+    monkeypatch: pytest.MonkeyPatch,
+    path: str,
+    detail: str,
+) -> None:
+    response = call(service_as(monkeypatch, verified()), "GET", path)
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": detail}
+
+
+@pytest.mark.parametrize("resource", ["sources", "findings", "subjects"])
+def test_catalog_routes_execute_the_optional_search(
+    monkeypatch: pytest.MonkeyPatch,
+    resource: str,
+) -> None:
+    response = call(
+        service_as(monkeypatch, verified()),
+        "GET",
+        f"/api/{resource}?search=needle",
+    )
+
+    assert response.status_code == 200, response.text
 
 
 @pytest.mark.parametrize("budget", [512, None], ids=["explicit", "default"])
@@ -291,49 +463,6 @@ def test_invalid_json_bodies_are_unprocessable(
     assert "detail" in response.json()
 
 
-def test_remember_forwards_the_write_and_returns_its_receipt(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    who = verified()
-    document_id = uuid7()
-    seen: dict[str, User | str | list[str] | bool | None] = {}
-
-    class FakeMemory:
-        def __init__(self, *, user: User, intake: ArtifactIntake) -> None:
-            del intake
-            seen["user"] = user
-
-        async def remember(
-            self,
-            text: str | None,
-            *,
-            source_uri: str | None = None,
-            scopes: list[str] | None = None,
-            preserve_source: bool = False,
-        ) -> WriteResult:
-            seen.update(text=text, source_uri=source_uri, scopes=scopes, preserve=preserve_source)
-            return WriteResult(id=document_id)
-
-    monkeypatch.setattr(app_module, "Memory", FakeMemory)
-
-    response = call(
-        service_as(monkeypatch, who),
-        "POST",
-        "/api/remember",
-        json={"text": "A durable note", "scopes": ["Lab"], "preserve_source": False},
-    )
-
-    assert response.status_code == 200
-    assert response.json() == {"id": str(document_id)}
-    assert seen == {
-        "user": who.user,
-        "text": "A durable note",
-        "source_uri": None,
-        "scopes": ["Lab"],
-        "preserve": False,
-    }
-
-
 @pytest.mark.parametrize(
     ("failure", "status", "detail"),
     [
@@ -375,54 +504,25 @@ def test_remember_forwards_the_write_and_returns_its_receipt(
     ],
 )
 def test_expected_domain_failures_map_to_stable_sanitized_details(
-    monkeypatch: pytest.MonkeyPatch, failure: Exception, status: int, detail: str
+    failure: Exception, status: int, detail: str
 ) -> None:
-    class FakeMemory:
-        def __init__(self, *, user: User, intake: ArtifactIntake) -> None:
-            del user, intake
-
-        async def remember(
-            self,
-            text: str | None,
-            *,
-            source_uri: str | None = None,
-            scopes: list[str] | None = None,
-            preserve_source: bool = False,
-        ) -> WriteResult:
-            raise failure
-
-    monkeypatch.setattr(app_module, "Memory", FakeMemory)
-
-    response = call(
-        service_as(monkeypatch, verified()),
-        "POST",
-        "/api/remember",
-        json={"text": "note"},
-    )
-
-    assert response.status_code == status
-    assert response.json() == {"detail": detail}
+    assert AizkAPI.status_for(failure) == status
+    assert AizkAPI.detail_for(failure) == detail
 
 
 @pytest.mark.parametrize(
-    ("path", "body", "field"),
+    ("body", "field"),
     [
-        ("/api/recall", {"query": "x" * 20}, "query"),
-        ("/api/recall", {"query": "what", "budget": 10_000_000}, "budget"),
-        ("/api/remember", {"text": "x" * 20}, "text"),
-        ("/api/remember", {"text": "note", "source_uri": "u" * 20}, "source_uri"),
-        ("/api/remember", {"text": "note", "scopes": ["A", "B", "C"]}, "scopes"),
+        ({"query": "x" * 20}, "query"),
+        ({"query": "what", "budget": 10_000_000}, "budget"),
     ],
 )
 def test_request_models_enforce_the_deployment_bounds_at_validation_time(
-    monkeypatch: pytest.MonkeyPatch, path: str, body: dict, field: str
+    monkeypatch: pytest.MonkeyPatch, body: dict, field: str
 ) -> None:
     monkeypatch.setattr(settings, "mcp_recall_query_max_chars", 10)
-    monkeypatch.setattr(settings, "mcp_remember_max_chars", 10)
-    monkeypatch.setattr(settings, "mcp_source_uri_max_chars", 10)
-    monkeypatch.setattr(settings, "mcp_scope_names_max", 2)
 
-    response = call(service_as(monkeypatch, verified()), "POST", path, json=body)
+    response = call(service_as(monkeypatch, verified()), "POST", "/api/recall", json=body)
 
     assert response.status_code == 422
     assert field in response.json()["detail"]

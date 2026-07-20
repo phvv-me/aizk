@@ -25,6 +25,10 @@
   --sidebar: oklch(0.975 0.004 250);
   --sidebar-foreground: oklch(0.32 0.03 260);
   --sidebar-border: oklch(0.917 0.008 255);
+  --series-1: #2a78d6;
+  --series-2: #008300;
+  --series-3: #e87ba4;
+  --series-4: #eda100;
   --radius: 0.55rem;
 }
 
@@ -52,6 +56,10 @@
     --sidebar: oklch(0.155 0.014 262);
     --sidebar-foreground: oklch(0.87 0.012 255);
     --sidebar-border: oklch(0.27 0.02 260);
+    --series-1: #3987e5;
+    --series-2: #008300;
+    --series-3: #d55181;
+    --series-4: #c98500;
   }
 }
 

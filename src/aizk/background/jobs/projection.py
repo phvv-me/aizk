@@ -39,6 +39,9 @@ class ChunkProjectionJob(QueueJob[ChunkJob]):
         if frozenset(chunk.scopes) != key:
             logger.warning("chunk {} does not belong to its queued scope, skipping", chunk.id)
             return
+        if chunk.processed_at is not None:
+            logger.info("chunk {} is already projected, skipping duplicate job", chunk.id)
+            return
         touched = await extract_and_consolidate(chunk, self.clients)
         if not touched:
             return
@@ -86,7 +89,7 @@ async def enqueue_chunks(chunks: Sequence[Chunk], scopes: Scopes) -> int:
     return queued
 
 
-async def retry_failed_chunks(limit: int = 100) -> int:
+async def retry_failed_chunks(limit: int = 100, max_cycles: int | None = None) -> int:
     """Requeue retained chunk projection failures through PgQueuer."""
     async with Queue(dsn=settings.asyncpg_dsn) as queue:
-        return await queue.requeue_failed(ChunkProjectionJob, limit)
+        return await queue.requeue_failed(ChunkProjectionJob, limit, max_cycles)

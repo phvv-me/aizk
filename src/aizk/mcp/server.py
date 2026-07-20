@@ -1,6 +1,6 @@
 from collections.abc import Callable, Coroutine
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated
 
 import httpx
 from fastmcp import FastMCP
@@ -11,19 +11,20 @@ from obstore.exceptions import BaseError as ObjectStoreError
 from patos import FrozenModel
 from pydantic import UUID5, UUID7, UUID8, Field, StringConstraints
 
-from ..artifacts.models import ArtifactReceipt
 from ..artifacts.service import ArtifactIntake
-from ..artifacts.uploads import Sha256Hex, UploadBox, UploadGrantLimitError, UploadRequest
+from ..artifacts.uploads import UploadBox, UploadGrantLimitError, UploadRequest
 from ..auth import Auth
 from ..config import Settings
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
-from ..memory import Memory, ShareResult, WriteResult
+from ..memory import Memory, ShareResult
+from ..status import StatusReport
 from ..storage import ByteStore, IntegrityMismatch
 from ..store import Artifact, Blob, Usage
 from ..store.identity import User
 from ..types import ScopeNames
 from ..usage import annotate_operation
 from .middleware import CallerRateLimit, IdentityMiddleware, bound_user
+from .models import RememberResult, UploadDeclaration, UploadTicketAccepted
 
 
 class _ArtifactObject(FrozenModel):
@@ -36,30 +37,6 @@ class _ArtifactObject(FrozenModel):
     encoding: Blob.Encoding
     scopes: list[UUID5]
     media_type: str | None = None
-
-
-class _UploadDeclaration(FrozenModel):
-    """One local file whose exact bytes an agent intends to preserve."""
-
-    filename: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
-    ]
-    media_type: Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
-    ]
-    size: Annotated[int, Field(gt=0)]
-    sha256: Sha256Hex
-
-
-class UploadTicketAccepted(FrozenModel):
-    """Acknowledge one short-lived private upload ticket."""
-
-    status: Literal["accepted"] = "accepted"
-    capability: str
-    instruction: str
-
-
-type _RememberResult = WriteResult | ArtifactReceipt | UploadTicketAccepted
 
 
 class AizkMCP(FastMCP):
@@ -117,13 +94,15 @@ class AizkMCP(FastMCP):
         """Build the shared memory service bound to one resolved caller."""
         return Memory(user=user, intake=self.intake)
 
-    def status_tool(self) -> Callable[[Context], Coroutine[None, None, User]]:
+    def status_tool(self) -> Callable[..., Coroutine[None, None, StatusReport]]:
         """Build the `status` tool over this server's dependencies."""
 
-        async def status(context: Context) -> User:
-            """Return the caller's organizations, roles, and permissions as supplied by
-            Logto."""
-            return self.memory(await self.user(context, identified=True)).status
+        async def status(
+            context: Context,
+            days: Annotated[int, Field(ge=1, le=365)] = 30,
+        ) -> StatusReport:
+            """Return caller authority together with durable usage and processing health."""
+            return await StatusReport.load(await self.user(context, identified=True), days)
 
         return status
 
@@ -157,7 +136,7 @@ class AizkMCP(FastMCP):
 
         return recall
 
-    def remember_tool(self) -> Callable[..., Coroutine[None, None, _RememberResult]]:
+    def remember_tool(self) -> Callable[..., Coroutine[None, None, RememberResult]]:
         """Build the `remember` tool with input bounds from this server's settings."""
         config = self.settings
 
@@ -181,8 +160,8 @@ class AizkMCP(FastMCP):
             scopes: Annotated[ScopeNames, Field(max_length=config.mcp_scope_names_max)]
             | None = None,
             preserve_source: bool = False,
-            upload: _UploadDeclaration | None = None,
-        ) -> _RememberResult:
+            upload: UploadDeclaration | None = None,
+        ) -> RememberResult:
             """Store text, preserve one URI original, or prepare one local file upload.
 
             text: self-describing Markdown, plain text, or companion information for a
@@ -228,12 +207,8 @@ class AizkMCP(FastMCP):
                 except UploadGrantLimitError as saturated:
                     raise ToolError(str(saturated)) from saturated
                 return UploadTicketAccepted(
-                    capability=grant.url.rsplit("/", 1)[-1],
-                    instruction=(
-                        "PUT the exact declared bytes once to the private single-use upload "
-                        f"endpoint {grant.url}. It expires shortly, in "
-                        f"{grant.expires_seconds} seconds."
-                    ),
+                    upload_url=grant.url,
+                    expires_seconds=grant.expires_seconds,
                 )
             if text is None and source_uri is None:
                 raise ToolError("remember requires text or a source URI")

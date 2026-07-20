@@ -1,5 +1,5 @@
 import hashlib
-from datetime import datetime
+from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import cast, get_type_hints
 from unittest.mock import AsyncMock
@@ -36,6 +36,14 @@ from aizk.mcp.server import AizkMCP
 from aizk.memory import ShareResult, WriteResult
 from aizk.provenance import CaptureContext
 from aizk.retrieval import Candidate, Lane
+from aizk.status import (
+    CallerStatus,
+    ProcessingStatus,
+    StatusReport,
+    UsageReport,
+    UsageStatus,
+    UsageSummary,
+)
 from aizk.store import Artifact
 from aizk.store.identity import OrganizationMember, OrganizationStanding, User
 from aizk.types import Scopes
@@ -76,11 +84,16 @@ def test_registration_is_exactly_the_client_verbs(tools: dict[str, FunctionTool]
     status_schema = tools["status"].output_schema
     assert status_schema is not None
     assert set(status_schema["properties"]) == {
-        "name",
-        "username",
-        "avatar",
-        "roles",
-        "organizations",
+        "generated_at",
+        "caller",
+        "usage",
+        "processing",
+    }
+    assert tools["status"].parameters["properties"]["days"] == {
+        "default": 30,
+        "maximum": 365,
+        "minimum": 1,
+        "type": "integer",
     }
 
 
@@ -88,7 +101,7 @@ def test_tool_schemas_bound_expensive_inputs(tools: dict[str, FunctionTool]) -> 
     recall_properties = tools["recall"].parameters["properties"]
     remember_properties = tools["remember"].parameters["properties"]
     share_properties = tools["share"].parameters["properties"]
-    upload_properties = mcp_server._UploadDeclaration.model_json_schema()["properties"]
+    upload_properties = mcp_server.UploadDeclaration.model_json_schema()["properties"]
 
     assert recall_properties["query"]["maxLength"] == settings.mcp_recall_query_max_chars
     assert recall_properties["budget"]["maximum"] == settings.mcp_recall_budget_max_tokens
@@ -109,7 +122,7 @@ _TOOL_FNS = tools_of(server)
 @given(field=st.sampled_from(tuple(_MCP_MAXIMUMS)), exceeds=st.booleans())
 def test_mcp_annotations_enforce_every_advertised_maximum(field: str, exceeds: bool) -> None:
     if field in _UPLOAD_FIELDS:
-        annotation = mcp_server._UploadDeclaration.__annotations__[field]
+        annotation = mcp_server.UploadDeclaration.__annotations__[field]
     else:
         function = (
             _TOOL_FNS["recall"].fn
@@ -273,7 +286,8 @@ def test_recall_describes_only_shared_scopes_present_in_evidence(
     )
 
 
-def test_status_returns_the_resolved_user_with_logto_values(
+def test_status_returns_authority_usage_and_processing(
+    monkeypatch: pytest.MonkeyPatch,
     tools: dict[str, FunctionTool],
 ) -> None:
     owner, docs, research = uuid5(), uuid5(), uuid5()
@@ -309,45 +323,29 @@ def test_status_returns_the_resolved_user_with_logto_values(
             ),
         ),
     )
-
-    result = dbutil.run(tools["status"].fn(context=context_for(caller)))
-
-    assert result is caller
-    assert result.model_dump() == {
-        "name": "Pedro Valois",
-        "username": "pedro",
-        "avatar": None,
-        "roles": ("aizk-user",),
-        "organizations": (
-            {
-                "name": "Docs",
-                "description": "Public documentation",
-                "custom_data": {"public": True},
-                "members": (
-                    {
-                        "name": "Pedro Valois",
-                        "username": "pedro",
-                        "avatar": None,
-                        "roles": ("editor",),
-                    },
-                ),
-                "roles": ("editor",),
-                "permissions": ("write:memory",),
-                "public": True,
-                "writable": True,
-            },
-            {
-                "name": "Research",
-                "description": None,
-                "custom_data": {},
-                "members": (),
-                "roles": ("viewer",),
-                "permissions": ("read",),
-                "public": False,
-                "writable": False,
-            },
+    now = datetime(2026, 7, 20, tzinfo=UTC)
+    report = StatusReport(
+        generated_at=now,
+        caller=CallerStatus.from_user(caller),
+        usage=UsageStatus.from_report(
+            UsageReport(
+                generated_at=now,
+                recorded_through=now,
+                days=30,
+                start=datetime.combine(now.date(), time.min, tzinfo=UTC),
+                summary=UsageSummary(requests=2),
+                lifetime=UsageSummary(requests=5),
+            )
         ),
-    }
+        processing=ProcessingStatus(generated_at=now, state="idle", stages=()),
+    )
+    load = AsyncMock(return_value=report)
+    monkeypatch.setattr(mcp_server.StatusReport, "load", load)
+
+    result = dbutil.run(tools["status"].fn(context=context_for(caller), days=7))
+
+    assert result is report
+    load.assert_awaited_once_with(caller, 7)
 
 
 @pytest.mark.parametrize(
@@ -671,7 +669,7 @@ def test_remember_upload_mints_one_claimable_capability(
     accepted = dbutil.run(
         tools["remember"].fn(
             text="Signed original",
-            upload=mcp_server._UploadDeclaration(
+            upload=mcp_server.UploadDeclaration(
                 filename="contract.pdf",
                 media_type="application/pdf",
                 size=1024,
@@ -683,8 +681,9 @@ def test_remember_upload_mints_one_claimable_capability(
 
     assert isinstance(accepted, mcp_server.UploadTicketAccepted)
     assert accepted.status == "accepted"
-    assert accepted.capability
-    ticket = dbutil.run(mcp_probe.runtime.uploads.claim(accepted.capability))
+    capability = accepted.upload_url.rsplit("/", 1)[-1]
+    assert capability
+    ticket = dbutil.run(mcp_probe.runtime.uploads.claim(capability))
     assert ticket.user.id == as_caller.id
     assert ticket.user.scopes == as_caller.scopes
     assert ticket.declared.size == 1024
@@ -705,7 +704,7 @@ def test_remember_upload_reports_grant_saturation_as_a_tool_error(
     with pytest.raises(ToolError, match="too many live upload grants"):
         dbutil.run(
             tools["remember"].fn(
-                upload=mcp_server._UploadDeclaration(
+                upload=mcp_server.UploadDeclaration(
                     filename="paper.pdf",
                     media_type="application/pdf",
                     size=4,
@@ -736,7 +735,7 @@ def test_remember_upload_rejects_invalid_declarations_as_tool_errors(
             tools["remember"].fn(
                 context=caller_context,
                 scopes=scopes,
-                upload=mcp_server._UploadDeclaration(
+                upload=mcp_server.UploadDeclaration(
                     filename=filename,
                     media_type="application/pdf",
                     size=8,
@@ -774,7 +773,7 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
     accepted_ticket = dbutil.run(
         tools["remember"].fn(
             text="Signed original",
-            upload=mcp_server._UploadDeclaration(
+            upload=mcp_server.UploadDeclaration(
                 filename="contract.pdf",
                 media_type="application/pdf",
                 size=4,
@@ -794,7 +793,7 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
         )
         transport = httpx.ASGITransport(app=receiving.app())
         async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as client:
-            return await client.put(f"/api/uploads/{accepted_ticket.capability}", content=b"data")
+            return await client.put(accepted_ticket.upload_url, content=b"data")
 
     response = dbutil.run(redeem())
 
@@ -821,7 +820,7 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
         (
             "remember",
             {
-                "upload": mcp_server._UploadDeclaration(
+                "upload": mcp_server.UploadDeclaration(
                     filename="paper.pdf",
                     media_type="application/pdf",
                     size=1,
@@ -833,7 +832,7 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
 )
 def test_write_verbs_refuse_the_anonymous_caller(
     tool_name: str,
-    arguments: dict[str, str | int | list[UUID7] | mcp_server._UploadDeclaration],
+    arguments: dict[str, str | int | list[UUID7] | mcp_server.UploadDeclaration],
     tools: dict[str, FunctionTool],
 ) -> None:
     anonymous = context_for(User.private(settings.anonymous_user_id))

@@ -1,5 +1,7 @@
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, cast
 
+from pydantic import UUID5, UUID7
 from sqlalchemy import (
     ColumnElement,
     Float,
@@ -9,14 +11,17 @@ from sqlalchemy import (
     exists,
     func,
     literal,
+    or_,
     union_all,
 )
 from sqlalchemy.dialects.postgresql import distinct_on
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import CTE
 from sqlmodel import select
-from sqlmodel.sql.expression import Select
+from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from .tables import (
+    Chunk,
     Community,
     Document,
     EntityClaim,
@@ -31,6 +36,23 @@ from .views import LiveFact
 
 if TYPE_CHECKING:
     from ...retrieval.models.lane import QueryContext
+
+
+type FindingRows = Select[
+    tuple[
+        UUID7,
+        str,
+        str,
+        UUID5,
+        str,
+        UUID5 | None,
+        str | None,
+        datetime,
+        UUID7 | None,
+        str | None,
+        list[UUID5],
+    ]
+]
 
 
 def seed_mass_from(
@@ -235,6 +257,183 @@ class Knowledge:
             LiveFact.total().label("findings"),
             EntityClaim.total().label("subjects"),
             Community.total().label("themes"),
+        )
+
+
+class Explorer:
+    """Read-only catalog and bounded graph queries for the browser explorer."""
+
+    @staticmethod
+    def source_rows(search: str, limit: int, offset: int) -> SelectOfScalar[Document]:
+        """Newest visible sources matching one optional title or URI search."""
+        statement = select(Document)
+        if search:
+            term = f"%{search}%"
+            statement = statement.where(
+                or_(Document.title.ilike(term), Document.source_uri.ilike(term))
+            )
+        return (
+            statement.order_by(Document.updated_at.desc(), Document.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+
+    @staticmethod
+    def source_total(search: str) -> SelectOfScalar[int]:
+        """Count visible sources matching one optional title or URI search."""
+        statement = select(Document.id.count().label("total"))
+        if search:
+            term = f"%{search}%"
+            statement = statement.where(
+                or_(Document.title.ilike(term), Document.source_uri.ilike(term))
+            )
+        return statement
+
+    @staticmethod
+    def finding_rows(search: str, limit: int, offset: int) -> FindingRows:
+        """Newest visible findings joined to subject, object, and source labels."""
+        subject = aliased(EntityContent, name="finding_subject")
+        object_ = aliased(EntityContent, name="finding_object")
+        statement = (
+            select(LiveFact.id, LiveFact.statement, LiveFact.predicate)
+            .add_columns(
+                LiveFact.subject_id,
+                subject.name.label("subject_name"),
+                LiveFact.object_id,
+                object_.name.label("object_name"),
+                LiveFact.recorded.lower(result=datetime).label("recorded_at"),
+                Document.id.label("source_id"),
+                Document.title.label("source_title"),
+                LiveFact.scopes,
+            )
+            .join(subject, subject.id == LiveFact.subject_id)
+            .outerjoin(object_, object_.id == LiveFact.object_id)
+            .outerjoin(Chunk, Chunk.id == LiveFact.source_chunk_id)
+            .outerjoin(Document, Document.id == Chunk.document_id)
+        )
+        if search:
+            term = f"%{search}%"
+            statement = statement.where(
+                or_(
+                    LiveFact.statement.ilike(term),
+                    LiveFact.predicate.ilike(term),
+                    subject.name.ilike(term),
+                    object_.name.ilike(term),
+                )
+            )
+        return cast(
+            FindingRows,
+            statement.order_by(LiveFact.recorded.lower(result=datetime).desc(), LiveFact.id.desc())
+            .offset(offset)
+            .limit(limit),
+        )
+
+    @staticmethod
+    def finding_total(search: str) -> SelectOfScalar[int]:
+        """Count visible findings matching one optional statement or entity search."""
+        subject = aliased(EntityContent, name="finding_count_subject")
+        object_ = aliased(EntityContent, name="finding_count_object")
+        statement = (
+            select(LiveFact.id.count().label("total"))
+            .join(subject, subject.id == LiveFact.subject_id)
+            .outerjoin(object_, object_.id == LiveFact.object_id)
+        )
+        if search:
+            term = f"%{search}%"
+            statement = statement.where(
+                or_(
+                    LiveFact.statement.ilike(term),
+                    LiveFact.predicate.ilike(term),
+                    subject.name.ilike(term),
+                    object_.name.ilike(term),
+                )
+            )
+        return statement
+
+    @staticmethod
+    def subject_rows(
+        search: str, limit: int, offset: int
+    ) -> Select[tuple[UUID7, UUID5, str, str, list[UUID5], datetime, int]]:
+        """Visible subject claims with their current finding degree."""
+        finding_count = (
+            select(LiveFact.id.count())
+            .where(
+                or_(
+                    LiveFact.subject_id == EntityContent.id,
+                    LiveFact.object_id == EntityContent.id,
+                )
+            )
+            .correlate(EntityContent)
+            .scalar_subquery()
+        )
+        statement = (
+            select(EntityClaim.id, EntityContent.id.label("content_id"), EntityContent.name)
+            .add_columns(
+                EntityContent.type,
+                EntityClaim.scopes,
+                EntityClaim.updated_at,
+                finding_count.label("finding_count"),
+            )
+            .join(EntityContent, EntityContent.id == EntityClaim.content_id)
+        )
+        if search:
+            term = f"%{search}%"
+            statement = statement.where(
+                or_(EntityContent.name.ilike(term), EntityContent.type.ilike(term))
+            )
+        return cast(
+            "Select[tuple[UUID7, UUID5, str, str, list[UUID5], datetime, int]]",
+            statement.order_by(
+                finding_count.desc(), EntityClaim.updated_at.desc(), EntityClaim.id.desc()
+            )
+            .offset(offset)
+            .limit(limit),
+        )
+
+    @staticmethod
+    def subject_total(search: str) -> SelectOfScalar[int]:
+        """Count visible subject claims matching one optional name or type search."""
+        statement = select(EntityClaim.id.count().label("total")).join(
+            EntityContent, EntityContent.id == EntityClaim.content_id
+        )
+        if search:
+            term = f"%{search}%"
+            statement = statement.where(
+                or_(EntityContent.name.ilike(term), EntityContent.type.ilike(term))
+            )
+        return statement
+
+    @staticmethod
+    def theme_rows() -> SelectOfScalar[Community]:
+        """Visible themes ordered by membership size then recency."""
+        return select(Community).order_by(
+            func.cardinality(Community.member_ids).desc(), Community.updated_at.desc()
+        )
+
+    @staticmethod
+    def member_names(ids: list[UUID5], limit: int = 8) -> SelectOfScalar[str]:
+        """Canonical names for one visible theme's bounded member roster."""
+        return (
+            select(EntityContent.name)
+            .where(EntityContent.id.in_(ids))
+            .order_by(EntityContent.name)
+            .limit(limit)
+        )
+
+    @staticmethod
+    def graph_rows(limit: int) -> Select[tuple[UUID5, str, UUID5, str, str, str]]:
+        """Newest visible binary findings for one bounded relationship graph."""
+        subject = aliased(EntityContent, name="graph_subject")
+        object_ = aliased(EntityContent, name="graph_object")
+        return cast(
+            "Select[tuple[UUID5, str, UUID5, str, str, str]]",
+            select(LiveFact.subject_id, subject.name.label("subject_name"), LiveFact.object_id)
+            .add_columns(object_.name.label("object_name"), LiveFact.predicate, LiveFact.statement)
+            .join(subject, subject.id == LiveFact.subject_id)
+            .join(object_, object_.id == LiveFact.object_id)
+            .where(LiveFact.object_id.is_not(None))
+            .order_by(LiveFact.recorded.lower(result=datetime).desc(), LiveFact.id.desc())
+            .limit(limit),
         )
 
 

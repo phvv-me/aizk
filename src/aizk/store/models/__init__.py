@@ -1,4 +1,4 @@
-from .namespaces import Entity, Fact, Knowledge, Relation
+from .namespaces import Entity, Explorer, Fact, Knowledge, Relation
 from .tables import (
     Artifact,
     Blob,
@@ -19,6 +19,7 @@ __all__ = [
     "Community",
     "Document",
     "Entity",
+    "Explorer",
     "Fact",
     "Knowledge",
     "Profile",

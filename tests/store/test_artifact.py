@@ -380,6 +380,76 @@ def test_share_reuses_the_target_artifact_and_versions_new_blobs() -> None:
     dbutil.run(body())
 
 
+def test_share_copies_complete_models_and_canonicalizes_target_scopes() -> None:
+    async def body() -> None:
+        await dbutil.reset_db()
+        owner, first_scope, second_scope = uuid5(), uuid5(), uuid5()
+        stored = await seed_artifact(owner, [owner], name="source.txt", source_uri="s://source")
+        observed = datetime(2026, 7, 2, tzinfo=UTC)
+        expires = datetime(2027, 7, 2, tzinfo=UTC)
+        async with User.private(owner) as session:
+            artifact = await session.get(Artifact, stored.artifact.id)
+            content = await session.get(Artifact.Content, stored.content.id)
+            assert artifact is not None and content is not None
+            artifact.description = "Preserved description"
+            content.state = Artifact.Content.State.ready
+            content.companion_text = "Companion context"
+            content.markdown = "# Converted\n"
+            content.docling_json = {"schema_name": "DoclingDocument"}
+            content.details = {"status": "success"}
+            content.observed_at = observed
+            content.expires_at = expires
+            content.processed_at = observed
+
+        user = User.authorized(
+            owner,
+            read=[owner, first_scope, second_scope],
+            write=[owner, first_scope, second_scope],
+        )
+        source = source_document(owner, stored.artifact.id, stored.content.id)
+        async with user as session:
+            artifact_id, content_id = await Artifact.share(
+                session,
+                source,
+                owner,
+                [second_scope, first_scope, second_scope],
+            )
+            assert artifact_id is not None and content_id is not None
+            original_artifact = await session.get(Artifact, stored.artifact.id)
+            original_content = await session.get(Artifact.Content, stored.content.id)
+            copied_artifact = await session.get(Artifact, artifact_id)
+            copied_content = await session.get(Artifact.Content, content_id)
+            assert all(
+                row is not None
+                for row in (original_artifact, original_content, copied_artifact, copied_content)
+            )
+            assert original_artifact is not None and copied_artifact is not None
+            assert original_content is not None and copied_content is not None
+            artifact_fields = {"name", "description", "source_uri"}
+            content_identity = {
+                "id",
+                "artifact_id",
+                "revision",
+                "created_at",
+                "updated_at",
+                "created_by",
+                "scopes",
+            }
+            assert copied_artifact.model_dump(include=artifact_fields) == (
+                original_artifact.model_dump(include=artifact_fields)
+            )
+            assert copied_content.model_dump(exclude=content_identity) == (
+                original_content.model_dump(exclude=content_identity)
+            )
+            assert (
+                copied_artifact.scopes
+                == copied_content.scopes
+                == sorted((first_scope, second_scope), key=str)
+            )
+
+    dbutil.run(body())
+
+
 def test_processing_state_is_mutable_but_blob_metadata_is_not() -> None:
     async def body() -> None:
         await dbutil.reset_db()
@@ -408,9 +478,12 @@ def test_repository_versions_one_uri_and_persists_derivatives_in_postgres() -> N
         user = User.private(owner)
         repository = ArtifactRepository()
         observed = datetime(2026, 7, 1, tzinfo=UTC)
+        stored = stored_bytes("objects/original-1", uuid8(), 1).model_copy(
+            update={"etag": "first-etag", "version": "first-version"}
+        )
         first = await repository.create_original(
             user,
-            stored_bytes("objects/original-1", uuid8(), 1),
+            stored,
             OriginalDescription(
                 filename="paper.pdf",
                 media_type="application/pdf",
@@ -445,8 +518,8 @@ def test_repository_versions_one_uri_and_persists_derivatives_in_postgres() -> N
             user,
             current,
             "# Paper\n",
-            {"texts": []},
-            {"status": "success"},
+            {"texts": [{"text": "before\x00after"}]},
+            {"status": "success", "pages": 1, "nul\x00key": "nul\x00value"},
         )
         await repository.set_state(
             user,
@@ -467,10 +540,21 @@ def test_repository_versions_one_uri_and_persists_derivatives_in_postgres() -> N
         assert [item.revision for item in contents] == [1, 2]
         original = next(item for item in contents if item.id == second.content_id)
         assert original.markdown == "# Paper\n"
-        assert original.docling_json == {"texts": []}
-        assert original.details == {"status": "success"}
+        assert original.docling_json == {"texts": [{"text": "before\ufffdafter"}]}
+        assert original.details == {
+            "status": "success",
+            "pages": 1,
+            "nul\ufffdkey": "nul\ufffdvalue",
+        }
         assert original.state is Artifact.Content.State.ready
         assert original.processed_at is not None
+        async with User.system().owner as session:
+            blob = await session.scalar(select(Blob).where(Blob.storage_key == stored.key))
+        assert blob is not None
+        assert blob.model_dump(include={"etag", "storage_version"}) == {
+            "etag": stored.etag,
+            "storage_version": stored.version,
+        }
 
     dbutil.run(body())
 

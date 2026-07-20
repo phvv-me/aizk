@@ -1,25 +1,35 @@
+from collections.abc import Awaitable, Callable
+from time import perf_counter
+
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from ..usage import annotate_transport
+from ..usage import account_usage, accounting_context
+
+type AccountUsage = Callable[[int, int, float, int | None], Awaitable[None]]
+
+_STREAM_PATHS = frozenset({"/api/processing/events"})
 
 
 class UsageMiddleware:
-    """Count one request's transport bytes and stamp them onto its server span.
+    """Measure one HTTP operation and durably admit its usage before releasing the reply."""
 
-    The OpenTelemetry Starlette instrumentation opens the root server span but does
-    not record body sizes, so this innermost ASGI layer measures the exact bytes it
-    relays in each direction and annotates the span for the usage processor.
-    """
-
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, account: AccountUsage = account_usage) -> None:
         self.app = app
+        self.account = account
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """Relay one connection, measuring HTTP request and response body bytes."""
+        """Buffer one bounded API reply until its successful usage event is queued."""
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
+        if scope.get("path") in _STREAM_PATHS:
+            with accounting_context():
+                await self.app(scope, receive, send)
+            return
         received = sent = 0
+        status = 500
+        messages: list[Message] = []
+        started_at = perf_counter()
 
         async def measured_receive() -> Message:
             nonlocal received
@@ -28,9 +38,15 @@ class UsageMiddleware:
             return message
 
         async def measured_send(message: Message) -> None:
-            nonlocal sent
-            sent += len(message.get("body", b""))
-            await send(message)
+            nonlocal sent, status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            else:
+                sent += len(message.get("body", b""))
+            messages.append(message)
 
-        await self.app(scope, measured_receive, measured_send)
-        annotate_transport(received, sent)
+        with accounting_context():
+            await self.app(scope, measured_receive, measured_send)
+            await self.account(received, sent, started_at, status)
+        for message in messages:
+            await send(message)

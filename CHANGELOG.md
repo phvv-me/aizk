@@ -63,6 +63,16 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   A controlled Crimson comparison found the large checkpoint nearly as fast as base and somewhat
   more precise, but still much weaker than the LLM on relation meaning. Large therefore serves the
   cheap gate while the LLM remains the default writer.
+- Ordinary 2,048-character graph chunks now fit one LLM extraction window instead of repeating
+  the ontology prompt over two half-chunks. The response bounds double to preserve the former
+  two-window entity and fact capacity. The extraction benchmark also selects `llm` or `gliner`
+  explicitly so throughput experiments cannot silently change the quality lane being measured.
+  Its bounded concurrency, wall time, completed-cases rate, and backlog ETA now measure burst
+  endpoints directly. Authenticated OpenAI-compatible services can receive redacted custom
+  headers, including Modal proxy credentials, without exposing an unauthenticated endpoint.
+  New local extraction uses Gemma 4 12B QAT with four scheduled sequences on the dedicated RTX
+  3090. Completed chunk projections remain untouched, and duplicate queue delivery now skips a
+  chunk whose projection was already committed.
 - Background jobs now share a typed PgQueuer boundary for payload validation, deduplication,
   priorities, fleet-wide concurrency, and database-backed retries. Profile projection work runs
   ahead of chunk projection, scheduled passes stay below both, and exhausted failures remain held
@@ -89,7 +99,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   durations, and explicit operational failures. Reports record model provenance and distinguish
   diagnostic samples from the complete reference protocol.
 - `FAMAScore` implements Memora's forgetting-aware accuracy equation.
-- `aizk eval groupmem` runs the external benchmark pipeline with bounded smoke-run controls.
+- `aizk-eval groupmem` runs the external benchmark pipeline with bounded smoke-run controls.
 
 ### Security
 

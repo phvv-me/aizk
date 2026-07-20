@@ -44,6 +44,11 @@ type ToolContext = MiddlewareContext[mt.CallToolRequestParams]
 type ResourceContext = MiddlewareContext[mt.ReadResourceRequestParams]
 
 
+async def no_account(*args: int | float | None) -> None:
+    """Accept one test transport completion without touching PgQueuer."""
+    del args
+
+
 def tool_context(user: User | None = None, name: str = "status") -> ToolContext:
     message = mt.CallToolRequestParams(name=name, arguments={"query": "hello"})
     return cast("ToolContext", FakeContext(context_for(user), message))
@@ -89,7 +94,7 @@ def test_user_middleware_resolves_once_and_stashes_the_user(
         users_inside.append(await bound_user(context.fastmcp_context))
         return expected
 
-    result = dbutil.run(IdentityMiddleware(auth).on_call_tool(context, call_next))
+    result = dbutil.run(IdentityMiddleware(auth, no_account).on_call_tool(context, call_next))
     assert result is expected
     assert reached == [context]  # the wrapped handler ran once, after the stash
     assert users_inside == [resolved]
@@ -142,7 +147,7 @@ def test_identity_middleware_binds_the_caller_on_resource_reads(
         users_inside.append(await bound_user(context.fastmcp_context))
         return expected
 
-    result = dbutil.run(IdentityMiddleware(auth).on_read_resource(context, call_next))
+    result = dbutil.run(IdentityMiddleware(auth, no_account).on_read_resource(context, call_next))
     assert result is expected
     assert users_inside == [resolved]
 

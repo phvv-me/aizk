@@ -1,5 +1,6 @@
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from time import perf_counter
 
 import mcp.types as mt
 from fastmcp.exceptions import ToolError
@@ -14,9 +15,16 @@ from ..auth import Auth
 from ..store import Usage
 from ..store.identity import User
 from ..store.models.tables import UsageEvent
-from ..usage import annotate_caller, annotate_operation, annotate_transport, serving_span
+from ..usage import (
+    account_usage,
+    accounting_context,
+    annotate_caller,
+    annotate_operation,
+    serving_span,
+)
 
 _USER_STATE = "aizk_user"
+type AccountUsage = Callable[[int, int, float, int | None], Awaitable[None]]
 
 
 def tool_reply_size(result: ToolResult) -> int:
@@ -55,17 +63,11 @@ def request_context[ParamsT](context: MiddlewareContext[ParamsT]) -> Context:
 
 
 class IdentityMiddleware(Middleware):
-    """Resolve the caller once per request and account the transport work it carries.
+    """Resolve, bind, and durably account every successful MCP operation."""
 
-    Tool calls and resource reads run through the same resolution, so the artifact
-    resource is bound to a verified caller exactly like every tool. The caller is
-    stamped onto the serving span here, operations and touched scopes are stamped
-    by the operation layer itself, and each successful call adds its semantic
-    request and reply byte sizes for the usage processor.
-    """
-
-    def __init__(self, auth: Auth) -> None:
+    def __init__(self, auth: Auth, account: AccountUsage = account_usage) -> None:
         self.auth = auth
+        self.account = account
 
     async def resolve[ParamsT: BaseModel, ResultT](
         self,
@@ -74,16 +76,17 @@ class IdentityMiddleware(Middleware):
         operation: UsageEvent.Operation | None,
         reply_size: Callable[[ResultT], int],
     ) -> ResultT:
-        """Bind the freshly resolved caller, run the handler, and account its transport."""
+        """Bind the caller and queue accounting before releasing the successful reply."""
         user = await self.auth.resolve()
         await bind_user(request_context(context), user)
-        with serving_span(f"mcp {context.method or 'request'}"):
+        with accounting_context(), serving_span(f"mcp {context.method or 'request'}"):
+            started_at = perf_counter()
             annotate_caller(user)
             if operation is not None:
                 annotate_operation(operation)
             request_bytes = len(context.message.model_dump_json(exclude_none=True).encode())
             result = await call_next(context)
-            annotate_transport(request_bytes, reply_size(result))
+            await self.account(request_bytes, reply_size(result), started_at, None)
             return result
 
     async def on_call_tool(
@@ -107,12 +110,12 @@ class IdentityMiddleware(Middleware):
 
 
 class CallerRateLimit(Middleware):
-    """Bound every caller to an independent token bucket.
+    """Bound every caller to an independent process-local burst-control bucket.
 
     The verified Aizk user ID is the bucket key. Auth-off and anonymous requests
     therefore share their configured fallback identity while authenticated users
-    cannot consume one another's allowance. The cache bounds per-process state.
-    Tool calls and resource reads drain the same bucket.
+    cannot consume one another's allowance. This is abuse control, not durable
+    quota accounting. Tool calls and resource reads drain the same bucket.
     """
 
     def __init__(self, max_requests_per_second: float) -> None:

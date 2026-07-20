@@ -152,8 +152,8 @@ permission is retired because AIZK has no invitation workflow. Inspect or repair
 with these idempotent commands.
 
 ```sh
-aizk logto audit
-aizk logto apply
+aizk admin auth audit
+aizk admin auth apply
 ```
 
 Start the local stack from the package root.
@@ -372,7 +372,7 @@ Run an on-demand Aizk backup inside the private worker.
 
 ```sh
 docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker \
-  aizk db backup /backups/aizk-$(date +%F).dump
+  aizk admin database backup /backups/aizk-$(date +%F).dump
 ```
 
 The configured-database restore streams the archive into `pg_restore` with `--exit-on-error` and
@@ -382,7 +382,7 @@ configured database do not collide with the archive.
 
 ```sh
 docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker \
-  aizk db restore /backups/aizk-2026-07-17.dump
+  aizk admin database restore /backups/aizk-2026-07-17.dump
 ```
 
 Stop public traffic and take a fresh backup before this command. The lower-level restore path can
@@ -494,7 +494,7 @@ scope-set file usage, physical Blob cost, recent writes, and one real recall. Da
 probes run concurrently and recall has a 3.5 second timeout.
 
 ```sh
-docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker aizk db health
+docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker aizk admin health
 ```
 
 Run this owner-level diagnostic in `worker`, never `server`. The public process intentionally has
@@ -504,6 +504,47 @@ into an RLS bypass.
 A healthy public deployment reports an up-to-date migration, no RLS violations, Logto identity
 mode, reachable and correctly named models, no retained queue failures, processed chunks catching
 up with stored chunks, and a nonempty recall sample without an error.
+
+## Queue and conversion diagnosis
+
+Run the read-only doctor when Processing reports blocked conversions, failed work, or active work
+with no throughput.
+
+```sh
+docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker \
+  aizk admin queue doctor
+```
+
+The default JSON groups current retained failures by entrypoint and safe error fingerprint. It
+reports stale picked leases, long-running live leases, recent exception aggregates, durable failed
+conversions, and conversions whose durable active state points to a terminal queue job. Complete
+counts remain separate from the bounded detail lists. Error messages stay redacted by default
+because an upstream exception can contain source text.
+
+A trusted owner can opt into bounded messages. Quoted values are redacted and the output is still
+operator-only.
+
+```sh
+docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker \
+  aizk admin queue doctor --show-error-messages
+```
+
+Tune the windows and detail bound when investigating unusual workloads.
+
+```sh
+aizk admin queue doctor --stale-minutes 15 --long-running-minutes 60 --history-hours 24 --limit 100
+```
+
+The doctor never changes state and exits nonzero when current blockers are present. Fix the
+reported root cause before retrying retained work.
+
+```sh
+aizk admin queue retry conversion --limit 100
+aizk admin queue retry graph --limit 100
+```
+
+The artifact retry command only requeues retained PgQueuer conversion failures. It does not repair
+an invalid source, ontology mismatch, abandoned durable state, or converter bug.
 
 ## Read-only extraction diagnosis
 
@@ -520,6 +561,147 @@ stored chunk but does not mark the chunk processed and does not write graph rows
 contains the proposed extraction, the rejection reason for each fact, and the grounded subset with
 acceptance counts. `missing_quote`, `unsupported_quote`, `unresolved_endpoint`, `self_relation`,
 and `generic_relation` are deliberate evidence failures rather than transport errors.
+
+Before changing the production extraction backend, run both implementations over the same
+human-verified JSONL cases. Each case names its source text and acceptable graph targets. The
+reports include accepted precision, recall, F1, grounding rate, metadata accuracy, and latency.
+
+```sh
+chefe run aizk-eval extraction /path/to/extraction-cases.jsonl \
+  --backend llm --model gemma-4-31b --out /tmp/extraction-llm.json
+chefe run aizk-eval extraction /path/to/extraction-cases.jsonl \
+  --backend gliner --model gliner2-large --out /tmp/extraction-gliner.json
+```
+
+The dataset path remains operator supplied until a reviewed corpus is committed. Never switch a
+backlog to GLiNER from latency alone. Compare both reports and inspect every unmatched or rejected
+fact first.
+
+An external OpenAI-compatible model uses the same extraction path. For OpenRouter, configure a
+dedicated API key and require both strict-schema support and Zero Data Retention. Disable optional
+reasoning because extraction does not benefit from paying for hidden reasoning tokens.
+
+```dotenv
+AIZK_RUNTIME_LLM_URL=https://openrouter.ai/api/v1
+AIZK_LLM_API_KEY=replace-with-a-dedicated-key
+AIZK_LLM_MODEL=deepseek/deepseek-v4-flash
+AIZK_LLM_EXTRA_BODY={"provider":{"zdr":true,"require_parameters":true},"reasoning":{"enabled":false}}
+```
+
+Compose maps `AIZK_RUNTIME_LLM_URL` onto the application's `AIZK_LLM_URL`. The separate name keeps
+a host-side `localhost` URL from replacing the private Compose service address inside containers.
+Direct non-Compose runs continue to use `AIZK_LLM_URL`.
+
+`AIZK_LLM_EXTRA_BODY` accepts any JSON request extension supported by the configured
+OpenAI-compatible service. The local vLLM setting `AIZK_LLM_CHAT_TEMPLATE_KWARGS` remains
+independent. When both provide `chat_template_kwargs`, the dedicated vLLM keys override matching
+general keys while unrelated keys from both settings are preserved.
+
+The extraction evaluation `--model` value is the model actually sent to the configured endpoint.
+It is not only a report label, so each comparison can use one shared OpenRouter URL and API key.
+Use `--concurrency` to reproduce production fan-out. The report measures total wall time,
+completed cases per hour, and the projected `--backlog` ETA in addition to per-request p50 and p95.
+
+### Modal endpoint trial
+
+The development environment includes the Modal CLI. Authenticate the workstation once, then create
+one private proxy token. Keep both credentials out of shell history and committed files.
+
+```sh
+chefe run modal token new
+chefe run modal workspace proxy-tokens create
+```
+
+Modal catalog endpoints are OpenAI compatible, authenticated by default, and scale to zero. Start
+with the catalog Qwen extraction model because its deployment recipe is already maintained by
+Modal. Creating the endpoint begins billable work only when its serving containers run.
+
+```sh
+chefe run modal endpoint create \
+  --name aizk-qwen-extraction \
+  --model Qwen/Qwen3.6-35B-A3B
+chefe run modal endpoint list --json
+```
+
+Copy the endpoint URL and private proxy pair into the uncommitted package `.env`.
+
+```dotenv
+AIZK_LLM_URL=https://replace-with-endpoint.modal.run/v1
+AIZK_LLM_MODEL=Qwen/Qwen3.6-35B-A3B
+AIZK_LLM_API_KEY=
+AIZK_LLM_HEADERS={"Modal-Key":"wk-replace","Modal-Secret":"ws-replace"}
+```
+
+Run quality at concurrency one, then measure the same accepted cases at increasing bounded
+parallelism. Never use production memory for the first trial.
+
+```sh
+chefe run aizk-eval extraction /path/to/extraction-cases.jsonl \
+  --backend llm --model Qwen/Qwen3.6-35B-A3B \
+  --concurrency 1 --backlog 10704 --out /tmp/modal-qwen-quality.json
+chefe run aizk-eval extraction /path/to/extraction-cases.jsonl \
+  --backend llm --model Qwen/Qwen3.6-35B-A3B \
+  --concurrency 8 --backlog 10704 --out /tmp/modal-qwen-throughput.json
+```
+
+Test concurrency 16 only after eight has no schema failures, rate limits, or worsening p95. The
+managed Inkling endpoint uses the same URL and proxy-header path but is billed by tokens. Run it
+with minimum reasoning effort and verify native structured output before treating its broad
+capability scores as extraction quality.
+
+For offline batch work, do not pin Modal compute to a region unless residency requires it. Global
+placement keeps the base price and offers the widest GPU pool. Broad `us` or `ap` placement costs
+1.5 times base. Narrow placement such as `us-east`, `ap-south`, or `jp` costs 1.75 times base.
+Routing and compute placement are separate. A nearby routing proxy reduces round-trip time, while
+compute colocation applies the region multiplier.
+
+Stop the endpoint after every trial and confirm its stopped state.
+
+```sh
+chefe run modal endpoint stop aizk-qwen-extraction
+chefe run modal endpoint list --json
+```
+
+Pin one provider per benchmark run so a model comparison does not silently compare different
+quantizations or hosts. Disable fallbacks during measurement and keep ZDR and strict-schema
+requirements enabled.
+
+```dotenv
+AIZK_LLM_MODEL=google/gemma-4-31b-it
+AIZK_LLM_EXTRA_BODY={"provider":{"only":["cerebras"],"allow_fallbacks":false,"zdr":true,"require_parameters":true},"reasoning":{"enabled":false}}
+```
+
+The Cerebras Gemma 4 31B endpoint was listed on July 20, 2026 at $0.99 input and $1.49 output per
+million tokens with roughly 1,800 generated tokens per second. Treat that throughput as a
+provider-specific planning number, not an end-to-end backlog promise. At 500 output tokens for
+each of 10,704 pending chunks, generation alone has a sequential floor of about 50 minutes. Four
+fully parallel requests would lower that arithmetic floor to about 12.4 minutes only if Cerebras
+sustains the advertised rate independently for every request and the account rate limit admits
+that concurrency.
+
+Every provider run must retain the following measurements.
+
+- Client wall time from dispatch through validated schema
+- Queue and time to first token when the provider exposes them
+- Completion tokens divided by generation time
+- Schema failures before and after local Pydantic validation
+- Prompt, cached, reasoning, and completion tokens with total cost
+- Provider attempts, status codes, fallbacks, and application retries
+- Completed cases per hour and projected backlog ETA from measured wall time
+
+Record the completion response ID and query OpenRouter's
+[`/api/v1/generation`](https://openrouter.ai/docs/api/api-reference/generations/get-generation)
+metadata after the run. It reports the serving provider, total latency, generation time, native
+token counts, total cost, and every provider response used for fallback attempts. OpenRouter does
+not expose a distinct queue field for every endpoint. Keep queue time unavailable when it cannot
+be measured rather than deriving a precise value from unrelated timers. For the same reason,
+capture request-specific time to first token only from a streamed diagnostic. The normal typed
+extractor remains nonstreaming.
+
+Calculate end-to-end backlog ETA from completed benchmark cases rather than advertised token
+speed. With `pending` chunks, `completed` measured cases, and `wall_seconds` elapsed, use
+`pending * wall_seconds / completed`. Report p50 and p95 request latency beside that ETA so a
+small number of slow or retried requests remains visible.
 
 ## Authentication and upgrades
 

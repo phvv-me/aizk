@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 from pydantic.networks import AnyHttpUrl
 from pydantic.types import (
     UUID5,
+    JsonValue,
     NonNegativeInt,
     PositiveFloat,
     PositiveInt,
@@ -63,6 +64,13 @@ class Settings(BaseSettings):
     artifact_dispatch_batch_size: PositiveInt = 100
     artifact_dispatch_cron: str = "* * * * *"
     artifact_dispatch_enabled: bool = True
+    chunk_dispatch_batch_size: PositiveInt = 512
+    chunk_dispatch_cron: str = "* * * * *"
+    chunk_dispatch_enabled: bool = True
+    chunk_recovery_batch_size: PositiveInt = 512
+    chunk_recovery_cron: str = "* * * * *"
+    chunk_recovery_enabled: bool = True
+    chunk_recovery_max_cycles: PositiveInt = 3
     artifact_integrity_batch_size: PositiveInt = 100
     artifact_integrity_cron: str = "0 6 * * *"
     artifact_integrity_enabled: bool = True
@@ -88,7 +96,7 @@ class Settings(BaseSettings):
     clamav_timeout: PositiveFloat = 30.0
     communities_cron: str = "0 4 * * 0"
     communities_enabled: bool = True
-    community_build_concurrency: int = 2
+    community_build_concurrency: int = 4
     community_entities_k: int = 64
     community_facts_k: int = 64
     communities_every_n_facts: int = 50
@@ -174,11 +182,18 @@ class Settings(BaseSettings):
         " and\nnegative_result for failed attempts. Keep the speaker in every non-world"
         " statement."
     )
-    extract_window_size: int = 1024
+    # Stored prose chunks are bounded to 2,048 characters. Matching that boundary keeps the
+    # ordinary graph projection to one structured model turn rather than repeating the ontology
+    # prompt for two half-chunks.
+    extract_window_size: int = 2048
     fusion_depth: int = 50
     llm_api_key: str = ""
     llm_chat_template_kwargs: dict[str, bool] = {}
-    llm_extract_max_tokens: int = 1024
+    llm_extra_body: dict[str, JsonValue] = {}
+    llm_headers: dict[str, SecretStr] = {}
+    # Crimson serves a 3,072-token context. A 768-token structured-output budget leaves 2,304
+    # tokens for the live ontology, instructions, chat template, and one ordinary stored chunk.
+    llm_extract_max_tokens: PositiveInt = 768
     llm_model: str = "extractor"
     llm_response_max_tokens: int = 512
     llm_temperature: float = 0.0
@@ -195,7 +210,7 @@ class Settings(BaseSettings):
     gliner_url: str = "http://localhost:8006"
     # Extra sidecars by variant name (gliner-relex and friends), each serving one checkpoint.
     gliner_variants: dict[str, str] = {}
-    graph_build_concurrency: int = 2
+    graph_build_concurrency: int = 4
     graph_facts_k: int = 20
     identity_url: AnyHttpUrl = AnyHttpUrl("https://aizk.phvv.me")
     # VectorChord is the low-memory default. HNSW and tsvector are the portable fallback.
@@ -329,12 +344,14 @@ class Settings(BaseSettings):
     rerank_api_key: str = ""
     rerank_concurrency: int = 8
     rerank_depth: int = 50
+    rerank_document_max_tokens: PositiveInt = 1408
     rerank_instruction: str = (
         "Given a question about stored memory, judge whether the evidence directly answers it. "
         "When the question names a subject, prefer a source whose title exactly names that "
         "subject over incidental mentions in other sources."
     )
     rerank_model: str = "qwen3-reranker"
+    rerank_query_max_tokens: PositiveInt = 512
     # The official Qwen3-Reranker scaffold. Serving the original checkpoint as a yes/no
     # classifier leaves score calibration to this exact prompt shape; without it the scores
     # are noise. Empty templates send the raw texts for models that need none.
@@ -352,7 +369,7 @@ class Settings(BaseSettings):
     raptor_cron: str = "30 4 * * 0"
     raptor_enabled: bool = True
     raptor_branch_factor: int = 12
-    raptor_build_concurrency: int = 2
+    raptor_build_concurrency: int = 4
     raptor_child_summary_chars: int = 384
     raptor_every_n_facts: int = 50
     raptor_k: int = 3

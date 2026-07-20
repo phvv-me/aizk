@@ -120,6 +120,33 @@ def test_management_words_without_type_remain_an_ordinary_note() -> None:
     assert declared.relations == ()
 
 
+def test_type_like_bullets_in_imported_content_are_not_declarations() -> None:
+    declared = SourceDeclaration.from_text(
+        "# swebok-v4.pdf\n\n"
+        "## Source file\n\n"
+        "Conversion state ready\n\n"
+        "## Extracted content\n\n"
+        "- Type (classification or category of the requirement)\n"
+        "- part_of [Area] Requirements engineering"
+    )
+
+    assert declared.title == "swebok-v4.pdf"
+    assert declared.subject_type is None
+    assert declared.tags == ()
+    assert declared.relations == ()
+    assert declared.canonical(Ontology.current()) is declared
+
+
+def test_prose_closes_the_leading_declaration_block() -> None:
+    declared = SourceDeclaration.from_text(
+        "# Notes\n\nOrdinary authored prose.\n\n- Type Project\n#area: Productivity"
+    )
+
+    assert declared.subject_type is None
+    assert declared.tags == ()
+    assert declared.relations == ()
+
+
 def test_ordinary_declaration_is_already_canonical_and_extracts_nothing(
     migrated_db: None,
 ) -> None:

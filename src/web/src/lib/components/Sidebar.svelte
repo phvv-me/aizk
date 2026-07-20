@@ -1,15 +1,20 @@
 <script lang="ts">
   import { page } from '$app/state';
   import {
+    Activity,
     Building2,
+    ChartNoAxesCombined,
     ChevronsUpDown,
+    CircleDot,
     FileText,
     LayoutDashboard,
+    Lightbulb,
     LogOut,
+    Menu,
     MessageCircleQuestion,
+    Network,
     Settings,
     Sparkles,
-    Users,
     type Icon as IconType
   } from '@lucide/svelte';
   import type { Me } from '$lib/api';
@@ -24,15 +29,78 @@
     dashboard: LayoutDashboard,
     recall: MessageCircleQuestion,
     sources: FileText,
-    organizations: Building2,
-    members: Users
+    findings: Lightbulb,
+    subjects: CircleDot,
+    themes: Network,
+    usage: ChartNoAxesCombined,
+    processing: Activity,
+    organizations: Building2
   };
-  const sections = $derived(navigation(me));
+  const sections = navigation();
   const initial = $derived((me.label ?? '').slice(0, 1).toUpperCase() || '?');
 </script>
 
+<header class="border-sidebar-border bg-sidebar sticky top-0 z-30 border-b md:hidden">
+  <div class="flex h-14 items-center justify-between px-4">
+    <a href="/dashboard" class="flex items-center gap-2 font-semibold tracking-tight">
+      <Sparkles class="text-primary size-5" aria-hidden="true" />
+      AIZK
+    </a>
+    <details class="group relative">
+      <summary
+        class="hover:bg-accent focus-visible:ring-ring flex cursor-pointer list-none items-center gap-2 rounded-md px-3 py-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <Menu class="size-4" aria-hidden="true" />
+        Menu
+      </summary>
+      <div
+        class="border-border bg-popover text-popover-foreground absolute right-0 mt-2 max-h-[75vh] w-72 overflow-y-auto rounded-lg border p-3 shadow-lg"
+      >
+        <nav class="space-y-4" aria-label="Mobile sections">
+          {#each sections as section (section.label)}
+            <div>
+              <p
+                class="text-muted-foreground px-2 pb-1 text-xs font-medium tracking-wide uppercase"
+              >
+                {section.label}
+              </p>
+              {#each section.links as link (link.href)}
+                {@const Icon = icons[link.icon]}
+                <a
+                  href={link.href}
+                  class="hover:bg-accent flex items-center gap-2 rounded-md px-2 py-2 text-sm"
+                >
+                  <Icon class="size-4" aria-hidden="true" />
+                  {link.label}
+                </a>
+              {/each}
+            </div>
+          {/each}
+        </nav>
+        <Separator class="my-3" />
+        <a
+          href={accountUrl}
+          class="hover:bg-accent flex items-center gap-2 rounded-md px-2 py-2 text-sm"
+        >
+          <Settings class="size-4" aria-hidden="true" />
+          Account settings
+        </a>
+        <form method="POST" action="/auth/sign-out">
+          <button
+            type="submit"
+            class="text-destructive hover:bg-accent flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm"
+          >
+            <LogOut class="size-4" aria-hidden="true" />
+            Sign out
+          </button>
+        </form>
+      </div>
+    </details>
+  </div>
+</header>
+
 <aside
-  class="border-sidebar-border bg-sidebar text-sidebar-foreground fixed inset-y-0 left-0 z-20 flex w-64 flex-col border-r"
+  class="border-sidebar-border bg-sidebar text-sidebar-foreground fixed inset-y-0 left-0 z-20 hidden w-64 flex-col border-r md:flex"
   aria-label="Primary"
 >
   <a
@@ -51,7 +119,7 @@
         <ul class="space-y-0.5">
           {#each section.links as link (link.href)}
             {@const Icon = icons[link.icon]}
-            {@const active = page.url.pathname === link.href.split('#')[0]}
+            {@const active = page.url.pathname === link.href}
             <li>
               <a
                 href={link.href}

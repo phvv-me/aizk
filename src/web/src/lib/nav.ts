@@ -1,6 +1,13 @@
-import type { Me } from './api';
-
-export type NavIcon = 'dashboard' | 'recall' | 'sources' | 'organizations' | 'members';
+export type NavIcon =
+  | 'dashboard'
+  | 'recall'
+  | 'sources'
+  | 'findings'
+  | 'subjects'
+  | 'themes'
+  | 'usage'
+  | 'processing'
+  | 'organizations';
 
 export type NavLink = {
   label: string;
@@ -13,17 +20,30 @@ export type NavSection = {
   links: NavLink[];
 };
 
-const managementPermissions = ['manage:member', 'delete:member'];
-
-/** Build the sidebar sections a signed-in caller is allowed to see. */
-export function navigation(me: Me): NavSection[] {
-  const sections: NavSection[] = [
+/** Build the fixed product information architecture. */
+export function navigation(): NavSection[] {
+  return [
     {
       label: 'Knowledge',
       links: [
         { label: 'Dashboard', href: '/dashboard', icon: 'dashboard' },
-        { label: 'Recall', href: '/recall', icon: 'recall' },
-        { label: 'Sources', href: '/sources', icon: 'sources' }
+        { label: 'Recall', href: '/recall', icon: 'recall' }
+      ]
+    },
+    {
+      label: 'Explore',
+      links: [
+        { label: 'Sources', href: '/sources', icon: 'sources' },
+        { label: 'Findings', href: '/findings', icon: 'findings' },
+        { label: 'Subjects', href: '/subjects', icon: 'subjects' },
+        { label: 'Themes', href: '/themes', icon: 'themes' }
+      ]
+    },
+    {
+      label: 'Operations',
+      links: [
+        { label: 'Usage', href: '/usage', icon: 'usage' },
+        { label: 'Processing', href: '/processing', icon: 'processing' }
       ]
     },
     {
@@ -31,18 +51,4 @@ export function navigation(me: Me): NavSection[] {
       links: [{ label: 'Organizations', href: '/organizations', icon: 'organizations' }]
     }
   ];
-  const managed = me.organizations.filter((organization) =>
-    managementPermissions.some((permission) => organization.permissions.includes(permission))
-  );
-  if (managed.length > 0) {
-    sections.push({
-      label: 'Member management',
-      links: managed.map((organization) => ({
-        label: organization.name,
-        href: `/organizations#${encodeURIComponent(organization.name)}`,
-        icon: 'members'
-      }))
-    });
-  }
-  return sections;
 }

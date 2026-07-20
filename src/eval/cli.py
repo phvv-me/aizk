@@ -1,6 +1,6 @@
 import asyncio
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 import fire
 from pydantic import UUID5
@@ -113,10 +113,24 @@ class EvaluationCLI:
         self,
         path: str,
         model: str = settings.llm_model,
+        backend: Literal["llm", "gliner"] = settings.extract_backend,
+        concurrency: int = 1,
+        backlog: int = 10_704,
         out: str | None = None,
     ) -> str:
-        """Score graph extraction in the dedicated evaluation database."""
-        return self.emit(asyncio.run(Evaluation().extraction(Path(path), model)), out)
+        """Score one explicit graph backend in the dedicated evaluation database."""
+        return self.emit(
+            asyncio.run(
+                Evaluation().extraction(
+                    Path(path),
+                    model,
+                    backend,
+                    concurrency,
+                    backlog,
+                )
+            ),
+            out,
+        )
 
     def groupmem(
         self,
