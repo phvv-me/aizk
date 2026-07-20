@@ -191,9 +191,9 @@ class Settings(BaseSettings):
     llm_chat_template_kwargs: dict[str, bool] = {}
     llm_extra_body: dict[str, JsonValue] = {}
     llm_headers: dict[str, SecretStr] = {}
-    # Gemma 4 serves an 8,192-token context. A 1,280-token structured-output budget leaves
+    # Gemma 4 serves an 8,192-token context. A 2,048-token structured-output budget leaves
     # enough room for the ontology, schema, instructions, and one ordinary stored chunk.
-    llm_extract_max_tokens: PositiveInt = 1280
+    llm_extract_max_tokens: PositiveInt = 2048
     llm_model: str = "extractor"
     llm_response_max_tokens: int = 512
     llm_temperature: float = 0.0
