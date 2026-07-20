@@ -191,9 +191,9 @@ class Settings(BaseSettings):
     llm_chat_template_kwargs: dict[str, bool] = {}
     llm_extra_body: dict[str, JsonValue] = {}
     llm_headers: dict[str, SecretStr] = {}
-    # Crimson serves a 3,072-token context. A 768-token structured-output budget leaves 2,304
-    # tokens for the live ontology, instructions, chat template, and one ordinary stored chunk.
-    llm_extract_max_tokens: PositiveInt = 768
+    # Gemma 4 serves an 8,192-token context. A 1,280-token structured-output budget leaves
+    # enough room for the ontology, schema, instructions, and one ordinary stored chunk.
+    llm_extract_max_tokens: PositiveInt = 1280
     llm_model: str = "extractor"
     llm_response_max_tokens: int = 512
     llm_temperature: float = 0.0

@@ -176,7 +176,7 @@ def test_extractor_uses_one_model_turn_for_one_stored_chunk(fake_llm: FakeLLM) -
         f"<document>\n{source}\n</document>"
     )
     assert fake_llm.completions.calls[0].max_tokens == settings.llm_extract_max_tokens
-    assert Settings.model_fields["llm_extract_max_tokens"].default == 768
+    assert Settings.model_fields["llm_extract_max_tokens"].default == 1280
 
 
 def test_extractor_retries_only_context_overflow_as_smaller_spans(
