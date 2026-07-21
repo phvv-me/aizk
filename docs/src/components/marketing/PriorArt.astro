@@ -1,0 +1,75 @@
+---
+const lineage = [
+  { name: 'Zep and Graphiti', what: 'temporal entity and fact graph', href: 'https://arxiv.org/abs/2501.13956' },
+  { name: 'Mem0', what: 'add, update and no-op consolidation', href: 'https://arxiv.org/abs/2504.19413' },
+  { name: 'HippoRAG 2', what: 'associative multi-hop recall', href: 'https://arxiv.org/abs/2502.14802' },
+  { name: 'GraphRAG', what: 'community summaries', href: 'https://arxiv.org/abs/2404.16130' },
+  { name: 'RAPTOR', what: 'recursive summary tree', href: 'https://arxiv.org/abs/2401.18059' },
+  { name: 'A-MEM', what: 'reflective observations', href: 'https://arxiv.org/abs/2502.12110' },
+  { name: 'Collaborative Memory', what: 'private and shared memory split', href: 'https://arxiv.org/abs/2505.18279' },
+  { name: 'Memora', what: 'forgetting-aware scoring', href: 'https://arxiv.org/abs/2604.20006' },
+];
+
+const built = [
+  { name: 'PostgreSQL', href: 'https://www.postgresql.org/' },
+  { name: 'VectorChord', href: 'https://github.com/tensorchord/VectorChord' },
+  { name: 'PgQueuer', href: 'https://github.com/JanBjorge/PgQueuer' },
+  { name: 'FastMCP', href: 'https://github.com/jlowin/fastmcp' },
+  { name: 'Logto', href: 'https://logto.io/' },
+  { name: 'Docling', href: 'https://github.com/docling-project/docling' },
+  { name: 'SeaweedFS', href: 'https://github.com/seaweedfs/seaweedfs' },
+  { name: 'ClamAV', href: 'https://docs.clamav.net/' },
+  { name: 'vLLM', href: 'https://github.com/vllm-project/vllm' },
+  { name: 'SQLModel', href: 'https://sqlmodel.tiangolo.com/' },
+];
+---
+
+<section class="border-base-300 border-b">
+  <div class="mx-auto grid max-w-6xl gap-12 px-4 py-16 lg:grid-cols-2">
+    <div class="space-y-5">
+      <h2 class="text-3xl font-semibold tracking-tight" style="font-family: var(--font-brand)">
+        Standing on published work
+      </h2>
+      <p class="text-base-content/70 text-sm">
+        aizk did not invent memory research. It adopts mechanisms that have been measured
+        elsewhere and records which is which, so you can tell a borrowed design from an original
+        one. A citation here means the idea shaped the code, not that the project endorses aizk.
+      </p>
+      <ul class="divide-base-300 divide-y text-sm">
+        {
+          lineage.map((paper) => (
+            <li class="flex flex-wrap items-baseline justify-between gap-x-4 py-2">
+              <a href={paper.href} class="font-medium underline underline-offset-4" rel="noopener">
+                {paper.name}
+              </a>
+              <span class="text-base-content/60">{paper.what}</span>
+            </li>
+          ))
+        }
+      </ul>
+      <a href="/docs/dev/prior-art/references/" class="btn btn-outline btn-sm">
+        The full lineage map
+      </a>
+    </div>
+
+    <div class="space-y-5">
+      <h2 class="text-3xl font-semibold tracking-tight" style="font-family: var(--font-brand)">
+        Built on
+      </h2>
+      <p class="text-base-content/70 text-sm">
+        The second design principle is to minimize our own work. Identity, conversion, scanning,
+        object storage, vector indexing, job queuing and model serving are all somebody else's
+        maintained project, and aizk owns only the parts that are actually about memory.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        {
+          built.map((project) => (
+            <a href={project.href} class="badge badge-outline badge-lg font-mono text-xs" rel="noopener">
+              {project.name}
+            </a>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,76 @@
+---
+const columns = ['Zep and Graphiti', 'Mem0', 'GraphRAG', 'aizk'];
+
+const rows = [
+  ['temporal facts', 'temporal graph', 'memory updates', 'no', 'valid and recorded ranges'],
+  ['consolidation', 'model driven', 'add, update, delete', 'no', 'rules first, model on ambiguity'],
+  ['speaker semantics', 'limited', 'user namespace', 'no', 'author snapshot and epistemic kind'],
+  ['authorization', 'application layer', 'application layer', 'no', 'forced PostgreSQL row security'],
+  ['overlapping scopes', 'no', 'no', 'no', 'arbitrary nonempty scope sets'],
+  ['retrieval', 'graph and text', 'vector', 'community summaries', 'typed hybrid plus graph lanes'],
+  ['local operation', 'service oriented', 'optional', 'batch oriented', 'PostgreSQL and local models'],
+];
+---
+
+<section id="compare" class="border-base-300 border-b">
+  <div class="mx-auto max-w-6xl px-4 py-16">
+    <div class="mb-8 max-w-2xl space-y-3">
+      <h2 class="text-3xl font-semibold tracking-tight" style="font-family: var(--font-brand)">
+        How it differs
+      </h2>
+      <p class="text-base-content/70">
+        This table compares mechanisms, not scores. aizk has no head-to-head benchmark result
+        against these systems yet, because an honest one needs the same imported histories, the
+        same answer model, the same judge and the same hardware budget across all of them. Until
+        that run exists, what follows is a description of design choices rather than a claim of
+        winning.
+      </p>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="table-zebra table text-sm">
+        <thead>
+          <tr>
+            <th class="font-mono text-xs font-normal opacity-60">capability</th>
+            {
+              columns.map((column) => (
+                <th class={column === 'aizk' ? 'font-semibold' : 'font-normal opacity-70'}>
+                  {column}
+                </th>
+              ))
+            }
+          </tr>
+        </thead>
+        <tbody>
+          {
+            rows.map(([capability, ...cells]) => (
+              <tr>
+                <th class="font-mono text-xs font-normal opacity-60">{capability}</th>
+                {cells.map((cell, index) => (
+                  <td class={index === cells.length - 1 ? 'font-medium' : 'opacity-70'}>{cell}</td>
+                ))}
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <p class="text-base-content/60 mt-6 max-w-3xl text-sm">
+      More graph machinery is not automatically better. The ACL 2026 study
+      <a
+        href="https://aclanthology.org/2026.acl-long.1232/"
+        class="underline underline-offset-4"
+        rel="noopener">Does Memory Need Graphs</a
+      >
+      finds that raw session evidence with independent summaries and facts is a strong baseline, and
+      that graph summaries can improve retrieval metrics while hurting answers when they crowd raw
+      evidence out of the prompt. aizk keeps raw source chunks primary and makes every graph lane
+      earn its place in ablation.
+    </p>
+
+    <a href="/docs/dev/prior-art/comparison/" class="btn btn-outline btn-sm mt-6">
+      The full comparison
+    </a>
+  </div>
+</section>

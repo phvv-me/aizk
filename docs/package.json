@@ -5,19 +5,28 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && node scripts/check-pages.mjs",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "check:pages": "node scripts/check-pages.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.41.3",
+    "@astrojs/svelte": "^9.0.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@xyflow/svelte": "^1.6.2",
     "astro": "^7.1.1",
+    "astro-d2": "^0.13.1",
     "astro-mermaid": "^2.1.0",
+    "daisyui": "^5.6.18",
     "mermaid": "^11.16.0",
-    "sharp": "^0.35.3"
+    "sharp": "^0.35.3",
+    "svelte": "^5.56.6",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@astrojs/starlight-tailwind": "^5.0.0",
     "typescript": "^6.0.0"
   }
 }

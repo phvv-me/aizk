@@ -1,0 +1,81 @@
+---
+const groups = [
+  {
+    title: 'Start',
+    links: [
+      { label: 'What aizk is', href: '/docs/user/what-is-aizk/' },
+      { label: 'Quickstart', href: '/docs/user/quickstart/' },
+      { label: 'Your first hour', href: '/docs/user/first-hour/' },
+      { label: 'Glossary', href: '/docs/user/reference/glossary/' },
+    ],
+  },
+  {
+    title: 'Understand',
+    links: [
+      { label: 'Scopes', href: '/docs/user/concepts/scopes/' },
+      { label: 'Time and history', href: '/docs/user/concepts/time/' },
+      { label: 'Evidence', href: '/docs/user/concepts/evidence/' },
+      { label: 'MCP tools', href: '/docs/user/reference/tools/' },
+    ],
+  },
+  {
+    title: 'Build',
+    links: [
+      { label: 'System map', href: '/docs/dev/architecture/system-map/' },
+      { label: 'The data model', href: '/docs/dev/store/data-model/' },
+      { label: 'The read path', href: '/docs/dev/read/overview/' },
+      { label: 'Contributing', href: '/docs/dev/contributing/setup/' },
+    ],
+  },
+  {
+    title: 'Run',
+    links: [
+      { label: 'Hardware and cost', href: '/docs/dev/run/hardware/' },
+      { label: 'First start', href: '/docs/dev/run/first-start/' },
+      { label: 'Security model', href: '/docs/dev/run/security/' },
+      { label: 'Backups', href: '/docs/dev/run/backups/' },
+    ],
+  },
+];
+---
+
+<footer class="mx-auto max-w-6xl px-4 py-16">
+  <div class="grid gap-10 md:grid-cols-[1.5fr_repeat(4,1fr)]">
+    <div class="space-y-3">
+      <p class="text-lg font-semibold" style="font-family: var(--font-brand)">aizk</p>
+      <p class="text-base-content/60 max-w-xs text-sm">
+        Self-hosted shared memory for people, teams and MCP agents.
+      </p>
+      <div class="flex gap-2">
+        <a href="https://github.com/phvv-me/aizk" class="btn btn-outline btn-xs" rel="noopener">
+          GitHub
+        </a>
+        <a href="/app/dashboard" class="btn btn-outline btn-xs">Open app</a>
+      </div>
+    </div>
+    {
+      groups.map((group) => (
+        <nav class="space-y-2 text-sm">
+          <p class="font-mono text-xs opacity-50">{group.title}</p>
+          {group.links.map((link) => (
+            <a href={link.href} class="hover:text-base-content block opacity-75">
+              {link.label}
+            </a>
+          ))}
+        </nav>
+      ))
+    }
+  </div>
+
+  <div
+    class="border-base-300 text-base-content/50 mt-12 flex flex-wrap items-center justify-between gap-3 border-t pt-6 text-xs"
+  >
+    <p>MIT licensed. Built by Pedro Valois.</p>
+    <p>
+      Security reports go to <a
+        href="mailto:contact@phvv.me"
+        class="underline underline-offset-4">contact@phvv.me</a
+      >
+    </p>
+  </div>
+</footer>

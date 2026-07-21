@@ -1,0 +1,51 @@
+---
+const lattice = `                       ┌───────────────┐
+                       │  { A , B }    │   both organizations
+                       │  intersection │   the narrowest shared cell
+                       └───────┬───────┘
+                   ┌───────────┴───────────┐
+             ┌─────┴─────┐           ┌─────┴─────┐
+             │   { A }   │           │   { B }   │
+             │  one team │           │  one team │
+             └─────┬─────┘           └─────┬─────┘
+                   └───────────┬───────────┘
+                        ┌──────┴──────┐
+                        │  { you }    │   private
+                        │  one person │   the default
+                        └─────────────┘
+
+    a reader sees a row only when they stand in every scope it names`;
+---
+
+<section id="scopes" class="border-base-300 border-b">
+  <div class="mx-auto grid max-w-6xl gap-10 px-4 py-16 lg:grid-cols-2 lg:items-center">
+    <div class="space-y-5">
+      <h2 class="text-3xl font-semibold tracking-tight" style="font-family: var(--font-brand)">
+        Sharing is a set, not a switch
+      </h2>
+      <p class="text-base-content/70">
+        Every row in aizk carries the set of organizations it belongs to. Reading requires
+        standing in all of them, so naming two organizations produces a cell that only people
+        in both can reach. Nothing here is an application-level check that a bug could skip.
+        PostgreSQL evaluates the rule itself, on every table, with row level security forced on.
+      </p>
+      <ul class="text-base-content/70 space-y-2 text-sm">
+        <li>
+          <span class="text-base-content font-medium">Writing names one destination.</span> An agent
+          picks the scope deliberately and the default is private.
+        </li>
+        <li>
+          <span class="text-base-content font-medium">Reading spans everything visible.</span> One
+          question searches the union of what you can see, and the answer says where each piece came
+          from.
+        </li>
+        <li>
+          <span class="text-base-content font-medium">Sharing copies, it does not move.</span> The
+          private original stays yours and unchanged.
+        </li>
+      </ul>
+      <a href="/docs/user/concepts/scopes/" class="btn btn-outline btn-sm">How scopes work</a>
+    </div>
+    <pre class="border-base-300 bg-base-200 overflow-x-auto border p-5 font-mono text-[11px] leading-relaxed"><code>{lattice}</code></pre>
+  </div>
+</section>

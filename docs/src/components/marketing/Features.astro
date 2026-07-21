@@ -1,0 +1,85 @@
+---
+const features = [
+  {
+    title: 'Four tools, nothing else',
+    body: 'status, recall, remember and share. Any MCP client gets the whole product without an adapter.',
+    href: '/docs/user/reference/tools/',
+  },
+  {
+    title: 'Sources stay authoritative',
+    body: 'The text you wrote is kept exactly. Everything the engine derives from it is a rebuildable projection that can be thrown away and rebuilt.',
+    href: '/docs/user/concepts/sources/',
+  },
+  {
+    title: 'Every lane runs',
+    body: 'No query router decides what to search. Dense, lexical, graph, community, summary and working memory all run, then one reranker sorts them by merit.',
+    href: '/docs/dev/read/lanes/',
+  },
+  {
+    title: 'Grounded extraction',
+    body: 'A fact is only written when the model can quote the span of text it came from. Ungrounded output is dropped rather than stored.',
+    href: '/docs/dev/write/consolidation/',
+  },
+  {
+    title: 'Files stay immutable',
+    body: 'An original is scanned, hashed and stored behind an opaque key. Conversion produces derivatives beside it and never replaces it.',
+    href: '/docs/user/using/files/',
+  },
+  {
+    title: 'Speaker aware',
+    body: 'Memory separates what is objectively true from what a particular person observed, prefers or experienced, so a team memory does not flatten into one voice.',
+    href: '/docs/user/concepts/graph/',
+  },
+  {
+    title: 'Bounded answers',
+    body: 'Recall returns the longest prefix of ranked evidence that fits a token budget you control, so it never floods a context window.',
+    href: '/docs/dev/read/packing/',
+  },
+  {
+    title: 'Autonomous upkeep',
+    body: 'Communities, summaries, profiles and decay run on a schedule under the same scope rules. There is no review queue and no human in the loop.',
+    href: '/docs/user/concepts/lifecycle/',
+  },
+  {
+    title: 'One database',
+    body: 'PostgreSQL does the filtering, ranking, temporal logic and authorization. There is no second store to keep in sync and nothing to reconcile.',
+    href: '/docs/dev/store/data-model/',
+  },
+  {
+    title: 'Forced row level security',
+    body: 'The application role cannot bypass policy. A missing WHERE clause returns nothing rather than everything.',
+    href: '/docs/dev/store/rls/',
+  },
+  {
+    title: 'Measured, not asserted',
+    body: 'A retrieval bench, an extraction bench and an external benchmark adapter decide what ships. Claims without a number stay off these pages.',
+    href: '/docs/dev/eval/approach/',
+  },
+  {
+    title: 'Runs on your metal',
+    body: 'Compose brings up PostgreSQL, the object store, the scanner, the converter and the model lanes. Nothing calls out to a vendor.',
+    href: '/docs/dev/run/hardware/',
+  },
+];
+---
+
+<section class="border-base-300 border-b">
+  <div class="mx-auto max-w-6xl px-4 py-16">
+    <h2
+      class="mb-10 text-3xl font-semibold tracking-tight"
+      style="font-family: var(--font-brand)"
+    >
+      What you get
+    </h2>
+    <div class="bg-base-300 border-base-300 grid gap-px border sm:grid-cols-2 lg:grid-cols-3">
+      {
+        features.map((feature) => (
+          <a href={feature.href} class="bg-base-100 hover:bg-base-200 group p-5 transition-colors">
+            <h3 class="mb-2 font-semibold">{feature.title}</h3>
+            <p class="text-base-content/65 text-sm">{feature.body}</p>
+          </a>
+        ))
+      }
+    </div>
+  </div>
+</section>

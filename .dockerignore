@@ -10,7 +10,12 @@ archive
 .venv
 .chefe
 tests
-docs
+# `docs` builds the landing page and documentation image, so its source has to reach the context.
+# Its installed packages and previous output must not, since the image installs and builds its own.
+docs/node_modules
+docs/dist
+docs/.astro
+docs/src/content/docs/**/*.bak
 __pycache__
 *.pyc
 .pytest_cache

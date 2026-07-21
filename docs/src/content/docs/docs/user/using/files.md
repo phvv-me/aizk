@@ -1,0 +1,140 @@
+---
+title: "Files, PDFs and web sources"
+description: "Bringing an original document into memory and what happens to it afterwards."
+---
+
+This page assumes you can already write plain notes, which
+[Writing memory well](/docs/user/using/remember/) covers. It is about the other kind of thing you
+can put in memory, which is a document you did not write yourself.
+
+The same `remember` call handles all of it. What changes is whether you hand it text, a URL, or a
+local file.
+
+## Pass a URL and let aizk do the work
+
+For one web page, PDF, or other supported file, give the original URL and no text at all.
+
+```json
+{ "source_uri": "https://example.org/binding-assay-protocol.pdf" }
+```
+
+aizk fetches it once, scans the bytes, keeps the exact original unchanged, converts it to readable
+text, and queues that text for the ordinary pipeline. The call returns quickly with a receipt that
+says queued, because conversion happens in the background rather than while you wait.
+
+```mermaid
+flowchart LR
+    U[your URL] --> F[fetch once]
+    F --> S[safety scan]
+    S --> K[keep exact original]
+    K --> C[convert to text]
+    C --> R[recallable]
+    C -->|cannot convert| M[metadata note, still recallable]
+```
+
+Refreshing later is the same call with the same URL and the same scope, so a page you want to track
+does not turn into five near-identical notes.
+
+## When to preserve the original and when not to
+
+Text is the preferred input. Most of the time what you want in memory is what a document said, and
+a note in your own words says it better and is cheaper to read.
+
+Preserve the original when the exact bytes might be needed later. A contract, a signed record, a
+form, a paper you may need to cite by page, or a presentation somebody will want to open again all
+qualify. A blog post explaining an idea you already understood does not.
+
+If you have a URL but only want the text of your own reading of it, pass both `text` and
+`source_uri` and leave preservation off. That records the link on your note without keeping a copy
+of the file.
+
+```json
+{
+  "text": "# Assay protocol, the parts that matter\n\nThe protocol fixes the incubation at 37 C for nine hours, which is why the plate reader is the only instrument that fits.",
+  "source_uri": "https://example.org/binding-assay-protocol.pdf"
+}
+```
+
+## Companion text alongside a file
+
+When both the file and your explanation belong to the same document, pass both and turn
+preservation on. The text is stored as companion context on the same revision, so recall can return
+your framing together with the converted contents rather than as two unrelated notes.
+
+```json
+{
+  "text": "Primary reference for the current retrieval design. Section 4 is the part we implemented.",
+  "source_uri": "https://example.org/paper.pdf",
+  "preserve_source": true
+}
+```
+
+## Local files
+
+There is no upload button in the web app. A local file goes in either through the `aizk` command
+line tool, which handles the whole flow itself, or through a client that implements the upload
+handshake.
+
+```sh
+aizk remember report.pdf notes.md --text "Primary references for the current design."
+```
+
+An assistant doing it through the tool declares the exact filename, media type, byte size and
+checksum, and gets back a short-lived, single-use upload address rather than a stored document. It
+then sends exactly the declared bytes to that address once. Treat that address like a password,
+because anyone holding it before it expires can perform its one upload.
+
+## What happens when conversion fails
+
+Some things cannot be turned into text, and aizk does not silently drop them. The original is still
+stored and a note is still created from what is known, which is the filename, the size, the media
+type, the source URL, the conversion state, and any companion text you passed.
+
+That note is recallable. So a file that failed to convert is still findable by name and still tells
+you it exists, and the exact bytes are still there when you go looking. In the web app it shows a
+failed badge on the processing screen rather than disappearing.
+
+## The two size limits
+
+There are two numbers and they are different, so it is worth knowing both.
+
+| Limit | Value | What it is |
+|---|---|---|
+| Application ceiling | 96 MiB | the largest object the storage layer accepts at all |
+| Scanner limit | 10 MiB | the largest object the malware scanner will read |
+
+Every file passes the malware scan before anything is stored, and the scan is fail-closed, meaning
+anything the scanner will not or cannot give a clean verdict on is rejected rather than let through.
+ClamAV in the default deployment is configured to 10 MiB, so a 40 MiB file is under the application
+ceiling, gets rejected as too large by the scanner, and never lands.
+
+**10 MiB is the number to plan around.** The 96 MiB figure is the theoretical ceiling and you will
+meet the scanner first.
+
+Do not split a file into pieces to get under the limit. Split parts lose the thing that made the
+original worth preserving, which is that it is the original, and they turn one document into
+several sources that recall then has to reassemble. Store a note describing what the file is and
+where it lives instead.
+
+## Getting the original bytes back
+
+Recall stays text first. When an evidence item is grounded in a stored file, it can name the exact
+revision of that file as a resource your assistant can read.
+
+```text
+  Resource `aizk://artifacts/019b2d0a-.../contents/019b2d0a-...`
+```
+
+Read it only when the task genuinely needs the original bytes, such as quoting a contract clause
+exactly. It always names the exact revision that produced the evidence, and it is checked against
+your current visibility before a single byte moves.
+
+## Next
+
+<div class="not-content">
+
+- [The web app](/docs/user/using/web-app/) shows conversion progress and failed originals.
+- [Sources and derived knowledge](/docs/user/concepts/sources/) explains what conversion feeds.
+- [Notes that stay useful](/docs/user/using/habits/) covers when a file beats a note.
+
+</div>

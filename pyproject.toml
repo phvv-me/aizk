@@ -114,8 +114,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://phvv.me/aizk"
-Documentation = "https://phvv.me/aizk"
+Homepage = "https://aizk.phvv.me"
+Documentation = "https://aizk.phvv.me/docs"
 Repository = "https://github.com/phvv-me/aizk"
 Issues = "https://github.com/phvv-me/aizk/issues"
 

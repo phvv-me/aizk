@@ -1,0 +1,92 @@
+/* The landing page only. Starlight never loads this file.
+
+   daisyUI's variables are scoped to `[data-aizk-marketing]` so nothing it
+   defines can leak into a docs page, and the typography component is excluded
+   because Starlight owns prose styling everywhere else.
+
+   The palette is the same monochrome brand as docs.css. Ink on paper in light,
+   chalk on black in dark, no accent hue anywhere, links told apart by weight
+   and underline rather than color. */
+
+@import 'tailwindcss';
+
+@plugin "daisyui" {
+  themes: aizk --default, aizk-dark --prefersdark;
+  root: '[data-aizk-marketing]';
+  exclude: typography;
+  logs: false;
+}
+
+@plugin "daisyui/theme" {
+  name: 'aizk';
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+  --color-base-100: oklch(100% 0 0);
+  --color-base-200: oklch(97% 0 0);
+  --color-base-300: oklch(92% 0 0);
+  --color-base-content: oklch(14% 0 0);
+  --color-primary: oklch(14% 0 0);
+  --color-primary-content: oklch(100% 0 0);
+  --color-secondary: oklch(45% 0 0);
+  --color-secondary-content: oklch(100% 0 0);
+  --color-accent: oklch(27% 0 0);
+  --color-accent-content: oklch(100% 0 0);
+  --color-neutral: oklch(27% 0 0);
+  --color-neutral-content: oklch(97% 0 0);
+  --color-info: oklch(45% 0 0);
+  --color-info-content: oklch(100% 0 0);
+  --color-success: oklch(45% 0 0);
+  --color-success-content: oklch(100% 0 0);
+  --color-warning: oklch(45% 0 0);
+  --color-warning-content: oklch(100% 0 0);
+  --color-error: oklch(45% 0 0);
+  --color-error-content: oklch(100% 0 0);
+  --radius-selector: 0;
+  --radius-field: 0;
+  --radius-box: 0;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@plugin "daisyui/theme" {
+  name: 'aizk-dark';
+  default: false;
+  prefersdark: true;
+  color-scheme: dark;
+  --color-base-100: oklch(14% 0 0);
+  --color-base-200: oklch(18% 0 0);
+  --color-base-300: oklch(24% 0 0);
+  --color-base-content: oklch(96% 0 0);
+  --color-primary: oklch(96% 0 0);
+  --color-primary-content: oklch(14% 0 0);
+  --color-secondary: oklch(70% 0 0);
+  --color-secondary-content: oklch(14% 0 0);
+  --color-accent: oklch(85% 0 0);
+  --color-accent-content: oklch(14% 0 0);
+  --color-neutral: oklch(24% 0 0);
+  --color-neutral-content: oklch(96% 0 0);
+  --color-info: oklch(70% 0 0);
+  --color-info-content: oklch(14% 0 0);
+  --color-success: oklch(70% 0 0);
+  --color-success-content: oklch(14% 0 0);
+  --color-warning: oklch(70% 0 0);
+  --color-warning-content: oklch(14% 0 0);
+  --color-error: oklch(70% 0 0);
+  --color-error-content: oklch(14% 0 0);
+  --radius-selector: 0;
+  --radius-field: 0;
+  --radius-box: 0;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@theme {
+  --font-brand: 'Space Grotesk', var(--font-sans);
+}

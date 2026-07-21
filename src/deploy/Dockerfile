@@ -81,6 +81,28 @@ USER node
 EXPOSE 3000
 CMD ["node", "build"]
 
+# The marketing page and the documentation are one static Astro build. Nothing here reaches the
+# database or Logto, so the output is plain files and the serving stage carries no runtime.
+FROM node:24-alpine AS docs-build
+RUN npm install -g pnpm@11
+WORKDIR /app
+COPY docs/package.json docs/pnpm-lock.yaml docs/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY docs ./
+RUN pnpm build
+
+# Static file serving only. Astro emits `/docs/quickstart/index.html`, so try_files resolves the
+# directory form, and the content-hashed `_astro` assets are safe to cache for a year.
+FROM caddy:2.10.2-alpine AS docs
+RUN setcap -r /usr/bin/caddy \
+    && addgroup -g 10001 caddy \
+    && adduser -D -H -u 10001 -G caddy caddy \
+    && chown -R caddy:caddy /config /data
+COPY --from=docs-build /app/dist /srv
+COPY src/deploy/Caddyfile.docs /etc/caddy/Caddyfile
+USER caddy
+EXPOSE 8082
+
 # The real integration target adds only the package test dependencies and test tree. It runs inside
 # the Compose network against PostgreSQL, SeaweedFS, ClamAV, Docling, and the model services while
 # the production runtime remains free of test tools.

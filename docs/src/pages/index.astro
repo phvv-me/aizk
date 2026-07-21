@@ -1,0 +1,33 @@
+---
+import Marketing from '../layouts/Marketing.astro';
+import Comparison from '../components/marketing/Comparison.astro';
+import Features from '../components/marketing/Features.astro';
+import Footer from '../components/marketing/Footer.astro';
+import Hero from '../components/marketing/Hero.astro';
+import HowItWorks from '../components/marketing/HowItWorks.astro';
+import Nav from '../components/marketing/Nav.astro';
+import Pillars from '../components/marketing/Pillars.astro';
+import PriorArt from '../components/marketing/PriorArt.astro';
+import Quickstart from '../components/marketing/Quickstart.astro';
+import Scopes from '../components/marketing/Scopes.astro';
+import Timeline from '../components/marketing/Timeline.astro';
+---
+
+<Marketing
+  title="aizk · one memory for you, your team and your agents"
+  description="Self-hosted shared memory for people, teams and MCP agents. Sourced, scoped, temporal recall over one PostgreSQL database."
+>
+  <Nav />
+  <main>
+    <Hero />
+    <Pillars />
+    <HowItWorks />
+    <Scopes />
+    <Timeline />
+    <Features />
+    <Comparison />
+    <PriorArt />
+    <Quickstart />
+  </main>
+  <Footer />
+</Marketing>

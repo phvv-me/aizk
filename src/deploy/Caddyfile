@@ -25,7 +25,16 @@
 		X-Frame-Options DENY
 	}
 
-	handle {
+	# SvelteKit owns a closed set of paths: the signed-in application, the browser sign-in flow
+	# that is not the MCP server's own callback above, its event stream, and its build assets.
+	# Everything else, including every documentation page ever added, is the static site, so a
+	# new docs page never needs a routing change here.
+	@app path /app /app/* /auth/* /events/* /_app/*
+	handle @app {
 		reverse_proxy frontend:3000
+	}
+
+	handle {
+		reverse_proxy docs:8082
 	}
 }

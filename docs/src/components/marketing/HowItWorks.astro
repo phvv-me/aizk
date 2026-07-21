@@ -1,0 +1,18 @@
+---
+import FlowMap from '../FlowMap.svelte';
+---
+
+<section id="how" class="border-base-300 border-b">
+  <div class="mx-auto max-w-6xl px-4 py-16">
+    <div class="mb-8 max-w-2xl space-y-3">
+      <h2 class="text-3xl font-semibold tracking-tight" style="font-family: var(--font-brand)">
+        How it works
+      </h2>
+      <p class="text-base-content/70">
+        Writing and reading are two paths across one database. Click any box to see what it does
+        and where the documentation explains it.
+      </p>
+    </div>
+    <FlowMap client:only="svelte" flow="system" />
+  </div>
+</section>

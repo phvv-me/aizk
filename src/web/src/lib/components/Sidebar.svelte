@@ -42,7 +42,7 @@
 
 <header class="border-sidebar-border bg-sidebar sticky top-0 z-30 border-b md:hidden">
   <div class="flex h-14 items-center justify-between px-4">
-    <a href="/dashboard" class="flex items-center gap-2 font-semibold tracking-tight">
+    <a href="/app/dashboard" class="flex items-center gap-2 font-semibold tracking-tight">
       <Sparkles class="text-primary size-5" aria-hidden="true" />
       AIZK
     </a>
@@ -104,7 +104,7 @@
   aria-label="Primary"
 >
   <a
-    href="/dashboard"
+    href="/app/dashboard"
     class="flex items-center gap-2 px-5 py-5 text-lg font-semibold tracking-tight"
   >
     <Sparkles class="text-primary size-5" aria-hidden="true" />

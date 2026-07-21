@@ -1,0 +1,102 @@
+---
+title: "Releasing"
+description: "Cutting a version and publishing it."
+---
+
+A release is a version bump, and everything else is automation. This page assumes you can run the
+gate from [Development setup](/docs/dev/contributing/setup/) and that your change is already green.
+For whether a deployment is fit to upgrade, which is a different question,
+[The release gate](/docs/dev/run/release-gate/) owns that.
+
+## The version drives everything
+
+There are no release branches and no manual tagging. The single source of truth is `version` in
+`pyproject.toml`, and `.github/workflows/publish.yml` compares it against the existing tags.
+
+```mermaid
+flowchart TD
+  P["push to main"] --> CI["ci.yml<br/>lint · lint-imports · typecheck · test"]
+  CI -->|red| STOP["nothing else runs"]
+  CI -->|green| G{"workflow_dispatch?"}
+  G -->|no| NOOP["stop here, the gate ran and that is all"]
+  G -->|yes| V{"v&lt;version&gt; already a tag?"}
+  V -->|yes| NOOP2["already released, no-op"]
+  V -->|no| B["uv build"]
+  B --> PY["publish to PyPI<br/>trusted publishing, skip-existing"]
+  PY --> T["tag v&lt;version&gt;"]
+  T --> R["GitHub release with generated notes"]
+```
+
+Two details in that flow are deliberate. The publish step runs **before** the tag, so a failed
+upload leaves no tag behind and the next attempt simply retries. And `skip-existing` is on, so
+re-running after a partial failure is idempotent rather than an error.
+
+The CI job is reused rather than reimplemented. `publish.yml` calls `ci.yml` through
+`workflow_call`, which means the gate a release passes is byte for byte the gate a pull request
+passes.
+
+## Why publishing is manual right now
+
+The release job carries `if: github.event_name == 'workflow_dispatch'`, so an ordinary push to
+`main` runs the full gate and stops. Two things block an unattended upload.
+
+The first is the `rls` dependency. It is a direct git reference, because the PyPI name belongs to
+the upstream fork base rather than to the house package, and PyPI rejects any distribution that
+carries a direct-URL dependency. The second is SQLAlchemy. aizk pins the 2.1 beta, and expressing
+that needs a resolver override that plain `pip` has no way to state.
+
+Neither is permanent. When the fork publishes under its own PyPI name and `pyproject.toml` can name
+it normally, the `if` line comes out and a version bump becomes the whole release again. Until then
+somebody triggers the run.
+
+## Checklist
+
+1. Bump `version` in `pyproject.toml`.
+2. Move the `Unreleased` section of `CHANGELOG.md` under the new version with today's date.
+3. Update `README.md` and these docs if the change is user-visible, in the same commit.
+4. Run the local gate.
+5. Merge to `main` and confirm CI is green.
+6. Trigger `publish.yml` from the Actions tab or with `gh workflow run publish.yml`.
+7. Check the PyPI project page and the docs site.
+
+## Commands
+
+Everything goes through `chefe run` from the monorepo root. Bare `uv run`, `pip`, `python`, and
+`pytest` are not the environment the gate uses.
+
+```sh
+chefe run lint                 # ruff check, ruff format --check, and the pre-commit stack
+chefe run lint-imports-aizk    # the layered and SQL import contracts
+chefe run typecheck-aizk       # pyrefly and ty
+chefe run test-aizk-cov        # the suite plus the 100 percent coverage gate
+chefe run docs-aizk            # build the site and run the page gate
+```
+
+Building the wheel is the one step CI owns rather than you, and it uses `uv build` on a clean
+checkout inside the workflow.
+
+## The docs are a separate workflow
+
+`.github/workflows/docs.yml` builds the Astro site on any change under `docs/` and runs the page
+gate over the result, checking the reading budget, the diagram rule, and every internal link. It
+publishes nothing. The site is served from the deployment itself through the `docs` Compose
+service, so this job only proves the build is green.
+[Writing these docs](/docs/dev/contributing/docs-style/) is the contract it enforces.
+
+## One-time setup
+
+PyPI publishing uses [trusted publishing](https://docs.pypi.org/trusted-publishers/) over OIDC, so
+there is no API token anywhere. The publisher is registered against this repository, the workflow
+file path `publish.yml`, and the `pypi` environment. That binding is by file path, which is why the
+workflow keeps its name even though it does more than publish now. Renaming it silently breaks
+uploads.
+
+## Next
+
+<div class="not-content">
+
+- [The release gate](/docs/dev/run/release-gate/) is the operational question of whether to upgrade.
+- [Upgrades](/docs/dev/run/upgrades/) covers moving a running deployment forward.
+- [Writing these docs](/docs/dev/contributing/docs-style/) is what the docs workflow checks.
+
+</div>

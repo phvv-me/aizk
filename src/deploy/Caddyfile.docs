@@ -1,0 +1,20 @@
+# The static site container. TLS terminates at the Cloudflare tunnel and the public router is the
+# other Caddy, so this one only answers plain HTTP inside the Compose network.
+:8082 {
+	encode zstd gzip
+	root * /srv
+
+	# Astro's directory build format emits /docs/quickstart/index.html, so a request for
+	# /docs/quickstart has to fall through to the directory before the .html guess.
+	try_files {path} {path}/ {path}.html
+	file_server
+
+	handle_errors {
+		rewrite * /404.html
+		file_server
+	}
+
+	# `_astro` filenames carry a content hash, so a stale one can never be served. HTML stays
+	# uncached because its name never changes.
+	header /_astro/* Cache-Control "public, max-age=31536000, immutable"
+}

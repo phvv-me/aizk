@@ -1,0 +1,70 @@
+/* aizk brand for Starlight. Deliberately monochrome.
+
+   Ink on paper in the light scheme, chalk on black in the dark scheme.
+   There is no accent hue anywhere. Links are told apart by an underline
+   instead of a color, and the only gradient on the whole site lives
+   inside the logo. Keep it that way.
+
+   daisyUI is deliberately absent here. It emits an `@layer daisyui` that
+   sits outside Starlight's layer order and would outrank every Starlight
+   style, so it stays in marketing.css and loads only on the landing page. */
+
+@layer base, starlight, theme, components, utilities;
+
+@import '@astrojs/starlight-tailwind';
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap');
+
+/* Starlight reads its accent and gray ramps from these. Monochrome means the
+   accent ramp is a gray ramp, so links and active nav read as bright ink. */
+@theme {
+  --font-brand: 'Space Grotesk', var(--font-sans);
+  --color-accent-50: var(--color-neutral-50);
+  --color-accent-100: var(--color-neutral-100);
+  --color-accent-200: var(--color-neutral-200);
+  --color-accent-300: var(--color-neutral-300);
+  --color-accent-400: var(--color-neutral-400);
+  --color-accent-500: var(--color-neutral-500);
+  --color-accent-600: var(--color-neutral-600);
+  --color-accent-700: var(--color-neutral-700);
+  --color-accent-800: var(--color-neutral-800);
+  --color-accent-900: var(--color-neutral-900);
+  --color-accent-950: var(--color-neutral-950);
+  --color-gray-50: var(--color-zinc-50);
+  --color-gray-100: var(--color-zinc-100);
+  --color-gray-200: var(--color-zinc-200);
+  --color-gray-300: var(--color-zinc-300);
+  --color-gray-400: var(--color-zinc-400);
+  --color-gray-500: var(--color-zinc-500);
+  --color-gray-600: var(--color-zinc-600);
+  --color-gray-700: var(--color-zinc-700);
+  --color-gray-800: var(--color-zinc-800);
+  --color-gray-900: var(--color-zinc-900);
+  --color-gray-950: var(--color-zinc-950);
+}
+
+/* The four rules that Tailwind utilities cannot reach, because they style
+   markup Starlight renders itself. */
+.site-title,
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--font-brand);
+  letter-spacing: -0.02em;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.sl-markdown-content :is(pre, .expressive-code, .expressive-code .frame, :not(pre) > code),
+.starlight-aside,
+.card,
+.sl-link-card {
+  border-radius: 0;
+}
+
+.sl-markdown-content :is(.mermaid, .astro-d2) {
+  display: flex;
+  justify-content: center;
+}

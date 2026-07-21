@@ -1,0 +1,59 @@
+<section class="border-base-300 border-b">
+  <div class="mx-auto grid max-w-6xl gap-10 px-4 py-16 lg:grid-cols-2 lg:items-center">
+    <svg viewBox="0 0 520 240" class="w-full" role="img" aria-labelledby="bitemporal-title">
+      <title id="bitemporal-title">
+        A fact valid from March, recorded in June, corrected in July without deleting the first
+        version
+      </title>
+      <g fill="none" stroke="currentColor" stroke-width="1" opacity="0.25">
+        <line x1="60" y1="200" x2="500" y2="200"></line>
+        <line x1="60" y1="200" x2="60" y2="30"></line>
+      </g>
+      <g font-family="monospace" font-size="10" fill="currentColor" opacity="0.55">
+        <text x="60" y="220">Mar</text>
+        <text x="200" y="220">Jun</text>
+        <text x="340" y="220">Jul</text>
+        <text x="470" y="220">now</text>
+        <text x="6" y="60">recorded</text>
+        <text x="6" y="150">valid</text>
+      </g>
+
+      <g fill="currentColor" opacity="0.15">
+        <rect x="60" y="130" width="280" height="26"></rect>
+        <rect x="340" y="130" width="150" height="26"></rect>
+      </g>
+      <g fill="currentColor" opacity="0.4">
+        <rect x="200" y="45" width="140" height="26"></rect>
+        <rect x="340" y="45" width="150" height="26"></rect>
+      </g>
+
+      <g font-family="monospace" font-size="10" fill="currentColor">
+        <text x="70" y="148">"the extractor is the LLM lane"</text>
+        <text x="350" y="148">"the extractor is GLiNER2"</text>
+        <text x="210" y="63" opacity="0.8">learned Jun</text>
+        <text x="350" y="63" opacity="0.8">corrected Jul</text>
+      </g>
+
+      <g stroke="currentColor" stroke-dasharray="3 3" opacity="0.4">
+        <line x1="340" y1="30" x2="340" y2="200"></line>
+      </g>
+    </svg>
+
+    <div class="space-y-5">
+      <h2 class="text-3xl font-semibold tracking-tight" style="font-family: var(--font-brand)">
+        Corrections keep the past
+      </h2>
+      <p class="text-base-content/70">
+        aizk records two clocks for every claim. One is the time the statement was true in the
+        world, the other is the time aizk was told. Correcting something closes the old range and
+        opens a new one, so yesterday's answer can still be reconstructed and nothing is silently
+        overwritten.
+      </p>
+      <p class="text-base-content/70">
+        That matters when memory drives decisions. You can ask what the team believed in June and
+        get June's answer, not today's, and you can see exactly when the belief changed.
+      </p>
+      <a href="/docs/user/concepts/time/" class="btn btn-outline btn-sm">How time works</a>
+    </div>
+  </div>
+</section>

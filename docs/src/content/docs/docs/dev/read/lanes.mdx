@@ -1,0 +1,134 @@
+---
+title: "The lanes"
+description: "Every retrieval lane, what it selects, and the SQL shape it contributes."
+---
+
+A lane is one source of evidence inside the single recall statement. This page assumes you have
+read [how recall runs](/docs/dev/read/overview/) and know that step four builds one cached
+`Select` from a `Plan`. Everything here lives in `src/aizk/retrieval/lanes/` and
+`src/aizk/retrieval/models/lane.py`.
+
+`build_recall_statement` in `src/aizk/retrieval/recall/program.py` carries the picture.
+
+```text
+    dense seeds -- neighbors -- ppr hops       dense -- bm25
+                    |                               |
+                fact lane    rrf source lane    memory    profiles    overviews
+                    |               |               |         |           |
+                    +------ union_all, ordered by the plan --------------+
+                                            |
+                                     candidate rows
+```
+
+import FlowMap from '../../../../../components/FlowMap.svelte';
+
+Click any lane to see what it selects and where it is documented.
+
+<FlowMap client:only="svelte" flow="recall" height="34rem" />
+
+## Six kinds, seven instances
+
+`Lane.Kind` is a `StrEnum` with exactly six members, which are `PROFILE`, `OVERVIEW`,
+`COMMUNITIES`, `FACTS`, `WORKING_MEMORY` and `SOURCES`. The kind is the prompt section a row lands
+in, not the class that produced it.
+
+`Plan.lanes` builds up to seven lane instances from those six kinds, because `SourceLane` and
+`EntityCatalogLane` are two different classes that both emit `SOURCES` and both take the same
+priority. Under `Plan.maximal()` all seven are present.
+
+| Lane class | Kind | Selects | Limit |
+|---|---|---|---|
+| `FactLane` | `facts` | live facts from dense seeds, one-hop neighbors and the PageRank walk | `k * fact_candidate_factor` |
+| `SourceLane` | `sources` | fused chunk hits with document attribution | `k` |
+| `EntityCatalogLane` | `sources` | live entities grouped by ontology type and exact scope set | `k` kinds |
+| `VectorLane` | `working_memory` | unpromoted `session_item` rows | `session_recall_k` |
+| `VectorLane` | `profile` | entity profile summaries | `profile_recall_k` |
+| `VectorLane` | `communities` | community label and summary lines | `community_recall_k` |
+| `OverviewLane` | `overview` | RAPTOR summaries at the deepest level | `raptor_k` |
+
+The last three follow the plan toggles `profiles`, `communities` and `raptor`. The first four are
+always instantiated, and a lane whose limit is zero simply contributes no rows, which is cheaper
+to reason about than a lane that sometimes does not exist.
+
+## FactLane
+
+`FactLane.__call__` assembles two or three ranked parts, each of which is a `(id, ordering)`
+select over `live_fact`.
+
+The **dense seeds** come from `Fact.Live.dense`. A MATERIALIZED `dense_fact_content` CTE takes the
+vector index scan over `fact_content` alone, cut at `fusion_depth` and floored at
+`recall_max_distance`, then joins `live_fact` for visibility and access history. The ordering is
+not raw distance but a blend, `distance - recency_weight * 0.5 ** (age / half_life) -
+frequency_weight * ln(1 + access_count)`, so a warm fact climbs.
+
+The **one-hop neighbors** come from `Fact.Live.neighbors`. Seed endpoints become a `seed_entity`
+CTE, and each of `subject_id` and `object_id` joins it through its own index. An `OR` across both
+endpoints would scan every fact instead, which is why the two sides are unioned rather than
+combined in a `WHERE`.
+
+The **PageRank diffusion** only appears when `hops` is above zero, which under the maximal plan
+means `multihop_max_hops`. `Entity.seed_mass` places the mass, giving named mentions decisive
+weight and falling back to dense entities and fact endpoints only when nothing was named.
+`Fact.Live.diffused` then spreads that mass one degree-normalized hop at a time, keeping the top
+`graph_ppr_frontier` entities per hop and accumulating every hop into a `graph_mass_window` cut.
+`Fact.Live.connected` finally scores each connecting fact by the weaker endpoint's mass, so a fact
+needs standing at both ends rather than one popular one.
+
+`FactLane.merged` interleaves the parts. Each part gets its own `row_number()`, the union groups
+by fact id and keeps the minimum rank, so a fact that a part ranked first stays first even when
+another part ranked it poorly. Ranking by rank rather than by raw distance is what stops cosine
+similarity from suppressing graph-only evidence. A window over `(perspective_key, lower(statement))`
+then keeps one row per distinct statement per perspective, and the cut is
+`k * fact_candidate_factor` before the lane hydrates each survivor with its source chunk, document
+title, URI and artifact ids.
+
+## SourceLane and EntityCatalogLane
+
+`SourceLane` is thin. It calls `Chunk.hybrid(context)` and renders each hit through
+`Chunk.source_line`, which is the document name, optional speaker and role, observed and expiry
+dates in `display_timezone`, then a whitespace-flattened snippet cut at `chunk_size` characters.
+Ordering is `-score`, and it is the only lane that sets the `direct` flag.
+[Fusion and reranking](/docs/dev/read/ranking/) owns what `hybrid` computes.
+
+`EntityCatalogLane` answers a different question, which is what exists right now. `Entity.catalog`
+ranks ontology entity kinds by embedding distance to the query, cuts at `k`, collects live
+entities either declared by an active document or inferred from a fact endpoint, appends each
+entity's state facts in parentheses, and aggregates one line per `(type, scopes)` pair. The result
+reads like `Current project entities are aizk (active), crivo (waiting).` and it is
+database-derived, so current work never depends on an extractor reading a checkbox.
+
+## VectorLane and OverviewLane
+
+`VectorLane` serves three kinds from one class. The `match` on `self.kind` picks the table, the
+rendered line, the guards and the limit bind, then delegates to `Lane.by_vector`, which floors on
+`recall_max_distance`, orders by distance and limits. Working memory adds the guard
+`promoted_at IS NULL` so a promoted item is not recalled twice.
+
+`OverviewLane` reads RAPTOR summaries. It computes the maximum `level` attribute across
+`RAPTOR_SUMMARY` entities as a scalar subquery and keeps only entities at that depth, so recall
+always reads the tree's roots rather than an arbitrary level. See
+[communities and RAPTOR](/docs/dev/passes/communities-raptor/) for how that tree is built.
+
+## The union
+
+Every lane renders into the same fourteen-column shape through `Lane.row`, with `lane`, `priority`
+and `ordering` alongside the candidate payload. `ordered()` unions them all into a CTE.
+
+```python
+candidates = union_all(*lanes).cte("ordered_context").prefix_with("MATERIALIZED")
+```
+
+`MATERIALIZED` is not decoration. Without it PostgreSQL is free to inline the CTE and re-evaluate
+the whole union per output row, which turns one pass into many. Keep it. The outer select then
+projects only the `Candidate` columns and orders by `priority, ordering, evidence_id`, so
+`priority` and `ordering` do their work inside the statement and never leave it.
+
+## Next
+
+<div class="not-content">
+
+- [Fusion and reranking](/docs/dev/read/ranking/) explains the source lane's score.
+- [Graph tables](/docs/dev/store/graph-tables/) has the tables these lanes read.
+- [Retrieval tuning](/docs/dev/read/tuning/) lists every limit named above.
+
+</div>

@@ -1,0 +1,128 @@
+---
+title: "Hardware and cost"
+description: "What it takes to run aizk, and how the model choices move that number."
+---
+
+aizk runs every model itself, so hardware is a real design decision rather than a billing line.
+This page is about the machine. It assumes you have seen the service list on
+[Deployment topology](/docs/dev/run/topology/), because the sizing follows directly from which
+container gets which GPU.
+
+Start with the estimator. Every constant in it is read out of `src/deploy/docker-compose.yml`
+and `src/aizk/config/settings.py`, or comes from a dated measurement named in the note under it.
+
+import CostEstimator from '../../../../../components/CostEstimator.svelte';
+
+<CostEstimator client:only="svelte" />
+
+## The default two-card layout
+
+The shipped Compose file assumes two 24 GB cards and splits them by size rather than by role.
+Three small lanes share GPU 0 and the extractor gets GPU 1 to itself.
+
+| Lane | Card | Utilization | What sets it |
+|---|---|---|---|
+| `vllm-emb`, Qwen3-VL-Embedding-2B | `AIZK_EMBED_GPU_DEVICE=0` | 0.30 | `AIZK_EMBED_GPU_MEM_UTIL` |
+| `vllm-rerank`, Qwen3-Reranker-4B fp8 | `AIZK_RERANK_GPU_DEVICE=0` | 0.25 | `AIZK_RERANK_GPU_MEM_UTIL` |
+| `gliner`, GLiNER2 large | `AIZK_GLINER_GPU_DEVICE=0` | plain torch, no fraction | the checkpoint |
+| `vllm-llm`, Gemma 4 12B QAT w4a16 | `AIZK_LLM_GPU_DEVICE=1` | 0.97 | `AIZK_LLM_GPU_MEM_UTIL` |
+
+The two vLLM fractions on GPU 0 come to 0.55, which leaves the GLiNER sidecar room on the same
+card. The extractor takes 0.97 of its own card because nothing competes with it there.
+
+## Measured model memory
+
+These are weights only, on the serving configuration the Compose file ships. vLLM reserves a KV
+cache out of the same card on top of them, sized by the utilization fraction rather than by an
+absolute number, so treat each row as a floor.
+
+| Model | Role | VRAM |
+|---|---|---|
+| Qwen3-VL-Embedding-2B, bf16 | embedder | 4.7 GB |
+| Qwen3-Reranker-4B, fp8 | reranker | 6.0 GB |
+| GLiNER2 large | gate and mention seeder | 2.4 GB |
+| GLiNER2 base | cheaper gate | 1.5 GB |
+| Gemma 4 12B QAT w4a16 | current extractor | 10.3 GB |
+| Gemma 4 31B w4a16 | previous baseline | 22.8 GB |
+| Gemma 4 E2B w4a16 | low resource extractor | 9.5 GB |
+
+Two of these are not free choices. The reranker cannot be economized down to the 0.6B checkpoint,
+because on 253 real vault queries reranking the embedder's own top 8 the small model dropped MRR
+from 0.90 to 0.77 while the 4B held 0.91. And the KV cache dtype is pinned to `bfloat16` because
+an RTX 3090 supports nothing else through vLLM's Triton backend.
+
+## Context lengths are part of the sizing
+
+Two of the three vLLM lanes are capped at 2048 tokens, which looks small until you notice that an
+aizk chunk is 2048 characters and therefore under 700 tokens. The embedder's native 262K length
+would have sized its KV cache at 28 GiB, and even 8192 was roughly ten times more than the lane
+can use. Cutting it to 2048 settled that lane near 4.7 GiB and raised its throughput about 15
+percent over the previous 8192 sizing. The extractor keeps 8192 because it holds one extraction
+window plus the response schema.
+
+Concurrency is coupled to those caps. `AIZK_LLM_MAX_NUM_SEQS` is 4 and the three graph fan-out
+settings, `AIZK_GRAPH_BUILD_CONCURRENCY`, `AIZK_COMMUNITY_BUILD_CONCURRENCY` and
+`AIZK_RAPTOR_BUILD_CONCURRENCY`, are 4 to match. `AIZK_QUEUE_BATCH_SIZE` is 64 so the queue keeps
+enough chunks in flight to actually saturate continuous batching. Raising the fan-out without
+raising the scheduled sequence count just moves the wait from the queue into vLLM.
+
+## If you only have one card
+
+The estimator encodes the rule. An extractor larger than half the card cannot share it with the
+embedding, reranking and gate lanes, so it needs its own. With one 24 GB card you have two honest
+options. Drop to a small extractor and accept it on the shared card, or set
+`AIZK_EXTRACT_BACKEND=gliner` and run with no LLM lane at all, which is much cheaper and produces
+weaker edges. [Extraction and the gate](/docs/dev/write/extraction/) explains what that trade
+actually costs in the graph.
+
+## CPU, RAM and disk
+
+The committed PostgreSQL settings assume a large host. `shared_buffers` is 16 GB and
+`effective_cache_size` is 128 GB, which are sized for the 256 GB reference machine. A smaller
+host must lower them before PostgreSQL first starts.
+[PostgreSQL and storage](/docs/dev/run/postgres/) has the full table and the reasoning.
+
+CPU matters mostly for conversion. `docling` runs the CPU-only image with two local workers by
+default through `AIZK_DOCLING_CONCURRENCY`, and a long PDF is minutes of CPU rather than GPU.
+ClamAV keeps its signature database resident and updates it 24 times a day.
+
+All four model containers mount one shared Hugging Face cache from
+`${AIZK_HOME:-${HOME}/.aizk}/hf-cache`, so a checkpoint downloads once and every lane that needs
+it reads the same copy. Size that directory for the checkpoints you actually plan to try rather
+than the one you settled on, because swapping an extractor to compare it leaves both on disk.
+
+The reference host was measured on July 15, 2026 and carries three SSDs.
+
+| Device | Capacity | Role |
+|---|---|---|
+| Samsung 980 PRO NVMe | 1 TB | OS, Docker, containers, model cache |
+| WD Blue SN580 NVMe | 2 TB | all durable aizk data |
+| Crucial MX500 SATA | 2 TB | datasets, overflow, backup staging |
+
+PostgreSQL is the latency-sensitive tenant on that middle device. Object bytes, observability
+state and backup staging can share it until they create measured contention, and then they move
+to the SATA drive. Keep 20 percent of the aizk device free, since PostgreSQL needs headroom for
+WAL spikes, index builds, vacuum rewrites and restore work on top of the table size.
+
+## Read the throughput numbers carefully
+
+The estimator's wall-clock range is a bracket, not a prediction. It comes from two measurements
+taken under different serving configurations. A warm vLLM lane with continuous batching amortized
+to about 667 milliseconds per chunk, and single-chunk smoke tests with no batching ran 20 to 75
+seconds per chunk. Real steady-state backlog work sits near the batched end, so that is the low
+bound, but nothing here was measured end to end on your corpus.
+
+The same caution applies to the storage estimate. It assumes roughly one entity and one fact per
+chunk after consolidation, which is an observed ratio on one corpus rather than a constant, and
+it counts the text, three `halfvec(1024)` embeddings and index overhead.
+
+## Next
+
+<div class="not-content">
+
+- [PostgreSQL and storage](/docs/dev/run/postgres/) has the tuning table and the disk layout.
+- [First start](/docs/dev/run/first-start/) turns this sizing into a running deployment.
+- [Extraction and the gate](/docs/dev/write/extraction/) explains what the extractor choice buys.
+- [Retrieval results](/docs/dev/eval/retrieval/) has the measurements behind the reranker choice.
+
+</div>

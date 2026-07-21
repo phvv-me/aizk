@@ -1,0 +1,44 @@
+---
+const pillars = [
+  {
+    title: 'Private by default',
+    body: 'A memory you write belongs to you alone until you say otherwise. There is no shared bucket that things fall into by accident, and no setting that quietly widens an old note.',
+    href: '/docs/user/concepts/scopes/',
+    art: ['  you', '   │', '   ▼', ' ┌─────┐', ' │  •  │  private', ' └─────┘'],
+  },
+  {
+    title: 'Shared on purpose',
+    body: 'Sharing names the organizations that may read a note. Name two and only people who belong to both can see it, which is how a memory about one collaboration stays inside it.',
+    href: '/docs/user/using/sharing/',
+    art: ['  ┌───┐   ┌───┐', '  │ A │   │ B │', '  └─┬─┘   └─┬─┘', '    └───┬───┘', '      ┌─┴─┐', '      │A∩B│'],
+  },
+  {
+    title: 'Yours to host',
+    body: 'One PostgreSQL database holds every byte, the model lanes run on your own GPUs, and nothing leaves the machine. Turn it off and the memory is still a file you own.',
+    href: '/docs/dev/run/topology/',
+    art: ['  ┌───────────┐', '  │ your host │', '  ├───────────┤', '  │ postgres  │', '  │ vllm      │', '  └───────────┘'],
+  },
+];
+---
+
+<section class="border-base-300 border-b">
+  <div class="bg-base-300 mx-auto grid max-w-6xl gap-px md:grid-cols-3">
+    {
+      pillars.map((pillar) => (
+        <a
+          href={pillar.href}
+          class="group bg-base-100 hover:bg-base-200 flex flex-col gap-4 p-8 transition-colors"
+        >
+          <pre class="text-base-content/70 font-mono text-xs leading-tight"><code>{pillar.art.join('\n')}</code></pre>
+          <h2 class="text-xl font-semibold" style="font-family: var(--font-brand)">
+            {pillar.title}
+          </h2>
+          <p class="text-base-content/70 text-sm">{pillar.body}</p>
+          <span class="text-base-content mt-auto text-sm font-medium underline underline-offset-4">
+            Read more
+          </span>
+        </a>
+      ))
+    }
+  </div>
+</section>

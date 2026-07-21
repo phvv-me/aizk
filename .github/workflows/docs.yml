@@ -1,22 +1,23 @@
 name: Docs
 
-# Builds the Astro + Starlight docs site and deploys it to GitHub Pages on main when docs change.
-# The site is static and imports no project code, so this job never touches Python, chefe, or the
-# runtime dependencies.
+# Builds the Astro site, which is the landing page and the documentation together, and runs the
+# page gate over it. The site is served from the deployment itself through the `docs` Compose
+# service, so this job publishes nothing. It only proves the build is green and the pages obey
+# the reading budget, the diagram rule and the internal link rule.
 on:
   push:
     branches: [main]
+    paths: ["docs/**", ".github/workflows/docs.yml", "README.md"]
+  pull_request:
     paths: ["docs/**", ".github/workflows/docs.yml", "README.md"]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -32,17 +33,5 @@ jobs:
           cache: pnpm
           cache-dependency-path: docs/pnpm-lock.yaml
       - run: pnpm --dir docs install --frozen-lockfile
+      - run: pnpm --dir docs check
       - run: pnpm --dir docs build
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: docs/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v5

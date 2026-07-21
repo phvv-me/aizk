@@ -1,5 +1,13 @@
+# Build scripts pnpm is allowed to run. sharp and esbuild ship native binaries that Astro needs at
+# build time, so they are allowed. The rest arrive through transitive dev tooling, have no job in
+# this static site, and stay off rather than being left undecided, because an undecided entry makes
+# `pnpm install` fail the whole build.
 allowBuilds:
+  '@google/genai': false
   esbuild: true
+  protobufjs: false
+  sharp: true
+  workerd: false
 onlyBuiltDependencies:
   - esbuild
   - sharp

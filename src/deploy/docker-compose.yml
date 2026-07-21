@@ -595,15 +595,41 @@ services:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+        - "fetch('http://127.0.0.1:3000/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 15s
     restart: unless-stopped
 
+  # The landing page and the documentation, one static Astro build behind a file server. It holds
+  # no credential, reaches no other service, and needs nothing running to answer, so it is the one
+  # public surface that stays up while the engine is down.
+  docs:
+    image: aizk-docs
+    profiles: ["public"]
+    build:
+      context: ../..
+      dockerfile: src/deploy/Dockerfile
+      target: docs
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /config:rw,noexec,nosuid,size=8m
+      - /data:rw,noexec,nosuid,size=8m
+      - /tmp:rw,noexec,nosuid,size=8m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8082/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
   # Caddy is the AIZK tunnel origin. It forwards FastMCP and its OAuth routes to the server,
-  # only capability upload PUTs to the api service, and every remaining path to SvelteKit.
+  # only capability upload PUTs to the api service, the signed-in application paths to SvelteKit,
+  # and every remaining path, which is the landing page and the documentation, to the docs site.
   # Cloudflare reaches caddy:8081 over Compose; no Caddy host port is published.
   caddy:
     networks:
@@ -623,6 +649,8 @@ services:
       api:
         condition: service_healthy
       frontend:
+        condition: service_healthy
+      docs:
         condition: service_healthy
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]

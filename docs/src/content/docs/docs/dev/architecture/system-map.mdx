@@ -1,0 +1,130 @@
+---
+title: "System map"
+description: "Every moving part of aizk on one page, and how a request crosses them."
+---
+
+This is the map of the whole engine, the page to read before opening any other developer page.
+It assumes you know what a [scope](/docs/user/concepts/scopes/) is and that you can read SQL.
+Everything below names a real module or a real container, so you can verify each claim against
+the repository.
+
+import FlowMap from '../../../../../components/FlowMap.svelte';
+
+<FlowMap client:only="svelte" flow="system" />
+
+## Three Python processes and a pile of sidecars
+
+All aizk code ships as one package with three entrypoints, and `src/deploy/docker-compose.yml`
+runs each of them as its own container.
+
+| Process | Command | What it owns |
+|---|---|---|
+| MCP server | `aizk admin server mcp` | the agent-facing tool surface |
+| Browser API | `aizk admin server api` | the JSON API the web app calls |
+| Worker | `aizk admin server worker` | the queue drain and the scheduled passes |
+
+Each one calls `Runtime.assemble(settings)` in `src/aizk/runtime.py` exactly once, which builds
+the database handle, the byte store, the artifact services, the Logto client, and the four model
+clients for embedding, reranking, gating, and generation. Nothing else in the codebase constructs
+those. [Design principles](/docs/dev/architecture/principles/) explains why that rule exists and
+where it is bent.
+
+The rest of the deployment is somebody else's maintained software. PostgreSQL with VectorChord
+holds every row and the queue, SeaweedFS holds the original bytes, ClamAV scans uploads, Docling
+converts documents to Markdown, three vLLM containers serve the embedding, reranking, and
+generation models, one GLiNER sidecar serves the gate, and Logto is the identity provider. Caddy
+fronts all of it. [Deployment topology](/docs/dev/run/topology/) has the full list with ports.
+
+## The write path
+
+A `remember` call lands on `Memory.remember` in `src/aizk/memory.py`, the one service both the
+MCP server and the browser API share. Plain text and a file take different routes from there.
+
+```mermaid
+flowchart TD
+    C([caller]) -->|remember| M[Memory.remember]
+    M -->|text| I[extract.ingest]
+    M -->|uri or file| U[ArtifactIntake]
+    U --> S[scan, then convert to Markdown]
+    S --> I
+    I --> D[(document and chunks)]
+    D --> Q[[PgQueuer]]
+    Q --> G[gate, extract, ground, consolidate]
+    G --> K[(entities and facts)]
+```
+
+Text goes straight to `extract.ingest.ingest_text`, which writes the document and its chunks and
+embeds them. A URI or an upload goes to the artifact intake first, which scans the bytes before
+storing them and converts them to Markdown only after the scan passes, then feeds the Markdown
+back into the same ingest path. [Intake](/docs/dev/write/intake/) and
+[Artifacts](/docs/dev/write/artifacts/) cover both.
+
+The transaction that writes the document ends there. `enqueue_document` puts a job on PgQueuer,
+and the worker picks it up later to run the graph projection, so a caller never waits on a model
+call to extract entities. [Extraction and the gate](/docs/dev/write/extraction/) covers what
+happens in that job, and [The job system](/docs/dev/passes/jobs/) covers how it is scheduled.
+
+## The read path
+
+A `recall` call is synchronous and touches no queue. `Memory.recall` calls
+`retrieval.recall`, which runs the lanes in `src/aizk/retrieval/lanes/`, fuses them, reranks the
+survivors with a cross-encoder, and packs the highest-merit prefix that fits the token budget.
+The result is rendered from `src/aizk/retrieval/templates/recall.md.j2` into one prompt-ready
+Markdown string.
+
+Two details matter for anyone changing it. Every lane runs on every query rather than being
+selected by a router, and the ranking is decided by the reranker rather than by which lane found
+the item. [How recall runs](/docs/dev/read/overview/) is the page that owns this.
+
+## The identity boundary
+
+aizk stores no users, no organizations, and no memberships. `src/aizk/auth.py` verifies the
+bearer token against Logto, and `User.authorized` in `src/aizk/store/identity/user.py` derives a
+stable UUID5 identity and the caller's organization standing from the verified claims alone.
+
+```text
+  bearer token ──▶ Auth.verify_token ──▶ claims
+                                          │
+                                          ▼
+                              User.authorized(...)
+                                          │
+             ┌────────────────────────────┴───────────────┐
+             ▼                                            ▼
+   app.orgs (readable)                        app.writable_orgs
+             └──────────────┬─────────────────────────────┘
+                            ▼
+             every PostgreSQL row policy reads these
+```
+
+`User` is an `rls.Context` subclass with the prefix `app`, so entering its session sets those
+settings on the connection and every row policy in the schema is written against them. The
+application role has `BYPASSRLS` off, so code that forgets to filter returns nothing instead of
+returning everything. [The Logto boundary](/docs/dev/identity/logto/) and
+[Row level security](/docs/dev/store/rls/) go deeper.
+
+Background work has no bearer token, so it uses `User.system()` or `User.private(user_id)`
+instead, which is a separate and deliberately narrow door.
+[Background work](/docs/dev/identity/background/) explains what each one may see.
+
+## What the transports may not do
+
+The MCP server and the browser API are thin. Neither builds a SQL statement and neither opens a
+session, which is enforced by `src/aizk/mcp/ruff.toml` and `src/aizk/api/ruff.toml` banning
+`sqlmodel.select`, the session classes, and `Database` inside those two packages. Both reach the
+store through model classmethods and `User.exec`.
+[Layers and import contracts](/docs/dev/architecture/layers/) has the wider version of that rule.
+
+One more naming note, because it bites when you read the web code. The web app renames things for
+users, so a fact is a Finding, an entity is a Subject, and a community is a Theme. The database
+uses the first name of each pair.
+
+## Next
+
+<div class="not-content">
+
+- [Layers and import contracts](/docs/dev/architecture/layers/) shows what may import what.
+- [Repository tour](/docs/dev/architecture/repository/) says which directory to open for a change.
+- [The data model](/docs/dev/store/data-model/) explains the content and claim split underneath everything here.
+- [Deployment topology](/docs/dev/run/topology/) lists every container and how they connect.
+
+</div>

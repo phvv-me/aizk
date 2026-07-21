@@ -1,5 +1,7 @@
 # build output
 dist/
+# astro-d2 renders diagrams into public/d2 at build time
+public/d2/
 # generated types
 .astro/
 # dependencies

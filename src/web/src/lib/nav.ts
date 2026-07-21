@@ -26,29 +26,29 @@ export function navigation(): NavSection[] {
     {
       label: 'Knowledge',
       links: [
-        { label: 'Dashboard', href: '/dashboard', icon: 'dashboard' },
-        { label: 'Recall', href: '/recall', icon: 'recall' }
+        { label: 'Dashboard', href: '/app/dashboard', icon: 'dashboard' },
+        { label: 'Recall', href: '/app/recall', icon: 'recall' }
       ]
     },
     {
       label: 'Explore',
       links: [
-        { label: 'Sources', href: '/sources', icon: 'sources' },
-        { label: 'Findings', href: '/findings', icon: 'findings' },
-        { label: 'Subjects', href: '/subjects', icon: 'subjects' },
-        { label: 'Themes', href: '/themes', icon: 'themes' }
+        { label: 'Sources', href: '/app/sources', icon: 'sources' },
+        { label: 'Findings', href: '/app/findings', icon: 'findings' },
+        { label: 'Subjects', href: '/app/subjects', icon: 'subjects' },
+        { label: 'Themes', href: '/app/themes', icon: 'themes' }
       ]
     },
     {
       label: 'Operations',
       links: [
-        { label: 'Usage', href: '/usage', icon: 'usage' },
-        { label: 'Processing', href: '/processing', icon: 'processing' }
+        { label: 'Usage', href: '/app/usage', icon: 'usage' },
+        { label: 'Processing', href: '/app/processing', icon: 'processing' }
       ]
     },
     {
       label: 'Collaboration',
-      links: [{ label: 'Organizations', href: '/organizations', icon: 'organizations' }]
+      links: [{ label: 'Organizations', href: '/app/organizations', icon: 'organizations' }]
     }
   ];
 }

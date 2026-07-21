@@ -11,15 +11,15 @@ describe('navigation', () => {
       'Collaboration'
     ]);
     expect(sections.flatMap((section) => section.links).map((link) => link.href)).toEqual([
-      '/dashboard',
-      '/recall',
-      '/sources',
-      '/findings',
-      '/subjects',
-      '/themes',
-      '/usage',
-      '/processing',
-      '/organizations'
+      '/app/dashboard',
+      '/app/recall',
+      '/app/sources',
+      '/app/findings',
+      '/app/subjects',
+      '/app/themes',
+      '/app/usage',
+      '/app/processing',
+      '/app/organizations'
     ]);
   });
 
@@ -27,7 +27,7 @@ describe('navigation', () => {
     const sections = navigation();
     expect(sections.map((section) => section.label)).not.toContain('Member management');
     expect(sections.at(-1)?.links).toEqual([
-      { label: 'Organizations', href: '/organizations', icon: 'organizations' }
+      { label: 'Organizations', href: '/app/organizations', icon: 'organizations' }
     ]);
   });
 });

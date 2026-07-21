@@ -1,0 +1,92 @@
+---
+const clients = [
+  {
+    id: 'claude',
+    label: 'Claude Code',
+    lang: 'sh',
+    code: `claude mcp add --scope user --transport http --callback-port 8912 \\
+  aizk https://aizk.phvv.me/mcp
+claude mcp login aizk`,
+    note: 'Then ask it to complete its own setup with "Ask AIZK how to do AIZK onboarding and follow it."',
+    href: '/docs/user/clients/claude-code/',
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    lang: 'toml',
+    code: `# .codex/config.toml
+mcp_oauth_credentials_store = "file"
+mcp_oauth_callback_port = 8912
+
+[mcp_servers.aizk]
+url = "https://aizk.phvv.me/mcp"
+auth = "oauth"
+oauth_resource = "https://aizk.phvv.me/mcp"
+scopes = ["control", "offline_access", "openid"]`,
+    note: 'Then run codex mcp login aizk. The fixed callback port keeps remote development predictable.',
+    href: '/docs/user/clients/codex/',
+  },
+  {
+    id: 'opencode',
+    label: 'OpenCode',
+    lang: 'json',
+    code: `{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "aizk": { "type": "remote", "url": "https://aizk.phvv.me/mcp", "enabled": true }
+  }
+}`,
+    note: 'Then run opencode mcp auth aizk, and opencode mcp debug aizk if it will not connect.',
+    href: '/docs/user/clients/opencode/',
+  },
+  {
+    id: 'self',
+    label: 'Your own stack',
+    lang: 'sh',
+    code: `git clone https://github.com/phvv-me/aizk && cd aizk
+cp src/deploy/.env.example .env   # fill in the secrets it names
+docker compose -f src/deploy/docker-compose.yml --profile public up -d`,
+    note: 'Two GPUs, one PostgreSQL, no vendor. The hardware page sizes it before you start.',
+    href: '/docs/dev/run/first-start/',
+  },
+];
+---
+
+<section class="border-base-300 border-b">
+  <div class="mx-auto max-w-6xl px-4 py-16">
+    <div class="mb-8 max-w-2xl space-y-3">
+      <h2 class="text-3xl font-semibold tracking-tight" style="font-family: var(--font-brand)">
+        Connect in one command
+      </h2>
+      <p class="text-base-content/70">
+        Every client points at the same URL and discovers aizk as an OAuth protected resource.
+        There is no API key to paste and no per-client integration to write.
+      </p>
+    </div>
+
+    <div class="tabs tabs-lift">
+      {
+        clients.map((client, index) => (
+          <>
+            <input
+              type="radio"
+              name="quickstart"
+              class="tab"
+              aria-label={client.label}
+              checked={index === 0}
+            />
+            <div class="tab-content border-base-300 bg-base-200 p-0">
+              <pre class="overflow-x-auto p-5 font-mono text-xs leading-relaxed"><code>{client.code}</code></pre>
+              <div class="border-base-300 flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
+                <p class="text-base-content/60 text-sm">{client.note}</p>
+                <a href={client.href} class="btn btn-ghost btn-xs">
+                  Full setup
+                </a>
+              </div>
+            </div>
+          </>
+        ))
+      }
+    </div>
+  </div>
+</section>
