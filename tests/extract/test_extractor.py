@@ -9,35 +9,22 @@ from doubles import FakeLLM
 from hypothesis import given
 from hypothesis import settings as hyp_settings
 from hypothesis import strategies as st
-from id_factory import uuid7
 from pydantic import BaseModel, SecretStr, ValidationError
 from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models import Model
-from strategies import predicates, wire_extractions
+from strategies import wire_extractions
 
 from aizk.config import Settings, settings
 from aizk.extract.extractor import Extractor, GLiNERExtractor, LLMExtractor
 from aizk.extract.models import (
     BatchConsolidationVerdict,
-    ConsolidationVerdict,
     Extraction,
-    TimedFact,
 )
-from aizk.graph.consolidation import Consolidator, FactMatch
 from aizk.ontology import Ontology, WireEntity, WireExtraction, WireFact
 from aizk.serving.extract import LLM, GLiNER, GraphResponse, Relation, Span
 
 extract_client_module = import_module("aizk.serving.extract.client")
 extractor_module = import_module("aizk.extract.extractor")
-
-
-def existing_match(statement: str) -> FactMatch:
-    return FactMatch(
-        id=uuid7(),
-        object_id=None,
-        statement=statement,
-        distance=0.5,
-    )
 
 
 @pytest.mark.parametrize(
@@ -423,43 +410,6 @@ def test_gliner_client_sends_the_live_ontology_schema(monkeypatch: pytest.Monkey
             "threshold": 0.42,
         }
     ]
-
-
-def test_consolidator_short_circuits_an_empty_batch(fake_llm: FakeLLM) -> None:
-    assert asyncio.run(Consolidator(llm=fake_llm.llm).resolve([])) == []
-    assert fake_llm.completions.calls == []
-
-
-@given(predicate=predicates)
-def test_consolidator_drops_a_hallucinated_supersedes(predicate: str) -> None:
-    fake = FakeLLM()
-    existing = existing_match("an existing claim")
-    candidate = TimedFact(subject="s", predicate=predicate, statement="new")
-    fake.register(
-        BatchConsolidationVerdict,
-        BatchConsolidationVerdict(
-            verdicts=[ConsolidationVerdict(action="UPDATE", supersedes=uuid7())]
-        ),
-    )
-    verdicts = asyncio.run(Consolidator(llm=fake.llm).resolve([(candidate, [existing])]))
-    assert verdicts[0].action == "UPDATE"
-    assert verdicts[0].supersedes is None
-
-
-@pytest.mark.parametrize("response", ["known-update", "missing-verdict"])
-def test_consolidator_normalizes_model_verdicts(fake_llm: FakeLLM, response: str) -> None:
-    existing = existing_match("old")
-    candidate = TimedFact(subject="s", predicate="uses", statement="new")
-    verdicts = (
-        [ConsolidationVerdict(action="UPDATE", supersedes=existing.id)]
-        if response == "known-update"
-        else []
-    )
-    fake_llm.register(BatchConsolidationVerdict, BatchConsolidationVerdict(verdicts=verdicts))
-    matches = [existing] if response == "known-update" else []
-    expected = verdicts or [ConsolidationVerdict(action="ADD")]
-
-    assert asyncio.run(Consolidator(llm=fake_llm.llm).resolve([(candidate, matches)])) == expected
 
 
 @pytest.mark.real_services

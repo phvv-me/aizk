@@ -32,31 +32,25 @@ def aged_claim(now: datetime, age_days: float, access_count: int) -> Fact.Claim:
     )
 
 
-@given(age=ages, low=counts, high=counts, half_life=half_lives)
-def test_relevance_never_falls_as_access_count_rises(
-    age: float, low: int, high: int, half_life: float
-) -> None:
-    now = datetime.now(UTC)
-    lo, hi = sorted((low, high))
-    quiet = aged_claim(now, age, lo).relevance(now, half_life)
-    busy = aged_claim(now, age, hi).relevance(now, half_life)
-    assert busy >= quiet
-    assert aged_claim(now, 0.0, lo).relevance(now, half_life) == pytest.approx(1.0 + lo)
-
-
-@given(young=ages, old=ages, count=counts, half_life=half_lives)
-def test_relevance_never_rises_with_age(
-    young: float, old: float, count: int, half_life: float
+@given(young=ages, old=ages, low=counts, high=counts, half_life=half_lives)
+def test_relevance_is_bounded_and_monotonic_in_age_and_access(
+    young: float,
+    old: float,
+    low: int,
+    high: int,
+    half_life: float,
 ) -> None:
     now = datetime.now(UTC)
     near, far = sorted((young, old))
-    fresh = aged_claim(now, near, count).relevance(now, half_life)
-    stale = aged_claim(now, far, count).relevance(now, half_life)
-    assert fresh >= stale
-
-
-def test_relevance_brackets_the_decay_floor() -> None:
-    now = datetime.now(UTC)
+    quiet_count, busy_count = sorted((low, high))
+    busy = aged_claim(now, near, busy_count).relevance(now, half_life)
+    quiet_score = aged_claim(now, near, quiet_count).relevance(now, half_life)
+    stale = aged_claim(now, far, quiet_count).relevance(now, half_life)
+    assert quiet_score >= stale
+    assert busy >= quiet_score
+    assert aged_claim(now, 0.0, quiet_count).relevance(now, half_life) == pytest.approx(
+        1.0 + quiet_count
+    )
     assert aged_claim(now, 3650.0, 0).relevance(now, 90.0) < settings.decay_floor
     assert aged_claim(now, 0.0, 0).relevance(now, 90.0) >= settings.decay_floor
 
@@ -104,25 +98,21 @@ async def plant_aged(
         return claim.id
 
 
-def test_decay_archives_the_stale_claim_and_keeps_the_fresh_one() -> None:
-    async def body() -> tuple[int, tuple[bool, bool], tuple[bool, bool]]:
+def test_decay_archives_only_stale_claims_and_handles_an_empty_default_scope() -> None:
+    async def body() -> tuple[int, tuple[bool, bool], tuple[bool, bool], int]:
         owner = await seedgraph.fresh_owner()
         async with dbutil.actor(owner) as session:
             subject = await seedgraph.add_entity(session, owner, "Subject")
         stale = await plant_aged(owner, subject, "stale", 3650.0, 0, accessed=False)
         fresh = await plant_aged(owner, subject, "fresh", 0.0, 50, accessed=True)
         count = await decay(scopes=frozenset({owner}), half_life_days=90.0)
-        return count, await claim_state(owner, stale), await claim_state(owner, fresh)
+        stale_state = await claim_state(owner, stale)
+        fresh_state = await claim_state(owner, fresh)
+        await dbutil.reset_db()
+        return count, stale_state, fresh_state, await decay()
 
-    count, (stale_live, stale_marked), (fresh_live, _) = dbutil.run(body())
+    count, (stale_live, stale_marked), (fresh_live, _), empty = dbutil.run(body())
     assert count == 1
     assert stale_live is False and stale_marked is True
     assert fresh_live is True
-
-
-def test_decay_defaults_to_the_system_user_and_archives_nothing_on_empty() -> None:
-    async def body() -> int:
-        await dbutil.reset_db()
-        return await decay()
-
-    assert dbutil.run(body()) == 0
+    assert empty == 0

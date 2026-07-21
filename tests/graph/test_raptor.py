@@ -50,20 +50,14 @@ small_vectors = st.lists(
 
 
 @given(vector=small_vectors)
-def test_cosine_handles_reflexive_orthogonal_and_degenerate_vectors(vector: list[float]) -> None:
+def test_vector_utilities_preserve_values_and_similarity_contracts(vector: list[float]) -> None:
     assert cosine(vector, vector) == pytest.approx(1.0)
     assert cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
     assert cosine([0.0, 0.0], [1.0, 1.0]) == 0.0
-
-
-def test_redundant_parent_finds_a_near_duplicate_else_none() -> None:
     kept = Node(entity_id=uuid5(), label="theme", summary="a paragraph", embedding=[1.0, 0.0])
     parents = [(kept, [1.0, 0.0])]
     assert redundant_parent(parents, [0.99, 0.01], threshold=0.95) is kept
     assert redundant_parent(parents, [0.0, 1.0], threshold=0.95) is None
-
-
-def test_to_floats_unwraps_a_halfvector_and_passes_a_list_through() -> None:
     assert to_floats([0.5, 0.25]) == [0.5, 0.25]
     unwrapped = to_floats(HalfVector([1.0, 0.0]))
     assert isinstance(unwrapped, list) and unwrapped == pytest.approx([1.0, 0.0])
@@ -84,20 +78,17 @@ async def seed_communities(owner: UUID5 | UUID7, axes: list[int]) -> None:
             )
 
 
-def test_similarity_groups_preserves_one_vector(owner: UUID5 | UUID7) -> None:
-    builder = RaptorBuilder(
-        scopes=frozenset({owner}), llm=FakeLLM().llm, embed=RecordingEmbedder()
-    )
-    assert dbutil.run(builder.similarity_groups([basis(0)])) == [[0]]
-
-
 def test_build_raptor_lifts_communities_into_a_part_of_tree(
     owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
 ) -> None:
-    async def probe() -> tuple[int, int, int, list[tuple[int, int]]]:
+    async def probe() -> tuple[int, int, int, list[tuple[int, int]], tuple[int, int]]:
+        other = uuid5()
         await seed_communities(owner, [0, 0, 1, 1])
+        await seed_communities(other, [0, 0])
         await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
         written = await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({other}))
+        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({other}))
         async with dbutil.actor(owner) as session:
             leaves = (
                 await session.exec(
@@ -137,27 +128,6 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
                 params={"scopes": [str(owner)]},
             )
             edges = [(row.child_level, row.parent_level) for row in rows]
-        return written, leaves or 0, parents or 0, edges
-
-    written, leaves, parents, edges = dbutil.run(probe())
-    assert leaves == 4
-    assert parents >= 1
-    assert written == parents
-    assert len(edges) == 4
-    assert all(child == 0 and parent >= 1 for child, parent in edges)
-
-
-def test_build_raptor_shares_content_without_deleting_another_scope(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
-) -> None:
-    other = uuid5()
-
-    async def probe() -> tuple[int, int]:
-        await seed_communities(owner, [0, 0])
-        await seed_communities(other, [0, 0])
-        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
-        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({other}))
-        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({other}))
         raptor_claims = (
             select(Entity.Claim.id.count())
             .join(Entity.Content, Entity.Content.id == Entity.Claim.content_id)
@@ -169,11 +139,15 @@ def test_build_raptor_shares_content_without_deleting_another_scope(
             second = (
                 await session.exec(raptor_claims.where(Entity.Claim.scopes == [other]))
             ).one()
-        return first, second
+        return written, leaves or 0, parents or 0, edges, (first or 0, second or 0)
 
-    first, second = dbutil.run(probe())
-    assert first >= 2
-    assert second >= 2
+    written, leaves, parents, edges, scoped = dbutil.run(probe())
+    assert leaves == 4
+    assert parents >= 1
+    assert written == parents
+    assert len(edges) == 4
+    assert all(child == 0 and parent >= 1 for child, parent in edges)
+    assert all(count >= 2 for count in scoped)
 
 
 @pytest.mark.parametrize(
@@ -193,6 +167,11 @@ def test_build_raptor_writes_the_expected_summary_count(
 ) -> None:
     async def probe() -> int:
         await seed_communities(owner, axes)
+        if len(axes) == 1:
+            builder = RaptorBuilder(
+                scopes=frozenset({owner}), llm=FakeLLM().llm, embed=RecordingEmbedder()
+            )
+            assert await builder.similarity_groups([basis(axes[0])]) == [[0]]
         return await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
 
     assert dbutil.run(probe()) == expected

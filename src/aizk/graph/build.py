@@ -280,7 +280,7 @@ async def _apply_plans(
     vectors: list[list[float]],
     plans: list[FactPlan],
 ) -> tuple[bool, list[FactPlan]]:
-    decisions = await writer.resolve_ambiguous(plans) if writer.borderline(plans) else []
+    decisions = await writer.resolve_ambiguous(plans)
     current: list[FactPlan] = []
     async for attempt in _transient_retries():
         with attempt, span("db_write"):

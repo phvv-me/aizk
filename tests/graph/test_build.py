@@ -170,39 +170,104 @@ def test_build_graph_loads_ontology_for_a_fresh_process(
     assert dbutil.run(build_graph(clients_for(embed=fixed_embedder), limit=0)) == (0, 0)
     assert Ontology.current().entity_names
 
+    async def invalid_mint() -> None:
+        owner = await seedgraph.fresh_owner()
+        async with dbutil.actor(owner) as session:
+            with pytest.raises(IntegrityError):
+                await Entity.Content.mint_all(
+                    session,
+                    [Entity.Content(id=uuid5(), name="invalid", type="missing ontology kind")],
+                )
+
+    dbutil.run(invalid_mint())
+
 
 class WrappedDBAPI(Exception):
     def __init__(self, inner: BaseException) -> None:
         self.orig = inner
 
 
-@pytest.mark.parametrize(
-    ("error", "expected"),
-    [
+def test_build_helpers_classify_errors_redirect_ids_and_group_failures() -> None:
+    errors = [
         (DBAPIError("s", None, WrappedDBAPI(TransactionRollbackError("deadlock"))), True),
         (DBAPIError("s", None, WrappedDBAPI(ValueError("other"))), False),
         (ValueError("not a db error"), False),
-    ],
-    ids=["rollback", "other-dbapi", "non-dbapi"],
-)
-def test_is_transient_db_error(error: BaseException, expected: bool) -> None:
-    assert is_transient_db_error(error) is expected
-
-
-def test_redirect_entity_resolves_null_absent_replaced_and_dropped() -> None:
+    ]
+    assert [is_transient_db_error(error) for error, _ in errors] == [
+        expected for _, expected in errors
+    ]
     canonical, duplicate, dropped, untouched = (uuid5() for _ in range(4))
     redirect = {duplicate: canonical, dropped: None}
     assert redirect_entity(redirect, None) == (None, False)
     assert redirect_entity(redirect, untouched) == (untouched, False)
     assert redirect_entity(redirect, duplicate) == (canonical, False)
     assert redirect_entity(redirect, dropped) == (None, True)
+    chunks = [
+        Chunk(
+            id=uuid5(),
+            document_id=uuid5(),
+            ord=index,
+            text="x",
+            created_by=uuid5(),
+            scopes=[uuid5()],
+        )
+        for index in range(3)
+    ]
+    results: list[set[UUID5 | UUID7] | BaseException] = [
+        set(),
+        RuntimeError("a"),
+        ValueError("b"),
+    ]
+    with pytest.raises(BaseExceptionGroup) as info:
+        raise_failures(chunks, results)
+    assert {type(error) for error in info.value.exceptions} == {RuntimeError, ValueError}
 
 
-@pytest.mark.parametrize("scenario", ["insert", "exact", "path"])
-def test_resolve_mints_reuses_folds_or_drops(
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "insert",
+        "exact",
+        "path",
+        "semantic",
+        "distinct-type",
+        "subject-missing",
+        "object-missing",
+        "both-resolved",
+    ],
+)
+def test_resolve_uses_normalized_names_and_types_as_exact_entity_identity(
     scenario: str, fake_embedder: RecordingEmbedder
 ) -> None:
-    async def body() -> UUID5 | UUID7 | None:
+    if scenario.endswith("missing") or scenario == "both-resolved":
+        owner, subject, object_id = uuid5(), uuid5(), uuid5()
+        writer = graph_writer(Session(), owner, frozenset({owner}))
+        if scenario == "subject-missing":
+            fact = TimedFact(subject="Missing", predicate="uses", statement="Missing uses memory.")
+            assert writer.candidate(fact, {}) is None
+        elif scenario == "object-missing":
+            fact = TimedFact(
+                subject="Known",
+                predicate="uses",
+                object="Missing",
+                statement="Known uses Missing.",
+            )
+            assert writer.candidate(fact, {"known": subject}) is None
+        else:
+            fact = TimedFact(
+                subject="MoE Expert Compression",
+                predicate="uses",
+                object="RTX 3090",
+                statement="MoE expert compression uses the RTX 3090.",
+            )
+            candidate = writer.candidate(
+                fact, {"moe expert compression": subject, "rtx 3090": object_id}
+            )
+            assert candidate is not None
+            assert (candidate.subject_id, candidate.object_id) == (subject, object_id)
+        return
+
+    async def body() -> tuple[UUID5 | UUID7 | None, ...]:
         owner = await seedgraph.fresh_owner()
         async with dbutil.actor(owner) as session:
             if scenario == "exact":
@@ -213,88 +278,59 @@ def test_resolve_mints_reuses_folds_or_drops(
                     type="author",
                     content_id=entity_id("Exact Fixture", "author"),
                 )
+            if scenario == "distinct-type":
+                await seedgraph.add_entity(
+                    session,
+                    owner,
+                    "Research",
+                    type="area",
+                    content_id=entity_id("Research", "area"),
+                )
         async with dbutil.actor(owner) as session:
             writer = graph_writer(session, owner, frozenset({owner}))
             if scenario == "insert":
                 first = await resolve(writer, "Brand New", "concept")
                 second = await resolve(writer, "Brand New", "concept")
-                assert first == second  # the second resolve reuses off the minted claim
-                return first
+                return first, second
             if scenario == "exact":
-                return await resolve(writer, "Exact Fixture", "author")
-            return await resolve(writer, "notes/graph_rag.md", "concept")
+                return (await resolve(writer, "Exact Fixture", "author"),)
+            if scenario == "path":
+                return (await resolve(writer, "notes/graph_rag.md", "concept"),)
+            if scenario == "semantic":
+                return (
+                    await resolve(writer, "Research", "area"),
+                    await resolve(writer, "Business", "area"),
+                )
+            return (
+                entity_id("Research", "area"),
+                await resolve(writer, "research", System.Entity.CONCEPT),
+            )
 
     expected = {
-        "insert": entity_id("Brand New", "concept"),
-        "exact": entity_id("Exact Fixture", "author"),
-        "path": None,
+        "insert": (entity_id("Brand New", "concept"),) * 2,
+        "exact": (entity_id("Exact Fixture", "author"),),
+        "path": (None,),
+        "semantic": (entity_id("Research", "area"), entity_id("Business", "area")),
+        "distinct-type": (
+            entity_id("Research", "area"),
+            entity_id("research", System.Entity.CONCEPT),
+        ),
     }
     assert dbutil.run(body()) == expected[scenario]
-
-
-def test_semantically_similar_entities_keep_distinct_identities(
-    fixed_embedder: FixedEmbedder,
-) -> None:
-    async def body() -> tuple[UUID5 | UUID7 | None, UUID5 | UUID7 | None]:
-        owner = await seedgraph.fresh_owner()
-        async with dbutil.actor(owner) as session:
-            writer = graph_writer(session, owner, frozenset({owner}))
-            research = await resolve(writer, "Research", "area")
-            business = await resolve(writer, "Business", "area")
-        return research, business
-
-    research, business = dbutil.run(body())
-    assert research == entity_id("Research", "area")
-    assert business == entity_id("Business", "area")
-    assert business != research
-
-
-def test_exact_names_with_distinct_types_remain_distinct_entities(
-    fake_embedder: RecordingEmbedder,
-) -> None:
-    async def body() -> tuple[UUID5 | UUID7, UUID5 | UUID7 | None]:
-        owner = await seedgraph.fresh_owner()
-        structural = entity_id("Research", "area")
-        async with dbutil.actor(owner) as session:
-            await seedgraph.add_entity(
-                session,
-                owner,
-                "Research",
-                type="area",
-                content_id=structural,
-            )
-        async with dbutil.actor(owner) as session:
-            resolved = await resolve(
-                graph_writer(session, owner, frozenset({owner})),
-                "research",
-                System.Entity.CONCEPT,
-            )
-        return structural, resolved
-
-    structural, resolved = dbutil.run(body())
-    assert resolved == entity_id("research", System.Entity.CONCEPT)
-    assert resolved != structural
-
-
-def test_batch_mint_reraises_a_non_unique_integrity_error() -> None:
-    async def body() -> None:
-        owner = await seedgraph.fresh_owner()
-        async with dbutil.actor(owner) as session:
-            with pytest.raises(IntegrityError):
-                await Entity.Content.mint_all(
-                    session,
-                    [Entity.Content(id=uuid5(), name="invalid", type="missing ontology kind")],
-                )
-
-    dbutil.run(body())
 
 
 def deterministic(text: str) -> list[float]:
     return deterministic_vector(text, settings.embed_dim)
 
 
-@pytest.mark.parametrize("scenario", ["add", "noop", "update"])
+@pytest.mark.parametrize("scenario", ["add", "noop", "update", "duplicate", "idempotent"])
 def test_consolidate_applies_verdict(scenario: str, fixed_embedder: FixedEmbedder) -> None:
+    if scenario == "duplicate":
+        check_duplicate_state_candidate(fixed_embedder)
+        return
+    if scenario == "idempotent":
+        check_idempotent_consolidation(fixed_embedder)
+        return
     now = datetime.now(UTC)
 
     async def body() -> tuple[int, int]:
@@ -349,7 +385,7 @@ def test_consolidate_applies_verdict(scenario: str, fixed_embedder: FixedEmbedde
     assert dbutil.run(body()) == {"add": (1, 1), "noop": (1, 1), "update": (2, 1)}[scenario]
 
 
-def test_duplicate_state_candidate_updates_once(fixed_embedder: FixedEmbedder) -> None:
+def check_duplicate_state_candidate(fixed_embedder: FixedEmbedder) -> None:
     now = datetime.now(UTC)
 
     async def body() -> tuple[int, int]:
@@ -437,7 +473,7 @@ def test_fact_claims_carry_quote_offsets_when_the_quote_aligns(
         )
 
 
-def test_consolidate_is_idempotent_and_reads_an_empty_pool(fixed_embedder: FixedEmbedder) -> None:
+def check_idempotent_consolidation(fixed_embedder: FixedEmbedder) -> None:
     async def body() -> tuple[list[FactPlan], int]:
         owner = await seedgraph.fresh_owner()
         chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
@@ -570,8 +606,6 @@ def test_speaker_bound_claims_coexist_inside_one_shared_scope(
 def test_consolidate_defers_borderline_facts_to_the_batch(
     fixed_embedder: FixedEmbedder, fake_llm: FakeLLM
 ) -> None:
-    phantom = uuid7()
-
     async def body() -> int:
         owner = await seedgraph.fresh_owner()
         chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
@@ -589,7 +623,7 @@ def test_consolidate_defers_borderline_facts_to_the_batch(
             BatchConsolidationVerdict,
             BatchConsolidationVerdict(
                 verdicts=[
-                    ConsolidationVerdict(action="UPDATE", supersedes=phantom),
+                    ConsolidationVerdict(action="NOOP"),
                     ConsolidationVerdict(action="ADD"),
                 ]
             ),
@@ -610,11 +644,24 @@ def test_consolidate_defers_borderline_facts_to_the_batch(
                 await session.exec(select(Fact.Claim.id.count()).execution_options(**GATE_OFF))
             ).one()
 
-    assert dbutil.run(body()) == 3  # one seeded plus the two borderline candidates
+    assert dbutil.run(body()) == 2
+    assert len(fake_llm.completions.calls) == 1
+    assert fake_llm.completions.calls[0].response_model is BatchConsolidationVerdict
 
 
-@pytest.mark.parametrize("bounded", [False, True], ids=["open", "bounded"])
-def test_backdated_update_becomes_history_without_retiring_newer_state(bounded: bool) -> None:
+@pytest.mark.parametrize(
+    "scenario", ["backdated-open", "backdated-bounded", "forward", "future-empty"]
+)
+def test_temporal_updates_preserve_valid_and_recorded_history(scenario: str) -> None:
+    if scenario.startswith("backdated"):
+        check_backdated_update(scenario == "backdated-bounded")
+    elif scenario == "forward":
+        check_forward_update()
+    else:
+        check_future_claim_closed_as_empty()
+
+
+def check_backdated_update(bounded: bool) -> None:
     newer_start = datetime.now(UTC)
     older_start = newer_start - timedelta(days=10)
     older_end = older_start + timedelta(days=1) if bounded else None
@@ -731,27 +778,82 @@ def test_write_graph_slice_stops_after_four_stale_plans(
     dbutil.run(body())
 
 
-def test_prepare_entities_passes_through_a_confident_type_unchanged(
+@pytest.mark.parametrize("scenario", ["declared", "matched", "novel", "unembedded"])
+def test_prepare_entities_resolves_types_without_mutating_the_ontology(
+    scenario: str,
     fake_embedder: RecordingEmbedder,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entity = ExtractedEntity(name="Ada", type="author")
+    async def body() -> tuple[str, str, tuple[int, int] | None]:
+        if scenario == "declared":
+            async with User.system().session() as session:
+                resolved = await prepare_entities(
+                    session, [ExtractedEntity(name="Ada", type="author")], fake_embedder
+                )
+            return resolved[0].type, "author", None
 
-    async def body() -> str:
-        async with User.system().session() as session:
-            return (await prepare_entities(session, [entity], fake_embedder))[0].type
-
-    assert dbutil.run(body()) == "author"
-
-
-def test_prepare_entities_matches_a_declared_kind_for_a_concept_suggestion(
-    fake_embedder: RecordingEmbedder,
-) -> None:
-    async def body() -> tuple[str, str]:
         owner = await seedgraph.fresh_owner()
+        if scenario == "novel":
+            monkeypatch.setattr(settings, "ontology_match_threshold", 1.1)
+            async with dbutil.actor(owner) as session:
+                before = await session.scalar(select(Entity.Kind.name.count()))
+            async with dbutil.actor(owner).session() as session:
+                resolved = await prepare_entities(
+                    session,
+                    [
+                        ExtractedEntity(
+                            name="Something",
+                            type=System.Entity.CONCEPT,
+                            suggested_type=str(uuid5()),
+                        )
+                    ],
+                    fake_embedder,
+                )
+            async with dbutil.actor(owner) as session:
+                after = await session.scalar(select(Entity.Kind.name.count()))
+            return resolved[0].type, System.Entity.CONCEPT, (before or 0, after or 0)
+
         async with dbutil.actor(owner).session() as session:
             async with session.begin():
                 await Ontology.refresh(session)
-                # Structural kinds are excluded from automatic suggestion matching.
+                originals = (
+                    list(
+                        (
+                            await session.exec(
+                                select(Entity.Kind.name, Entity.Kind.embedding).where(
+                                    Entity.Kind.embedding.is_not(None)
+                                )
+                            )
+                        ).all()
+                    )
+                    if scenario == "unembedded"
+                    else []
+                )
+                if scenario == "unembedded":
+                    await session.exec(
+                        update(Entity.Kind)
+                        .values(embedding=None)
+                        .execution_options(synchronize_session=False)
+                    )
+            if scenario == "unembedded":
+                entity = ExtractedEntity(
+                    name="Something",
+                    type=System.Entity.CONCEPT,
+                    suggested_type="a novel kind",
+                )
+                try:
+                    resolved = await prepare_entities(session, [entity], fake_embedder)
+                finally:
+                    async with session.begin():
+                        for name, vector in originals:
+                            await session.exec(
+                                update(Entity.Kind)
+                                .where(Entity.Kind.name == name)
+                                .values(embedding=vector)
+                                .execution_options(synchronize_session=False)
+                            )
+                return resolved[0].type, System.Entity.CONCEPT, None
+            async with session.begin():
                 kind = (
                     await session.exec(
                         select(Entity.Kind).where(Entity.Kind.structural.is_(False)).limit(1)
@@ -766,98 +868,23 @@ def test_prepare_entities_matches_a_declared_kind_for_a_concept_suggestion(
                 name="Something", type=System.Entity.CONCEPT, suggested_type=description
             )
             resolved = (await prepare_entities(session, [entity], fake_embedder))[0].type
-        return resolved, name
+        return resolved, name, None
 
-    resolved_type, existing_name = dbutil.run(body())
-    assert resolved_type == existing_name
+    resolved, expected, counts = dbutil.run(body())
+    assert resolved == expected
+    assert counts is None or counts[0] == counts[1]
 
 
-def test_prepare_entities_keeps_a_novel_tenant_suggestion_as_concept(
+@pytest.mark.parametrize("scenario", ["ordinary", "normalized", "filtered"])
+def test_build_graph_normalizes_filters_and_resumes_without_duplicate_work(
+    scenario: str,
+    fake_llm: FakeLLM,
     fake_embedder: RecordingEmbedder,
-    monkeypatch: pytest.MonkeyPatch,
+    fake_gate: FakeGate,
 ) -> None:
-    monkeypatch.setattr(settings, "ontology_match_threshold", 1.1)
-
-    async def body() -> tuple[str, int, int]:
-        owner = await seedgraph.fresh_owner()
-        async with dbutil.actor(owner) as session:
-            before = await session.scalar(select(Entity.Kind.name.count()))
-        async with dbutil.actor(owner).session() as session:
-            resolved = (
-                await prepare_entities(
-                    session,
-                    [
-                        ExtractedEntity(
-                            name="Something",
-                            type=System.Entity.CONCEPT,
-                            suggested_type=str(uuid5()),
-                        )
-                    ],
-                    fake_embedder,
-                )
-            )[0].type
-        async with dbutil.actor(owner) as session:
-            after = await session.scalar(select(Entity.Kind.name.count()))
-        return resolved, before or 0, after or 0
-
-    resolved, before, after = dbutil.run(body())
-    assert resolved == System.Entity.CONCEPT
-    assert after == before
-
-
-def test_prepare_entities_falls_back_to_concept_without_ontology_vectors(
-    fake_embedder: RecordingEmbedder,
-) -> None:
-    entity = ExtractedEntity(
-        name="Something", type=System.Entity.CONCEPT, suggested_type="a novel kind"
-    )
-
-    async def body() -> str:
-        owner = await seedgraph.fresh_owner()
-        user = dbutil.actor(owner)
-        async with user.session() as session:
-            async with session.begin():
-                originals = list(
-                    (
-                        await session.exec(
-                            select(Entity.Kind.name, Entity.Kind.embedding).where(
-                                Entity.Kind.embedding.is_not(None)
-                            )
-                        )
-                    ).all()
-                )
-                await session.exec(
-                    update(Entity.Kind)
-                    .values(embedding=None)
-                    .execution_options(synchronize_session=False)
-                )
-            try:
-                return (await prepare_entities(session, [entity], fake_embedder))[0].type
-            finally:
-                async with session.begin():
-                    for name, vector in originals:
-                        await session.exec(
-                            update(Entity.Kind)
-                            .where(Entity.Kind.name == name)
-                            .values(embedding=vector)
-                            .execution_options(synchronize_session=False)
-                        )
-
-    assert (
-        dbutil.run(body()) == System.Entity.CONCEPT
-    )  # no vectors to score means the concept stands
-
-
-def test_build_graph_writes_a_slice_then_resumes(
-    fake_llm: FakeLLM, fake_embedder: RecordingEmbedder, fake_gate: FakeGate
-) -> None:
-    fake_llm.register(
-        WireExtraction,
-        WireExtraction(
-            e=[
-                WireEntity(n="Ada", t="author"),
-                WireEntity(n="Notes", t="concept"),
-            ],
+    if scenario == "ordinary":
+        extraction = WireExtraction(
+            e=[WireEntity(n="Ada", t="author"), WireEntity(n="Notes", t="concept")],
             f=[
                 WireFact(
                     s="Ada",
@@ -867,32 +894,10 @@ def test_build_graph_writes_a_slice_then_resumes(
                     quote=LONG_PROSE,
                 )
             ],
-        ),
-    )
-
-    async def body() -> tuple[tuple[int, int], tuple[int, int]]:
-        owner = await seedgraph.fresh_owner()
-        await seedgraph.seed_chunk(owner, LONG_PROSE)
-        clients = clients_for(fake_llm, fake_embedder, fake_gate)
-        first = await build_graph(clients, scopes=frozenset({owner}))
-        second = await build_graph(clients, scopes=frozenset({owner}))
-        return first, second
-
-    first, second = dbutil.run(body())
-    assert first == (2, 1)  # two entities minted, one binary fact between them
-    assert second == (0, 0)  # the built chunk is skipped on resume
-
-
-def test_build_graph_normalizes_unknown_types_and_drops_unknown_predicates(
-    fake_llm: FakeLLM, fake_embedder: RecordingEmbedder, fake_gate: FakeGate
-) -> None:
-    fake_llm.register(
-        WireExtraction,
-        WireExtraction(
-            e=[
-                WireEntity(n="Ada", t="Author"),
-                WireEntity(n="prompt rows", t="file"),
-            ],
+        )
+    elif scenario == "normalized":
+        extraction = WireExtraction(
+            e=[WireEntity(n="Ada", t="Author"), WireEntity(n="prompt rows", t="file")],
             f=[
                 WireFact(
                     s="Ada",
@@ -909,25 +914,9 @@ def test_build_graph_normalizes_unknown_types_and_drops_unknown_predicates(
                     quote=LONG_PROSE,
                 ),
             ],
-        ),
-    )
-
-    async def body() -> tuple[int, int]:
-        owner = await seedgraph.fresh_owner()
-        await seedgraph.seed_chunk(owner, LONG_PROSE)
-        return await build_graph(
-            clients_for(fake_llm, fake_embedder, fake_gate), scopes=frozenset({owner})
         )
-
-    assert dbutil.run(body()) == (2, 1)
-
-
-def test_build_graph_source_filter_drops_a_path_and_skips_a_ghost_subject(
-    fake_llm: FakeLLM, fake_embedder: RecordingEmbedder, fake_gate: FakeGate
-) -> None:
-    fake_llm.register(
-        WireExtraction,
-        WireExtraction(
+    else:
+        extraction = WireExtraction(
             e=[
                 WireEntity(n="Ada", t="author"),
                 WireEntity(n="Ada", t="author"),
@@ -937,160 +926,132 @@ def test_build_graph_source_filter_drops_a_path_and_skips_a_ghost_subject(
                 WireFact(s="Ada", p="uses", statement="Ada keeps notes", quote=LONG_PROSE),
                 WireFact(s="ghost", p="uses", statement="ghost drifts", quote=LONG_PROSE),
             ],
-        ),
-    )
-
-    async def body() -> tuple[int, int]:
-        owner = await seedgraph.fresh_owner()
-        await seedgraph.seed_chunk(owner, LONG_PROSE, title="alpha source")
-        await seedgraph.seed_chunk(owner, LONG_PROSE, title="beta other")
-        return await build_graph(
-            clients_for(fake_llm, fake_embedder, fake_gate),
-            scopes=frozenset({owner}),
-            source="alpha",
         )
+    fake_llm.register(
+        WireExtraction,
+        extraction,
+    )
 
-    assert dbutil.run(body()) == (1, 1)  # Ada minted once, path dropped, ghost fact skipped
-
-
-def test_pending_chunks_can_target_one_document() -> None:
-    async def body() -> tuple[UUID7, list[Chunk]]:
+    async def body() -> tuple[tuple[int, int], tuple[int, int]]:
         owner = await seedgraph.fresh_owner()
-        first = await seedgraph.seed_chunk(owner, LONG_PROSE, title="first")
-        await seedgraph.seed_chunk(owner, LONG_PROSE, title="second")
-        async with dbutil.actor(owner) as session:
-            chunk = await session.get(Chunk, first)
-            assert chunk is not None
-        selected = await build.pending_chunks(frozenset({owner}), None, None, chunk.document_id)
-        return first, selected
+        first_chunk = await seedgraph.seed_chunk(
+            owner, LONG_PROSE, title="alpha source" if scenario == "filtered" else None
+        )
+        if scenario == "filtered":
+            await seedgraph.seed_chunk(owner, LONG_PROSE, title="beta other")
+            async with dbutil.actor(owner) as session:
+                chunk = await session.get(Chunk, first_chunk)
+                assert chunk is not None
+            selected = await build.pending_chunks(
+                frozenset({owner}), None, None, chunk.document_id
+            )
+            assert [pending.id for pending in selected] == [first_chunk]
+        clients = clients_for(fake_llm, fake_embedder, fake_gate)
+        source = "alpha" if scenario == "filtered" else None
+        first = await build_graph(clients, scopes=frozenset({owner}), source=source)
+        second = await build_graph(clients, scopes=frozenset({owner}), source=source)
+        return first, second
 
-    expected, selected = dbutil.run(body())
-    assert [chunk.id for chunk in selected] == [expected]
-
-
-def test_build_graph_skips_a_gated_out_chunk(fake_gate: FakeGate) -> None:
-    fake_gate.result = False
-
-    async def body() -> tuple[tuple[int, int], bool]:
-        owner = await seedgraph.fresh_owner()
-        chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
-        result = await build_graph(clients_for(gate=fake_gate), scopes=frozenset({owner}))
-        async with dbutil.actor(owner) as session:
-            done = await session.get(seedgraph.Chunk, chunk)
-        return result, done is not None and done.processed_at is not None
-
-    result, marked = dbutil.run(body())
-    assert result == (0, 0)
-    assert marked is True  # gated out, but still stamped done so it is never re-offered
-
-
-def test_model_extraction_skips_the_separate_gate_for_a_self_gating_backend(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    entity = ExtractedEntity(name="Ada", type="author")
-    fact = TimedFact(
-        subject="Ada",
-        predicate="uses",
-        statement="Ada writes",
-        quote=LONG_PROSE,
-    )
-
-    class SelfGatingExtractor(build.Extractor):
-        async def extract(self, text: str) -> Extraction:
-            assert text == LONG_PROSE
-            return Extraction(entities=[entity], facts=[fact])
-
-    async def fail_gate(text: str) -> NoReturn:
-        raise AssertionError(f"unexpected gate for {text}")
-
-    clients = build.GraphClients(
-        extractor=SelfGatingExtractor(),
-        gate=cast("build.RelevanceGate", SimpleNamespace(relevant=fail_gate)),
-        embed=RecordingEmbedder(),
-        llm=FakeLLM().llm,
-    )
-    owner = uuid5()
-    chunk = Chunk(
-        id=uuid5(),
-        document_id=uuid5(),
-        ord=0,
-        text=LONG_PROSE,
-        created_by=owner,
-        scopes=[owner],
-    )
-
-    entities, facts = asyncio.run(build.model_extraction(chunk, None, clients))
-
-    assert entities == [entity]
-    assert facts[0].valid_from is not None
+    first, second = dbutil.run(body())
+    assert first == ((1, 1) if scenario == "filtered" else (2, 1))
+    assert second == (0, 0)
 
 
 @pytest.mark.parametrize(
-    ("text", "title"),
-    [("too short to bother", None), ("- 2024-01-01: an orphan dated line", None)],
-    ids=["short-prose", "untitled-journal"],
+    "scenario", ["gated", "self-gating", "short", "untitled-journal", "journal", "typed"]
 )
-def test_build_graph_marks_short_and_untitled_chunks_done(
-    text: str, title: str | None, fake_embedder: RecordingEmbedder
-) -> None:
-    async def body() -> tuple[tuple[int, int], bool]:
-        owner = await seedgraph.fresh_owner()
-        chunk = await seedgraph.seed_chunk(owner, text, title=title)
-        result = await build_graph(clients_for(embed=fake_embedder), scopes=frozenset({owner}))
-        async with dbutil.actor(owner) as session:
-            done = await session.get(seedgraph.Chunk, chunk)
-        return result, done is not None and done.processed_at is not None
-
-    result, marked = dbutil.run(body())
-    assert result == (0, 0)
-    assert marked is True
-
-
-def test_journal_line_logs_a_dated_project_fact(fake_embedder: RecordingEmbedder) -> None:
-    journal_text = "# My Project\n\n- Type Project\n- 2024-01-01: shipped the first release"
-
-    async def body() -> tuple[int, int, int]:
-        owner = await seedgraph.fresh_owner()
-        await seedgraph.seed_chunk(owner, journal_text, title="My Project", subject_type="project")
-        entities, facts = await build_graph(
-            clients_for(embed=fake_embedder), scopes=frozenset({owner})
-        )
-        async with dbutil.actor(owner) as session:
-            projects = (
-                await session.exec(
-                    select(Entity.Content.id.count()).where(Entity.Content.type == "project")
-                )
-            ).one()
-        return entities, facts, projects or 0
-
-    entities, facts, projects = dbutil.run(body())
-    assert entities >= 1 and facts >= 1
-    assert projects == 1  # the title entity was lifted to a Project node
-
-
-def test_short_typed_document_writes_its_declared_entity(
+def test_build_graph_handles_gates_and_source_only_extraction_paths(
+    scenario: str,
+    fake_gate: FakeGate,
     fake_embedder: RecordingEmbedder,
 ) -> None:
-    async def body() -> tuple[int, int, int]:
-        owner = await seedgraph.fresh_owner()
-        await seedgraph.seed_chunk(
-            owner,
-            "# Research\n\n- Type Area\n\nResearch is an area.",
-            title="Research",
-            subject_type="area",
+    if scenario == "self-gating":
+        entity = ExtractedEntity(name="Ada", type="author")
+        fact = TimedFact(
+            subject="Ada",
+            predicate="uses",
+            statement="Ada writes",
+            quote=LONG_PROSE,
         )
+
+        class SelfGatingExtractor(build.Extractor):
+            async def extract(self, text: str) -> Extraction:
+                assert text == LONG_PROSE
+                return Extraction(entities=[entity], facts=[fact])
+
+        async def fail_gate(text: str) -> NoReturn:
+            raise AssertionError(f"unexpected gate for {text}")
+
+        clients = build.GraphClients(
+            extractor=SelfGatingExtractor(),
+            gate=cast("build.RelevanceGate", SimpleNamespace(relevant=fail_gate)),
+            embed=RecordingEmbedder(),
+            llm=FakeLLM().llm,
+        )
+        owner = uuid5()
+        chunk = Chunk(
+            id=uuid5(),
+            document_id=uuid5(),
+            ord=0,
+            text=LONG_PROSE,
+            created_by=owner,
+            scopes=[owner],
+        )
+        entities, facts = asyncio.run(build.model_extraction(chunk, None, clients))
+        assert entities == [entity]
+        assert facts[0].valid_from is not None
+        return
+
+    async def body() -> None:
+        owner = await seedgraph.fresh_owner()
+        if scenario in {"gated", "short", "untitled-journal"}:
+            fake_gate.result = scenario != "gated"
+            text = {
+                "gated": LONG_PROSE,
+                "short": "too short to bother",
+                "untitled-journal": "- 2024-01-01: an orphan dated line",
+            }[scenario]
+            chunk = await seedgraph.seed_chunk(owner, text)
+            result = await build_graph(
+                clients_for(embed=fake_embedder, gate=fake_gate),
+                scopes=frozenset({owner}),
+            )
+            async with dbutil.actor(owner) as session:
+                done = await session.get(seedgraph.Chunk, chunk)
+            assert result == (0, 0)
+            assert done is not None and done.processed_at is not None
+            return
+
+        title, subject_type, text, expected = (
+            (
+                "My Project",
+                "project",
+                "# My Project\n\n- Type Project\n- 2024-01-01: shipped the first release",
+                ("project", True),
+            )
+            if scenario == "journal"
+            else (
+                "Research",
+                "area",
+                "# Research\n\n- Type Area\n\nResearch is an area.",
+                ("area", False),
+            )
+        )
+        await seedgraph.seed_chunk(owner, text, title=title, subject_type=subject_type)
         entities, facts = await build_graph(
             clients_for(embed=fake_embedder), scopes=frozenset({owner})
         )
         async with dbutil.actor(owner) as session:
-            areas = (
+            typed = (
                 await session.exec(
-                    select(Entity.Content.id.count()).where(Entity.Content.type == "area")
+                    select(Entity.Content.id.count()).where(Entity.Content.type == expected[0])
                 )
             ).one()
-        return entities, facts, areas or 0
+        assert typed == 1
+        assert entities >= 1
+        assert bool(facts) is expected[1]
 
-    assert dbutil.run(body()) == (1, 0, 1)
+    dbutil.run(body())
 
 
 def raising_error(kind: str) -> BaseException:
@@ -1125,23 +1086,39 @@ def test_build_graph_propagates_a_single_chunk_extraction_failure(
         dbutil.run(body())
 
 
-def test_build_graph_and_dedup_default_to_the_system_user_on_an_empty_graph() -> None:
-    async def body() -> tuple[tuple[int, int], int]:
-        await dbutil.reset_db()
-        return await build_graph(clients_for()), await dedup_entities()
+@pytest.mark.parametrize("scenario", ["empty", "slug", "path", "path-with-object"])
+def test_dedup_repairs_normalized_duplicates_and_dangling_paths(
+    scenario: str, fake_embedder: RecordingEmbedder
+) -> None:
+    async def body() -> None:
+        if scenario == "empty":
+            await dbutil.reset_db()
+            assert await build_graph(clients_for()) == (0, 0)
+            assert await dedup_entities() == 0
+            return
 
-    (entities, facts), merged = dbutil.run(body())
-    assert (entities, facts) == (0, 0)
-    assert merged == 0
-
-
-def test_dedup_merges_a_slug_twin_and_converges(fake_embedder: RecordingEmbedder) -> None:
-    canonical_id = entity_id("Team Memory", "concept")
-    # Sort IDs so the fact-bearing duplicate is redirected into the canonical entity.
-    duplicate_id = uuid.UUID(int=canonical_id.int + 1)
-
-    async def body() -> tuple[int, int, int, bool]:
         owner = await seedgraph.fresh_owner()
+        if scenario.startswith("path"):
+            async with dbutil.actor(owner) as session:
+                path_like = await seedgraph.add_entity(session, owner, "notes/graph_rag.md")
+                object_id = (
+                    await seedgraph.add_entity(session, owner, "Ordinary Node")
+                    if scenario == "path-with-object"
+                    else None
+                )
+                await seedgraph.add_fact(
+                    session, owner, path_like, statement="a dangling fact", object_id=object_id
+                )
+            await dedup_entities(scopes=frozenset({owner}))
+            async with dbutil.actor(owner) as session:
+                facts = (await session.exec(select(Fact.Content.id.count()))).one()
+                entities = (await session.exec(select(Entity.Content.id.count()))).one()
+            assert facts == 0
+            assert entities == (1 if object_id is not None else 0)
+            return
+
+        canonical_id = entity_id("Team Memory", "concept")
+        duplicate_id = uuid.UUID(int=canonical_id.int + 1)
         async with dbutil.actor(owner) as session:
             await seedgraph.add_entity(session, owner, "Team Memory", content_id=canonical_id)
             await seedgraph.add_entity(session, owner, "team-memory", content_id=duplicate_id)
@@ -1155,78 +1132,56 @@ def test_dedup_merges_a_slug_twin_and_converges(fake_embedder: RecordingEmbedder
             subject = (
                 await session.exec(select(Fact.Content.subject_id).where(Fact.Content.id == fact))
             ).one()
-        return first, second, len(survivors), subject == survivors[0]
+        assert (first, second, len(survivors), subject == survivors[0]) == (1, 0, 1, True)
 
-    first, second, survivors, repointed = dbutil.run(body())
-    assert first == 1  # one duplicate merged away
-    assert second == 0  # the rerun converges
-    assert survivors == 1  # a single canonical node remains
-    assert repointed is True  # the fact now names the survivor
+    dbutil.run(body())
 
 
-@pytest.mark.parametrize("with_object", [False, True], ids=["subject-only", "with-object"])
-def test_dedup_drops_a_path_like_entity_and_its_dangling_facts(
-    with_object: bool, fake_embedder: RecordingEmbedder
-) -> None:
-    async def body() -> tuple[int, int]:
-        owner = await seedgraph.fresh_owner()
-        async with dbutil.actor(owner) as session:
-            path_like = await seedgraph.add_entity(session, owner, "notes/graph_rag.md")
-            object_id = (
-                await seedgraph.add_entity(session, owner, "Ordinary Node")
-                if with_object
-                else None
-            )
-            await seedgraph.add_fact(
-                session, owner, path_like, statement="a dangling fact", object_id=object_id
-            )
-        await dedup_entities(scopes=frozenset({owner}))
-        async with dbutil.actor(owner) as session:
-            facts = (await session.exec(select(Fact.Content.id.count()))).one()
-            entities = (await session.exec(select(Entity.Content.id.count()))).one()
-        return facts or 0, entities or 0
-
-    facts, entities = dbutil.run(body())
-    assert facts == 0  # the dangling fact is dropped, never repointed to nothing
-    assert entities == (1 if with_object else 0)  # only an ordinary object node survives
-
-
-@pytest.mark.parametrize("subject_type", ["project", None], ids=["declared", "ordinary"])
-def test_source_extraction_uses_the_document_type_across_chunks(
-    subject_type: str | None,
-) -> None:
-    owner = uuid5()
-    chunk = Chunk(
-        id=uuid5(),
-        document_id=uuid5(),
-        ord=1,
-        text="- 2024-01-01: shipped the first release",
-        created_by=owner,
-        scopes=[owner],
-    )
-    document = Document(
-        content_hash=uuid8(),
-        created_by=owner,
-        scopes=[owner],
-        title="My Project",
-        subject_type=subject_type,
-    )
-
-    entities, facts = source_extraction(chunk, document)
-    assert [entity.type for entity in entities] == [subject_type or System.Entity.CONCEPT]
-    assert len(facts) == 1 and facts[0].subject == "My Project"
-
-
-def test_source_declaration_becomes_generic_ontology_facts() -> None:
+@pytest.mark.parametrize(
+    "scenario",
+    ["journal-project", "journal-concept", "declaration", "tags", "part-of", "status"],
+)
+def test_source_extraction_projects_journals_declarations_and_tags(scenario: str) -> None:
     owner = uuid5()
     observed = datetime(2026, 7, 15, tzinfo=UTC)
+    if scenario.startswith("journal"):
+        subject_type = "project" if scenario == "journal-project" else None
+        chunk = Chunk(
+            id=uuid5(),
+            document_id=uuid5(),
+            ord=1,
+            text="- 2024-01-01: shipped the first release",
+            created_by=owner,
+            scopes=[owner],
+        )
+        document = Document(
+            content_hash=uuid8(),
+            created_by=owner,
+            scopes=[owner],
+            title="My Project",
+            subject_type=subject_type,
+        )
+        entities, facts = source_extraction(chunk, document)
+        assert [entity.type for entity in entities] == [subject_type or System.Entity.CONCEPT]
+        assert len(facts) == 1 and facts[0].subject == "My Project"
+        return
+
+    relation = {
+        "part-of": "part_of [Area] Productivity",
+        "status": "has_status [Status] Active",
+    }.get(scenario)
+    text = {
+        "declaration": (
+            "# Aizk\n\n- Type Project\n- part_of [Area] Productivity\n- has_status [Status] Active"
+        ),
+        "tags": "# Ontology boundary\n\n#project: AIZK Productization\n#area: Business",
+    }.get(scenario, f"# Aizk\n\n- Type Project\n- {relation}")
+    title = "Ontology boundary" if scenario == "tags" else "Aizk"
     chunk = Chunk(
         id=uuid5(),
         document_id=uuid5(),
         ord=0,
-        text=(
-            "# Aizk\n\n- Type Project\n- part_of [Area] Productivity\n- has_status [Status] Active"
-        ),
+        text=text,
         created_by=owner,
         scopes=[owner],
     )
@@ -1234,138 +1189,39 @@ def test_source_declaration_becomes_generic_ontology_facts() -> None:
         content_hash=uuid8(),
         created_by=owner,
         scopes=[owner],
-        title="Aizk",
-        subject_type="project",
+        title=title,
+        subject_type=None if scenario == "tags" else "project",
         observed_at=observed,
     )
 
     entities, facts = source_extraction(chunk, document)
-
-    assert [(entity.name, entity.type) for entity in entities] == [
-        ("Aizk", "project"),
-        ("Productivity", "area"),
-        ("Active", "status"),
-    ]
-    assert [(fact.predicate, fact.object_) for fact in facts] == [
-        ("part_of", "Productivity"),
-        ("has_status", "Active"),
-    ]
-    assert all(fact.valid_from == observed for fact in facts)
-
-
-def test_source_tags_become_generic_ontology_entities_and_edges() -> None:
-    owner = uuid5()
-    chunk = Chunk(
-        id=uuid5(),
-        document_id=uuid5(),
-        ord=0,
-        text=("# Ontology boundary\n\n#project: AIZK Productization\n#area: Business"),
-        created_by=owner,
-        scopes=[owner],
-    )
-    document = Document(
-        content_hash=uuid8(),
-        created_by=owner,
-        scopes=[owner],
-        title="Ontology boundary",
-    )
-
-    entities, facts = source_extraction(chunk, document)
-
-    assert [(entity.name, entity.type) for entity in entities] == [
-        ("Ontology boundary", System.Entity.CONCEPT),
-        ("AIZK Productization", "project"),
-        ("Business", "area"),
-    ]
-    assert [(fact.predicate, fact.object_) for fact in facts] == [
-        (System.Relation.RELATED_TO, "AIZK Productization"),
-        (System.Relation.RELATED_TO, "Business"),
-    ]
-
-
-@pytest.mark.parametrize(
-    ("relation", "expected"),
-    [
-        ("part_of [Area] Productivity", [("part_of", "Productivity")]),
-        ("has_status [Status] Active", [("has_status", "Active")]),
-    ],
-)
-def test_source_declaration_accepts_each_relation_independently(
-    relation: str,
-    expected: list[tuple[str, str]],
-) -> None:
-    owner = uuid5()
-    chunk = Chunk(
-        id=uuid5(),
-        document_id=uuid5(),
-        ord=0,
-        text=f"# Aizk\n\n- Type Project\n- {relation}",
-        created_by=owner,
-        scopes=[owner],
-    )
-    document = Document(
-        content_hash=uuid8(),
-        created_by=owner,
-        scopes=[owner],
-        title="Aizk",
-        subject_type="project",
-    )
-
-    _, facts = source_extraction(chunk, document)
-
+    if scenario == "tags":
+        assert [(entity.name, entity.type) for entity in entities] == [
+            ("Ontology boundary", System.Entity.CONCEPT),
+            ("AIZK Productization", "project"),
+            ("Business", "area"),
+        ]
+        assert [(fact.predicate, fact.object_) for fact in facts] == [
+            (System.Relation.RELATED_TO, "AIZK Productization"),
+            (System.Relation.RELATED_TO, "Business"),
+        ]
+        return
+    expected = {
+        "declaration": [("part_of", "Productivity"), ("has_status", "Active")],
+        "part-of": [("part_of", "Productivity")],
+        "status": [("has_status", "Active")],
+    }[scenario]
     assert [(fact.predicate, fact.object_) for fact in facts] == expected
+    assert all(fact.valid_from == observed for fact in facts)
+    if scenario == "declaration":
+        assert [(entity.name, entity.type) for entity in entities] == [
+            ("Aizk", "project"),
+            ("Productivity", "area"),
+            ("Active", "status"),
+        ]
 
 
-@pytest.mark.parametrize("scenario", ["subject-missing", "both-resolved", "object-missing"])
-def test_graph_writer_candidate_resolves_endpoints_or_skips_a_dangling_fact(
-    scenario: str,
-) -> None:
-    owner, subject, object_id = uuid5(), uuid5(), uuid5()
-
-    writer = graph_writer(Session(), owner, frozenset({owner}))
-    if scenario == "subject-missing":
-        fact = TimedFact(subject="Missing", predicate="uses", statement="Missing uses memory.")
-        assert writer.candidate(fact, {}) is None
-    elif scenario == "object-missing":
-        fact = TimedFact(
-            subject="Known", predicate="uses", object="Missing", statement="Known uses Missing."
-        )
-        assert writer.candidate(fact, {"known": subject}) is None
-    else:
-        fact = TimedFact(
-            subject="MoE Expert Compression",
-            predicate="uses",
-            object="RTX 3090",
-            statement="MoE expert compression uses the RTX 3090.",
-        )
-        candidate = writer.candidate(
-            fact, {"moe expert compression": subject, "rtx 3090": object_id}
-        )
-        assert candidate is not None
-        assert (candidate.subject_id, candidate.object_id) == (subject, object_id)
-
-
-def test_raise_failures_groups_multiple_unexpected_chunk_errors() -> None:
-    chunks = [
-        Chunk(
-            id=uuid5(),
-            document_id=uuid5(),
-            ord=index,
-            text="x",
-            created_by=uuid5(),
-            scopes=[uuid5()],
-        )
-        for index in range(3)
-    ]
-    results: list[set[UUID5 | UUID7] | BaseException] = [set(), RuntimeError("a"), ValueError("b")]
-
-    with pytest.raises(BaseExceptionGroup) as info:
-        raise_failures(chunks, results)
-
-    assert {type(error) for error in info.value.exceptions} == {RuntimeError, ValueError}
-
-
-def test_forward_update_retires_the_prior_claim_and_opens_the_correction() -> None:
+def check_forward_update() -> None:
     base = datetime.now(UTC)
     later_start = base + timedelta(days=10)
 
@@ -1427,7 +1283,7 @@ def test_forward_update_retires_the_prior_claim_and_opens_the_correction() -> No
     assert claims["the newer state"] == (True, later_start, None)  # the correction stays live
 
 
-def test_update_without_event_time_closes_a_future_claim_as_empty() -> None:
+def check_future_claim_closed_as_empty() -> None:
     future = datetime.now(UTC) + timedelta(days=1)
 
     async def body() -> bool:

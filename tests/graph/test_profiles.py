@@ -51,11 +51,21 @@ async def stored_summary(owner: UUID5 | UUID7, subject: UUID5 | UUID7) -> str | 
         ).first()
 
 
-def test_build_profile_upserts_one_row_and_is_idempotent(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
+@pytest.mark.parametrize("visible", [True, False], ids=["visible", "invisible"])
+def test_build_profile_upserts_visible_entities_and_rejects_invisible_ones(
+    owner: UUID5 | UUID7,
+    fake_llm: FakeLLM,
+    fake_embedder: RecordingEmbedder,
+    visible: bool,
 ) -> None:
     async def probe() -> tuple[UUID5 | UUID7, UUID5 | UUID7, str | None]:
-        subject = await seed_entity_with_facts(owner, "Leech lattice")
+        subject = await seed_entity_with_facts(owner, "Leech lattice") if visible else uuid5()
+        if not visible:
+            with pytest.raises(NotVisibleError, match="not visible"):
+                await build_profile(
+                    subject, fake_llm.llm, fake_embedder, scopes=frozenset({owner})
+                )
+            return subject, subject, None
         first = await build_profile(
             subject, fake_llm.llm, fake_embedder, scopes=frozenset({owner})
         )
@@ -66,22 +76,47 @@ def test_build_profile_upserts_one_row_and_is_idempotent(
 
     first, second, summary = dbutil.run(probe())
     assert first == second
-    assert summary is not None and summary.strip()
+    assert bool(summary and summary.strip()) is visible
 
 
-@pytest.mark.parametrize("entity_count", [0, 2], ids=["empty", "related"])
-def test_refresh_profiles_rebuilds_the_visible_related_graph_in_one_batch(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder, entity_count: int
+@pytest.mark.parametrize("scenario", ["empty", "related", "dirty"])
+def test_refresh_profiles_batches_visible_and_dirty_entities(
+    owner: UUID5 | UUID7,
+    fake_llm: FakeLLM,
+    fake_embedder: RecordingEmbedder,
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
 ) -> None:
-    async def probe() -> tuple[int, str | None, str | None]:
-        if not entity_count:
-            return (
-                await refresh_profiles(fake_llm.llm, fake_embedder, scopes=frozenset({owner})),
-                None,
-                None,
-            )
+    async def probe() -> None:
+        if scenario == "empty":
+            count = await refresh_profiles(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+            assert count == 0
+            return
         alpha = await seed_entity_with_facts(owner, "alpha")
         beta = await seed_entity_with_facts(owner, "beta")
+        key = frozenset({owner})
+        if scenario == "dirty":
+            monkeypatch.setattr(settings, "profile_batch_size", 1)
+            async with dbutil.actor(owner) as session:
+                await Watermark.bump_many(
+                    session,
+                    key,
+                    Watermark.Kind.entity_dirty,
+                    [str(alpha), str(beta)],
+                )
+            counts = [
+                await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
+                await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
+                await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
+            ]
+            async with dbutil.actor(owner) as session:
+                pending = await Watermark.pending_refs(
+                    session, key, Watermark.Kind.entity_dirty, settings.profile_batch_size
+                )
+            assert counts == [1, 1, 0]
+            assert all([await stored_summary(owner, alpha), await stored_summary(owner, beta)])
+            assert pending == {}
+            return
         async with dbutil.actor(owner) as session:
             relation = Fact.Content(
                 id=uuid5(),
@@ -94,59 +129,8 @@ def test_refresh_profiles_rebuilds_the_visible_related_graph_in_one_batch(
             await session.flush()
             session.add(Fact.Claim(content_id=relation.id, created_by=owner, scopes=[owner]))
         count = await refresh_profiles(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
-        return count, await stored_summary(owner, alpha), await stored_summary(owner, beta)
-
-    count, alpha, beta = dbutil.run(probe())
-    assert count == entity_count
-    assert (alpha is not None and beta is not None) is bool(entity_count)
-
-
-def test_build_profile_refuses_an_invisible_entity(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
-) -> None:
-    async def probe() -> None:
-        with pytest.raises(NotVisibleError, match="not visible"):
-            await build_profile(uuid5(), fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+        assert count == 2
+        assert await stored_summary(owner, alpha)
+        assert await stored_summary(owner, beta)
 
     dbutil.run(probe())
-
-
-def test_dirty_profiles_run_in_bounded_batches_and_consume_their_watermarks(
-    owner: UUID5 | UUID7,
-    fake_llm: FakeLLM,
-    fake_embedder: RecordingEmbedder,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "profile_batch_size", 1)
-
-    async def probe() -> tuple[list[int], list[str | None], dict[str, int]]:
-        alpha = await seed_entity_with_facts(owner, "alpha")
-        beta = await seed_entity_with_facts(owner, "beta")
-        key = frozenset({owner})
-        async with dbutil.actor(owner) as session:
-            await Watermark.bump_many(
-                session,
-                key,
-                Watermark.Kind.entity_dirty,
-                [str(alpha), str(beta)],
-            )
-        counts = [
-            await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
-            await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
-            await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
-        ]
-        async with dbutil.actor(owner) as session:
-            pending = await Watermark.pending_refs(
-                session, key, Watermark.Kind.entity_dirty, settings.profile_batch_size
-            )
-        return (
-            counts,
-            [await stored_summary(owner, alpha), await stored_summary(owner, beta)],
-            pending,
-        )
-
-    counts, summaries, pending = dbutil.run(probe())
-
-    assert counts == [1, 1, 0]
-    assert all(summaries)
-    assert pending == {}

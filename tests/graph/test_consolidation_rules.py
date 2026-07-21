@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from doubles import FakeLLM
 from hypothesis import given
@@ -6,7 +8,7 @@ from id_factory import uuid5, uuid7
 from pydantic import UUID5, UUID7
 
 from aizk.config import settings
-from aizk.extract.models import ConsolidationVerdict
+from aizk.extract.models import BatchConsolidationVerdict, ConsolidationVerdict, TimedFact
 from aizk.graph.consolidation import Consolidator, FactMatch, cosine_similarity
 from aizk.store import Relation
 
@@ -39,33 +41,84 @@ def test_cosine_is_reflexive_symmetric_bounded_and_orthogonal(vector: list[float
     assert cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
 
 
-def test_decide_by_rule_handles_empty_and_borderline_similarity_bands() -> None:
-    floor = settings.consolidation_borderline_floor
-    auto = settings.consolidation_auto_merge_threshold
-    below = floor - 0.05
-    band = (floor + auto) / 2
-    rules = Consolidator(llm=FakeLLM().llm)
-    assert rules.decide(Relation.Policy.state, None, []) == ConsolidationVerdict(action="ADD")
-    assert rules.decide(Relation.Policy.state, None, [match(below)]) == ConsolidationVerdict(
-        action="NOOP"
-    )
-    assert rules.decide(Relation.Policy.set, None, [match(below)]) == ConsolidationVerdict(
-        action="ADD"
-    )
-    assert rules.decide(Relation.Policy.set, None, [match(band)]) == ConsolidationVerdict(
-        action="ADD"
-    )
-
-
-def test_decide_by_rule_auto_merge_noop_update_and_add() -> None:
-    auto = settings.consolidation_auto_merge_threshold
+@pytest.mark.parametrize(
+    ("policy", "similarity", "same_object", "match_count", "action"),
+    [
+        (Relation.Policy.state, None, True, 0, "ADD"),
+        (Relation.Policy.state, 0.2, True, 1, "NOOP"),
+        (Relation.Policy.state, 0.2, False, 1, "UPDATE"),
+        (Relation.Policy.state, 0.95, True, 2, "UPDATE"),
+        (Relation.Policy.set, settings.consolidation_borderline_floor - 0.05, True, 1, "ADD"),
+        (Relation.Policy.set, settings.consolidation_borderline_floor, True, 1, None),
+        (
+            Relation.Policy.event,
+            (settings.consolidation_borderline_floor + settings.consolidation_auto_merge_threshold)
+            / 2,
+            False,
+            1,
+            None,
+        ),
+        (Relation.Policy.set, settings.consolidation_auto_merge_threshold, True, 1, "NOOP"),
+        (Relation.Policy.event, settings.consolidation_auto_merge_threshold, True, 1, "NOOP"),
+        (Relation.Policy.set, settings.consolidation_auto_merge_threshold, False, 1, "ADD"),
+    ],
+)
+def test_decide_respects_policy_and_similarity_bands(
+    policy: Relation.Policy,
+    similarity: float | None,
+    same_object: bool,
+    match_count: int,
+    action: str | None,
+) -> None:
     rules = Consolidator(llm=FakeLLM().llm)
     obj = uuid5()
-    best = match(auto, object_id=obj)
-    assert rules.decide(Relation.Policy.state, obj, [best]) == ConsolidationVerdict(action="NOOP")
-    other = uuid5()
-    verdict = rules.decide(Relation.Policy.state, other, [best])
-    assert verdict == ConsolidationVerdict(action="UPDATE", supersedes=best.id)
-    assert rules.decide(Relation.Policy.set, obj, [best]) == ConsolidationVerdict(action="NOOP")
-    assert rules.decide(Relation.Policy.set, other, [best]) == ConsolidationVerdict(action="ADD")
-    assert rules.decide(Relation.Policy.event, other, [best]) == ConsolidationVerdict(action="ADD")
+    matches = (
+        []
+        if similarity is None
+        else [match(similarity, obj if same_object else uuid5()) for _ in range(match_count)]
+    )
+
+    verdict = rules.decide(policy, obj, matches)
+
+    if action is None:
+        assert verdict is None
+    else:
+        assert verdict is not None
+        assert verdict.action == action
+        assert verdict.supersedes == (matches[0].id if action == "UPDATE" else None)
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    ["empty", "known-update", "missing", "unknown-update", "noop-target", "add-target"],
+)
+def test_resolve_batches_and_normalizes_model_verdicts(scenario: str) -> None:
+    fake = FakeLLM()
+    existing = match(0.8)
+    candidate = TimedFact(subject="Subject", predicate="uses", statement="new")
+    if scenario == "empty":
+        candidates: list[tuple[TimedFact, list[FactMatch]]] = []
+        expected: list[ConsolidationVerdict] = []
+    else:
+        candidates = [(candidate, [existing])]
+        responses = {
+            "known-update": ConsolidationVerdict(action="UPDATE", supersedes=existing.id),
+            "unknown-update": ConsolidationVerdict(action="UPDATE", supersedes=uuid7()),
+            "noop-target": ConsolidationVerdict(action="NOOP", supersedes=uuid7()),
+            "add-target": ConsolidationVerdict(action="ADD", supersedes=uuid7()),
+        }
+        response = responses.get(scenario)
+        fake.register(
+            BatchConsolidationVerdict,
+            BatchConsolidationVerdict(verdicts=[] if response is None else [response]),
+        )
+        if scenario == "known-update":
+            assert response is not None
+            expected = [response]
+        else:
+            expected = [
+                ConsolidationVerdict(action="NOOP" if scenario == "noop-target" else "ADD")
+            ]
+
+    assert asyncio.run(Consolidator(llm=fake.llm).resolve(candidates)) == expected
+    assert len(fake.completions.calls) == (0 if scenario == "empty" else 1)

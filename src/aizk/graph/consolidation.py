@@ -52,11 +52,11 @@ class Consolidator(FrozenModel):
         best = matches[0]
         if best.distance > _borderline_distance:
             return ConsolidationVerdict(action="ADD")
-        return (
-            ConsolidationVerdict(action="NOOP")
-            if best.distance <= _automatic_distance and best.object_id == object_id
-            else ConsolidationVerdict(action="ADD")
-        )
+        if best.distance > _automatic_distance:
+            return None
+        if best.object_id == object_id:
+            return ConsolidationVerdict(action="NOOP")
+        return ConsolidationVerdict(action="ADD")
 
     async def resolve(
         self,
@@ -100,9 +100,8 @@ class Consolidator(FrozenModel):
             if index < len(resolution.verdicts)
             else ConsolidationVerdict(action="ADD")
         )
-        supersedes = (
-            verdict.supersedes
-            if verdict.action == "UPDATE" and verdict.supersedes in known
-            else None
-        )
-        return ConsolidationVerdict(action=verdict.action, supersedes=supersedes)
+        if verdict.action != "UPDATE":
+            return ConsolidationVerdict(action=verdict.action)
+        if verdict.supersedes not in known:
+            return ConsolidationVerdict(action="ADD")
+        return verdict

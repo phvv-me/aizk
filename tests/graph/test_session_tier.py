@@ -36,61 +36,51 @@ async def seed_item(
     return item_id
 
 
-def test_promote_moves_due_items_into_the_graph_and_skips_unwritable_scopes(
+@pytest.mark.parametrize("scenario", ["due", "explicit-empty", "default-empty"])
+def test_promote_sessions_handles_due_writable_items_and_empty_working_sets(
     monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
 ) -> None:
     monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
-    monkeypatch.setattr(settings, "session_promote_age_minutes", 0.0)
-    marker = uuid5().hex
+    if scenario == "due":
+        monkeypatch.setattr(settings, "session_promote_age_minutes", 0.0)
+        marker = uuid5().hex
 
-    async def body() -> tuple[int, int, bool, bool]:
-        owner = await seedgraph.fresh_owner()
-        # The background caller can read this scope but cannot promote into it.
-        readonly = uuid5()
-        private = await seed_item(owner, f"a decision about {marker} worth keeping")
-        blocked = await seed_item(owner, f"team note {marker}", scopes=(readonly,))
-        promoted = await promote_sessions(frozenset({owner}))
-        async with dbutil.actor(owner) as session:
-            chunks = (
-                await session.exec(select(Chunk.id.count()).where(Chunk.text.ilike(f"%{marker}%")))
-            ).one()
-            private_item = await session.get(SessionItem, private)
-        async with dbutil.admin_engine().connect() as connection:
-            blocked_at = await connection.scalar(
-                select(SessionItem.promoted_at).where(SessionItem.id == blocked)
+        async def promote_due() -> tuple[int, int, bool, bool]:
+            owner = await seedgraph.fresh_owner()
+            readonly = uuid5()
+            private = await seed_item(owner, f"a decision about {marker} worth keeping")
+            blocked = await seed_item(owner, f"team note {marker}", scopes=(readonly,))
+            promoted = await promote_sessions(frozenset({owner}))
+            async with dbutil.actor(owner) as session:
+                chunks = (
+                    await session.exec(
+                        select(Chunk.id.count()).where(Chunk.text.ilike(f"%{marker}%"))
+                    )
+                ).one()
+                private_item = await session.get(SessionItem, private)
+            async with dbutil.admin_engine().connect() as connection:
+                blocked_at = await connection.scalar(
+                    select(SessionItem.promoted_at).where(SessionItem.id == blocked)
+                )
+            assert private_item is not None
+            return (
+                promoted,
+                chunks or 0,
+                private_item.promoted_at is not None,
+                blocked_at is not None,
             )
-        assert private_item is not None
-        return (
-            promoted,
-            chunks or 0,
-            private_item.promoted_at is not None,
-            blocked_at is not None,
-        )
 
-    promoted, chunks, private_done, blocked_done = dbutil.run(body())
-    assert promoted == 1  # only the writable private item is due
-    assert chunks >= 1  # promotion reingested it into a graph chunk
-    assert private_done is True  # and stamped it out of the working set
-    assert blocked_done is False  # the read-only-scope item stays working
+        promoted, chunks, private_done, blocked_done = dbutil.run(promote_due())
+        assert (promoted, private_done, blocked_done) == (1, True, False)
+        assert chunks >= 1
+        return
 
-
-def test_promote_is_a_no_op_when_nothing_is_due(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
-
-    async def body() -> int:
+    async def promote_empty() -> int:
+        if scenario == "default-empty":
+            await dbutil.reset_db()
+            return await promote_sessions()
         owner = await seedgraph.fresh_owner()
         return await promote_sessions(frozenset({owner}))
 
-    assert dbutil.run(body()) == 0
-
-
-def test_promote_defaults_to_the_system_user_on_an_empty_working_set(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(session_tier_module, "enqueue_pending", noop_enqueue)
-
-    async def body() -> int:
-        await dbutil.reset_db()
-        return await promote_sessions()
-
-    assert dbutil.run(body()) == 0
+    assert dbutil.run(promote_empty()) == 0

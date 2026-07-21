@@ -300,15 +300,11 @@ class GraphWriter(FlexModel):
                 )
         return matches
 
-    def borderline(self, plans: list[FactPlan]) -> list[tuple[TimedFact, list[FactMatch]]]:
-        """Return only plans whose similarity needs one batched LLM decision."""
-        return [
-            (plan.candidate.fact, list(plan.matches)) for plan in plans if plan.verdict is None
-        ]
-
     async def resolve_ambiguous(self, plans: list[FactPlan]) -> list[ConsolidationVerdict]:
         """Resolve the plans left undecided by deterministic similarity rules."""
-        return await self.consolidator.resolve(self.borderline(plans))
+        return await self.consolidator.resolve(
+            [(plan.candidate.fact, list(plan.matches)) for plan in plans if plan.verdict is None]
+        )
 
     async def lock_plans(self, plans: list[FactPlan]) -> None:
         """Serialize each scope, subject, and perspective slot for final revalidation."""

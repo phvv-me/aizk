@@ -68,49 +68,34 @@ async def observed(user: UUID5 | UUID7) -> list[str]:
         )
 
 
-def test_insight_writes_only_the_gated_observation_and_is_idempotent(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
+@pytest.mark.parametrize("scenario", ["empty", "weak", "mixed"])
+def test_derive_insights_gates_observations_and_is_idempotent(
+    owner: UUID5 | UUID7,
+    fake_llm: FakeLLM,
+    fake_embedder: RecordingEmbedder,
+    scenario: str,
 ) -> None:
+    observations = {
+        "empty": [],
+        "weak": [Observation(statement="a shallow restatement", significance=0.1)],
+        "mixed": [
+            Observation(statement="alice drives the project", significance=0.95),
+            Observation(statement="a shallow restatement", significance=0.1),
+        ],
+    }[scenario]
     fake_llm.register(
         InsightReport,
-        InsightReport(
-            observations=[
-                Observation(statement="alice drives the project", significance=0.95),
-                Observation(statement="a shallow restatement", significance=0.1),
-            ]
-        ),
+        InsightReport(observations=observations),
     )
 
     async def probe() -> tuple[int, int, list[str]]:
-        await seed_two_facts(owner)
+        if scenario != "empty":
+            await seed_two_facts(owner)
         written = await derive_insights(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
         again = await derive_insights(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
         return written, again, await observed(owner)
 
     written, again, mine = dbutil.run(probe())
-    assert written == 1  # only the significant observation cleared the gate
-    assert again == 0  # the content-addressed id makes a rerun idempotent
-    assert mine == ["alice drives the project"]
-
-
-def test_insight_skips_a_graph_with_too_few_facts(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
-) -> None:
-    assert dbutil.run(derive_insights(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))) == 0
-
-
-def test_insight_writes_nothing_when_no_observation_clears_the_gate(
-    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
-) -> None:
-    fake_llm.register(
-        InsightReport,
-        InsightReport(
-            observations=[Observation(statement="a shallow restatement", significance=0.1)]
-        ),
-    )
-
-    async def probe() -> int:
-        await seed_two_facts(owner)
-        return await derive_insights(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
-
-    assert dbutil.run(probe()) == 0
+    assert written == (1 if scenario == "mixed" else 0)
+    assert again == 0
+    assert mine == (["alice drives the project"] if scenario == "mixed" else [])

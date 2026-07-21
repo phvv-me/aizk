@@ -5,7 +5,6 @@ import pytest
 import seedgraph
 from hypothesis import given
 from id_factory import uuid5
-from sqlalchemy.dialects.postgresql import Range
 from sqlmodel import select
 from strategies import TemporalState, fact_timeline, temporal_states
 
@@ -17,16 +16,8 @@ pytestmark = pytest.mark.usefixtures("migrated_db")
 GATE_OFF = {settings.skip_live_gate: True}
 
 
-def test_fact_claim_temporal_helpers_match_their_range_contract() -> None:
-    assert len(Fact.Claim.visible_at(None)) == 1
-    assert len(Fact.Claim.visible_at(datetime(2020, 1, 1, tzinfo=UTC))) == 2
-    lower = datetime(2024, 6, 1, tzinfo=UTC)
-    claim = Fact.Claim(content_id=uuid5(), created_by=uuid5(), recorded=Range(lower, None))
-    assert claim.created_at == lower
-
-
 @given(state=temporal_states())
-def test_is_current_matches_the_temporal_spec(state: TemporalState) -> None:
+def test_fact_claim_helpers_match_the_temporal_spec(state: TemporalState) -> None:
     now = datetime.now(UTC)
     claim = Fact.Claim(
         content_id=uuid5(),
@@ -35,6 +26,9 @@ def test_is_current_matches_the_temporal_spec(state: TemporalState) -> None:
         recorded=state.recorded(now),
     )
     assert claim.is_current is state.expected_current(now)
+    assert claim.created_at == state.recorded(now).lower
+    assert len(Fact.Claim.visible_at(None)) == 1
+    assert len(Fact.Claim.visible_at(now)) == 2
 
 
 def _recorded_holds(state: TemporalState, as_of: datetime, now: datetime) -> bool:
@@ -50,7 +44,7 @@ def _valid_holds(state: TemporalState, as_of: datetime, now: datetime) -> bool:
 
 async def read_versions(
     states: list[TemporalState], now: datetime, as_of: datetime
-) -> tuple[set[str], set[str], set[str], set[str]]:
+) -> tuple[set[str], set[str], set[str], set[str], set[str]]:
     owner = await seedgraph.fresh_owner()
     async with dbutil.actor(owner) as session:
         subject = await seedgraph.add_entity(session, owner, "Subject")
@@ -82,7 +76,8 @@ async def read_versions(
                 claims.where(*Fact.Claim.visible_at(as_of)).execution_options(**GATE_OFF)
             )
         )
-    return live, live_expected, replay, replay_expected
+        history = set(await session.exec(claims.execution_options(**GATE_OFF)))
+    return live, live_expected, replay, replay_expected, history
 
 
 @given(timeline=fact_timeline())
@@ -91,10 +86,13 @@ def test_live_gate_surfaces_only_current_and_as_of_replays_history(
 ) -> None:
     states, probe = timeline
     now = datetime.now(UTC)
-    live, live_expected, replay, replay_expected = dbutil.run(read_versions(states, now, probe))
+    live, live_expected, replay, replay_expected, history = dbutil.run(
+        read_versions(states, now, probe)
+    )
     assert live == live_expected
     assert len(live) <= 1
     assert replay == replay_expected
+    assert history == {f"version {index}" for index in range(len(states))}
 
 
 def test_record_access_bumps_recency_and_count_and_no_ops_on_empty() -> None:
@@ -114,33 +112,3 @@ def test_record_access_bumps_recency_and_count_and_no_ops_on_empty() -> None:
     access_count, has_recency = dbutil.run(body())
     assert access_count == 1
     assert has_recency is True
-
-
-def test_skip_live_gate_reveals_the_full_history() -> None:
-    async def body() -> tuple[int, int]:
-        owner = await seedgraph.fresh_owner()
-        now = datetime.now(UTC)
-        async with dbutil.actor(owner) as session:
-            subject = await seedgraph.add_entity(session, owner, "Subject")
-            await seedgraph.add_fact(
-                session,
-                owner,
-                subject,
-                statement="retired",
-                recorded=Range(now - timedelta(hours=1), now),
-                valid=Range(None, now),
-            )
-            await seedgraph.add_fact(session, owner, subject, statement="current")
-        base = (
-            select(Fact.Claim.id.count())
-            .join(Fact.Content, Fact.Content.id == Fact.Claim.content_id)
-            .where(Fact.Content.subject_id == subject)
-        )
-        async with dbutil.actor(owner) as session:
-            live = (await session.exec(base)).one()
-            history = (await session.exec(base.execution_options(**GATE_OFF))).one()
-        return live or 0, history or 0
-
-    live, history = dbutil.run(body())
-    assert live == 1
-    assert history == 2

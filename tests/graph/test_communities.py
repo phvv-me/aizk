@@ -38,8 +38,13 @@ def edge(subject: UUID5 | UUID7, object_: UUID5 | UUID7) -> Fact.Live:
     return LiveFactFactory.build(subject_id=subject, object_id=object_)
 
 
+@pytest.mark.parametrize("backend", ["networkx", "cugraph"])
 @given(size=st.integers(min_value=3, max_value=6))
-def test_detect_keeps_a_clique_and_drops_under_floor(size: int) -> None:
+def test_detect_filters_small_clusters_and_forwards_nondefault_backends(
+    monkeypatch: pytest.MonkeyPatch,
+    backend: str,
+    size: int,
+) -> None:
     clique = [uuid5() for _ in range(size)]
     pair = [uuid5(), uuid5()]
     facts = [edge(a, b) for i, a in enumerate(clique) for b in clique[i + 1 :]]
@@ -52,6 +57,18 @@ def test_detect_keeps_a_clique_and_drops_under_floor(size: int) -> None:
     assert detect(facts, min_size=size + 3) == []
     isolated = [LiveFactFactory.build(subject_id=uuid5(), object_id=None) for _ in range(3)]
     assert detect(isolated, min_size=3) == []
+
+    captured: dict[str, str] = {}
+
+    def fake_louvain(graph: nx.Graph, seed: int, **kwargs: str) -> list[set[UUID5 | UUID7]]:
+        captured.update(kwargs)
+        return [set(graph.nodes())]
+
+    with monkeypatch.context() as patch:
+        patch.setattr(communities_module, "louvain_communities", fake_louvain)
+        clusters = detect(facts, min_size=3, backend=backend)
+    assert clusters == [set((*clique, *pair))]
+    assert captured.get("backend") == (None if backend == "networkx" else backend)
 
 
 def test_prompt_bounds_and_deduplicates_the_cluster_snapshot(
@@ -74,25 +91,6 @@ def test_prompt_bounds_and_deduplicates_the_cluster_snapshot(
     )
 
     assert builder.prompt({alpha, beta}) == "Entities: alpha\n\nFacts:\n- new fact"
-
-
-@pytest.mark.parametrize("backend", ["networkx", "cugraph"])
-def test_detect_forwards_the_backend_keyword_only_off_the_default(
-    monkeypatch: pytest.MonkeyPatch, backend: str
-) -> None:
-    captured: dict[str, str] = {}
-
-    def fake_louvain(graph: nx.Graph, seed: int, **kwargs: str) -> list[set[UUID5 | UUID7]]:
-        captured.update(kwargs)
-        return [set(graph.nodes())]
-
-    monkeypatch.setattr(communities_module, "louvain_communities", fake_louvain)
-    nodes = [uuid5() for _ in range(3)]
-    facts = [edge(a, b) for i, a in enumerate(nodes) for b in nodes[i + 1 :]]
-
-    clusters = detect(facts, min_size=3, backend=backend)
-    assert clusters == [set(nodes)]
-    assert captured.get("backend") == (None if backend == "networkx" else backend)
 
 
 @pytest.mark.usefixtures("fake_embedder")

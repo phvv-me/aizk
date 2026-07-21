@@ -122,7 +122,25 @@ def test_promote_copies_once_into_scope_and_an_outsider_stays_blind() -> None:
     assert len(source_scopes) == 1
 
 
-def test_promote_of_an_invisible_document_raises() -> None:
+@pytest.mark.parametrize("scenario", ["invisible-document", "broken-artifact"])
+def test_promote_rejects_invisible_or_incomplete_sources(scenario: str) -> None:
+    if scenario == "broken-artifact":
+        result = MagicMock()
+        result.first.return_value = None
+        session = AsyncMock()
+        session.exec = AsyncMock(return_value=result)
+        source = Document(
+            title="Broken",
+            artifact_id=uuid7(),
+            artifact_content_id=uuid7(),
+            content_hash=uuid8(),
+            created_by=uuid5(),
+            scopes=[uuid5()],
+        )
+        with pytest.raises(NotVisibleError, match="original artifact"):
+            dbutil.run(Artifact.share(session, source, uuid5(), [uuid5()]))
+        return
+
     async def probe() -> None:
         await dbutil.reset_db()
         promoter = uuid5()
@@ -130,24 +148,6 @@ def test_promote_of_an_invisible_document_raises() -> None:
             await promote([uuid5()], frozenset({promoter}), User.private(promoter))
 
     dbutil.run(probe())
-
-
-def test_sharing_rejects_a_document_with_broken_artifact_links() -> None:
-    result = MagicMock()
-    result.first.return_value = None
-    session = AsyncMock()
-    session.exec = AsyncMock(return_value=result)
-    source = Document(
-        title="Broken",
-        artifact_id=uuid7(),
-        artifact_content_id=uuid7(),
-        content_hash=uuid8(),
-        created_by=uuid5(),
-        scopes=[uuid5()],
-    )
-
-    with pytest.raises(NotVisibleError, match="original artifact"):
-        dbutil.run(Artifact.share(session, source, uuid5(), [uuid5()]))
 
 
 def test_promote_shares_artifact_metadata_without_copying_its_blob() -> None:
