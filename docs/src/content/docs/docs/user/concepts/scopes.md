@@ -37,6 +37,13 @@ Name two and only the people who belong to both can, which is narrower than eith
 own, not wider. That is the part people usually get backwards on first reading. Adding a second
 organization to a note **restricts** it.
 
+:::note[Where this comes from]
+Splitting memory into private and shared is informed by
+[Collaborative Memory](https://arxiv.org/abs/2505.18279). The scope set itself, where a memory
+carries a set of organizations and you read it only by standing in every one, is aizk's own turn
+on that idea. The full [map of prior art](/docs/dev/prior-art/references/) has the rest.
+:::
+
 ## Why intersections are the useful part
 
 Say you work at a company and also collaborate with a university on one project. Some of what

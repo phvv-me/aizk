@@ -15,9 +15,11 @@ cron entry arrives with nothing. Community building, decay, RAPTOR and profile r
 read claims and write projections, and PostgreSQL will not let them read anything without a
 standing to check against.
 
+:::caution[Keep the boundary in the database]
 The wrong answer is to run maintenance as the owner role and filter in Python. That moves the
 boundary out of the database, which is the one thing the whole design refuses to do. The right
 answer is to give the job an exact scope set before it starts.
+:::
 
 ## The roster
 
@@ -40,15 +42,17 @@ is `settings.system_user_id`.
 
 `fan_out(job)` turns that roster into durable queue items, one per set.
 
-```mermaid
-flowchart TD
-    cron["cron fires aizk_cron_communities"] --> roster["scope_roster()"]
-    roster --> a["MaintenanceJob(scopes={me})"]
-    roster --> b["MaintenanceJob(scopes={acme})"]
-    roster --> c["MaintenanceJob(scopes={acme, uni})"]
-    a --> exec["execute(scopes) under User.system(scopes)"]
-    b --> exec
-    c --> exec
+```text
+            cron fires aizk_cron_communities
+                        │
+                        ▼
+                  scope_roster()
+            ┌───────────┼───────────────┐
+            ▼           ▼               ▼
+      Job {me}   Job {book club}   Job {book club, uni}
+            └───────────┼───────────────┘
+                        ▼
+      execute(scopes) under User.system(scopes)
 ```
 
 Each item is enqueued with a dedupe key of `f"{job.name}:{','.join(map(str, sorted(key)))}"`, so a
@@ -78,13 +82,13 @@ From there the pass is an ordinary caller. It goes through the app role, the sam
 
 This is the part worth slowing down on, because partitioning by user looks simpler and is wrong.
 
-Suppose Ana is in her private scope and also in the organization Acme, and some of her memory sits
-in the intersection `{acme, uni}`. Partition by user and one community pass runs with a read set
-covering all three, which means the graph it clusters mixes claims from three different
+Suppose Ada is in her private scope and also in the organization Book Club, and some of her memory
+sits in the intersection `{book club, uni}`. Partition by user and one community pass runs with a
+read set covering all three, which means the graph it clusters mixes claims from three different
 visibilities. Now the pass has to write a community row, and that row needs one scope array. Any
-array it picks is wrong. Pick `{ana}` and the row is derived from Acme content but readable
-privately, which leaks. Pick `{acme, uni}` and most of its members become invisible to the people
-who can see the row, which is useless.
+array it picks is wrong. Pick `{ada}` and the row is derived from Book Club content but readable
+privately, which leaks. Pick `{book club, uni}` and most of its members become invisible to the
+people who can see the row, which is useless.
 
 Partition by exact scope set and the problem disappears. The read set and the written array are
 the same value, so the projection is closed. Everything the pass could read is exactly what its

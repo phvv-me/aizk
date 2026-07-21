@@ -72,15 +72,14 @@ pyrefly, ty, and mypy all run, and each one is there because it catches somethin
 | ty | `src/aizk`, `src/eval` | two file-scoped overrides, everything else stays an error |
 | mypy | `src/aizk`, `src/eval` | `strict`, with two documented relaxations |
 
-Every relaxation is a third-party typing gap and none of them is a shortcut around our own code.
-`ty` downgrades `invalid-assignment` on `src/aizk/store/mixins/base.py` alone, because sqlmodel's
-config class does not declare Pydantic's `ignored_types` field that SQLAlchemy hybrid properties
-need. mypy keeps `implicit_reexport` on, because aizk packages re-export through `__init__` on
-purpose and pyrefly and ty already enforce their own view of that, and it disables `call-arg`,
-because a `table=True` SQLModel synthesizes its Pydantic `__init__` through the metaclass at
-runtime and mypy has no working sqlmodel plugin, so it rejects every keyword construction in the
-codebase. Both are irreducible, and every other strict check stays on so a genuine mistake still
-fails.
+Every relaxation is a third-party typing gap, never a shortcut around our own code. `ty` downgrades
+`invalid-assignment` on `src/aizk/store/mixins/base.py` alone, because sqlmodel's config class does
+not declare the Pydantic `ignored_types` field that SQLAlchemy hybrid properties need. mypy keeps
+`implicit_reexport` on, because aizk packages re-export through `__init__` on purpose and pyrefly and
+ty already police that, and it disables `call-arg`, because a `table=True` SQLModel builds its
+Pydantic `__init__` through the metaclass at runtime and mypy has no working sqlmodel plugin, so it
+would reject every keyword construction. Both are irreducible, and every other strict check stays on
+so a genuine mistake still fails.
 
 pyright is deliberately not a fourth gate.
 [Rejected and deferred](/docs/dev/prior-art/rejected/) records why.
@@ -96,9 +95,11 @@ little to say about an `object` but a great deal to say about the first attribut
 
 ## Suppressions have to be earned
 
+:::note[Zero suppressions in src]
 There are currently zero `# type: ignore`, zero `noqa`, and zero `pyrefly: ignore` comments in
-`src/`. That is the standard, not a coincidence, and it is worth keeping because it means an error
-report is always about the code rather than about the annotations somebody silenced.
+`src/`. That is the standard, not a coincidence, because it means an error report is always about
+the code rather than about the annotations somebody silenced.
+:::
 
 Fix the root cause first. If you exhaust the proper fixes and the remaining problem is genuinely a
 third-party stub gap, a single narrow `pyrefly: ignore` with a comment explaining which stub is

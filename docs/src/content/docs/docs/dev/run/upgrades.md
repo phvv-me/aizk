@@ -9,26 +9,21 @@ out. This page covers both. It assumes the service list from
 [Deployment topology](/docs/dev/run/topology/) and a working backup routine from
 [Backups and recovery](/docs/dev/run/backups/).
 
-```mermaid
-flowchart TD
-    change{"what changed?"}
-    change -->|"aizk source, web, docs"| build["build the image, then up -d"]
-    change -->|"an .env value"| recreate["up -d, Compose recreates the affected services"]
-    change -->|"a pinned image tag"| pull["pull, then up -d"]
-    change -->|"nothing, a hung process"| restart["restart is enough"]
-
-    build --> migrate["setup runs migrations once"]
-    recreate --> migrate
-    pull --> migrate
-    migrate --> health["aizk admin health"]
-    restart --> health
+```text
+  what changed?
+    aizk source, web, docs  ─▶ build the image ─▶ up -d ─┐
+    an .env value ──────────▶ up -d recreates affected ──┤
+    a pinned image tag ─────▶ pull ─▶ up -d ─────────────┼─▶ setup migrates ─▶ admin health
+    nothing, a hung process ─▶ restart ──────────────────────────────────────▶ admin health
 ```
 
 ## Rebuild, do not restart
 
+:::caution[A restart runs the old code]
 `src/deploy/Dockerfile` copies `src` into the image and installs the project into a virtualenv
-built at image time. There is no bind mount of the source and no editable install at runtime.
-A `docker compose restart` therefore runs exactly the code that was already there.
+built at image time. There is no bind mount of the source and no editable install at runtime, so
+`docker compose restart` runs exactly the code that was already there.
+:::
 
 Any change to Python source, to the SvelteKit app or to these documentation pages needs the image
 rebuilt and the container recreated.
@@ -69,9 +64,11 @@ There are two revisions in `src/aizk/store/migrations/versions/`, `0001_init` an
 `0002_durable_usage`. [Migrations and DDL](/docs/dev/store/migrations/) explains why the initial
 one is fused rather than a long chain.
 
-Never use `down -v` during an upgrade. It removes the named volumes, which takes the database,
-the object store, the ClamAV signatures and the OAuth state with it. It is also the only way to
-make PostgreSQL re-run `initdb/roles.sh`, so if that is what you want, say so on purpose.
+:::danger[Never `down -v` during an upgrade]
+It removes the named volumes, which takes the database, the object store, the ClamAV signatures
+and the OAuth state with it. It is also the only way to make PostgreSQL re-run `initdb/roles.sh`,
+so reach for it only when that is exactly what you want.
+:::
 
 ## Rotating secrets
 
@@ -81,11 +78,12 @@ reconciles every role with the current `.env`, so it is the tool for the databas
 replaced that file through an rsync deployment, recreate the `db` container before running it,
 because a live bind mount keeps the old inode.
 
-Rotating `AIZK_OAUTH_CLIENT_SECRET` is different and it is not reversible by restarting. FastMCP
-stores dynamic client registrations and upstream Logto tokens in the persistent `/oauth` volume,
-encrypted with keys derived from that client secret. Changing it invalidates the derived keys, so
-every MCP client has to sign in again. Treat it as a deliberate full session reset rather than a
-routine rotation, and schedule it with the people who will have to re-authorize.
+:::caution[Rotating `AIZK_OAUTH_CLIENT_SECRET` logs everyone out]
+FastMCP stores dynamic client registrations and upstream Logto tokens in the persistent `/oauth`
+volume, encrypted with keys derived from that client secret. Change it and the derived keys are
+invalid, so every MCP client has to sign in again. It is not reversible by restarting. Treat it
+as a deliberate full session reset and schedule it with the people who will have to re-authorize.
+:::
 
 The web session secret is separate and independent by validation. `Settings` rejects it when it
 is shorter than 32 bytes or equal to the web, Management API or OAuth client secret.

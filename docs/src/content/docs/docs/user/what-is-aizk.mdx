@@ -3,11 +3,13 @@ title: "What aizk is"
 description: "The shortest complete explanation of what aizk stores, who can read it, and why it gives back evidence instead of answers."
 ---
 
-aizk is a memory that you and your AI assistants share. You tell it things worth keeping, it
-keeps them, and later any assistant you use can ask for what is relevant and get it back with
-the original wording and a note about where it came from.
+import Diagram from '../../../../components/Diagram.astro';
 
-This page assumes nothing. It is the one to read first.
+aizk is a memory you and your AI assistants share. You tell it things worth keeping, it keeps
+them, and later any assistant you use can ask for what is relevant and get it back in the
+original words, with a note about where it came from.
+
+This page assumes nothing. Read it first.
 
 ## The problem it solves
 
@@ -19,18 +21,24 @@ Meanwhile the useful things are scattered. Some live in a document, some in a ch
 somebody's head. When a teammate needs the reason a choice was made six months ago, there is no
 one place to ask.
 
-aizk is that one place, and it is designed so an assistant can use it without you doing anything
-by hand.
+aizk is that one place, and an assistant can use it without you doing anything by hand.
 
-```mermaid
-flowchart LR
-    Y([you]) --> A([your assistant])
-    T([a teammate]) --> B([their assistant])
-    A -->|remember| M[(aizk)]
-    B -->|remember| M
-    M -->|recall| A
-    M -->|recall| B
-```
+<Diagram
+  title="You and a teammate each work through your own assistant, and both assistants share one aizk"
+  nodes={[
+    { id: 'you', label: 'you', col: 0, row: 0 },
+    { id: 'ya', label: 'your assistant', col: 1, row: 0 },
+    { id: 'tm', label: 'a teammate', col: 0, row: 2 },
+    { id: 'ta', label: 'their assistant', col: 1, row: 2 },
+    { id: 'm', label: 'aizk', col: 2, row: 1, emphasis: true },
+  ]}
+  edges={[
+    { from: 'you', to: 'ya' },
+    { from: 'ya', to: 'm', label: 'remember, recall' },
+    { from: 'tm', to: 'ta' },
+    { from: 'ta', to: 'm', label: 'remember, recall' },
+  ]}
+/>
 
 ## What it stores
 
@@ -75,12 +83,12 @@ from something the engine inferred.
   ┌──────────────────────────────────────────────────────┐
   │ ## Evidence                                          │
   │                                                      │
-  │ - Source excerpt · scope Toshiba                     │
+  │ - Source excerpt · scope Book Club                     │
   │     We moved extraction to GLiNER2 because the LLM   │
   │     lane cost 4.1 s per chunk and GLiNER2 costs      │
   │     0.3 s at the same grounding rate.                │
   │                                                      │
-  │ - Derived memory · scope Toshiba                     │
+  │ - Derived memory · scope Book Club                     │
   │     [aizk, world] (uses) aizk uses GLiNER2.          │
   └──────────────────────────────────────────────────────┘
                      │

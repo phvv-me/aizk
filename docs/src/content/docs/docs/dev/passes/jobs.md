@@ -114,21 +114,24 @@ while an operator running the retry command may pass no cap at all.
 
 ## The loop
 
-```mermaid
-flowchart TD
-  cron["scheduler fires aizk_cron_communities"] --> roster
-  roster["scope_roster reads every distinct scopes array as owner"] --> enq
-  enq["one MaintenanceJob per exact scope set"] --> queue
-  write["a write enqueues a chunk or conversion job"] --> queue
-  queue[("pgqueuer queue table, partial unique dedupe_key")] --> pick
-  pick["worker picks the highest priority ready job"] --> run
-  run["handle, decoded into its payload type"] --> ok
-  run --> failed
-  ok["status successful, dedupe key freed"]
-  failed{"attempts left?"}
-  failed -->|yes| pick
-  failed -->|no| hold["status failed, row retained"]
-  hold --> requeue["requeue_failed, bounded window"] --> queue
+```text
+     cron fires                         a write arrives
+         |                                    |
+  scope_roster (as owner)          enqueue chunk / conversion
+         |                                    |
+  one job per exact scope set                 |
+         +-------------->  pgqueuer queue  <---+
+                        (partial unique dedupe_key)
+                                 |
+                worker picks the highest-priority ready job
+                                 |
+                     handle, decoded to its payload type
+                        |                          |
+                     success                  attempts left?
+                (dedupe key freed)         yes --> back to pick
+                                           no  --> failed, row retained
+                                                        |
+                                            requeue_failed (bounded) --> queue
 ```
 
 `scope_roster()` is the part worth pausing on. It runs under the database owner so row security
@@ -136,7 +139,12 @@ does not hide other tenants, unions the distinct `scopes` arrays of `document`, 
 `artifact`, and returns each exact set it finds. A cron tick therefore produces one job per set
 that actually holds memory, and each of those jobs then runs entirely inside
 `User.system(scopes)`, so the pass sees exactly the rows a member of that scope set would see.
-There is no cross-tenant query anywhere below the fan-out.
+
+:::caution[The fan-out reads as owner, the jobs do not]
+Only `scope_roster` runs with row security off, to see every tenant's scope sets. Each job it spawns
+runs inside `User.system(scopes)` and sees just that one set. Keep new maintenance work inside that
+per-scope session and never widen the owner query into a job body.
+:::
 
 ## Next
 

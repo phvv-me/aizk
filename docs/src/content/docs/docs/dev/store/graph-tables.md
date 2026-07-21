@@ -135,6 +135,14 @@ then joins `live_fact` for visibility and access history. `neighbors` deliberate
 subject side and the object side rather than writing one `OR`, because an `OR` across both
 endpoints falls back to scanning every fact.
 
+:::note[Where this comes from]
+`diffused` and `connected` adapt the associative personalized PageRank recall of
+[HippoRAG 2](https://arxiv.org/abs/2502.14802) into one SQL statement over visible current facts.
+The community projections below follow [GraphRAG](https://arxiv.org/abs/2404.16130) and
+[LightRAG](https://arxiv.org/abs/2410.05779). The full map is at
+[References and lineage](/docs/dev/prior-art/references/).
+:::
+
 ## The catalogs
 
 `EntityKind` and `RelationKind` both derive from `OntologyKind`, which declares

@@ -9,6 +9,13 @@ longer holds. It assumes you know that a claim is the scoped assertion and the c
 immutable statement, which [The data model](/docs/dev/store/data-model/) covers. The code is
 `src/aizk/store/models/tables/fact.py`.
 
+:::note[Where this comes from]
+Keeping valid time and recorded time apart on an immutable graph is adopted from
+[Zep and Graphiti](https://arxiv.org/abs/2501.13956). The append-only correction, closing a range
+instead of overwriting it, is enforced here by one index rather than by convention. The full map
+is at [References and lineage](/docs/dev/prior-art/references/).
+:::
+
 ## Two ranges, two questions
 
 ```python

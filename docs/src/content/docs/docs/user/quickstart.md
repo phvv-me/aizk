@@ -40,10 +40,11 @@ run. If the browser never comes back, or the client claims it is signed out,
 Just say it. Your assistant calls `remember` with self-describing Markdown, and the first
 level-one heading becomes the title that recall will show later.
 
-```json
-{
-  "text": "# Retrieval reranker choice\n\nWe kept the cross-encoder reranker on by default. Turning it off saved 40 ms and cost more in answer quality than the latency was worth."
-}
+```python
+aizk.remember(text="""# Retrieval reranker choice
+
+We kept the cross-encoder reranker on by default. Turning it off saved 40 ms and cost more in
+answer quality than the latency was worth.""")
 ```
 
 You named no organization, so this note is private to you. Nothing else needs to be set. Dates,
@@ -54,10 +55,8 @@ The call returns an ID. Keep it if you think you may want to share that exact no
 
 ## 3. Ask for it back
 
-```json
-{
-  "query": "why is the reranker on by default?"
-}
+```python
+aizk.recall(query="why is the reranker on by default?")
 ```
 
 What comes back is not an answer. It is a short block of Markdown holding the most relevant things
@@ -82,9 +81,12 @@ how to read those labels.
 
 ## That is the loop
 
-Everything else refines these three steps. You will get more out of aizk by writing fewer and
-better notes than by writing many, and by asking one focused question at a time rather than a
-compound one.
+Everything else refines these three steps.
+
+:::tip[Good habit]
+You get more out of aizk by writing fewer and better notes than by writing many, and by asking
+one focused question at a time rather than a compound one.
+:::
 
 ## Next
 

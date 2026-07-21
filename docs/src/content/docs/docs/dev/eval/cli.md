@@ -38,9 +38,11 @@ the launcher rewrites the environment before it execs `eval.cli`.
       python -m eval.cli   →  fire.Fire(EvaluationCLI)
 ```
 
+:::caution[The last line of defense]
 The three isolated commands each call `EvaluationDatabase().reset()`, which refuses to run at all
-unless the configured database name ends in `_eval`. That check is the last line of defense
-between a benchmark and somebody's memory.
+unless the configured database name ends in `_eval`. That check is what stands between a benchmark
+and somebody's memory.
+:::
 
 Every command returns a rendered text report on stdout and takes `--out <path>` to also write the
 structured JSON. Every live command takes `--user <uuid5>` to select the corpus owner, defaulting

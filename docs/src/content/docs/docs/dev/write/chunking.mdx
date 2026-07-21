@@ -1,0 +1,140 @@
+---
+title: "Chunking and embedding"
+description: "Splitting normalized text and giving every piece a vector."
+---
+
+By the time text reaches this stage it is normalized Markdown with a resolved document identity,
+which [Intake](/docs/dev/write/intake/) explains. This page turns that text into `chunk` rows with
+vectors, and shows where those rows wait for [Extraction and the gate](/docs/dev/write/extraction/)
+to pick them up.
+
+import Diagram from '../../../../../components/Diagram.astro';
+
+## Splitting
+
+`chunk_text` in `src/aizk/serving/chunk/chonkie.py` is the only splitter in the write path. It uses
+Chonkie's `RecursiveChunker`, which walks paragraph, sentence and word boundaries in turn and
+hard-cuts only when a single unit is too long. Each span is stripped and empty spans are dropped, so
+a document of pure whitespace produces no chunks and `TextIngestor.prepare` returns nothing for it.
+
+The size is `chunk_size`, default 2048 characters, and that number is load bearing in two other
+places. It is roughly 700 tokens, which is why the embedding lane runs a 2048-token context instead
+of the model's native 262K. It is also the default `extract_window_size`, so an ordinary chunk is
+exactly one extraction call.
+
+`src/aizk/serving/chunk/chunker.py` holds the file-type side. `is_text` uses the `identify` library
+to decide whether a path is text at all, and it is the filter `ingest_path` applies when walking a
+directory. `is_code` subtracts the structural tags `identify` mixes in and asks whether the
+remaining language tags avoid `chunk_denylist`, the prose and configuration formats such as
+`markdown`, `rst`, `tex`, `json`, `yaml` and `toml`. `is_code` has no caller in the ingest path
+today, though, so every source is chunked as prose and the denylist only shapes a helper for a
+future code chunker.
+
+## What a chunk row carries
+
+<Diagram
+  title="Normalized text becomes ordered chunk rows, embedded only when content changed"
+  nodes={[
+    { id:'text', label:'normalized text', col:1, row:0 },
+    { id:'split', label:'RecursiveChunker 2048', col:1, row:1 },
+    { id:'rows', label:'ord rows', col:1, row:2 },
+    { id:'changed', label:'content changed?', col:1, row:3 },
+    { id:'embed', label:'embed, halfvec 1024', col:0, row:4 },
+    { id:'reuse', label:'reuse vectors', col:2, row:4 },
+    { id:'insert', label:'insert chunks', col:1, row:5 },
+    { id:'queue', label:'graph queue', col:1, row:6, emphasis:true },
+  ]}
+  edges={[
+    { from:'text', to:'split' },
+    { from:'split', to:'rows' },
+    { from:'rows', to:'changed' },
+    { from:'changed', to:'embed', label:'changed' },
+    { from:'changed', to:'reuse', label:'same' },
+    { from:'embed', to:'insert' },
+    { from:'reuse', to:'insert' },
+    { from:'insert', to:'queue' },
+  ]}
+/>
+
+`Chunk` in `src/aizk/store/models/tables/chunk.py` is `Id`, `Scoped` and `Embedded`, with
+`read_through` set to `document`, so a chunk is visible exactly when its document is, never widened
+away from it.
+
+`ord` is the position inside the document, assigned by `enumerate` in `TextIngestor.document`, and
+what `Document.chunks` orders on. `provenance` is the JSONB record from `CaptureContext.record`,
+carrying the speaker label and role with `observed_at` and `expires_at`, and recall reads the
+speaker fields straight from it.
+
+`lexical` is the text the BM25 lane indexes when it should differ from `text`. `contextual_lexical`
+in `src/aizk/extract/ingest.py` prepends the document title only when `contextual_bm25` is on, off
+by default, and otherwise supplies the capture context's search text, returning null when neither
+adds anything so the lane falls back to `text`.
+
+`processed_at` is the graph build's own bookkeeping and stays null until a chunk has been projected.
+A partial index `ix_chunk_pending` on `id` where `processed_at IS NULL` keeps the backlog scan cheap
+however many processed chunks sit beside it.
+
+## Embedding
+
+`EmbedClient` in `src/aizk/serving/embed/client.py` talks to a pooled vLLM lane over the
+OpenAI-compatible `/v1/embeddings` route. The served model is `embed_model`, default `qwen3-vl-emb`,
+which is `Qwen/Qwen3-VL-Embedding-2B` started with `--runner pooling`, and the model never loads
+inside the aizk process. Texts go out in batches of `embed_batch_size`, default 32, and
+`ordered_results` restores request order inside each batch, so vectors line up with chunks by
+position and never by id.
+
+Instruction prefixes are asymmetric on purpose. The document instruction defaults to the empty
+string while `embed_instruction_query` carries a retrieval instruction, so stored chunks are
+embedded raw and only questions get the instruction. `instructed` wraps a query as
+`Instruct: {instruction}\nQuery: {text}`.
+
+Dimensions are Matryoshka. The checkpoint emits 2048 dimensions natively, the Compose service
+enables Matryoshka through `--hf-overrides`, and every request sends `dimensions=embed_dim`, default
+1024, so vLLM truncates to the 1024-dimensional prefix the store keeps as `halfvec(1024)`.
+
+:::caution[embed_dim is a migration, not a knob]
+Change `embed_dim` and you change the column type, the vector index and the casts in the graph
+writer together, so treat it as a schema migration.
+:::
+
+Only changed content is embedded. `TextIngestor._vectors` keeps only plans whose `content_matches`
+is false, so a re-ingest of an unchanged corpus sends nothing.
+
+## Images
+
+An image gets one supplemental vector on top of whatever Docling extracted. `DirectImageEnricher` in
+`src/aizk/artifacts/visual.py` calls `embed_images`, which posts the image as a data URI with the
+document instruction as the system message, into the same 1024-dimensional space. The vector is
+upserted as a chunk at ordinal 2147483647 on the same document, its provenance recording the
+modality, `direct_embedding` representation, `supplemental` role and revision. It lands with
+`processed_at` already stamped, so it is retrievable immediately and never enters the graph build,
+and the enricher refuses to write when the document's artifact pair does not match the revision
+given.
+
+## Where pending chunks wait
+
+There is no in-memory queue. A pending chunk is a row where `processed_at IS NULL`, and
+`pending_chunks` in `src/aizk/graph/build.py` selects them inside one exact scope set, ordered by
+`id`.
+
+Three things drain that backlog. `Memory.remember` calls `enqueue_document` right after ingest, so a
+fresh document is queued immediately. `ChunkDispatchJob` runs on `chunk_dispatch_cron`, every
+minute, enqueuing up to `chunk_dispatch_batch_size` pending chunks, default 512, which recovers
+anything that missed the direct call. `ChunkRecoveryJob` requeues retained failures up to
+`chunk_recovery_batch_size`, also 512, bounded by `chunk_recovery_max_cycles` of 3 so a poisoned
+chunk stops retrying.
+
+Jobs are deduplicated on the chunk id, and `ChunkProjectionJob` re-checks visibility, scope equality
+and `processed_at` before doing any work, so a duplicate delivery costs one lookup. It runs at
+`JobPriority.chunk`, 50, with a concurrency limit of `graph_build_concurrency`, default 4.
+
+## Next
+
+<div class="not-content">
+
+- [Extraction and the gate](/docs/dev/write/extraction/) covers what happens to a pending chunk.
+- [The job system](/docs/dev/passes/jobs/) covers PgQueuer, priorities and recovery in full.
+- [The lanes](/docs/dev/read/lanes/) covers how these vectors and the BM25 column are queried.
+- [Content and artifact tables](/docs/dev/store/content-tables/) has the chunk columns in full.
+
+</div>

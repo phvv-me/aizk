@@ -3,11 +3,14 @@ title: "Design principles"
 description: "The rules that decide how new code is shaped, and what they rule out."
 ---
 
-These are the rules that decide the shape of new code. They came out of an architecture audit and
-they are worth reading before a first contribution, because half of them are enforced by a gate
-and the other half are only conventions that reviewers hold you to. This page says which is which,
-verified against the code rather than repeated from the old architecture note. It assumes you have
-read [Layers and import contracts](/docs/dev/architecture/layers/).
+import Diagram from '../../../../../components/Diagram.astro';
+
+These are the rules that decide the shape of new code. They came out of an architecture audit, and
+they are worth a read before your first contribution, because half of them are enforced by a gate
+and the other half are conventions that reviewers hold you to. The useful part is knowing which is
+which, so this page says so, checked against the code rather than repeated from the old
+architecture note. It assumes you have read
+[Layers and import contracts](/docs/dev/architecture/layers/).
 
 ## Agentic first
 
@@ -45,16 +48,28 @@ answer is that one already exists and the work is choosing it.
 
 ## The eight rules and what actually enforces them
 
-```mermaid
-flowchart TD
-    A[new code] --> B{does it compose SQL?}
-    B -->|yes| C[it belongs in store or one<br/>of the twelve exceptions]
-    B -->|no| D{does it construct a client<br/>or a shared service?}
-    D -->|yes| E[it belongs in Runtime.assemble]
-    D -->|no| F{does it emit user-facing markdown?}
-    F -->|yes| G[it belongs in a Jinja template]
-    F -->|no| H[write it beside the code it serves]
-```
+<Diagram
+  title="Where a new piece of code belongs, decided by three questions"
+  nodes={[
+    { id:'new', label:'new code', col:1, row:0 },
+    { id:'q1', label:'composes SQL?', col:1, row:1 },
+    { id:'sql', label:'store, or the twelve', col:0, row:1 },
+    { id:'q2', label:'builds a service?', col:1, row:2 },
+    { id:'rt', label:'Runtime.assemble', col:0, row:2 },
+    { id:'q3', label:'emits user markdown?', col:1, row:3 },
+    { id:'tpl', label:'a Jinja template', col:0, row:3 },
+    { id:'beside', label:'beside its code', col:1, row:4, emphasis:true },
+  ]}
+  edges={[
+    { from:'new', to:'q1' },
+    { from:'q1', to:'sql', label:'yes' },
+    { from:'q1', to:'q2', label:'no' },
+    { from:'q2', to:'rt', label:'yes' },
+    { from:'q2', to:'q3', label:'no' },
+    { from:'q3', to:'tpl', label:'yes' },
+    { from:'q3', to:'beside', label:'no' },
+  ]}
+/>
 
 **1. SQL lives in the store.** Enforced, with documented exceptions. The forbidden import contract
 stops seventeen packages from importing `sqlmodel` or `sqlalchemy` at all, and ruff overlays in
@@ -117,9 +132,12 @@ cannot fork the wire format between them.
 | No duplicate projections | review |
 
 That split is the useful part. Four of the eight are checked by a machine on every push, and the
-rest survive only because somebody reads the diff. If you find one of the four conventions being
-broken in the tree, that is a bug in the tree rather than a stale rule, and the honest fix is
-either to repair the code or to write the gate that would have caught it.
+rest survive only because somebody reads the diff.
+
+:::tip[Found a convention being broken?]
+Treat it as a bug in the tree, not a stale rule. The honest fix is either to repair the code or to
+write the gate that would have caught it.
+:::
 
 ## Next
 

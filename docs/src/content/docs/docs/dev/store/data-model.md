@@ -57,6 +57,13 @@ claim.content_id -> content.id: "many claims, one content"
 One statement, many claims. Your organization's assertion and mine point at the same immutable
 sentence, and neither can see the other's claim.
 
+:::note[Where this comes from]
+The bi-temporal entity and fact graph, statements carried with valid time and recorded time, is
+adopted from [Zep and Graphiti](https://arxiv.org/abs/2501.13956). Splitting content from claim
+and content-addressing the immutable half is aizk's own. The full map is at
+[References and lineage](/docs/dev/prior-art/references/).
+:::
+
 ## Why the split earns its complexity
 
 It gives four things at once.

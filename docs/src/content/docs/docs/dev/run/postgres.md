@@ -119,10 +119,12 @@ Grafana separately. Each one needs the UID its own image uses.
 Note that the mount point is `/var/lib/postgresql` and not the data directory inside it, because
 PostgreSQL 18 images store data under a major-version subdirectory.
 
-Never change a populated service path until a verified backup exists and the service is stopped.
-Moving one means preserving both database archives, stopping only that service, copying with
-ownership intact, recreating that service, and then verifying with the RLS check, a restore drill
-and an authenticated recall before the old volume is removed.
+:::danger[Never move a populated service path casually]
+Change one only when a verified backup exists and the service is stopped. Moving a path means
+preserving both database archives, stopping only that service, copying with ownership intact,
+recreating the service, and then verifying with the RLS check, a restore drill and an
+authenticated recall before you remove the old volume.
+:::
 
 ## Encryption at rest, honestly
 
@@ -138,8 +140,12 @@ and a recovery dependency.
 
 Storing the LUKS key on the same machine's unencrypted root disk protects against removal of the
 database SSD and nothing else. It is not full at-rest encryption and should not be described as
-such. Until an unlock design is chosen the dedicated device stays unencrypted, and that stays on
+such.
+
+:::caution[The dedicated device ships unencrypted]
+Until an unlock design is chosen the database device stays unencrypted, and that stays on
 [the release gate](/docs/dev/run/release-gate/) as an accepted gap rather than quietly closing.
+:::
 
 ## Next
 

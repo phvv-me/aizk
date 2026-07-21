@@ -10,13 +10,19 @@ that killed it.
 
 Four things end an idea here.
 
-```mermaid
-flowchart TD
-  I["an idea"] --> M{"measured against<br/>what already ships?"}
-  M -->|worse| R1["rejected, with the number"]
-  M -->|"better, but Postgres or<br/>Logto already owns it"| R2["rejected as a second store"]
-  M -->|"better, but it owns<br/>the agent's loop"| R3["rejected as out of scope"]
-  M -->|not measurable yet| D["deferred, with its trigger"]
+```text
+  an idea
+      │
+      ▼
+  measured against what already ships?
+      │
+      ├─ worse ──────────────────────────────▶ rejected, with the number
+      │
+      ├─ better, but Postgres or Logto owns it ─▶ rejected as a second store
+      │
+      ├─ better, but it owns the agent's loop ──▶ rejected as out of scope
+      │
+      └─ not measurable yet ─────────────────▶ deferred, with its trigger
 ```
 
 ## Rejected on a measurement
@@ -51,11 +57,14 @@ already holds, and a second copy is a thing that can disagree.
 
 ## Rejected on principle
 
-A human acceptance queue is the one that keeps coming back, and it is permanently out. There is no
-pending state, no approve or reject verb, no standing approver pass, and no server-wide admin flag
-whose only purpose was cross-tenant reach. Agents write sources directly and correct them when the
-evidence changes, so a write is canon the moment it lands, and history rather than review is what
-makes a wrong write recoverable.
+:::caution[Permanently out]
+A human acceptance queue keeps coming back and it is permanently out. There is no pending state, no
+approve or reject verb, no standing approver pass, and no server-wide admin flag whose only purpose
+was cross-tenant reach.
+:::
+
+Agents write sources directly and correct them when the evidence changes, so a write is canon the
+moment it lands, and history rather than review is what makes a wrong write recoverable.
 
 The external benchmark command was removed for a related reason. It turned isolated questions into
 retrieval gold without importing the conversations, speakers, scopes, or temporal state those

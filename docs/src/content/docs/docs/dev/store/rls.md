@@ -8,21 +8,35 @@ forced row security, so a missing `WHERE` clause in application code cannot leak
 page assumes you know what a [scope set](/docs/dev/identity/scope-sets/) is and can read a
 `CREATE POLICY` statement.
 
+:::note[Where this comes from]
+Enforcing tenancy inside
+[PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html) rather
+than in application code is standard PostgreSQL. Splitting private from shared memory is informed
+by [Collaborative Memory](https://arxiv.org/abs/2505.18279). The arbitrary nonempty scope-set
+lattice with intersection visibility is aizk's own, as noted at
+[References and lineage](/docs/dev/prior-art/references/).
+:::
+
 ## One read, evaluated
 
-```mermaid
-flowchart TD
-    A["caller enters `async with user`"] --> B["app-role transaction opens"]
-    B --> C["SET LOCAL app.scopes = '{read, write, public}'"]
-    C --> D["SELECT ... FROM document"]
-    D --> E{"scope_read policy"}
-    E --> F["cardinality(scopes) > 0"]
-    F --> G{"scopes <@ readable array?"}
-    G -- yes --> K["row visible"]
-    G -- no --> H{"single scope and in public?"}
-    H -- yes --> K
-    H -- no --> L["row does not exist, as far as this caller knows"]
-    K --> M["COMMIT resets app.scopes"]
+```text
+  async with user  ─▶  app-role transaction opens
+                            │  SET LOCAL app.scopes = {read, write, public}
+                            ▼
+                    SELECT ... FROM document
+                            │  scope_read policy runs
+                            ▼
+                    cardinality(scopes) > 0
+                            │
+                            ▼
+            scopes contained in the caller's readable array ?
+                 │ yes                            │ no
+                 ▼                                ▼
+            row visible                one scope, and in public ?
+                                          │ yes              │ no
+                                          ▼                  ▼
+                                     row visible     row does not exist,
+                                                     as far as this caller knows
 ```
 
 The whole picture matters. The standing is written transaction-local, the policy reads it back
@@ -108,9 +122,9 @@ CREATE ROLE aizk_app LOGIN PASSWORD %L NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREA
 ```
 
 `NOBYPASSRLS` is the guarantee. Even a bug that hands `aizk_app` a raw connection cannot see
-another tenant's rows. The role gets `USAGE` on the public schema and default privileges for
-`SELECT, INSERT, UPDATE, DELETE` on tables, so new tables inherit access without a follow-up
-grant, and `0001_init` adds explicit grants for the tables it creates after that default was set.
+another tenant's rows. The role gets default privileges for `SELECT, INSERT, UPDATE, DELETE`, so
+new tables inherit access without a follow-up grant, and `0001_init` adds explicit grants for the
+tables it creates.
 
 The separate owner role, `aizk_admin`, owns the schema, runs migrations, and is the only way to
 bypass row security. `Database.owner()` builds its engine and `User.owner` refuses to hand it
@@ -121,9 +135,9 @@ if self.id != settings.system_user_id:
     raise PermissionError("only the system caller may use the database owner role")
 ```
 
-Policies also name `roles=(settings.app_role,)` explicitly, and `app_role` is read from the
-username in `database_url` rather than hardcoded, so a deployment that renames the role keeps
-its policies pointed at it.
+Policies name `roles=(settings.app_role,)` explicitly, and `app_role` is read from the
+`database_url` username rather than hardcoded, so a deployment that renames the role keeps its
+policies pointed at it.
 
 ## Caller standing travels as a GUC
 
@@ -140,13 +154,12 @@ transaction at all. Any ORM statement touching a protected table without a user 
 
 ## The drift check
 
-Declared policy and live policy are compared semantically, not textually. PostgreSQL deparses
-what you gave it, so the catalog text never matches the SQLAlchemy rendering byte for byte.
-`CompiledPolicy._normalize` in the `rls` package parses both sides with **sqlglot** in the
-`postgres` dialect, rewrites away deparser noise such as redundant casts, doubled subqueries and
-`= ANY(ARRAY[...])` versus `IN`, normalizes identifiers, and compares the results.
-`RLSState.diff` then reports missing policies, drifted policies, undeclared policies and any
-table where `enabled` or `forced` is wrong.
+Declared policy and live policy are compared semantically, not textually, because PostgreSQL
+deparses what you gave it and the catalog text never matches the SQLAlchemy rendering byte for
+byte. `CompiledPolicy._normalize` in the `rls` package parses both sides with **sqlglot**, rewrites
+away deparser noise such as redundant casts and `= ANY(ARRAY[...])` versus `IN`, and compares.
+`RLSState.diff` then reports missing, drifted and undeclared policies, and any table where
+`enabled` or `forced` is wrong.
 
 Run it with `chefe run aizk database check-rls`, or read the test that fails the suite when it
 regresses, `test_live_schema_forces_rls_with_no_violations` in `tests/store/test_catalog.py`,

@@ -11,13 +11,12 @@ was checked against the tree.
 
 ## How to read the map
 
-```mermaid
-flowchart LR
-  P["published work"] -->|adopted, follows the design closely| M["shipped mechanism"]
-  P -->|adapted, idea kept, shape changed| M
-  P -.->|compared, no code| B["product boundary"]
-  P -.->|workflow, no runtime| W["how we change the code"]
-  O["designed for aizk"] -->|original| M
+```text
+  published work ──adopted, follows the design closely──▶ shipped mechanism
+  published work ──adapted, idea kept, shape changed────▶ shipped mechanism
+  published work ┄┄compared, no code┄┄▶ product boundary
+  published work ┄┄workflow, no runtime┄┄▶ how we change the code
+  designed for aizk ──original──▶ shipped mechanism
 ```
 
 | Label | Meaning |

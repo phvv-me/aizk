@@ -3,7 +3,6 @@ import starlight from '@astrojs/starlight';
 import tailwind from '@tailwindcss/vite';
 import { defineConfig } from 'astro/config';
 import d2 from 'astro-d2';
-import mermaid from 'astro-mermaid';
 
 // The whole product lives on one origin. A plain Astro page owns `/`, and Astro gives static
 // routes priority over Starlight's dynamic `[...slug]`, so the marketing page wins without a
@@ -13,9 +12,6 @@ export default defineConfig({
   site: 'https://aizk.phvv.me',
   vite: { plugins: [tailwind()] },
   integrations: [
-    // astro-mermaid must be registered before Starlight so its markdown transform runs first.
-    // autoTheme swaps the diagram theme with the page.
-    mermaid({ theme: 'neutral', autoTheme: true }),
     // D2 draws what mermaid draws badly, the table shapes and the container nesting. useD2js
     // renders through WebAssembly so no D2 binary has to exist in the build container.
     d2({

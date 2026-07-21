@@ -8,6 +8,12 @@ organizations and you read it only if you belong to every one of them. This page
 at the level of the column, the policy expression and the classmethods, and it assumes you have
 read that page. Where the values come from is on [The Logto boundary](/docs/dev/identity/logto/).
 
+:::note[Where this comes from]
+The private-versus-shared split is informed by
+[Collaborative Memory](https://arxiv.org/abs/2505.18279), while the intersection lattice itself is
+original to aizk. The [references map](/docs/dev/prior-art/references/) has the full lineage.
+:::
+
 ## The column
 
 Every scoped table gets two columns from the `Scoped` mixin in `src/aizk/store/mixins/scoped.py`.

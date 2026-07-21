@@ -15,13 +15,19 @@ milliseconds and nothing has to be indexed first. aizk earns its keep on the oth
 question, the one that needs meaning, source time, a speaker's perspective, a shared scope, or
 evidence gathered across several documents. They are complements and a working setup runs both.
 
-```mermaid
-flowchart TD
-  Q["a question"] --> E{"exact string<br/>or file path?"}
-  E -->|yes| RG["rg<br/>fastest, no index to keep fresh"]
-  E -->|no| S{"needs a scope, a speaker,<br/>or a point in time?"}
-  S -->|no| QMD["qmd<br/>returns matching files and snippets"]
-  S -->|yes| A["aizk<br/>returns one ranked evidence pack"]
+```text
+  a question
+      │
+      ▼
+  exact string or file path?
+      │
+      ├─ yes ─▶ rg      fastest, no index to keep fresh
+      │
+      └─ no  ─▶ needs a scope, a speaker, or a point in time?
+                    │
+                    ├─ no  ─▶ qmd    returns matching files and snippets
+                    │
+                    └─ yes ─▶ aizk   returns one ranked evidence pack
 ```
 
 | Need | Vault tools | aizk |
@@ -83,11 +89,15 @@ current-state memory surface in this cell.
 | retrieval | graph and text | vector | community summaries | typed hybrid plan and graph lanes |
 | local operation | service oriented | optional | batch oriented | PostgreSQL plus local model lanes |
 
+:::caution
 Read that table as a description of mechanisms and nothing more. No head-to-head benchmark exists
-behind it. An honest GroupMemBench adapter lives in the repository at `src/eval/groupmem.py`, but
-the full aizk run has not been completed, and an external claim would need the same imported
-histories, the same answer model, the same judge, and the same hardware budget on every system
-before it meant anything. [External benchmarks](/docs/dev/eval/external/) tracks that work.
+behind it.
+:::
+
+An honest GroupMemBench adapter lives in the repository at `src/eval/groupmem.py`, but the full aizk
+run has not been completed, and an external claim would need the same imported histories, the same
+answer model, the same judge, and the same hardware budget on every system before it meant anything.
+[External benchmarks](/docs/dev/eval/external/) tracks that work.
 
 ## More graph is not automatically better
 

@@ -12,11 +12,11 @@ Asking is one call named `recall` with one field that matters, the question itse
 
 ## One focused question per call
 
-Write the question the way you would ask a colleague. Natural language works, and keyword soup
-works worse than a sentence.
+Write the question the way you would ask a colleague. Natural language works, and keyword soup works
+worse than a sentence. Your harness makes the call for you.
 
-```json
-{ "query": "why did we move extraction off the LLM backend?" }
+```text
+aizk.recall(query="why did we move extraction off the LLM backend?")
 ```
 
 A compound question splits the ranking budget across two subjects and returns the strongest half of
@@ -39,9 +39,11 @@ Ask twice. It costs one more call and returns far more.
 
 ## Never name a scope
 
-There is no scope selector on `recall` and inventing one is the most common mistake. One question
-reads the caller's full visible union at once, which is your private memory plus every organization
-you belong to plus every intersection you qualify for.
+:::caution[The most common mistake]
+There is no scope selector on `recall`, and inventing one is the most common mistake. One question
+already reads your full visible union, which is your private memory plus every organization you
+belong to plus every intersection you qualify for.
+:::
 
 The results tell you where each item came from, so filtering happens when you read rather than when
 you ask. [Scopes](/docs/user/concepts/scopes/) is the model underneath.
@@ -113,8 +115,8 @@ tuned. There is one reason to override it, which is a caller that repeatedly rec
 than it can use, such as a small model with a tight context window or a loop that recalls many
 times in a row.
 
-```json
-{ "query": "current status of the assay project", "budget": 800 }
+```text
+aizk.recall(query="current status of the assay project", budget=800)
 ```
 
 Do not shrink it to make the answer shorter. A smaller budget drops the least relevant items first,

@@ -14,12 +14,9 @@
     "@astrojs/starlight": "^0.41.3",
     "@astrojs/svelte": "^9.0.1",
     "@tailwindcss/vite": "^4.3.3",
-    "@xyflow/svelte": "^1.6.2",
     "astro": "^7.1.1",
     "astro-d2": "^0.13.1",
-    "astro-mermaid": "^2.1.0",
     "daisyui": "^5.6.18",
-    "mermaid": "^11.16.0",
     "sharp": "^0.35.3",
     "svelte": "^5.56.6",
     "tailwindcss": "^4.3.3"

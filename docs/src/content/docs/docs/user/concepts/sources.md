@@ -47,6 +47,14 @@ is something you wrote. All of it is a projection of what you wrote.
 [Entities, facts, ontology](/docs/user/concepts/graph/) explains how prose turns into the first
 two, which is where most of the value sits.
 
+:::note[Where this comes from]
+The derived layer, the entities and facts aizk pulls from your text, follows the temporal entity
+and fact graph of [Zep and Graphiti](https://arxiv.org/abs/2501.13956). Keeping the raw source
+authoritative echoes [Does Memory Need Graphs](https://arxiv.org/abs/2601.01280). The rule that a
+source always outranks a derived reading is aizk's own. The full
+[map of prior art](/docs/dev/prior-art/references/) traces every mechanism.
+:::
+
 ## The two layers are not equal
 
 ```text

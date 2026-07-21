@@ -116,6 +116,12 @@ was retired rather than as a fresh benchmark.
 Running every lane and letting the cross encoder sort them out costs one wider statement and
 removes a whole class of failure. The plan is a constant.
 
+:::note[Where this comes from]
+Keeping every lane available and ordering the result by one cross-encoder merit pass is original
+to aizk rather than adopted from a paper. The [references map](/docs/dev/prior-art/references/)
+marks which mechanisms are borrowed and which are ours.
+:::
+
 ## Next
 
 <div class="not-content">

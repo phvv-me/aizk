@@ -8,12 +8,20 @@ Every value below lives in `src/aizk/config/settings.py`, reads from the environ
 is compiled into the cached statement, so a changed setting takes effect on the very next recall.
 Read [how recall runs](/docs/dev/read/overview/) first, because the groups below follow its steps.
 
-```mermaid
-flowchart LR
-    A[candidate generation<br/>fusion_depth, recall_max_distance] --> B[graph traversal<br/>hops, mass, damping]
-    B --> C[fusion<br/>rrf_k, bonuses, caps]
-    C --> D[reranking<br/>rerank_depth, sidecar]
-    D --> E[packing<br/>chars_per_token, budget]
+```text
+  candidate generation   fusion_depth, recall_max_distance
+          │
+          ▼
+  graph traversal        hops, mass, damping
+          │
+          ▼
+  fusion                 rrf_k, bonuses, caps
+          │
+          ▼
+  reranking              rerank_depth, sidecar
+          │
+          ▼
+  packing                chars_per_token, budget
 ```
 
 The one number that is not a setting is `k`, the per-lane candidate budget. It is a `recall()`
@@ -112,9 +120,11 @@ Move these behind an evaluation run. `recall_max_distance`, `rrf_k`, `rerank_dep
 wins, and the effect is not monotonic. `chefe run aizk-eval` is the tool, and
 [how we evaluate](/docs/dev/eval/approach/) explains the strata.
 
+:::caution[Rescore after touching the reranker]
 Do not move the rerank templates or `rerank_model` without rescoring. The scaffold turns a
 classifier into a calibrated score, so an edited template produces numbers that still sort but no
 longer mean anything.
+:::
 
 The graph settings sit in between. `multihop_max_hops` and `graph_ppr_frontier` are the two that
 dominate walk cost, so if recall latency is the problem, start there and measure before touching

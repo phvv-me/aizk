@@ -2,24 +2,24 @@
 type Tone = 'prompt' | 'body' | 'quote' | 'label' | 'ok' | 'muted' | 'gap';
 
 const transcript: { kind: Tone; text: string }[] = [
-  { kind: 'prompt', text: 'agent › remember' },
-  {
-    kind: 'body',
-    text: `{ "text": "# Extractor choice\\n\\nWe moved extraction to GLiNER2 because the\\nLLM lane cost 4.1 s per chunk and GLiNER2 costs 0.3 s at the\\nsame grounding rate.\\n\\n#project: aizk",\n  "scopes": ["Toshiba"] }`,
-  },
-  { kind: 'ok', text: '✓ stored  019f7a2c-f3e0-72cc-95eb-3f05dec36d0f  →  scope { Toshiba }' },
+  { kind: 'prompt', text: 'agent › aizk.remember(' },
+  { kind: 'body', text: '          text="We moved extraction to GLiNER2 because the LLM' },
+  { kind: 'body', text: '                lane cost 4.1s per chunk and GLiNER2 costs 0.3s' },
+  { kind: 'body', text: '                at the same grounding rate. #project: aizk",' },
+  { kind: 'body', text: '          scopes=["Book Club"])' },
+  { kind: 'ok', text: '✓ stored  019f7a2c…  →  scope { Book Club }' },
   { kind: 'muted', text: '  queued  chunk → gate → extract → ground → consolidate' },
   { kind: 'gap', text: '' },
-  { kind: 'prompt', text: 'agent › recall  "why did we drop the LLM extractor?"' },
+  { kind: 'prompt', text: 'agent › aizk.recall(query="why did we drop the LLM extractor?")' },
   { kind: 'gap', text: '' },
   { kind: 'label', text: '## Evidence' },
-  { kind: 'body', text: '- Source excerpt · scope Toshiba' },
+  { kind: 'body', text: '- Source excerpt · scope Book Club' },
   { kind: 'quote', text: '    We moved extraction to GLiNER2 because the LLM lane cost' },
-  { kind: 'quote', text: '    4.1 s per chunk and GLiNER2 costs 0.3 s at the same' },
+  { kind: 'quote', text: '    4.1s per chunk and GLiNER2 costs 0.3s at the same' },
   { kind: 'quote', text: '    grounding rate.' },
-  { kind: 'body', text: '- Derived memory · scope Toshiba' },
+  { kind: 'body', text: '- Derived memory · scope Book Club' },
   { kind: 'quote', text: '    [aizk, world] (uses) aizk uses GLiNER2 for extraction.' },
-  { kind: 'muted', text: '  1.4 s · 6 of 2048 tokens · 3 lanes hit' },
+  { kind: 'muted', text: '  1.4s · 6 of 2048 tokens · 3 lanes hit' },
 ];
 
 const tone: Record<Tone, string> = {

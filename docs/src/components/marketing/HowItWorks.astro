@@ -1,5 +1,27 @@
 ---
-import FlowMap from '../FlowMap.svelte';
+import Diagram from '../Diagram.astro';
+
+const nodes = [
+  { id: 'client', label: 'your agent', col: 1, row: 0, href: '/docs/dev/interfaces/mcp/' },
+  { id: 'logto', label: 'Logto identity', col: 2, row: 0, href: '/docs/dev/identity/logto/' },
+  { id: 'write', label: 'write path', col: 0, row: 1, href: '/docs/dev/write/intake/' },
+  { id: 'read', label: 'read path', col: 2, row: 1, href: '/docs/dev/read/overview/' },
+  { id: 'graph', label: 'gate → extract → ground', col: 0, row: 2, href: '/docs/dev/write/extraction/' },
+  { id: 'store', label: 'one PostgreSQL', col: 1, row: 3, emphasis: true, href: '/docs/dev/store/data-model/' },
+  { id: 'passes', label: 'autonomous passes', col: 0, row: 4, href: '/docs/dev/passes/jobs/' },
+  { id: 'evidence', label: 'sourced evidence', col: 2, row: 4, href: '/docs/user/concepts/evidence/' },
+];
+
+const edges = [
+  { from: 'client', to: 'write', label: 'remember' },
+  { from: 'write', to: 'graph' },
+  { from: 'graph', to: 'store' },
+  { from: 'client', to: 'read', label: 'recall' },
+  { from: 'store', to: 'read' },
+  { from: 'read', to: 'evidence' },
+  { from: 'store', to: 'passes', label: 'project' },
+  { from: 'logto', to: 'store', label: 'scopes', dashed: true },
+];
 ---
 
 <section id="how" class="border-base-300 border-b">
@@ -9,10 +31,10 @@ import FlowMap from '../FlowMap.svelte';
         How it works
       </h2>
       <p class="text-base-content/70">
-        Writing and reading are two paths across one database. Click any box to see what it does
-        and where the documentation explains it.
+        Writing and reading are two paths across one database. Tap any box to jump to the part of
+        the docs that explains it.
       </p>
     </div>
-    <FlowMap client:only="svelte" flow="system" />
+    <Diagram title="How aizk fits together, from an agent through the store and back to evidence" nodes={nodes} edges={edges} />
   </div>
 </section>

@@ -3,6 +3,8 @@ title: "Files, PDFs and web sources"
 description: "Bringing an original document into memory and what happens to it afterwards."
 ---
 
+import Diagram from '../../../../../components/Diagram.astro';
+
 This page assumes you can already write plain notes, which
 [Writing memory well](/docs/user/using/remember/) covers. It is about the other kind of thing you
 can put in memory, which is a document you did not write yourself.
@@ -14,59 +16,70 @@ local file.
 
 For one web page, PDF, or other supported file, give the original URL and no text at all.
 
-```json
-{ "source_uri": "https://example.org/binding-assay-protocol.pdf" }
+```text
+aizk.remember(source_uri="https://example.org/binding-assay-protocol.pdf")
 ```
 
 aizk fetches it once, scans the bytes, keeps the exact original unchanged, converts it to readable
 text, and queues that text for the ordinary pipeline. The call returns quickly with a receipt that
 says queued, because conversion happens in the background rather than while you wait.
 
-```mermaid
-flowchart LR
-    U[your URL] --> F[fetch once]
-    F --> S[safety scan]
-    S --> K[keep exact original]
-    K --> C[convert to text]
-    C --> R[recallable]
-    C -->|cannot convert| M[metadata note, still recallable]
-```
+<Diagram
+  title="A URL is fetched once, scanned, preserved, and converted into recallable text"
+  nodes={[
+    { id: 'url', label: 'your URL', col: 0, row: 0 },
+    { id: 'fetch', label: 'fetch once', col: 0, row: 1 },
+    { id: 'scan', label: 'safety scan', col: 0, row: 2 },
+    { id: 'keep', label: 'keep the original', col: 0, row: 3 },
+    { id: 'convert', label: 'convert to text', col: 0, row: 4 },
+    { id: 'recall', label: 'recallable', col: 0, row: 5, emphasis: true },
+    { id: 'meta', label: 'metadata note', col: 1, row: 5 },
+  ]}
+  edges={[
+    { from: 'url', to: 'fetch' },
+    { from: 'fetch', to: 'scan' },
+    { from: 'scan', to: 'keep' },
+    { from: 'keep', to: 'convert' },
+    { from: 'convert', to: 'recall' },
+    { from: 'convert', to: 'meta', label: 'cannot convert', dashed: true },
+  ]}
+/>
 
 Refreshing later is the same call with the same URL and the same scope, so a page you want to track
 does not turn into five near-identical notes.
 
 ## When to preserve the original and when not to
 
-Text is the preferred input. Most of the time what you want in memory is what a document said, and
-a note in your own words says it better and is cheaper to read.
+Text is the preferred input. Most of the time what you want in memory is what a document said, and a
+note in your own words says it better and is cheaper to read.
 
 Preserve the original when the exact bytes might be needed later. A contract, a signed record, a
-form, a paper you may need to cite by page, or a presentation somebody will want to open again all
+form, a paper you may need to cite by page, or a slide deck somebody will want to open again all
 qualify. A blog post explaining an idea you already understood does not.
 
 If you have a URL but only want the text of your own reading of it, pass both `text` and
-`source_uri` and leave preservation off. That records the link on your note without keeping a copy
-of the file.
+`source_uri` and leave preservation off. That records the link on your note without keeping a copy of
+the file.
 
-```json
-{
-  "text": "# Assay protocol, the parts that matter\n\nThe protocol fixes the incubation at 37 C for nine hours, which is why the plate reader is the only instrument that fits.",
-  "source_uri": "https://example.org/binding-assay-protocol.pdf"
-}
+```text
+aizk.remember(
+    text="# Assay protocol, the parts that matter\n\nIt fixes incubation at 37 C for nine hours ...",
+    source_uri="https://example.org/binding-assay-protocol.pdf",
+)
 ```
 
 ## Companion text alongside a file
 
-When both the file and your explanation belong to the same document, pass both and turn
-preservation on. The text is stored as companion context on the same revision, so recall can return
-your framing together with the converted contents rather than as two unrelated notes.
+When both the file and your explanation belong to the same document, pass both and turn preservation
+on. The text is stored as companion context on the same revision, so recall can return your framing
+together with the converted contents rather than as two unrelated notes.
 
-```json
-{
-  "text": "Primary reference for the current retrieval design. Section 4 is the part we implemented.",
-  "source_uri": "https://example.org/paper.pdf",
-  "preserve_source": true
-}
+```text
+aizk.remember(
+    text="Primary reference for the current retrieval design. Section 4 is the part we implemented.",
+    source_uri="https://example.org/paper.pdf",
+    preserve_source=True,
+)
 ```
 
 ## Local files
@@ -96,25 +109,20 @@ failed badge on the processing screen rather than disappearing.
 
 ## The two size limits
 
-There are two numbers and they are different, so it is worth knowing both.
+There are two numbers, and they are different, so it is worth knowing both. The storage layer accepts
+an object up to **96 MiB**, but the malware scanner reads only up to **10 MiB**.
 
-| Limit | Value | What it is |
-|---|---|---|
-| Application ceiling | 96 MiB | the largest object the storage layer accepts at all |
-| Scanner limit | 10 MiB | the largest object the malware scanner will read |
-
-Every file passes the malware scan before anything is stored, and the scan is fail-closed, meaning
-anything the scanner will not or cannot give a clean verdict on is rejected rather than let through.
-ClamAV in the default deployment is configured to 10 MiB, so a 40 MiB file is under the application
-ceiling, gets rejected as too large by the scanner, and never lands.
-
-**10 MiB is the number to plan around.** The 96 MiB figure is the theoretical ceiling and you will
-meet the scanner first.
+:::caution[Plan around 10 MiB]
+Every file is scanned before anything is stored, and the scan is fail-closed, so anything the scanner
+will not or cannot clear is rejected rather than let through. ClamAV in the default deployment is set
+to 10 MiB, so a 40 MiB file sits under the 96 MiB ceiling, is rejected as too large by the scanner,
+and never lands. The 96 MiB figure is the theoretical ceiling, and you will meet the scanner first.
+:::
 
 Do not split a file into pieces to get under the limit. Split parts lose the thing that made the
-original worth preserving, which is that it is the original, and they turn one document into
-several sources that recall then has to reassemble. Store a note describing what the file is and
-where it lives instead.
+original worth preserving, which is that it is the original, and they turn one document into several
+sources that recall then has to reassemble. Store a note describing what the file is and where it
+lives instead.
 
 ## Getting the original bytes back
 

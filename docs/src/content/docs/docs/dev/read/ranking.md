@@ -9,15 +9,21 @@ assumes you have read [the lanes](/docs/dev/read/lanes/), since the first half i
 `SourceLane` calls. The code is `src/aizk/store/models/tables/chunk.py` and
 `src/aizk/retrieval/rerank/rescore.py`.
 
-```mermaid
-flowchart TB
-    D[dense, distance under the floor] --> F[sum of 1 / rrf_k + rank]
-    B[bm25 through tokenize and to_bm25query] --> F
-    T[title named in the query, longest first] --> F
-    F --> S[plus promoted bonus, plus 1.0 when named]
-    S --> C[at most recall_per_document per document, then k]
-    C --> R[cross encoder scores the first rerank_depth]
-    R --> O[direct and unshadowed first, then score, then evidence id]
+```text
+  dense (distance under the floor) ─┐
+  bm25  (tokenize, to_bm25query)   ─┼─▶ RRF, sum of 1 / (rrf_k + rank)
+  title (named in query, longest)  ─┘             │
+                                                  ▼
+                        + promoted_bonus, + 1.0 when named
+                                                  │
+                                                  ▼
+                 at most recall_per_document per document, then k
+                                                  │
+                                                  ▼
+                  cross encoder scores the first rerank_depth
+                                                  │
+                                                  ▼
+           direct and unshadowed first, then score, then evidence id
 ```
 
 ## Chunk.fused unions three rankings
@@ -44,6 +50,12 @@ padding is what makes it a whole-token match rather than a substring accident. I
 The three are unioned and grouped, and each contributes `1 / (rrf_k + rank)` with `rrf_k`
 defaulting to 60. A chunk found by two rankings collects both votes. Fusing positions rather than
 scores is the point, since a cosine distance and a BM25 score are not comparable numbers.
+
+:::note[Where this comes from]
+Fusing ranks instead of raw scores is
+[Reciprocal Rank Fusion](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/).
+The [references map](/docs/dev/prior-art/references/) traces every mechanism back to its source.
+:::
 
 ## Chunk.hybrid scores, caps and cuts
 

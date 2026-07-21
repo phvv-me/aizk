@@ -38,6 +38,13 @@ The gap between the two lines in that picture is real. Bo took over in June and 
 until July 2, so for a month aizk believed something the world had already moved past. Keeping
 both clocks is what lets you see that gap instead of pretending it never happened.
 
+:::note[Where this comes from]
+Keeping two clocks, one for when something was true and one for when aizk was told, comes from the
+temporal knowledge graph in [Zep and Graphiti](https://arxiv.org/abs/2501.13956). Facts fading as
+they go unused follows [Memora](https://arxiv.org/abs/2604.20006). Closing a range instead of
+deleting it is aizk's own.
+:::
+
 ## The two times you can set
 
 When your assistant stores a memory it can attach two optional times. Both are optional, and for

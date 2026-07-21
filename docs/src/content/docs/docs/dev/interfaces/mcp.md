@@ -30,6 +30,17 @@ limit without a code change.
 | `remember` | yes | store text, preserve a URI original, or mint an upload ticket |
 | `share` | yes | copy visible documents into one authorized destination |
 
+A user never hand-writes the MCP JSON. An agent harness reaches the four tools by name, like this.
+
+```text
+aizk.status(days=30)
+aizk.recall(query="why did we switch extractors?", budget=2048)
+aizk.remember(text="reranker sidecar is back up", scopes=["Book Club"])
+aizk.remember(upload={"filename": "contract.pdf", "media_type": "application/pdf",
+                      "size": 84213, "sha256": "..."})
+aizk.share(documents=["019820a1-..."], scopes=["Book Club"])
+```
+
 `AizkMCP.user(context, identified=True)` is what enforces that column. It reads the caller bound by
 the middleware and raises `ToolError` when an anonymous caller tries to write, so
 `recall` is the only tool the read-only anonymous identity can reach.
@@ -53,16 +64,16 @@ themselves.
 
 ## The middleware chain
 
-```mermaid
-flowchart LR
-    req[tool call] --> id[IdentityMiddleware]
-    id --> rl[CallerRateLimit]
-    rl --> tool[tool body]
-    tool --> mem[Memory service]
-    mem --> pg[(PostgreSQL RLS)]
+```text
+  tool call ──▶ IdentityMiddleware ──▶ CallerRateLimit ──▶ tool body ──▶ Memory ──▶ PostgreSQL RLS
 ```
 
-The order is load bearing. `IdentityMiddleware.resolve` calls `Auth.resolve()`, stores the `User`
+:::note[The order is load bearing]
+Identity resolves first so the rate limiter and the accounting both have a caller to key on. Run
+them the other way and a rate check has nobody to charge.
+:::
+
+`IdentityMiddleware.resolve` calls `Auth.resolve()`, stores the `User`
 on the request context under the `aizk_user` state key, opens an accounting context and a serving
 span, measures the request JSON size, runs the handler, then queues one durable usage event with
 the reply size. Because accounting happens after the handler returns, a failed call is not charged.

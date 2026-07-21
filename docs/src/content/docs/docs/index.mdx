@@ -4,27 +4,35 @@ description: "Everything about aizk, split into a user half for people who use i
 ---
 
 import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Diagram from '../../../components/Diagram.astro';
 
 These docs come in two halves. The **user half** is for anyone whose agent talks to aizk. It
-explains what memory is, how sharing works, and how to write and ask for things so the answers
-stay useful. It assumes no database knowledge at all. The **developer half** is for anyone
-changing aizk or running a deployment, and it goes down to table columns, job schedules and GPU
-budgets.
+explains what memory is, how sharing works, and how to write and ask so the answers stay useful.
+You need no database knowledge to read it. The **developer half** is for anyone changing aizk or
+running a deployment, and it goes all the way down to table columns, job schedules and GPU budgets.
 
-Every page here is written to be read on its own in ten minutes or less. When a page needs an
-idea it does not own, it links the one page that does rather than explaining it again.
+Read any page on its own in ten minutes or less. When a page needs an idea it does not own, it
+links the one page that does instead of explaining it twice.
 
-```mermaid
-flowchart LR
-    A([your agent]) -->|remember| W[write path]
-    W --> S[(one PostgreSQL database)]
-    S --> P[autonomous passes]
-    P --> S
-    A -->|recall| R[read path]
-    S --> R
-    R -->|sourced evidence| A
-    L[Logto] -.->|who may read what| S
-```
+<Diagram
+  title="You remember and recall through one agent, everything lands in one database, and Logto decides who reads what"
+  nodes={[
+    { id: 'agent', label: 'your agent', col: 0, row: 1 },
+    { id: 'write', label: 'write path', col: 1, row: 0 },
+    { id: 'read', label: 'read path', col: 1, row: 2 },
+    { id: 'db', label: 'PostgreSQL', col: 2, row: 1, emphasis: true },
+    { id: 'passes', label: 'autonomous passes', col: 3, row: 1 },
+    { id: 'logto', label: 'Logto', col: 2, row: 2.2 },
+  ]}
+  edges={[
+    { from: 'agent', to: 'write', label: 'remember' },
+    { from: 'write', to: 'db' },
+    { from: 'db', to: 'read', label: 'recall' },
+    { from: 'read', to: 'agent', label: 'evidence' },
+    { from: 'passes', to: 'db', label: 'enrich' },
+    { from: 'logto', to: 'db', label: 'who reads what', dashed: true },
+  ]}
+/>
 
 ## Start here
 

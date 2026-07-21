@@ -55,10 +55,9 @@ an RTX 3090 supports nothing else through vLLM's Triton backend.
 
 Two of the three vLLM lanes are capped at 2048 tokens, which looks small until you notice that an
 aizk chunk is 2048 characters and therefore under 700 tokens. The embedder's native 262K length
-would have sized its KV cache at 28 GiB, and even 8192 was roughly ten times more than the lane
-can use. Cutting it to 2048 settled that lane near 4.7 GiB and raised its throughput about 15
-percent over the previous 8192 sizing. The extractor keeps 8192 because it holds one extraction
-window plus the response schema.
+would have sized its KV cache at 28 GiB, and even 8192 was about ten times more than the lane can
+use. Cutting it to 2048 settled that lane near 4.7 GiB and raised throughput about 15 percent. The
+extractor keeps 8192 because it holds one extraction window plus the response schema.
 
 Concurrency is coupled to those caps. `AIZK_LLM_MAX_NUM_SEQS` is 4 and the three graph fan-out
 settings, `AIZK_GRAPH_BUILD_CONCURRENCY`, `AIZK_COMMUNITY_BUILD_CONCURRENCY` and
@@ -68,9 +67,13 @@ raising the scheduled sequence count just moves the wait from the queue into vLL
 
 ## If you only have one card
 
-The estimator encodes the rule. An extractor larger than half the card cannot share it with the
-embedding, reranking and gate lanes, so it needs its own. With one 24 GB card you have two honest
-options. Drop to a small extractor and accept it on the shared card, or set
+:::caution[An extractor larger than half a card needs its own]
+It cannot share a card with the embedding, reranking and gate lanes. That is the rule the
+estimator encodes.
+:::
+
+With one 24 GB card you have two honest options. Drop to a small extractor and accept it on the
+shared card, or set
 `AIZK_EXTRACT_BACKEND=gliner` and run with no LLM lane at all, which is much cheaper and produces
 weaker edges. [Extraction and the gate](/docs/dev/write/extraction/) explains what that trade
 actually costs in the graph.
@@ -106,15 +109,15 @@ WAL spikes, index builds, vacuum rewrites and restore work on top of the table s
 
 ## Read the throughput numbers carefully
 
-The estimator's wall-clock range is a bracket, not a prediction. It comes from two measurements
-taken under different serving configurations. A warm vLLM lane with continuous batching amortized
-to about 667 milliseconds per chunk, and single-chunk smoke tests with no batching ran 20 to 75
-seconds per chunk. Real steady-state backlog work sits near the batched end, so that is the low
-bound, but nothing here was measured end to end on your corpus.
+The estimator's wall-clock range is a bracket, not a prediction, drawn from two measurements
+under different serving configurations. A warm vLLM lane with continuous batching amortized to
+about 667 milliseconds per chunk, while single-chunk smoke tests with no batching ran 20 to 75
+seconds. Steady-state backlog work sits near the batched end, so that is the low bound, but
+nothing here was measured on your corpus.
 
-The same caution applies to the storage estimate. It assumes roughly one entity and one fact per
-chunk after consolidation, which is an observed ratio on one corpus rather than a constant, and
-it counts the text, three `halfvec(1024)` embeddings and index overhead.
+The storage estimate is just as rough. It assumes about one entity and one fact per chunk after
+consolidation, an observed ratio on one corpus rather than a constant, and it counts the text,
+three `halfvec(1024)` embeddings and index overhead.
 
 ## Next
 

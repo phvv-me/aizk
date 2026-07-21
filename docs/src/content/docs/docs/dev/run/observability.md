@@ -8,18 +8,10 @@ they expire. The `usage_event` ledger records what work was done and it does not
 covers both, plus the commands you actually run when something is stuck. It assumes the service
 list from [Deployment topology](/docs/dev/run/topology/).
 
-```mermaid
-flowchart LR
-    containers["every container in project aizk"]
-    alloy["alloy, reads docker.sock read-only"]
-    loki["loki, 720h retention"]
-    grafana["grafana, 127.0.0.1:3003"]
-
-    pg[("PostgreSQL")]
-    ledger["usage_event, durable"]
-
-    containers -->|"stdout and stderr"| alloy --> loki --> grafana
-    containers -->|"successful operations"| pg --> ledger
+```text
+  logs ──▶ containers ─▶ alloy ─▶ loki (720h, 30-day retention) ─▶ grafana
+                │
+  usage ────────┴─▶ PostgreSQL ─▶ usage_event (durable, never expires)
 ```
 
 ## The logging stack
@@ -32,9 +24,7 @@ dropping all capabilities leaves those unprivileged users unable to fix a root-o
 `alloy` discovers containers through `discovery.docker` filtered on the label
 `com.docker.compose.project=aizk`, relabels each target with its container name and Compose
 service, and pushes to Loki. It runs as `473:473` with the Docker socket mounted read-only, and
-`AIZK_DOCKER_GID` adds only the supplemental host group it needs to open that socket. Read-only
-still means broad visibility into container metadata and logs, so treat Alloy as host
-infrastructure rather than an application.
+`AIZK_DOCKER_GID` adds only the supplemental host group it needs to open that socket.
 
 `loki` uses a TSDB index on the local filesystem with the `aizk_logs_` prefix and a compactor
 with `retention_period: 720h`, which is 30 days. `grafana` has one provisioned, noneditable Loki
@@ -47,7 +37,13 @@ docker compose --profile observability --env-file .env -f src/deploy/docker-comp
 ```
 
 Grafana on `127.0.0.1:3003` is the only host port anything in the Compose file publishes. Reach
-it locally or forward it over SSH. Never expose Grafana, Loki, Alloy or the Docker socket.
+it locally or forward it over SSH.
+
+:::caution[Keep the observability stack off the network]
+Never expose Grafana, Loki, Alloy or the Docker socket. Alloy reads the socket read-only, which
+still means broad visibility into every container's metadata and logs, so treat it as host
+infrastructure rather than an application.
+:::
 
 Traces stay inside each Python process unless `AIZK_OTLP_ENDPOINT` names an OTLP over HTTP
 collector, so span export is off until something like Tempo joins this profile.

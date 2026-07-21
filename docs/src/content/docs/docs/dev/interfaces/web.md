@@ -67,17 +67,17 @@ the result through `unwrap`, which turns any rejection into an `ApiError` carryi
 the API's own `detail` string. `failure` converts one of those into a SvelteKit form failure a page
 can render.
 
-```mermaid
-flowchart LR
-    b[browser] --> sk[SvelteKit server]
-    sk -->|"bearer token"| api[aizk HTTP API]
-    api --> pg[(PostgreSQL RLS)]
-    b -.->|"never"| api
+```text
+  browser ──▶ SvelteKit server ──(bearer token)──▶ aizk HTTP API ──▶ PostgreSQL RLS
+     ╎                                                  ▲
+     ╎................. never ...........................┘
 ```
 
-The token never reaches the browser. Loads and form actions run on the SvelteKit server, which is
-also why the processing stream has its own route at `/events/processing` rather than the browser
-opening the API's `text/event-stream` directly.
+:::note[The token never reaches the browser]
+Loads and form actions run on the SvelteKit server, which is also why the processing stream has
+its own route at `/events/processing` rather than the browser opening the API's
+`text/event-stream` directly.
+:::
 
 ## The rules this app must not break
 

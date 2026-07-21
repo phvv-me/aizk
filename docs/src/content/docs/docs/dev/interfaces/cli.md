@@ -62,15 +62,11 @@ root. Tokens go to the system keyring through `KeyringStore`, never to that file
 `aizk remember ./contract.pdf` is worth tracing, because it is three round trips and no credential
 ever touches the upload.
 
-```mermaid
-sequenceDiagram
-    participant CLI
-    participant MCP as MCP server
-    participant API as HTTP API
-    CLI->>MCP: remember(upload={filename, media_type, size, sha256})
-    MCP-->>CLI: UploadTicketAccepted{status, upload_url, expires_seconds}
-    CLI->>API: PUT upload_url, raw bytes, no Authorization header
-    API-->>CLI: ArtifactReceipt
+```text
+  CLI ──▶ MCP server    remember(upload={filename, media_type, size, sha256})
+  MCP server ──▶ CLI    UploadTicketAccepted{status, upload_url, expires_seconds}
+  CLI ──▶ HTTP API      PUT upload_url, raw bytes, no Authorization header
+  HTTP API ──▶ CLI      ArtifactReceipt
 ```
 
 The declaration is made before any bytes move, so an oversized or duplicate file is refused
@@ -78,10 +74,12 @@ cheaply. The ticket is one-time and short-lived, and `MemoryClient.upload` strea
 megabyte chunks with a plain `httpx` client rather than the authenticated one. Passing several
 paths loops the whole exchange once per file and returns a `RememberBatchResult`.
 
+:::caution[10 MiB is the practical limit]
 Two size limits apply and they are far apart. The application ceiling is
 `AIZK_OBJECT_STORE_UPLOAD_BYTE_LIMIT`, which defaults to 100663296 bytes, 96 MiB. ClamAV is
 configured with `MaxFileSize`, `MaxScanSize` and `StreamMaxLength` all at `10M`, and scanning fails
-closed, so **10 MiB is the practical limit** and 96 MiB is the theoretical one.
+closed, so 10 MiB is the practical limit and 96 MiB is the theoretical one.
+:::
 
 File paths cannot be combined with `--source-uri`, `--observed-at`, `--expires-at` or
 `--preserve-source`, and the CLI rejects that before contacting the server.

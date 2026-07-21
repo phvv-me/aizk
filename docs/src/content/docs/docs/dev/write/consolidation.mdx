@@ -1,0 +1,145 @@
+---
+title: "Grounding and consolidation"
+description: "Proving a fact came from the text, then deciding whether it is new."
+---
+
+A model has just proposed entities and facts, which [Extraction and the gate](/docs/dev/write/extraction/)
+covers, and nothing it said is trusted yet. This page follows one proposal through the grounding
+audit, the consolidation cascade and the writer. It assumes you know how a claim carries two time
+ranges, from [The bi-temporal model](/docs/dev/store/bitemporal/). The web app shows these facts as
+Findings.
+
+import Diagram from '../../../../../components/Diagram.astro';
+
+<Diagram
+  title="A proposed fact is audited, matched, judged, then written or dropped"
+  nodes={[
+    { id:'ext', label:'proposed extraction', col:1, row:0 },
+    { id:'audit', label:'grounding audit', col:1, row:1 },
+    { id:'reject', label:'rejected, counted', col:0, row:1 },
+    { id:'cand', label:'new candidates', col:1, row:2 },
+    { id:'lateral', label:'lateral top-5 in SQL', col:1, row:3 },
+    { id:'verdict', label:'rule verdict', col:1, row:4 },
+    { id:'write', label:'lock, replan, write', col:1, row:5 },
+    { id:'close', label:'close old, insert new', col:1, row:6, emphasis:true },
+  ]}
+  edges={[
+    { from:'ext', to:'audit' },
+    { from:'audit', to:'reject', label:'reason' },
+    { from:'audit', to:'cand', label:'accepted' },
+    { from:'cand', to:'lateral' },
+    { from:'lateral', to:'verdict' },
+    { from:'verdict', to:'write' },
+    { from:'write', to:'close' },
+  ]}
+/>
+
+## Grounding
+
+`GroundedProjection.from_extraction` in `src/aizk/graph/grounding.py` decides what survives with
+deterministic rules. `rejection` returns the first reason that applies, in this order.
+
+| Reason | Meaning |
+|---|---|
+| `missing_quote` | the fact carries no quote, or only whitespace |
+| `unsupported_quote` | the quote cannot be located in the chunk text |
+| `unresolved_endpoint` | the subject, or a named object, is not one of the extraction's own entities |
+| `self_relation` | subject and object normalize to the same name |
+| `generic_relation` | the predicate is the catch-all `related_to` |
+
+An accepted fact is rewritten so its endpoints carry the canonical entity name, and only entities
+some accepted fact used are kept. `ProjectionQuality`, logged by `model_extraction` with the chunk
+id, makes the accepted-over-proposed ratio and per-reason breakdown queryable per chunk.
+
+`generic_relation` only rejects a model that fell back to the vacuous predicate. Declared source tags
+produce `related_to` edges too, but those come from `source_extraction` and never reach this audit.
+
+## Aligning the quote without losing offsets
+
+`quote_interval` tries `text.find(quote)` first, the free common case. When that misses,
+`normalized_map` folds text and quote the same way, dropping Markdown backticks, collapsing
+whitespace and casefolding, while recording the original offset behind every emitted character. The
+folded match is translated back through `offsets`, so the span points at real source characters,
+which `GraphWriter.grounding` stores as `quote_start` and `quote_end` in the claim's `attributes` for
+later highlighting.
+
+## The consolidation cascade
+
+The old pipeline asked a model whether every fact was new. Now rules do nearly all of it, each tier
+cheaper than the next.
+
+:::note[Where this comes from]
+The add, update, no-op cascade is adapted from [Mem0](https://arxiv.org/abs/2504.19413), with rules
+settling the confident cases so only genuine ambiguity reaches a model. The full lineage is in
+[References and lineage](/docs/dev/prior-art/references/).
+:::
+
+**Tier one is free.** `GraphWriter.new_candidates` deduplicates within the batch and drops anything
+already claimed. A fact's identity is a UUID5 over its resolved subject, predicate, object and
+normalized statement, so an exact repeat collides by construction. State relations dedupe on subject,
+predicate, validity window and perspective instead, since one interval holds only one current value.
+
+**Tier two is one SQL query.** `_fact_matches` builds the candidates into a typed relation and joins
+it laterally against live fact claims with the same subject, predicate, scope set and perspective
+key, ordered by cosine distance and limited to `similar_facts`, default 5.
+
+**Tier three is `Consolidator.decide`**, which reads the relation's policy from the ontology. With no
+matches the verdict is `ADD`. A `state` relation with exactly one match on the same object is a
+`NOOP`, and any other `state` case is an `UPDATE` superseding the nearest match. For `set` and
+`event` relations the thresholds decide, `consolidation_auto_merge_threshold` at 0.9 and
+`consolidation_borderline_floor` at 0.75. Similarity at or above 0.9 with the same object is a
+`NOOP`, and similarity below 0.75 is an `ADD`.
+
+**Tier four is one batched model call.** Only similarity from 0.75 up to 0.9 leaves the rule verdict
+empty. `GraphWriter.resolve_ambiguous` collects those candidates and `Consolidator.resolve` sends
+each with its own catalog of similar facts in one numbered prompt, validated as
+`BatchConsolidationVerdict` with at most eight verdicts. An `UPDATE` may only supersede a fact from
+that candidate's catalog, and a missing or unknown target becomes `ADD`, keeping the new fact without
+letting the model revise an unrelated claim.
+
+## Dates
+
+Dates cascade too. `resolve_valid_from` prefers the model's own `date` field and then parses
+the statement itself, both through `parse_date`, which runs dateparser with `STRICT_PARSING`, only
+`absolute-time` parsers, `DATE_ORDER` of `YMD` and a past-date preference. Strictness is the point, since a permissive parser
+resolves ordinary prose to today and corrupts bi-temporal validity. `with_source_fallback` then fills a still-undated fact from the capture
+context's `observed_at`, falling back to the document's creation time, and caps an open `valid_to` at
+the source's `expires_at`, so an expiring source cannot leave a claim open forever.
+
+## The writer
+
+`write_graph_slice` in `src/aizk/graph/build.py` keeps model work outside transactions and holds each
+one short.
+
+**Locking.** `lock_plans` takes one `pg_advisory_xact_lock` per slot, keyed by subject, predicate,
+perspective key and scope set, over a sorted list. Sorted acquisition keeps concurrent chunks on the
+same subject from deadlocking.
+
+**Replan and bail.** Ranking happened before the lock, so it may be stale. Inside the lock
+`_apply_plans` re-runs `plan_facts` and compares the new matches against the ones the verdicts used.
+If they differ it abandons the attempt rather than write against a graph that moved. `_consolidate`
+retries the cycle up to four times, then raises naming the chunk.
+
+**Temporal closure.** `Fact.Claim.revise` applies every correction in one statement. The ordinary
+case closes the superseded claim's valid range at the greater of the new `valid_from` and the old
+lower bound, and its recorded range at database `now()`. The backdated case, where the new fact
+starts before the old claim did, leaves the old claim alone and returns an adjusted end so the new
+claim stops where the old one begins. History stays a clean partition.
+
+**Transient retry.** `_transient_retries` wraps both transactions with tenacity, four attempts and a
+random exponential wait up to one second. `is_transient_db_error` retries only a `DBAPIError` whose
+asyncpg error is `TransactionRollbackError`, a deadlock or serialization failure, and every other
+error surfaces immediately. The final insert uses
+`ON CONFLICT DO NOTHING` over content id, scopes and perspective key on still-open rows, so two
+racing writers converge instead of colliding.
+
+## Next
+
+<div class="not-content">
+
+- [The bi-temporal model](/docs/dev/store/bitemporal/) explains the two ranges these writes close.
+- [Graph tables](/docs/dev/store/graph-tables/) has the content and claim columns in full.
+- [Evidence and provenance](/docs/user/concepts/evidence/) is the reader-facing view of grounding.
+- [Communities and RAPTOR](/docs/dev/passes/communities-raptor/) covers what runs after the write.
+
+</div>

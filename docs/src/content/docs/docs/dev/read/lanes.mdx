@@ -20,11 +20,34 @@ read [how recall runs](/docs/dev/read/overview/) and know that step four builds 
                                      candidate rows
 ```
 
-import FlowMap from '../../../../../components/FlowMap.svelte';
+import Diagram from '../../../../../components/Diagram.astro';
 
-Click any lane to see what it selects and where it is documented.
-
-<FlowMap client:only="svelte" flow="recall" height="34rem" />
+<Diagram
+  title="Every lane unions into one statement, then a reranker and a budget walk"
+  nodes={[
+    { id: 'facts', label: 'facts', col: 0, row: 0 },
+    { id: 'sources', label: 'sources', col: 1, row: 0 },
+    { id: 'catalog', label: 'entity catalog', col: 2, row: 0 },
+    { id: 'working', label: 'working memory', col: 3, row: 0 },
+    { id: 'profile', label: 'profiles', col: 0, row: 1 },
+    { id: 'comm', label: 'communities', col: 1, row: 1 },
+    { id: 'over', label: 'RAPTOR roots', col: 2, row: 1 },
+    { id: 'union', label: 'one SQL statement', col: 1.5, row: 2, emphasis: true },
+    { id: 'merit', label: 'cross-encoder merit order', col: 1.5, row: 3, href: '/docs/dev/read/ranking/' },
+    { id: 'pack', label: 'budget walk', col: 1.5, row: 4, href: '/docs/dev/read/packing/' },
+  ]}
+  edges={[
+    { from: 'facts', to: 'union' },
+    { from: 'sources', to: 'union' },
+    { from: 'catalog', to: 'union' },
+    { from: 'working', to: 'union' },
+    { from: 'profile', to: 'union' },
+    { from: 'comm', to: 'union' },
+    { from: 'over', to: 'union' },
+    { from: 'union', to: 'merit' },
+    { from: 'merit', to: 'pack' },
+  ]}
+/>
 
 ## Six kinds, seven instances
 
@@ -73,6 +96,12 @@ weight and falling back to dense entities and fact endpoints only when nothing w
 `graph_ppr_frontier` entities per hop and accumulating every hop into a `graph_mass_window` cut.
 `Fact.Live.connected` finally scores each connecting fact by the weaker endpoint's mass, so a fact
 needs standing at both ends rather than one popular one.
+
+:::note[Where this comes from]
+Seeding entities and diffusing mass across the fact graph is aizk's in-SQL take on
+[HippoRAG 2](https://arxiv.org/abs/2502.14802), which runs personalized PageRank over a memory
+graph. The [references map](/docs/dev/prior-art/references/) traces the rest of the lineage.
+:::
 
 `FactLane.merged` interleaves the parts. Each part gets its own `row_number()`, the union groups
 by fact id and keeps the minimum rank, so a fact that a part ranked first stays first even when

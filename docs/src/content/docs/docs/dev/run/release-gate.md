@@ -90,8 +90,9 @@ rather than inherited from an earlier document.
 
 ## Accepted gaps
 
-Two items on this list are not passes and should be recorded as accepted rather than quietly
-skipped.
+:::caution[Two items are accepted gaps, not passes]
+Record them as known and accepted rather than quietly skipping them.
+:::
 
 The dedicated PostgreSQL device is not LUKS encrypted, and the reference host has no TPM
 available for unattended unlock. [PostgreSQL and storage](/docs/dev/run/postgres/) explains the
@@ -104,11 +105,10 @@ gives you a memory that knows about files it can no longer open.
 
 ## What changed from the old checklist
 
-Two items in the previous version were wrong and are corrected above. There is no `pgrls lint`
-command in this repository, and the real check is `aizk admin database check-rls` backed by
-`ops.scoped_rls_violations`. And the browser image was described as static, which it is not, since
-`frontend` is an adapter-node server that renders every page. The claim it was making, that no
-secret is baked at build time, does hold.
+Two items in the previous version were wrong. There is no `pgrls lint` command here, and the real
+check is `aizk admin database check-rls` backed by `ops.scoped_rls_violations`. And the browser
+image was called static, which it is not, since `frontend` is an adapter-node server that renders
+every page. Its real claim, that no secret is baked at build time, still holds.
 
 ## Next
 

@@ -10,11 +10,14 @@ deployment rather than a development one.
 
 ## chefe owns everything
 
-There is one rule and it saves a lot of confusion. Every command runs through `chefe run`. Never
-call `uv run`, `pip`, `pytest`, `python`, or `pixi` directly, because the environment those would
-use is not the environment the gate uses, and the divergence is not theoretical. CI once ran a
-separate `uv sync`, and a stale lock plus three missing type stubs hid 187 type errors from the
-local gate for weeks.
+There is one rule and it saves a lot of confusion.
+
+:::danger[Everything runs through chefe]
+Every command runs through `chefe run`. Never call `uv run`, `pip`, `pytest`, `python`, or `pixi`
+directly, because that environment is not the one the gate uses, and the divergence is not
+theoretical. CI once ran a separate `uv sync`, and a stale lock plus three missing type stubs hid
+187 type errors from the local gate for weeks.
+:::
 
 ```text
   pyproject.toml

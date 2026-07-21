@@ -3,9 +3,9 @@ title: "Deployment topology"
 description: "Every Compose service, what it does, and which profile starts it."
 ---
 
-One file, `src/deploy/docker-compose.yml`, defines the whole deployment. This page walks it
-service by service. It assumes you have read the [System map](/docs/dev/architecture/system-map/)
-and know that aizk ships as three Python entrypoints on one image.
+The whole deployment is one file, `src/deploy/docker-compose.yml`. This page walks it service by
+service, so it helps to have read the [System map](/docs/dev/architecture/system-map/) first and
+to know that aizk ships as three Python entrypoints on one image.
 
 ```d2
 direction: right
@@ -115,9 +115,11 @@ Order matters in exactly one place. `/auth/callback` belongs to the MCP server a
 first, so the later `/auth/*` rule only catches the browser sign-in flow. Because the fallback is
 the static site, a new documentation page never needs a routing change.
 
-One detail is easy to miss. The `caddy` service declares a network alias of `web`, because the
-externally managed tunnel ingress still targets `web:8081`. Renaming the service without keeping
-that alias breaks the tunnel while every container still looks healthy.
+:::caution[Keep the caddy `web` alias]
+The `caddy` service declares a network alias of `web`, because the externally managed tunnel
+ingress still targets `web:8081`. Rename the service without carrying that alias forward and the
+tunnel breaks while every container still looks perfectly healthy.
+:::
 
 ## The observability and integration profiles
 

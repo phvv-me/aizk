@@ -3,48 +3,49 @@ title: "External benchmarks"
 description: "GroupMemBench, forgetting-aware scoring, and the claims we do not make."
 ---
 
-An external benchmark is the only level that compares aizk with anything, and it is the level
-where aizk currently has no number to show. This page assumes you have read
+An external benchmark is the only level that compares aizk with anything, and it is the level where
+aizk currently has no number to show. This page assumes you have read
 [how we evaluate](/docs/dev/eval/approach/) and know the isolation rules on
 [the eval CLI](/docs/dev/eval/cli/).
+
+:::note[Where this comes from]
+The adapter reads the group-memory benchmark from GroupMemBench
+([2605.14498](https://arxiv.org/abs/2605.14498)), and `FAMAScore` implements the forgetting-aware
+equation from Memora ([2604.20006](https://arxiv.org/abs/2604.20006)). The full lineage is on
+[references and lineage](/docs/dev/prior-art/references/).
+:::
 
 ## The GroupMemBench adapter
 
 `src/eval/groupmem.py` reads the released conversation and question schemas directly. It does not
-copy the upstream implementation, whose repository currently declares no license. Messages come
-from `data/final/<Domain>/synthetic_domain_channels_rolevariants_<Domain>.json` and questions come
-from `questions/<Domain>/<kind>.jsonl`, both validated into frozen models before anything is
-stored.
+copy the upstream implementation, whose repository currently declares no license. Messages come from
+`data/final/<Domain>/synthetic_domain_channels_rolevariants_<Domain>.json` and questions come from
+`questions/<Domain>/<kind>.jsonl`, both validated into frozen models before anything is stored.
 
 Structure is preserved rather than flattened into text. Every message keeps its author, role,
 channel, reply target, phase, topic, decision marker and source time, and those become a
 `CaptureContext` on the ingested source. Every question is asked as the user who asked it, so a
 first-person question resolves against the right speaker.
 
-```mermaid
-sequenceDiagram
-    participant D as released corpus
-    participant A as GroupMemBench adapter
-    participant W as write path
-    participant R as recall
-    participant J as LLM judge
-    D->>A: channels JSON and question JSONL
-    A->>A: fingerprint the selected messages
-    A->>W: ingest_texts into one deterministic scope
-    W->>W: build_graph over that scope
-    A->>R: recall as the named asking user, k=10
-    R->>A: packed context
-    A->>A: answer from that context only
-    A->>J: candidate against the gold answer
-    J->>A: correct or not, with a reason
+```text
+  released corpus ──▶ adapter: fingerprint the selected messages
+                        │
+                        ├─▶ write path: ingest_texts into one deterministic scope
+                        │        └─▶ build_graph over that scope
+                        │
+                        ├─▶ recall: as the named asking user, k=10 ──▶ packed context
+                        │
+                        ├─▶ adapter: answer from that context only
+                        │
+                        └─▶ LLM judge: candidate against the gold answer ──▶ correct or not
 ```
 
-The scope is derived from `benchmark:GroupMemBench:<domain>:<fingerprint>`, and the fingerprint is
-a SHA-256 over the adapter version and the exact selected messages. Two revisions of a corpus
-therefore cannot share prepared state. Preparation is idempotent and verified, because
-`corpus_state` counts the imported documents and any chunk that has not finished graph extraction,
-and the runner refuses to score a corpus that is short a document or still has pending chunks. The
-scope is purged after the run unless you pass `--keep`.
+The scope is derived from `benchmark:GroupMemBench:<domain>:<fingerprint>`, where the fingerprint is
+a SHA-256 over the adapter version and the exact selected messages, so two revisions of a corpus
+cannot share prepared state. Preparation is idempotent and verified, because `corpus_state` counts
+the imported documents and any chunk that has not finished graph extraction, and the runner refuses
+to score a corpus that is short a document or still has pending chunks. The scope is purged after
+the run unless you pass `--keep`.
 
 ## The six question kinds
 
@@ -78,26 +79,25 @@ accordingly.
 ```
 
 Healthcare and Manufacturing stay useful as diagnostic domains, but their released questions are
-unfiltered, so a score there is not comparable to the published protocol. Reusing the local LLM
-also drops the run to diagnostic, and an operational failure is never turned into an ordinary
-wrong answer.
+unfiltered, so a score there is not comparable to the published protocol. Reusing the local LLM also
+drops a run to diagnostic, and an operational failure is never turned into an ordinary wrong answer.
 
 ## The honest status
 
 No aizk GroupMemBench score exists. The adapter is implemented and unit-tested and the runner
-executes the complete path, but a full run needs the deployed embedding and extraction lanes
-against the whole 30,000 message domain, and that has not been completed. A synthetic estimate is
-not an acceptable substitute, so there is no head-to-head claim on this page and there will not be
-one until a run comes back publishable.
+executes the complete path, but a full run needs the deployed embedding and extraction lanes against
+the whole 30,000 message domain, and that has not been done. A synthetic estimate is not an
+acceptable substitute, so there is no head-to-head claim here and there will not be one until a run
+comes back publishable.
 
-For difficulty context only, the GroupMemBench paper reports its best evaluated system at 46
-percent overall. That is a reference for how hard the task is, not an aizk result and not a
-target anybody here has hit.
+For difficulty context only, the GroupMemBench paper reports its best evaluated system at 46 percent
+overall. That is a reference for how hard the task is, not an aizk result and not a target anybody
+here has hit.
 
 ## Running one
 
-A small diagnostic run is the normal way to check that a corpus directory parses and that the
-whole path still works end to end.
+A small diagnostic run is the normal way to check that a corpus directory parses and that the whole
+path still works end to end.
 
 ```sh
 chefe run aizk-eval groupmem /path/to/GroupMemBench \
@@ -105,10 +105,10 @@ chefe run aizk-eval groupmem /path/to/GroupMemBench \
 ```
 
 That reroutes to the isolated evaluation database, resets it, imports the messages, builds the
-graph, answers and judges, and then purges the scope. Because `--question-limit` is set it comes
-back marked `diagnostic`, which is the correct label and not a warning to work around. Drop both
-limits, point the answering and judging models at the reference protocol, and the same command
-produces a publishable report or tells you which of the five conditions failed.
+graph, answers and judges, then purges the scope. Because `--question-limit` is set it comes back
+marked `diagnostic`, which is the correct label and not a warning to work around. Drop both limits,
+point the answering and judging models at the reference protocol, and the same command produces a
+publishable report or tells you which of the five conditions failed.
 
 ## Forgetting-aware scoring
 
@@ -123,30 +123,28 @@ score = max(0, MPA - weight * (1 - FAA))
 ```
 
 It penalizes exactly the failure a retrieval score misses. An answer that finds every relevant
-current memory and also repeats an invalidated one scores a perfect MPA and still loses credit,
-proportionally to how much of the question was about forgetting. When a question declares no
-forgetting criteria the absence term defaults to 1.0 and the score reduces to plain presence
-accuracy.
+current memory and also repeats an invalidated one scores a perfect MPA and still loses credit, in
+proportion to how much of the question was about forgetting. When a question declares no forgetting
+criteria the absence term defaults to 1.0 and the score reduces to plain presence accuracy.
 
-It is available and tested rather than in use. The GroupMemBench runner currently scores
-correctness with an LLM judge, so no report on this page carries a FAMA number yet.
+It is available and tested rather than in use. The GroupMemBench runner currently scores correctness
+with an LLM judge, so no report here carries a FAMA number yet.
 
 ## The adapters that do not exist
 
 `src/eval/` holds exactly one external adapter today. LongMemEval-V2, Memora and Mem2ActBench are
 read, cited and used to shape the design, and briefs for each live in the corpus, but no code
-imports their corpora and no score for them exists. If a page anywhere claims otherwise it is
-wrong.
+imports their corpora and no score for them exists. If a page anywhere claims otherwise it is wrong.
 
 ## The action-memory boundary
 
-Everything measured across these pages is retrieval and extraction. A retrieval score says that
-the right evidence reached the top of a packed context. It says nothing about whether an agent
-then chose the right action, because aizk generates no actions and no benchmark here scores any.
+Everything measured across these pages is retrieval and extraction. A retrieval score says the right
+evidence reached the top of a packed context. It says nothing about whether an agent then chose the
+right action, because aizk generates no actions and no benchmark here scores any.
 
-That boundary matters because action-memory benchmarks are the ones people most want a memory
-system to win. Reporting a retrieval number against them would be a category error, so when a
-comparison needs an action-selection claim, the honest answer is that aizk has not measured it.
+That boundary matters because action-memory benchmarks are the ones people most want a memory system
+to win. Reporting a retrieval number against them would be a category error, so when a comparison
+needs an action-selection claim, the honest answer is that aizk has not measured it.
 
 ## Next
 

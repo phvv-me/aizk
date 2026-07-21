@@ -156,10 +156,13 @@ ForeignKeyConstraint(
 )
 ```
 
+:::caution[Why the key is composite]
 A single foreign key on `artifact_content_id` alone would let a forged pair name a revision
-belonging to somebody else's artifact. The composite key makes PostgreSQL check the pair, so
-the revision must truly belong to the artifact named beside it, and that is what
-`uq_artifact_content_artifact_id_id` exists to support. `Artifact.share` relies on the same
+belonging to somebody else's artifact. The composite key makes PostgreSQL check the pair, so the
+revision must truly belong to the artifact named beside it.
+:::
+
+That check is what `uq_artifact_content_artifact_id_id` exists to support. `Artifact.share` relies on the same
 pairing when it reads the source, and it takes a transaction-scoped advisory lock keyed by the
 target's dedup identity so the target lookup, the blob dedup and `max(revision) + 1` cannot
 race a peer.

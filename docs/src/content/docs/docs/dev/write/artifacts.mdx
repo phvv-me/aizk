@@ -1,0 +1,146 @@
+---
+title: "Artifacts"
+description: "Scanning, storing and converting an original file without ever trusting it."
+---
+
+An artifact is bytes somebody else produced, so the pipeline treats them as hostile until a scanner
+says otherwise. This page follows [Intake](/docs/dev/write/intake/), where a URI or upload reaches
+this code, and hands off to [Chunking and embedding](/docs/dev/write/chunking/) once conversion
+produces text.
+
+import Diagram from '../../../../../components/Diagram.astro';
+import { Steps } from '@astrojs/starlight/components';
+
+## The order is the design
+
+`ArtifactIntake.accept` in `src/aizk/artifacts/service.py` runs four steps whose order is the whole
+security argument.
+
+<Steps>
+
+1. `ClamAVClient.scan` streams the complete bytes to `clamd` and must come back clean.
+2. `ByteStore.put` hashes and stores them behind an opaque key.
+3. `ArtifactRepository.create_original` writes the `artifact`, `blob` and `artifact_content` rows.
+4. `ArtifactQueue.enqueue` queues a conversion by id, moving the state to `queued`.
+
+</Steps>
+
+Scanning happens before persistence, so a hostile file never reaches the object store, and
+persistence happens before queueing, so the queue only carries a content id and a scope set, never
+bytes or a URI. If step three raises a `SQLAlchemyError`, the stored object is deleted as
+compensation, the only ordering that can orphan one.
+
+Scanning is fail-closed. Only the literal `OK` verdict passes, a `FOUND` verdict or a byte-limit
+refusal raises `MalwareRejectedError`, and a timeout, connection failure or unparsable reply raises
+`MalwareUnavailableError`, none being an authoritative clean verdict. The taxonomy lives
+in `src/aizk/integrations/clamav/client.py`, and scans run on their own four-worker pool so a
+stranded peer cannot pin the shared executor.
+
+## Two size limits, only one bites
+
+The application ceiling `AIZK_OBJECT_STORE_UPLOAD_BYTE_LIMIT` defaults to 100663296 bytes (96 MiB)
+and bounds the URI reader, the upload body, the scanner and every decompression. But
+`src/deploy/docker-compose.yml` sets ClamAV's `MaxFileSize`, `MaxScanSize` and `StreamMaxLength` to
+`10M` each.
+
+:::caution[10 MiB is the real limit]
+A file the scanner refuses is a file aizk refuses, so 10 MiB is the practical ceiling and 96 MiB
+only theoretical. Raise the three ClamAV variables together for more, and remember the whole
+artifact stays in memory, since scanning, hashing and storing each need the complete bytes.
+:::
+
+## Storage
+
+`ByteStore` in `src/aizk/storage.py` writes to an S3-compatible backend. A key is `objects/` plus
+`secrets.token_urlsafe(32)`, 256 bits of randomness with no filename, scope, media type or
+checksum. Object storage has no tenant context, so the caller must authorize the PostgreSQL `blob`
+row before reading or signing it.
+
+Compression is adaptive. `encode` uses Zstandard at `object_store_compression_level`, default 3,
+keeping the result only when it saves at least `object_store_compression_min_savings`, default 0.05,
+and otherwise storing `identity`. Decoding caps the decompressor at the upload limit plus one byte
+and requires `eof`, catching a compression bomb before it can allocate.
+
+The `blob` row records the UUIDv8 content hash, the logical size, the stored size, the encoding and
+the object-store version. `ArtifactProcessor.process` reads back against all of those, so a silently
+corrupted or replaced object fails with `IntegrityMismatch` rather than being converted.
+
+## The state machine
+
+`ArtifactContent.State` is a PostgreSQL enum, deliberately independent from PgQueuer, which owns
+delivery while this column owns the durable outcome.
+
+<Diagram
+  title="The durable artifact state, from pending through ready or failed"
+  nodes={[
+    { id:'pending', label:'pending', col:1, row:0 },
+    { id:'queued', label:'queued', col:1, row:1, emphasis:true },
+    { id:'processing', label:'processing', col:1, row:2 },
+    { id:'failed', label:'failed', col:2, row:2 },
+    { id:'ready', label:'ready', col:1, row:3 },
+  ]}
+  edges={[
+    { from:'pending', to:'queued', label:'enqueue' },
+    { from:'queued', to:'processing', label:'picked' },
+    { from:'processing', to:'ready', label:'stored' },
+    { from:'processing', to:'failed', label:'error' },
+    { from:'failed', to:'queued', label:'retry', dashed:true },
+  ]}
+/>
+
+`pending` exists because the row is created before the enqueue call returns. If the process dies in
+between, `ArtifactIntake.dispatch_pending` finds it again, up to `artifact_dispatch_batch_size` at a
+time, default 100, on the every-minute `artifact_dispatch_cron`. `failed` is recovered by
+`ArtifactRecovery`, which prefers retained queue jobs and only then enqueues durable failures with
+no live job.
+
+## Conversion and the fallback document
+
+`ArtifactProcessor` reads the original back and posts it to Docling Serve asking for `json` and `md`
+with `image_export_mode` of `placeholder`. Docling may use images while converting, but aizk stores
+only the JSON and the Markdown.
+
+`DoclingOutput.from_response` accepts `success` and `partial_success` and rejects `skipped`,
+`failure`, and any response missing either format. On rejection the processor still calls `index`
+with the state `failed`, creating a document from the Jinja template
+`src/aizk/artifacts/templates/source.md.j2`. That fallback carries the file's metadata and source
+URI, so an unsupported file stays findable and downloadable through an authorized read.
+
+Companion text is the caller's own prose about the file, capped by
+`web_artifact_companion_max_chars`, default 65,536, stored on the `artifact_content` row and
+rendered at the top of the document. `ArtifactDocument.semantic` is true only when there is
+companion text or Markdown, and only a semantic document is enqueued for graph projection, so a
+metadata-only shell is recallable but never becomes facts.
+
+## The upload capability
+
+`UploadBox` in `src/aizk/artifacts/uploads.py` never lets an agent stream bytes into the MCP server.
+It mints a ticket instead. The caller declares `filename`, `media_type`, `size` and `sha256`, and
+`mint` refuses a size above the upload limit, authorizes the write scope once, and packs a
+`TicketRecord` holding only the minter's id, the authorized scopes and the declaration. It does not
+keep the caller's full scope table, so a redeemed ticket writes to those scopes and nothing wider.
+
+The capability itself is `secrets.token_urlsafe(32)` in the `upload_capability` table under the
+system scope, so the MCP process can mint a grant the separate API process redeems. It lives for
+`api_upload_ttl_seconds`, default 600, and a caller may hold at most
+`api_upload_live_grants_per_caller`, default 8. The accepted response is exactly this shape.
+
+```json
+{ "status": "accepted", "upload_url": "https://.../api/uploads/<capability>", "expires_seconds": 600 }
+```
+
+The URL is built from `api_base_url`, so callers never construct it. Redemption is single use.
+`claim` runs `DELETE ... RETURNING` on the row, so a second `PUT` finds nothing and raises
+`UploadCapabilityError`, and `deliver` refuses any body whose length or SHA-256 misses the
+declaration before calling the same `ArtifactIntake.accept` every other door uses.
+
+## Next
+
+<div class="not-content">
+
+- [Chunking and embedding](/docs/dev/write/chunking/) covers what happens to the converted text.
+- [The job system](/docs/dev/passes/jobs/) covers PgQueuer, priorities and recovery.
+- [Content and artifact tables](/docs/dev/store/content-tables/) has the columns in full.
+- [The HTTP API](/docs/dev/interfaces/http-api/) has the upload endpoint and its neighbors.
+
+</div>

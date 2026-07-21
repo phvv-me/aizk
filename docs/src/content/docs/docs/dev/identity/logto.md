@@ -51,11 +51,13 @@ plus every organization they see, write is the caller plus every organization wh
 include `logto_write_permission`, which `src/deploy/logto.conf` sets to `write:memory`, and public
 is the public catalog.
 
-Be aware of one stale comment. `src/web/src/hooks.server.ts` says organization standing rides in a
-custom `aizk_groups` claim, and uses that as the reason to leave the `urn:logto:scope` organization
-scopes out of the sign-in request. Nothing in the Python server reads such a claim. Leaving those
-scopes out is still correct, because standing is resolved server side, but the reason the comment
-gives no longer describes the code.
+:::caution[A stale comment to ignore]
+`src/web/src/hooks.server.ts` says organization standing rides in a custom `aizk_groups` claim, and
+uses that as the reason to leave the `urn:logto:scope` organization scopes out of the sign-in
+request. Nothing in the Python server reads such a claim. Leaving those scopes out is still correct,
+because standing is resolved server side, but the reason the comment gives no longer describes the
+code.
+:::
 
 ## The authority cache
 
@@ -90,19 +92,14 @@ token through `get_access_token()`. The browser API declares an `HTTPBearer` dep
 subject. The API needs that raw subject because organization management calls act as the person
 making them. Everything after those two lines is identical.
 
-```mermaid
-sequenceDiagram
-    participant C as Client
-    participant A as Auth
-    participant L as Logto
-    participant P as PostgreSQL
-    C->>A: request with bearer token
-    A->>A: verify issuer, audience, scopes
-    A->>L: subject standing, cached 60s
-    L-->>A: organizations, roles, public catalog
-    A->>A: uuid5 subject and scope ids
-    A->>P: SET LOCAL app.scopes
-    P-->>C: only the rows the policies admit
+```text
+  Client ──▶ Auth         request carrying a bearer token
+  Auth                    verify issuer, audience, scopes
+  Auth ──▶ Logto          read subject standing, cached 60s
+  Logto ──▶ Auth          organizations, roles, public catalog
+  Auth                    derive uuid5 subject and scope ids
+  Auth ──▶ PostgreSQL     SET LOCAL app.scopes
+  PostgreSQL ──▶ Client   only the rows the policies admit
 ```
 
 ## Policy lives in a file

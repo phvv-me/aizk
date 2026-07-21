@@ -86,7 +86,12 @@ error never reaches a browser verbatim.
 ```
 
 It buffers every response message until the usage event is queued, then replays the buffer to the
-real `send`. That ordering means a reply is never delivered before its accounting is durable.
+real `send`.
+
+:::note[Accounting lands before the reply ships]
+That ordering means a reply is never delivered before its accounting is durable.
+:::
+
 `/api/processing/events` is the one exception, listed in `_STREAM_PATHS`, because buffering a
 server-sent event stream would defeat it. That path gets the accounting context but no buffering.
 

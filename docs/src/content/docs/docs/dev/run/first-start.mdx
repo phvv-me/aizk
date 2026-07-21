@@ -1,0 +1,132 @@
+---
+title: "First start"
+description: "From an empty host to a working deployment, secret by secret."
+---
+
+This page takes a host that already has Docker and an NVIDIA runtime all the way to a deployment
+that answers a real recall. It helps to know which services exist from
+[Deployment topology](/docs/dev/run/topology/), and that the machine is big enough per
+[Hardware and cost](/docs/dev/run/hardware/).
+
+The run is two tracks that meet at the health check. The default profile gives you a private
+engine you can already probe. The Logto and public track adds the internet-facing surface on top.
+
+```text
+  fill .env ─▶ up -d default ─┬──────────────────────────▶ admin health
+                              │                                 ▲
+                              └▶ Logto apps ─▶ auth apply ─▶ up -d public
+```
+
+import { Steps } from '@astrojs/starlight/components';
+
+Compose reads one file, the project `.env` at the package root, and every command names it
+explicitly. Follow the steps in order.
+
+<Steps>
+
+1. **Fill the environment.** Start from the committed example and generate a fresh secret for each
+   blank.
+
+   ```sh
+   cp src/deploy/.env.example .env
+   openssl rand -base64 32
+   ```
+
+   Six values are hard requirements. Compose interpolates them with `:?`, so it refuses to start
+   at all while any of them is blank.
+
+   ```sh
+   AIZK_ADMIN_PASSWORD=
+   AIZK_APP_PASSWORD=
+   AIZK_LOGTO_DB_PASSWORD=
+   AIZK_OBJECT_STORE_ACCESS_KEY=
+   AIZK_OBJECT_STORE_SECRET_KEY=
+   AIZK_DOCLING_API_KEY=
+   ```
+
+2. **Start the local stack**, the default profile, which is the engine with no public surface.
+
+   ```sh
+   docker compose --env-file .env -f src/deploy/docker-compose.yml up -d
+   ```
+
+   The first start is slow, because the three vLLM lanes come up one after another and each one
+   downloads and loads weights. `setup` runs the migrations once and exits. Nothing is exposed to
+   the network yet.
+
+3. **Create the three Logto applications.** The public profile needs Logto to already know about
+   aizk, so make these in the Logto console and paste their credentials into `.env`.
+
+   | Application | Kind | Setting pair |
+   |---|---|---|
+   | Management API client | machine to machine, role carrying the Management API `all` permission | `AIZK_LOGTO_CLIENT_ID`, `AIZK_LOGTO_CLIENT_SECRET` |
+   | MCP OAuth upstream | traditional web, redirect is the aizk server callback | `AIZK_OAUTH_CLIENT_ID`, `AIZK_OAUTH_CLIENT_SECRET` |
+   | Browser app | traditional web, redirect is exactly `${AIZK_WEB_PUBLIC_URL}/auth/sign-in-callback` | `AIZK_WEB_CLIENT_ID`, `AIZK_WEB_CLIENT_SECRET` |
+
+   Then set the URLs. `AIZK_LOGTO_URL` is where Logto answers, and `AIZK_MCP_PUBLIC_URL`,
+   `AIZK_WEB_PUBLIC_URL` and `AIZK_API_PUBLIC_URL` are the one public origin the tunnel serves.
+   All of them must be HTTPS. Add `AIZK_WEB_SESSION_SECRET` of at least 32 bytes, generated
+   separately, since `Settings.independent_session_secret` rejects it when it matches the web,
+   Management API or OAuth client secret. Finally add `AIZK_TUNNEL_TOKEN` from Cloudflare. Caddy
+   keeps the browser and the API same-origin by routing, so neither needs its own published port.
+
+4. **Reconcile the authorization policy.** aizk owns a small committed slice of the Logto policy.
+
+   ```sh
+   aizk admin auth audit
+   aizk admin auth apply
+   ```
+
+   `audit` reports drift and exits nonzero when the live tenant does not match. `apply` reconciles
+   it and leaves unrelated roles and permissions alone. Both are idempotent, and
+   [The Logto boundary](/docs/dev/identity/logto/) explains what aizk does and does not own here.
+
+5. **Start the public profile**, which adds everything internet-facing.
+
+   ```sh
+   docker compose --profile public --env-file .env -f src/deploy/docker-compose.yml up -d
+   ```
+
+   The ordering fails closed. `cloudflared` must report ready before `logto-setup` runs, because
+   the tunnel is what publishes Logto's canonical issuer. `public-check` then runs
+   `admin auth check-public` with `AIZK_REQUIRE_AUTH=1`, which builds `Settings` and so fails when
+   the Logto URL, the public URLs or either OAuth client is missing or half filled. `web-check`
+   does the same for the browser settings, and the MCP server waits until both gates pass.
+
+6. **Check it works** with the health command, run inside the private worker.
+
+   ```sh
+   docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker aizk admin health
+   ```
+
+</Steps>
+
+:::caution[The six secrets must never share a value]
+The migration owner, the forced-RLS application role, Logto, SeaweedFS and Docling are distinct
+principals, so give each of the six blanks above its own random secret. The whole
+[security model](/docs/dev/run/security/) rests on those being different. `src/deploy/logto.conf`
+carries the committed nonsecret policy and Compose loads it before `.env`, so keep the secrets
+only in `.env`.
+:::
+
+## What a healthy deployment reports
+
+Run the health command in the private worker, never in `server`. The public process has no
+migration-owner credential on purpose, so a compromised request path cannot turn this diagnostic
+into an RLS bypass.
+
+A healthy deployment reports an up-to-date migration, an empty `rls_violations` list, Logto
+identity mode, all four model endpoints reachable with matching served aliases, no retained queue
+failures, and a `recall` block with candidates and no error. That last field is the one that
+matters, because it is a real retrieval through the real models rather than a ping.
+
+## Next
+
+<div class="not-content">
+
+- [PostgreSQL and storage](/docs/dev/run/postgres/) covers tuning before your data grows.
+- [Backups and recovery](/docs/dev/run/backups/) should be set up on day one.
+- [Observability](/docs/dev/run/observability/) adds the logging profile and the queue doctor.
+- [The release gate](/docs/dev/run/release-gate/) is the checklist before real traffic.
+
+</div>

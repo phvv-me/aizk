@@ -3,10 +3,10 @@ title: "Repository tour"
 description: "What lives where, and which directory to open for a given change."
 ---
 
-This page is a directory map. It assumes you have read the
-[System map](/docs/dev/architecture/system-map/), so it says where code lives rather than what it
-does. [Layers and import contracts](/docs/dev/architecture/layers/) says which of these
-directories may import which.
+This page is the directory map, the one to keep open while you find your way around. It assumes
+you have read the [System map](/docs/dev/architecture/system-map/), so it tells you where code
+lives rather than what it does. [Layers and import contracts](/docs/dev/architecture/layers/) says
+which of these directories may import which.
 
 ```text
   packages/aizk/
@@ -103,6 +103,11 @@ shared fixtures in `conftest.py` and factories in `factories.py` and `strategies
 [Testing](/docs/dev/contributing/testing/) explains the layout and the markers.
 
 ## If you want to change X, open Y
+
+:::tip[The fastest way in]
+When you know the change but not the file, skim this table first. It is the shortcut past the
+whole tree.
+:::
 
 | You want to change | Open |
 |---|---|

@@ -68,16 +68,17 @@ and then the whole pass runs inside the caller's own session rather than as the 
 security therefore enforces both halves, since an invisible source document simply is not there to
 read and an unauthorized destination fails on insert.
 
-```mermaid
-flowchart TD
-  src["source document, private scope"] --> guard
-  guard{"already shared into target?"} -->|yes| skip["skip, promoted_from is unique per scope"]
-  guard -->|no| facts["read live facts sourced from this document's chunks"]
-  facts --> copy["copy chunks into target scope, text and embedding included"]
-  copy --> art["Artifact.share, new scoped metadata over the same blob"]
-  art --> doc["new document, promoted_from = source.id"]
-  doc --> ents["claim every subject and object entity in the target"]
-  ents --> cl["claim each fact content in the target, source_chunk_id = the copy"]
+```text
+source document (private scope)
+   already shared into target?  --- yes --> skip (promoted_from is unique per scope)
+       | no
+       v
+   read live facts sourced from this document's chunks
+       -> copy chunks into the target scope (text + embedding included)
+       -> Artifact.share: new scoped metadata over the same blob
+       -> new document, promoted_from = source.id
+       -> claim every subject and object entity in the target
+       -> claim each fact content in the target (source_chunk_id = the copy)
 ```
 
 Each step is a copy, not a reference. The new `document` row repeats the title, subject type,
@@ -114,17 +115,17 @@ foreign provenance into the destination.
 
 ## Sharing snapshots, it does not link
 
-This is the part worth being blunt about. A share copies the facts that were live at that instant.
-Nothing watches the original afterward. If you later correct a fact in your private scope, or
-close it, or the decay pass archives it, the destination's claim is unaffected and keeps saying
-what it said. The reverse is also true, since edits made in the shared copy never reach back.
+:::caution[A share is a snapshot, not a live link]
+A share copies the facts that were live at that instant, and nothing watches the source afterward. A
+later correction, close or decay in the source never reaches the destination, and edits in the shared
+copy never reach back. Bring a correction across by correcting it in the destination.
+:::
 
 That is a deliberate trade. A live link would mean a private correction silently rewriting what an
-organization already read, and it would mean the destination's visibility depended on a row it
-cannot see. A snapshot keeps both scopes independently readable and independently correctable, and
-the `promoted_from` columns are still there when you need to know where something came from.
-Re-sharing an already-shared document does not refresh it either, since the duplicate guard skips
-it, so bringing a correction across today means correcting it in the destination.
+organization already read, and the destination's visibility depending on a row it cannot see. A
+snapshot keeps both scopes independently readable and correctable, and the `promoted_from` columns are
+still there when you need to know where something came from. Re-sharing does not refresh either, since
+the duplicate guard skips it.
 
 ## Next
 

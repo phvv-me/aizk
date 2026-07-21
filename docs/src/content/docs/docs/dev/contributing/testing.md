@@ -72,8 +72,12 @@ without creating anything and the database tests skip rather than fail.
 
 ## The coverage gate
 
-Coverage is a backstop against behavior nobody tested, not a reason to keep a repetitive test. The
-gate is 100 percent statement **and** branch coverage across both `aizk` and `eval`, set by
+:::tip[Coverage is a backstop]
+100 percent coverage guards against behavior nobody tested. It is never a reason to keep a
+repetitive test around.
+:::
+
+The gate is 100 percent statement **and** branch coverage across both `aizk` and `eval`, set by
 `fail_under = 100` with `branch = true` in `pyproject.toml`. Migrations are the only omission.
 
 The gate runs in two passes and the reason is a real limitation rather than a workaround. The

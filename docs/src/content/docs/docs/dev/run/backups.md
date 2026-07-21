@@ -8,24 +8,15 @@ A backup is only as good as the last time somebody restored it. This page covers
 not. It assumes you know the role split from
 [PostgreSQL and storage](/docs/dev/run/postgres/).
 
-```mermaid
-flowchart LR
-    subgraph covered["one pg_dump covers"]
-      schema["schema and migrations"]
-      rows["tenant rows, graph, history"]
-      meta["artifact metadata, hashes, Markdown, Docling JSON"]
-      usage["the usage_event ledger"]
-    end
+```text
+  aizk admin database backup  =  one pg_dump --format=custom
 
-    subgraph missing["it does not cover"]
-      bytes["original artifact bytes in SeaweedFS"]
-      logtodb["the separate logto database"]
-      oauth["FastMCP state in the /oauth volume"]
-      pw["role passwords, only role names are referenced"]
-    end
-
-    dump["aizk admin database backup"] --> covered
-    dump -.->|"never touches"| missing
+    covers                          does NOT cover
+    ────────────────────────        ─────────────────────────────
+    schema and migrations           original artifact bytes in SeaweedFS
+    tenant rows, graph, history     the separate logto database
+    artifact metadata and hashes    FastMCP state in the /oauth volume
+    the usage_event ledger          role passwords, only names are kept
 ```
 
 ## The scheduled job
@@ -75,11 +66,13 @@ docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker \
 `restore_database` streams the archive into `pg_restore` with `--exit-on-error` and
 `--single-transaction`, so PostgreSQL either commits the whole restore or rolls it back at the
 first error. When the target is the configured database it also passes `--clean --if-exists`, so
-existing objects do not collide with the archive. That is a live replacement, so stop public
-traffic and take a fresh dump before running it.
+existing objects do not collide with the archive.
 
-Naming an explicit scratch database instead keeps the two safety flags and drops
-`--clean --if-exists`, which means a drill can never silently erase a populated target.
+:::danger[Restoring the configured database overwrites it in place]
+That is a live replacement. Stop public traffic and take a fresh dump before you run it. For a
+drill, name an explicit scratch database instead. That keeps the two safety flags, drops
+`--clean --if-exists`, and so can never silently erase a populated target.
+:::
 
 Afterward `ensure_bm25_tokenizer` probes `tokenizer_catalog.tokenize` and recreates the
 `aizk_bm25` tokenizer when the archive did not carry that extension state. Without it the lexical
@@ -117,8 +110,11 @@ volume are not in any dump. Losing that volume means every MCP client signs in a
 
 ## The local volume is staging, not a strategy
 
-The backup volume shares the host's power, controller, filesystem, administrator account and
-physical location with the data it protects. It survives an accidental `DROP` and nothing else.
+:::caution[The backup volume protects against exactly one thing]
+It shares the host's power, controller, filesystem, administrator account and physical location
+with the data it protects, so it survives an accidental `DROP` and nothing else.
+:::
+
 Copy every successful dump and every artifact generation to an encrypted destination on another
 machine, keep at least one generation outside the normal retention window, and alert when the
 copy fails. A dump is a plaintext database archive, so it needs its own encryption even after the

@@ -3,11 +3,12 @@ title: "Layers and import contracts"
 description: "The enforced layer stack and the two import contracts that keep it honest."
 ---
 
-aizk has a layered architecture, and unlike most layered architectures it is executable. Two
-[import-linter](https://import-linter.readthedocs.io/) contracts live in `[tool.importlinter]` in
-`pyproject.toml` and fail the lint gate the moment a package imports upward or reaches past its
-allowed door. This page assumes you have read the [System map](/docs/dev/architecture/system-map/)
-and know roughly what each package does.
+aizk has a layered architecture, and unlike most layered architectures this one is executable.
+Two [import-linter](https://import-linter.readthedocs.io/) contracts live in `[tool.importlinter]`
+in `pyproject.toml`, and they fail the lint gate the moment a package imports upward or reaches
+past its allowed door. So the diagram below is not a wish, it is what the build enforces. This
+page assumes you have read the [System map](/docs/dev/architecture/system-map/) and know roughly
+what each package does.
 
 Run the gate from the monorepo root.
 
@@ -67,8 +68,12 @@ module anywhere can read settings without dragging the engine along.
 The layers contract sets `exhaustive = true`, which tells import-linter that the `layers` list
 must name every top-level module inside the `aizk` container. Add `src/aizk/newthing/` and the
 contract does not quietly ignore it, it fails, and the only way to make it pass is to decide
-which layer the new package belongs to and write it down. That is the point. The stack cannot
-drift by accretion, because accretion is a build failure.
+which layer the new package belongs to and write it down.
+
+:::caution[The stack cannot drift by accretion]
+A new top-level package is a build failure until you place it in the stack. That is deliberate.
+Accretion is the usual way a clean layering rots, so here accretion simply does not compile.
+:::
 
 Two other settings shape what counts as an import.
 
