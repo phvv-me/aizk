@@ -12,20 +12,23 @@ import seedgraph
 from factories import CandidateFactory
 from id_factory import uuid5, uuid8
 from pydantic import JsonValue
-from sqlalchemy import update
+from sqlalchemy import URL, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.sql.base import Executable
 from sqlalchemy.sql.elements import TextClause
 
 import aizk.ops as ops
 from aizk.background.status import TasksStatus
-from aizk.config import settings
+from aizk.config import DatabaseBackend, settings
+from aizk.ontology import Ontology
 from aizk.ops import EndpointHealth
 from aizk.retrieval import Candidate, Lane
 from aizk.store import Artifact, Blob, Chunk, Usage
+from aizk.store.engine import Session
 from aizk.store.identity import User
 from aizk.usage import UsageAccountingJob, UsageCapture
 from alembic import command
+from alembic.config import Config
 
 
 class FakeResponse:
@@ -216,8 +219,21 @@ class FakeEngine:
     def connect(self) -> FakeBegin:
         return FakeBegin(self.connection)
 
+    def execution_options(self, *, isolation_level: str) -> Self:
+        assert isolation_level == "AUTOCOMMIT"
+        return self
+
     async def dispose(self) -> None:
         self.disposed = True
+
+
+class FakeDatabaseAdapter:
+    def __init__(self, engine: FakeEngine) -> None:
+        self.fake_engine = engine
+
+    def engine(self, url: str | URL, app_role: bool) -> FakeEngine:
+        del url, app_role
+        return self.fake_engine
 
 
 def dbapi_error(message: str) -> DBAPIError:
@@ -417,7 +433,7 @@ def test_enable_query_stats_tolerates_only_the_preload_error(
     monkeypatch: pytest.MonkeyPatch, error: Exception | None, raises: bool
 ) -> None:
     engine = FakeEngine(error)
-    monkeypatch.setattr(ops.provision, "create_async_engine", lambda url: engine)
+    monkeypatch.setattr(ops.provision, "database_adapter", lambda: FakeDatabaseAdapter(engine))
 
     if raises:
         with pytest.raises(DBAPIError):
@@ -458,6 +474,59 @@ def test_setup_is_idempotent_on_a_ready_database(
     assert tokenizer_checks == 1
 
 
+def test_cockroach_setup_uses_its_migrations_and_skips_postgres_services(
+    migrated_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+    calls: list[str] = []
+
+    async def current() -> str:
+        return "0000"
+
+    async def queue_present() -> bool:
+        return False
+
+    def migrate(fn: Callable[..., None], config: Config, revision: str) -> None:
+        assert fn is command.upgrade
+        assert revision == "head"
+        locations = config.get_main_option("version_locations")
+        assert locations is not None and "cockroachdb" in locations
+        calls.append("migrate")
+
+    async def install_queue() -> None:
+        calls.append("queue")
+
+    async def grant() -> None:
+        calls.append("grant")
+
+    async def refresh(cls: type[Ontology], session: Session) -> None:
+        del cls, session
+        calls.append("ontology")
+
+    async def postgres_only() -> None:
+        raise AssertionError("PostgreSQL-only setup ran for CockroachDB")
+
+    monkeypatch.setattr(ops.provision, "alembic_current", current)
+    monkeypatch.setattr(ops.provision, "queue_schema_present", queue_present)
+    monkeypatch.setattr(ops.provision, "run_alembic", migrate)
+    monkeypatch.setattr(ops.provision, "install_queue_schema", install_queue)
+    monkeypatch.setattr(ops.provision, "grant_app_role_privileges", grant)
+    monkeypatch.setattr(ops.provision, "alembic_head", lambda config: "0001")
+    monkeypatch.setattr(ops.provision.Ontology, "refresh", classmethod(refresh))
+    monkeypatch.setattr(ops.provision, "ensure_bm25_tokenizer", postgres_only)
+    monkeypatch.setattr(ops.provision, "enable_query_stats", postgres_only)
+
+    report = dbutil.run(ops.setup())
+
+    assert report == ops.SetupReport(
+        migrated_from="0000",
+        migrated_to="0001",
+        queue_installed=True,
+    )
+    assert calls == ["migrate", "queue", "grant", "ontology"]
+
+
 def test_reset_recreates_only_the_configured_database_then_runs_setup(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -466,7 +535,7 @@ def test_reset_recreates_only_the_configured_database_then_runs_setup(
     async def setup() -> ops.SetupReport:
         return ops.SetupReport(migrated_from=None, migrated_to="0001_init", queue_installed=True)
 
-    monkeypatch.setattr(ops.provision, "create_async_engine", lambda *args, **kwargs: engine)
+    monkeypatch.setattr(ops.provision, "database_adapter", lambda: FakeDatabaseAdapter(engine))
     monkeypatch.setattr(ops.provision, "setup", setup)
 
     report = dbutil.run(ops.reset())

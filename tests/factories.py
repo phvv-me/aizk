@@ -6,7 +6,6 @@ from id_factory import uuid5, uuid7, uuid8
 from polyfactory import Use
 from polyfactory.factories.pydantic_factory import ModelFactory
 from pydantic import UUID5, UUID7, BaseModel
-from sqlalchemy.dialects.postgresql import Range
 
 from aizk.config import settings
 from aizk.retrieval import Candidate
@@ -41,8 +40,10 @@ class LiveFactFactory(AizkModelFactory[Fact.Live]):
     embedding = None
     created_by = Use(uuid5)
     scopes = [settings.system_user_id]
-    valid = None
-    recorded = Use(lambda: Range(datetime.now(UTC), None))
+    valid_from = None
+    valid_to = None
+    recorded_from = Use(lambda: datetime.now(UTC))
+    recorded_to = None
     last_accessed = None
     access_count = 0
     attributes = {}

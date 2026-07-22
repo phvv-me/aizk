@@ -3,10 +3,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from loguru import logger
-from sqlalchemy import NullPool, inspect, text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import command
 from alembic.config import Config
@@ -15,8 +14,9 @@ from alembic.script import ScriptDirectory
 
 from ..background.queue import install_queue_schema
 from ..backup import ensure_bm25_tokenizer
-from ..config import settings
+from ..config import DatabaseBackend, settings
 from ..ontology import Ontology
+from ..store.backend import database_adapter
 from ..store.ddl import CreateExtension, Grant, GrantTarget
 from ..store.identity import User
 from .reports import ResetReport, SetupReport
@@ -29,6 +29,13 @@ def alembic_config() -> Config:
         "script_location", str(Path(__file__).parent.parent / "store" / "migrations")
     )
     config.set_main_option("sqlalchemy.url", settings.admin_database_url)
+    if settings.database_backend is DatabaseBackend.cockroachdb:
+        config.set_main_option(
+            "version_locations",
+            str(
+                Path(__file__).parent.parent / "store" / "migrations" / "cockroachdb" / "versions"
+            ),
+        )
     return config
 
 
@@ -46,7 +53,7 @@ def alembic_head(config: Config) -> str:
 
 async def alembic_current() -> str | None:
     """The revision the live database is stamped at, null on a fresh unmigrated database."""
-    admin = create_async_engine(settings.admin_database_url)
+    admin = database_adapter().engine(settings.admin_database_url, False)
     try:
         async with admin.connect() as connection:
             return await connection.run_sync(
@@ -57,11 +64,14 @@ async def alembic_current() -> str | None:
 
 
 async def queue_schema_present() -> bool:
-    """Whether the pgqueuer tables already exist, setup's own idempotency probe."""
-    app = create_async_engine(settings.database_url)
+    """Whether the configured queue backend's durable tables already exist."""
+    table = (
+        "queue_task" if settings.database_backend is DatabaseBackend.cockroachdb else "pgqueuer"
+    )
+    app = database_adapter().engine(settings.database_url, True)
     try:
         async with app.connect() as connection:
-            return await connection.run_sync(lambda sync: inspect(sync).has_table("pgqueuer"))
+            return await connection.run_sync(lambda sync: inspect(sync).has_table(table))
     finally:
         await app.dispose()
 
@@ -70,7 +80,7 @@ async def grant_app_role_privileges() -> None:
     """Grant the app role CRUD on the public schema, mirroring `initdb/roles.sh` on any
     database."""
     role = settings.app_role
-    admin = create_async_engine(settings.admin_database_url)
+    admin = database_adapter().engine(settings.admin_database_url, False)
     try:
         async with admin.begin() as connection:
             for statement in (
@@ -108,7 +118,7 @@ async def grant_app_role_privileges() -> None:
 async def enable_query_stats() -> None:
     """Create pg_stat_statements, tolerating a Postgres not yet restarted with the library
     loaded."""
-    admin = create_async_engine(settings.admin_database_url)
+    admin = database_adapter().engine(settings.admin_database_url, False)
     try:
         async with admin.begin() as connection:
             await connection.execute(CreateExtension("pg_stat_statements"))
@@ -131,10 +141,12 @@ async def setup() -> SetupReport:
     already_queued = await queue_schema_present()
     config = alembic_config()
     run_alembic(command.upgrade, config, "head")
-    await ensure_bm25_tokenizer()
+    if settings.database_backend is DatabaseBackend.postgresql:
+        await ensure_bm25_tokenizer()
     await install_queue_schema()
     await grant_app_role_privileges()
-    await enable_query_stats()
+    if settings.database_backend is DatabaseBackend.postgresql:
+        await enable_query_stats()
     async with User.system() as session:
         await Ontology.refresh(session)
     return SetupReport(
@@ -149,7 +161,7 @@ def reset_target() -> str:
     database, never a maintenance database and never one the application DSN disagrees on.
     """
     name = make_url(settings.admin_database_url).database
-    if name is None or name == "postgres" or name.startswith("template"):
+    if name is None or name in {"defaultdb", "postgres"} or name.startswith("template"):
         raise ValueError(f"refusing to reset maintenance database {name!r}")
     if make_url(settings.database_url).database != name:
         raise ValueError("database_url and admin_database_url must name the same database")
@@ -160,15 +172,23 @@ async def reset() -> ResetReport:
     """Recreate only the configured Aizk database, then install its complete schema."""
     name = reset_target()
     identifier = '"' + name.replace('"', '""') + '"'
-    maintenance = make_url(settings.admin_database_url).set(database="postgres")
-    admin = create_async_engine(
-        maintenance,
-        isolation_level="AUTOCOMMIT",
-        poolclass=NullPool,
+    cockroach = settings.database_backend is DatabaseBackend.cockroachdb
+    maintenance = make_url(settings.admin_database_url).set(
+        database="defaultdb" if cockroach else "postgres"
+    )
+    admin = (
+        database_adapter()
+        .engine(maintenance, False)
+        .execution_options(isolation_level="AUTOCOMMIT")
     )
     try:
         async with admin.connect() as connection:
-            await connection.execute(text(f"DROP DATABASE IF EXISTS {identifier} WITH (FORCE)"))
+            drop = (
+                f"DROP DATABASE IF EXISTS {identifier} CASCADE"
+                if cockroach
+                else f"DROP DATABASE IF EXISTS {identifier} WITH (FORCE)"
+            )
+            await connection.execute(text(drop))
             await connection.execute(text(f"CREATE DATABASE {identifier}"))
     finally:
         await admin.dispose()

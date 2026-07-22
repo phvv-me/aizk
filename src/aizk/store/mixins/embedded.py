@@ -3,14 +3,15 @@ from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.orm import declared_attr
 
 from ...config import settings
+from ..vector import CosineVector
 
 
 class Embedded(sql.Model):
-    """Nullable halfvec embedding with a cosine ANN index."""
+    """Nullable portable vector embedding with a cosine ANN index."""
 
     embedding = sql.Field(
         list[float] | None,
-        sa_type=sql.CosineHalfvec(settings.embed_dim),
+        sa_type=CosineVector(settings.embed_dim),
     )
 
     @declared_attr.directive
@@ -20,7 +21,7 @@ class Embedded(sql.Model):
             Index(
                 f"ix_{table}_embedding",
                 "embedding",
-                postgresql_using=settings.index_backend,
-                postgresql_ops={"embedding": "halfvec_cosine_ops"},
+                postgresql_using=settings.vector_index_backend,
+                postgresql_ops={"embedding": "vector_cosine_ops"},
             ),
         )

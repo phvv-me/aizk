@@ -20,7 +20,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "sqlalchemy[asyncio]>=2.1.0b3,<3",
+    "sqlalchemy[asyncio]>=2.0.47,<2.1",
+    "sqlalchemy-cockroachdb>=2.0.4,<2.1",
     "greenlet>=3,<4",
     "sqlmodel>=0.0.39,<0.1",
     "asyncpg>=0.31,<0.32",
@@ -47,6 +48,8 @@ dependencies = [
     "rlsalchemy>=0.4.1,<0.6",
     "mainboard>=0.0.8,<0.1",
     "pgqueuer>=1.1.1,<2",
+    "croniter>=6.2.4,<7",
+    "mangum>=0.19,<1",
     "opentelemetry-sdk>=1.44,<2",
     "opentelemetry-exporter-otlp-proto-http>=1.43,<2",
     "opentelemetry-instrumentation-starlette>=0.65b0,<1",
@@ -88,6 +91,7 @@ dev = [
     # third-party type stubs: the crux of the old uv divergence (pyrefly could not type these)
     "asyncpg-stubs>=0.31.2,<0.32",
     "types-dateparser>=1.4.1.20260617,<2",
+    "types-croniter>=6.2.2.20260518,<7",
     "types-networkx>=3.6.1.20260624,<4",
     # checkers and linters, pinned to the versions the monorepo gate runs green on
     "ruff>=0.6",
@@ -121,6 +125,9 @@ Issues = "https://github.com/phvv-me/aizk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/aizk", "src/eval"]
+
+[tool.uv]
+override-dependencies = ["sqlalchemy>=2.0.47,<2.1"]
 
 [tool.ruff]
 line-length = 99
@@ -279,9 +286,10 @@ platforms = ["linux-64"]
 
 [tool.chefe.conda]
 python = ">=3.14.6,<3.15"
+opentofu = ">=1.12,<1.13"
 
 [tool.chefe.python.dependency-overrides]
-sqlalchemy = ">=2.1.0b3"
+sqlalchemy = ">=2.0.47,<2.1"
 
 [tool.chefe.sources]
 patos = { provider = "git", git = "https://github.com/phvv-me/patos", branch = "main" }
@@ -293,3 +301,11 @@ lint = { run = "ruff check . && ruff format --check ." }
 lint-imports = "lint-imports"
 typecheck = { run = "pyrefly check --python-interpreter-path \"$CONDA_PREFIX/bin/python\" && ty check --python \"$CONDA_PREFIX\" --exit-zero-on-warning && mypy src/aizk src/eval" }
 test = { run = "python -m pytest -n 4 --dist loadscope --benchmark-disable --cov-fail-under=0 && COVERAGE_CORE=pytrace python -m pytest 'tests/graph/test_build.py::test_write_graph_slice_retries_a_transient_db_conflict' -o addopts='--import-mode=importlib' --cov=aizk --cov-append --cov-report=term-missing" }
+infra-init = { run = "tofu -chdir=infra/aws init -backend=false" }
+infra-fmt = { run = "tofu -chdir=infra/aws fmt -check -recursive" }
+infra-validate = { run = "tofu -chdir=infra/aws validate", depends = ["infra-init"] }
+infra-test = { run = "tofu -chdir=infra/aws test", depends = ["infra-init"] }
+infra-check = { depends = ["infra-fmt", "infra-validate", "infra-test"] }
+ccloud-build = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml build ccloud" }
+ccloud = { run = "sh -lc 'docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud \"$@\"' --" }
+ccloud-check = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud version", depends = ["ccloud-build"] }

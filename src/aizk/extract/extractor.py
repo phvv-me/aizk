@@ -39,7 +39,7 @@ class LLMExtractor(Extractor):
 
     @property
     def requires_gate(self) -> bool:
-        return True
+        return settings.extraction_gate_enabled
 
     @staticmethod
     def system_prompt() -> str:

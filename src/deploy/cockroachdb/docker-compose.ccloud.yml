@@ -1,0 +1,20 @@
+name: aizk-cockroachdb-cloud
+
+services:
+  ccloud:
+    image: aizk-cockroachdb-ccloud:0.6.12
+    build:
+      context: .
+      dockerfile: Dockerfile.ccloud
+    environment:
+      HOME: /state
+    volumes:
+      - ccloud-state:/state
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+
+volumes:
+  ccloud-state:

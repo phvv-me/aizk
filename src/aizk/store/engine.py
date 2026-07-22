@@ -4,17 +4,20 @@ from functools import cache
 from types import TracebackType
 from typing import Self
 
-from sqlalchemy import NullPool
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
-    create_async_engine,
 )
+from sqlalchemy.orm import Session as OrmSession
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from ..config import settings
 from ..exceptions import NoTenantContext
+from .backend import bind_cockroach_authority, database_adapter
 from .identity import User
+
+event.listen(OrmSession, "after_begin", bind_cockroach_authority)
 
 
 class Session(AsyncSession):
@@ -59,7 +62,7 @@ class SessionScope:
         async with AsyncExitStack() as opening:
             opened = await opening.enter_async_context(self.factory())
             opened.info["user"] = self.user
-            opened.info.update(self.user.info())
+            database_adapter().configure_session(opened.sync_session, self.user)
             if self.transactional:
                 await opening.enter_async_context(opened.begin())
             self.stack = opening.pop_all()
@@ -111,23 +114,9 @@ class Database:
 
     def _build_engine(self) -> AsyncEngine:
         """Build this role's async engine and connection pool."""
-        if self.role is DatabaseRole.owner:
-            if settings.db_null_pool:
-                return create_async_engine(settings.admin_database_url, poolclass=NullPool)
-            return create_async_engine(settings.admin_database_url)
-        if settings.db_null_pool:
-            return create_async_engine(
-                settings.database_url,
-                poolclass=NullPool,
-                connect_args={"server_settings": {"vchordrq.prefilter": "on"}},
-            )
-        return create_async_engine(
-            settings.database_url,
-            connect_args={"server_settings": {"vchordrq.prefilter": "on"}},
-            pool_size=settings.db_pool_size,
-            max_overflow=settings.db_pool_max_overflow,
-            pool_pre_ping=False,
-        )
+        app_role = self.role is DatabaseRole.app
+        url = settings.database_url if app_role else settings.admin_database_url
+        return database_adapter().engine(url, app_role)
 
     def session(self, user: User) -> SessionScope:
         """Open a caller-bound session for sequential transaction scopes."""

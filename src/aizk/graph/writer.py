@@ -4,18 +4,15 @@ from typing import cast
 
 from loguru import logger
 from patos import FlexModel, FrozenModel, sql
-from pgvector.sqlalchemy import HALFVEC
 from pydantic import UUID5, UUID7, Field, field_validator
 from sqlalchemy import (
     Integer,
     Text,
     Uuid,
     column,
-    func,
-    literal,
     true,
 )
-from sqlalchemy.dialects.postgresql import Range, insert
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.sql.selectable import CTE
 from sqlmodel import select, tuple_
 from sqlmodel.sql.expression import Select
@@ -26,7 +23,9 @@ from ..ontology import Ontology
 from ..provenance import CaptureContext
 from ..store import Entity, Fact, Relation
 from ..store.engine import Session
+from ..store.locking import acquire_locks
 from ..store.models.tables import EntityContent, FactContent
+from ..store.vector import CosineVector, cosine_distance
 from ..types import Scopes
 from .consolidation import Consolidator, FactMatch
 from .dedupe import ClaimField
@@ -233,7 +232,7 @@ class GraphWriter(FlexModel):
                 column("subject_id", Uuid),
                 column("predicate", Text),
                 column("perspective_key", Text),
-                column("embedding", HALFVEC(settings.embed_dim)),
+                column("embedding", CosineVector(settings.embed_dim)),
             ),
             [
                 (
@@ -251,7 +250,10 @@ class GraphWriter(FlexModel):
 
     async def _fact_matches(self, inputs: CTE, count: int) -> list[list[FactMatch]]:
         """Return each input's nearest live facts from one lateral database query."""
-        distance = Fact.Content.embedding @ inputs.c.embedding.cast(HALFVEC(settings.embed_dim))
+        distance = cosine_distance(
+            Fact.Content.embedding,
+            inputs.c.embedding.cast(CosineVector(settings.embed_dim)),
+        )
         ranked = (
             select(
                 Fact.Claim.id,
@@ -321,27 +323,13 @@ class GraphWriter(FlexModel):
         )
         if not slots:
             return
-        inputs = sql.relation(
-            "fact_lock",
+        scope_key = ",".join(str(scope) for scope in self.scopes)
+        await acquire_locks(
+            self.session,
             (
-                column("subject_id", Uuid),
-                column("predicate", Text),
-                column("perspective_key", Text),
+                f"fact|{subject_id}|{predicate}|{perspective_key}|{scope_key}"
+                for subject_id, predicate, perspective_key in slots
             ),
-            slots,
-        )
-        key = func.hashtextextended(
-            inputs.c.subject_id.cast(Text)
-            + literal("|")
-            + inputs.c.predicate
-            + literal("|")
-            + inputs.c.perspective_key
-            + literal("|")
-            + literal(",".join(str(scope) for scope in self.scopes)),
-            0,
-        )
-        await self.session.exec(
-            select(func.pg_advisory_xact_lock(key)).select_from(inputs).order_by(key)
         )
 
     async def apply_plans(
@@ -371,7 +359,7 @@ class GraphWriter(FlexModel):
                         Fact.Claim.scopes,
                         Fact.Claim.perspective_key,
                     ],
-                    index_where=Fact.Claim.recorded.f.upper_inf(result=bool),
+                    index_where=Fact.Claim.recorded_to.is_(None),
                 )
             )
 
@@ -450,7 +438,8 @@ class GraphWriter(FlexModel):
                 "content_id": candidate.identity,
                 "created_by": self.created_by,
                 "scopes": self.scopes,
-                "valid": Range(fact.valid_from, valid_to) if fact.valid_from or valid_to else None,
+                "valid_from": fact.valid_from,
+                "valid_to": valid_to,
                 "source_chunk_id": source_chunk_id,
                 "attributes": self.capture.claim_attributes(fact.kind, self.created_by)
                 | self.grounding(fact),

@@ -14,12 +14,12 @@ from sqlalchemy import (
     or_,
     union_all,
 )
-from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import CTE
 from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
+from ..vector import cosine_distance
 from .tables import (
     Artifact,
     Chunk,
@@ -60,7 +60,7 @@ def seed_mass_from(
     weight: ColumnElement[float], distance: ColumnElement[float]
 ) -> ColumnElement[float]:
     """PageRank seed mass shrinking smoothly with cosine distance, w / (1 + d)."""
-    return weight / (1 + distance)
+    return weight.op("/")(literal(1.0, Float) + distance)
 
 
 class Entity:
@@ -73,7 +73,7 @@ class Entity:
     @classmethod
     def catalog(cls, context: QueryContext) -> CTE:
         """Group live entities and their state facts by ontology type and exact scopes."""
-        kind_distance = cls.Kind.embedding @ context.vector
+        kind_distance = cosine_distance(cls.Kind.embedding, context.vector)
         relevant_kinds = (
             select(cls.Kind.name, kind_distance.label("distance"))
             .where(cls.Kind.structural.is_(False), cls.Kind.embedding.is_not(None))
@@ -129,7 +129,7 @@ class Entity:
                 live.c.scopes,
             )
             .add_columns(live.c.created_by)
-            .ext(distinct_on(live.c.type, live.c.name, live.c.scopes))
+            .distinct(live.c.type, live.c.name, live.c.scopes)
             .order_by(live.c.type, live.c.name, live.c.scopes, live.c.id)
             .cte("unique_live_entity")
         )
@@ -217,7 +217,7 @@ class Entity:
             mention_entities = union_all(exact_mentions, fuzzy_matches).cte("mention_entity")
         else:
             mention_entities = exact_mentions.cte("mention_entity")
-        entity_distance = cls.Content.embedding @ context.vector
+        entity_distance = cosine_distance(cls.Content.embedding, context.vector)
         dense_entities = (
             select(
                 cls.Content.id.label("entity_id"),
@@ -313,7 +313,7 @@ class Explorer:
                 subject.name.label("subject_name"),
                 LiveFact.object_id,
                 object_.name.label("object_name"),
-                LiveFact.recorded.lower(result=datetime).label("recorded_at"),
+                LiveFact.recorded_from.label("recorded_at"),
                 Document.id.label("source_id"),
                 Document.title.label("source_title"),
                 LiveFact.scopes,
@@ -335,7 +335,7 @@ class Explorer:
             )
         return cast(
             FindingRows,
-            statement.order_by(LiveFact.recorded.lower(result=datetime).desc(), LiveFact.id.desc())
+            statement.order_by(LiveFact.recorded_from.desc(), LiveFact.id.desc())
             .offset(offset)
             .limit(limit),
         )
@@ -444,7 +444,7 @@ class Explorer:
             .join(subject, subject.id == LiveFact.subject_id)
             .join(object_, object_.id == LiveFact.object_id)
             .where(LiveFact.object_id.is_not(None))
-            .order_by(LiveFact.recorded.lower(result=datetime).desc(), LiveFact.id.desc())
+            .order_by(LiveFact.recorded_from.desc(), LiveFact.id.desc())
             .limit(limit),
         )
 

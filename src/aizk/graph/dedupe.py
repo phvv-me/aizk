@@ -1,13 +1,13 @@
 from datetime import datetime
 
 from pydantic import UUID5, UUID7, JsonValue
-from sqlalchemy.dialects.postgresql import Range, insert
+from sqlalchemy.dialects.postgresql import insert
 
 from ..store import Entity, Fact
 from ..store.engine import Session
 
 # Optional claim columns supplied to the PostgreSQL upsert
-type ClaimField = Range[datetime] | UUID5 | UUID7 | list[UUID5] | dict[str, JsonValue] | str | None
+type ClaimField = datetime | UUID5 | UUID7 | list[UUID5] | dict[str, JsonValue] | str | None
 
 
 async def claim_entity(
@@ -30,6 +30,6 @@ async def claim_fact(
         .values(content_id=content_id, created_by=created_by, scopes=scopes, **claim_fields)
         .on_conflict_do_nothing(
             index_elements=[Fact.Claim.content_id, Fact.Claim.scopes, Fact.Claim.perspective_key],
-            index_where=Fact.Claim.recorded.f.upper_inf(result=bool),
+            index_where=Fact.Claim.recorded_to.is_(None),
         )
     )

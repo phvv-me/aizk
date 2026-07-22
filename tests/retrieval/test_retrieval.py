@@ -12,7 +12,6 @@ from id_factory import uuid5, uuid5s, uuid7, uuid8
 from pydantic import UUID5, UUID7
 from sqlalchemy import Row, update
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects.postgresql import Range
 from sqlmodel import select
 from sqlmodel.sql.expression import Select
 
@@ -567,7 +566,7 @@ def test_fresh_and_frequent_claims_outrank_stale_twins_at_equal_distance(
                     last_accessed=accessed,
                     access_count=count,
                 )
-                claim.recorded = Range(recorded, None, bounds="[)")
+                claim.recorded_from = recorded
                 opened.add(claim)
         rows = await retrieve(user, basis())
         return [row._mapping["line"] for row in rows if "fact" in row._mapping["line"]]

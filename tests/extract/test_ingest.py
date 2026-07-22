@@ -451,11 +451,11 @@ def test_refresh_retracts_claims_mined_from_removed_source_text(settings: Settin
                     .execution_options(**{settings.skip_live_gate: True})
                 )
             ).one()
-        return (
-            historical.recorded.upper is not None,
-            historical.attributes,
-            historical.source_chunk_id,
-        )
+            return (
+                historical.recorded_to is not None,
+                historical.attributes,
+                historical.source_chunk_id,
+            )
 
     closed, attributes, source_chunk_id = dbutil.run(body())
     assert closed and "source_refreshed" in attributes

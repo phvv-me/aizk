@@ -4,6 +4,7 @@ from sqlmodel import select
 
 from ...ontology import System
 from ...store import Entity
+from ...store.vector import cosine_distance
 from ..models.lane import Lane, LaneSelect, QueryContext
 
 
@@ -25,7 +26,7 @@ class OverviewLane(Lane):
             .where(Entity.Content.type == System.Entity.RAPTOR_SUMMARY, level >= 1)
             .scalar_subquery()
         )
-        raptor_distance = Entity.Content.embedding @ context.vector
+        raptor_distance = cosine_distance(Entity.Content.embedding, context.vector)
         return (
             self.row(
                 evidence_id=Entity.Content.id,
