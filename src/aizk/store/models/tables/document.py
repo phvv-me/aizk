@@ -18,6 +18,7 @@ from sqlalchemy import (
     or_,
 )
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import ScalarSelect
 from sqlmodel import Field, Relationship, select
 from sqlmodel.sql.expression import SelectOfScalar
 
@@ -94,6 +95,20 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
             select(cls)
             .order_by(cls.__table__.c.updated_at.desc(), cls.__table__.c.id.desc())
             .limit(limit)
+        )
+
+    @classmethod
+    def newest_authored(cls, limit: int) -> SelectOfScalar[Self]:
+        """The newest visible documents created from text rather than preserved files."""
+        return cls.newest(limit).where(cls.artifact_id.is_(None))
+
+    @classmethod
+    def authored_total(cls) -> ScalarSelect[int]:
+        """Count visible documents created from text rather than preserved files."""
+        return (
+            select(func.count(cls.__table__.c.id))
+            .where(cls.artifact_id.is_(None))
+            .scalar_subquery()
         )
 
     @classmethod

@@ -6,6 +6,7 @@
     ChartNoAxesCombined,
     ChevronsUpDown,
     CircleDot,
+    Compass,
     FileText,
     LayoutDashboard,
     Lightbulb,
@@ -21,6 +22,7 @@
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { Separator } from '$lib/components/ui/separator';
   import { navigation, type NavIcon } from '$lib/nav';
+  import { appRoutes } from '$lib/routes';
   import { cn } from '$lib/utils';
 
   let { me, accountUrl }: { me: Me; accountUrl: string } = $props();
@@ -28,6 +30,7 @@
   const icons: Record<NavIcon, typeof IconType> = {
     dashboard: LayoutDashboard,
     recall: MessageCircleQuestion,
+    explore: Compass,
     sources: FileText,
     findings: Lightbulb,
     subjects: CircleDot,
@@ -42,7 +45,7 @@
 
 <header class="border-sidebar-border bg-sidebar sticky top-0 z-30 border-b md:hidden">
   <div class="flex h-14 items-center justify-between px-4">
-    <a href="/app/dashboard" class="flex items-center gap-2 font-semibold tracking-tight">
+    <a href={appRoutes.dashboard} class="flex items-center gap-2 font-semibold tracking-tight">
       <Sparkles class="text-primary size-5" aria-hidden="true" />
       AIZK
     </a>
@@ -104,7 +107,7 @@
   aria-label="Primary"
 >
   <a
-    href="/app/dashboard"
+    href={appRoutes.dashboard}
     class="flex items-center gap-2 px-5 py-5 text-lg font-semibold tracking-tight"
   >
     <Sparkles class="text-primary size-5" aria-hidden="true" />
@@ -180,3 +183,4 @@
     </DropdownMenu.Root>
   </div>
 </aside>
+Compass,

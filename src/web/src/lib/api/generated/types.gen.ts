@@ -261,9 +261,13 @@ export type HttpValidationError = {
  */
 export type KnowledgeTotals = {
     /**
-     * Sources
+     * Documents
      */
-    sources: number;
+    documents: number;
+    /**
+     * Files
+     */
+    files: number;
     /**
      * Findings
      */
@@ -454,9 +458,9 @@ export type Overview = {
     totals: KnowledgeTotals;
     usage: UsageTotals;
     /**
-     * Recent Sources
+     * Recent Documents
      */
-    recent_sources: Array<RecentSource>;
+    recent_documents: Array<RecentDocument>;
     /**
      * Artifacts
      */
@@ -536,11 +540,11 @@ export type ProcessingStatus = {
 };
 
 /**
- * RecentSource
+ * RecentDocument
  *
- * Presentation metadata for one source without exposing internal identifiers.
+ * Presentation metadata for one authored document without internal identifiers.
  */
-export type RecentSource = {
+export type RecentDocument = {
     /**
      * Source Uri
      */
@@ -563,6 +567,8 @@ export type RecentSource = {
     kind: string;
 };
 
+export type SourceOrigin = 'all' | 'document' | 'file';
+
 /**
  * SourcePage
  *
@@ -581,6 +587,7 @@ export type SourcePage = {
      * Limit
      */
     limit: number;
+    origin: SourceOrigin;
     /**
      * Rows
      */
@@ -605,6 +612,10 @@ export type SourceView = {
      * Kind
      */
     kind: string;
+    /**
+     * Origin
+     */
+    origin: 'document' | 'file';
     /**
      * Source Uri
      */
@@ -1158,6 +1169,10 @@ export type SourcesData = {
          * Search
          */
         search?: string;
+        /**
+         * Origin
+         */
+        origin?: 'all' | 'document' | 'file';
         /**
          * Limit
          */

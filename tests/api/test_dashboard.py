@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import dbutil
+from factories import seed_artifact
 from id_factory import uuid5
 
 from aizk.api.dashboard import Dashboard
@@ -15,6 +16,7 @@ def test_dashboard_reads_only_visible_sources_through_user_rls(migrated_db: None
         shared = await dbutil.seed_document(caller, [caller, organization])
         public_source = await dbutil.seed_document(stranger, [public])
         hidden = await dbutil.seed_document(stranger, [stranger])
+        await seed_artifact(caller, [caller], name="manual.pdf")
         metadata = (
             (
                 private,
@@ -73,18 +75,19 @@ def test_dashboard_reads_only_visible_sources_through_user_rls(migrated_db: None
 
     dashboard = dbutil.run(load())
 
-    assert dashboard.totals.sources == 3
+    assert dashboard.totals.documents == 3
+    assert dashboard.totals.files == 1
     assert dashboard.totals.findings == 0
     assert dashboard.totals.subjects == 0
     assert dashboard.totals.themes == 0
-    assert [source.title for source in dashboard.recent_sources] == [
-        "Untitled source",
+    assert [document.title for document in dashboard.recent_documents] == [
+        "Untitled document",
         "Shared paper",
         "Private note",
     ]
-    assert dashboard.recent_sources[0].kind == "Source"
-    assert dashboard.recent_sources[0].scopes == ("Shared",)
-    assert dashboard.recent_sources[1].kind == "Code Artifact"
-    assert dashboard.recent_sources[1].scopes == ("Private", "Robotics Lab")
-    assert dashboard.recent_sources[1].date == "Jul 16, 2026"
-    assert dashboard.recent_sources[2].date == "Jul 14, 2026"
+    assert dashboard.recent_documents[0].kind == "Source"
+    assert dashboard.recent_documents[0].scopes == ("Shared",)
+    assert dashboard.recent_documents[1].kind == "Code Artifact"
+    assert dashboard.recent_documents[1].scopes == ("Private", "Robotics Lab")
+    assert dashboard.recent_documents[1].date == "Jul 16, 2026"
+    assert dashboard.recent_documents[2].date == "Jul 14, 2026"

@@ -10,6 +10,7 @@
   import { Input } from '$lib/components/ui/input';
   import { rankedCounts } from '$lib/collections';
   import { formatDateTime } from '$lib/format';
+  import { appHref, appRoutes } from '$lib/routes';
   import type { PageServerData } from './$types';
 
   let { data }: { data: PageServerData } = $props();
@@ -91,13 +92,13 @@
             <div class="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">{finding.predicate}</Badge>
               <a
-                href={`/subjects?search=${encodeURIComponent(finding.subject_name)}`}
+                href={appHref(appRoutes.subjects, { search: finding.subject_name })}
                 class="font-medium hover:underline">{finding.subject_name}</a
               >
               {#if finding.object_name}
                 <span class="text-muted-foreground text-sm">to</span>
                 <a
-                  href={`/subjects?search=${encodeURIComponent(finding.object_name)}`}
+                  href={appHref(appRoutes.subjects, { search: finding.object_name })}
                   class="font-medium hover:underline">{finding.object_name}</a
                 >
               {/if}
@@ -111,7 +112,7 @@
               <p class="text-muted-foreground mt-3 text-xs">
                 Grounded in
                 <a
-                  href={`/sources?search=${encodeURIComponent(finding.source_title)}`}
+                  href={appHref(appRoutes.sources, { search: finding.source_title })}
                   class="text-primary hover:underline">{finding.source_title}</a
                 >
               </p>

@@ -21,6 +21,7 @@ from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from .tables import (
+    Artifact,
     Chunk,
     Community,
     Document,
@@ -250,13 +251,16 @@ class Knowledge:
     """Cross-model rollups over the caller-visible knowledge graph."""
 
     @classmethod
-    def totals(cls) -> Select[tuple[int, int, int, int]]:
-        """Count visible sources, findings, subjects, and themes in one row."""
-        return select(
-            Document.total().label("sources"),
-            LiveFact.total().label("findings"),
-            EntityClaim.total().label("subjects"),
-            Community.total().label("themes"),
+    def totals(cls) -> Select[tuple[int, int, int, int, int]]:
+        """Count visible authored documents, files, findings, subjects, and themes."""
+        return cast(
+            "Select[tuple[int, int, int, int, int]]",
+            select(
+                Document.authored_total().label("documents"),
+                Artifact.total().label("files"),
+                LiveFact.total().label("findings"),
+                EntityClaim.total().label("subjects"),
+            ).add_columns(Community.total().label("themes")),
         )
 
 
@@ -264,9 +268,13 @@ class Explorer:
     """Read-only catalog and bounded graph queries for the browser explorer."""
 
     @staticmethod
-    def source_rows(search: str, limit: int, offset: int) -> SelectOfScalar[Document]:
+    def source_rows(search: str, origin: str, limit: int, offset: int) -> SelectOfScalar[Document]:
         """Newest visible sources matching one optional title or URI search."""
         statement = select(Document)
+        if origin == "document":
+            statement = statement.where(Document.artifact_id.is_(None))
+        elif origin == "file":
+            statement = statement.where(Document.artifact_id.is_not(None))
         if search:
             term = f"%{search}%"
             statement = statement.where(
@@ -279,9 +287,13 @@ class Explorer:
         )
 
     @staticmethod
-    def source_total(search: str) -> SelectOfScalar[int]:
+    def source_total(search: str, origin: str) -> SelectOfScalar[int]:
         """Count visible sources matching one optional title or URI search."""
         statement = select(Document.id.count().label("total"))
+        if origin == "document":
+            statement = statement.where(Document.artifact_id.is_(None))
+        elif origin == "file":
+            statement = statement.where(Document.artifact_id.is_not(None))
         if search:
             term = f"%{search}%"
             statement = statement.where(

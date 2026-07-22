@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import dbutil
 import pytest
+from factories import seed_artifact
 from id_factory import uuid5, uuid7, uuid8
 from pydantic import UUID5
 
@@ -12,6 +13,7 @@ from aizk.api.explorer import (
     GraphRecord,
     GraphSlice,
     NameRecord,
+    SourcePage,
     SourceView,
     SubjectRecord,
     SubjectView,
@@ -77,12 +79,47 @@ def test_catalog_views_present_fallbacks_and_deduplicated_scope_labels() -> None
         user,
     )
 
-    assert (source.title, source.kind, source.source_uri) == (
+    assert (source.title, source.kind, source.origin, source.source_uri) == (
         "Untitled source",
         "Source",
+        "document",
         "",
     )
     assert source.scopes == finding.scopes == subject.scopes == ("Private", "Lab")
+
+
+def test_source_catalog_separates_authored_documents_from_files(migrated_db: None) -> None:
+    async def load() -> tuple[SourcePage, SourcePage, SourcePage]:
+        await dbutil.reset_db()
+        owner = uuid5()
+        authored = await dbutil.seed_document(owner, [owner])
+        stored = await seed_artifact(owner, [owner], name="paper.pdf")
+        file_document = await dbutil.seed_document(owner, [owner])
+        await dbutil.admin_exec(
+            "UPDATE document SET artifact_id = :artifact, artifact_content_id = :content "
+            "WHERE id = :document",
+            {
+                "artifact": stored.artifact.id,
+                "content": stored.content.id,
+                "document": file_document,
+            },
+        )
+        await dbutil.admin_exec(
+            "UPDATE document SET title = :title WHERE id = :document",
+            {"title": "Authored note", "document": authored},
+        )
+        user = User.authorized(owner, read=(owner,))
+        return (
+            await SourcePage.load(user),
+            await SourcePage.load(user, origin="document"),
+            await SourcePage.load(user, origin="file"),
+        )
+
+    all_sources, documents, files = dbutil.run(load())
+
+    assert all_sources.total == 2
+    assert [(row.title, row.origin) for row in documents.rows] == [("Authored note", "document")]
+    assert [row.origin for row in files.rows] == ["file"]
 
 
 def test_theme_view_loads_bounded_member_names(

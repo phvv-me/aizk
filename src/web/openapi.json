@@ -232,6 +232,21 @@
             }
           },
           {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "all",
+                "document",
+                "file"
+              ],
+              "type": "string",
+              "default": "all",
+              "title": "Origin"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -1296,9 +1311,14 @@
       },
       "KnowledgeTotals": {
         "properties": {
-          "sources": {
+          "documents": {
             "type": "integer",
-            "title": "Sources",
+            "title": "Documents",
+            "default": 0
+          },
+          "files": {
+            "type": "integer",
+            "title": "Files",
             "default": 0
           },
           "findings": {
@@ -1319,7 +1339,8 @@
         },
         "type": "object",
         "required": [
-          "sources",
+          "documents",
+          "files",
           "findings",
           "subjects",
           "themes"
@@ -1605,12 +1626,12 @@
           "usage": {
             "$ref": "#/components/schemas/UsageTotals"
           },
-          "recent_sources": {
+          "recent_documents": {
             "items": {
-              "$ref": "#/components/schemas/RecentSource"
+              "$ref": "#/components/schemas/RecentDocument"
             },
             "type": "array",
-            "title": "Recent Sources"
+            "title": "Recent Documents"
           },
           "artifacts": {
             "items": {
@@ -1624,7 +1645,7 @@
         "required": [
           "totals",
           "usage",
-          "recent_sources",
+          "recent_documents",
           "artifacts"
         ],
         "title": "Overview",
@@ -1797,7 +1818,7 @@
         "title": "ProcessingStatus",
         "description": "Caller-visible processing stages and honest ETA ranges."
       },
-      "RecentSource": {
+      "RecentDocument": {
         "properties": {
           "source_uri": {
             "type": "string",
@@ -1832,8 +1853,16 @@
           "title",
           "kind"
         ],
-        "title": "RecentSource",
-        "description": "Presentation metadata for one source without exposing internal identifiers."
+        "title": "RecentDocument",
+        "description": "Presentation metadata for one authored document without internal identifiers."
+      },
+      "SourceOrigin": {
+        "type": "string",
+        "enum": [
+          "all",
+          "document",
+          "file"
+        ]
       },
       "SourcePage": {
         "properties": {
@@ -1849,6 +1878,9 @@
             "type": "integer",
             "title": "Limit"
           },
+          "origin": {
+            "$ref": "#/components/schemas/SourceOrigin"
+          },
           "rows": {
             "items": {
               "$ref": "#/components/schemas/SourceView"
@@ -1863,6 +1895,7 @@
           "total",
           "offset",
           "limit",
+          "origin",
           "rows"
         ],
         "title": "SourcePage",
@@ -1882,6 +1915,14 @@
           "kind": {
             "type": "string",
             "title": "Kind"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "document",
+              "file"
+            ],
+            "title": "Origin"
           },
           "source_uri": {
             "type": "string",
@@ -1918,6 +1959,7 @@
           "id",
           "title",
           "kind",
+          "origin",
           "source_uri",
           "observed_at",
           "updated_at",

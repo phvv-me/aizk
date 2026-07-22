@@ -1,6 +1,8 @@
+import re
 from compression import zstd
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from loguru import logger
@@ -42,6 +44,30 @@ from .models import (
 )
 from .repository import ArtifactRepository
 from .visual import ArtifactVisualEnricher
+
+_INLINE_LINK = re.compile(r"(?P<prefix>!?\[[^\]\n]*\]\()(?P<destination><[^>\n]+>|[^)\s\n]+)")
+_REFERENCE_LINK = re.compile(
+    r"^(?P<prefix>[ \t]{0,3}\[[^\]\n]+\]:[ \t]*)(?P<destination><[^>\n]+>|\S+)",
+    re.MULTILINE,
+)
+
+
+def _resolve_markdown_links(markdown: str, source_uri: str | None) -> str:
+    """Resolve source-relative Markdown destinations against one HTTP source URI."""
+    if source_uri is None or urlparse(source_uri).scheme not in {"http", "https"}:
+        return markdown
+
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group("destination")
+        angled = raw.startswith("<") and raw.endswith(">")
+        destination = raw[1:-1] if angled else raw
+        if urlparse(destination).scheme:
+            return match.group(0)
+        resolved = urljoin(source_uri, destination)
+        prefix = match.group("prefix")
+        return f"{prefix}<{resolved}>" if angled else f"{prefix}{resolved}"
+
+    return _REFERENCE_LINK.sub(replace, _INLINE_LINK.sub(replace, markdown))
 
 
 class ArtifactEnqueuer(Protocol):
@@ -215,10 +241,11 @@ class ArtifactProcessor:
                     str(error),
                 )
                 return
+            markdown = _resolve_markdown_links(output.markdown, original.source_uri)
             await self.repository.store_conversion(
                 user,
                 original,
-                output.markdown,
+                markdown,
                 output.docling_json,
                 output.details,
             )
@@ -227,7 +254,7 @@ class ArtifactProcessor:
                 original,
                 Artifact.Content.State.ready,
                 content,
-                output.markdown,
+                markdown,
                 output.details,
             )
             await self.repository.set_state(

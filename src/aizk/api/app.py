@@ -32,8 +32,8 @@ from ..storage import ByteLimitExceeded
 from ..store.identity import User
 from ..usage import annotate_caller
 from .artifacts import ArtifactDashboard, ArtifactView
-from .dashboard import Dashboard, KnowledgeTotals, RecentSource, UsageTotals
-from .explorer import FindingPage, GraphSlice, SourcePage, SubjectPage, ThemePage
+from .dashboard import Dashboard, KnowledgeTotals, RecentDocument, UsageTotals
+from .explorer import FindingPage, GraphSlice, SourceOrigin, SourcePage, SubjectPage, ThemePage
 from .middleware import UsageMiddleware
 from .operations import ProcessingReport, ProcessingUpdates, UsageReport
 from .organizations import OrganizationDirectory
@@ -124,7 +124,7 @@ class Overview(FrozenModel):
 
     totals: KnowledgeTotals
     usage: UsageTotals
-    recent_sources: tuple[RecentSource, ...]
+    recent_documents: tuple[RecentDocument, ...]
     artifacts: tuple[ArtifactView, ...]
 
 
@@ -412,10 +412,15 @@ class AizkAPI:
         return limit, offset
 
     async def sources(
-        self, who: Verified, search: str = "", limit: int = 50, offset: int = 0
+        self,
+        who: Verified,
+        search: str = "",
+        origin: SourceOrigin = "all",
+        limit: int = 50,
+        offset: int = 0,
     ) -> SourcePage:
         """Return one read-only page of visible source documents."""
-        return await SourcePage.load(who.user, search.strip(), *self.page(limit, offset))
+        return await SourcePage.load(who.user, search.strip(), origin, *self.page(limit, offset))
 
     async def findings(
         self, who: Verified, search: str = "", limit: int = 50, offset: int = 0

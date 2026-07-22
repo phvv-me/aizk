@@ -17,6 +17,7 @@ assets/external/
 site/
 
 # generated
+.chefe/
 dist/
 build/
 

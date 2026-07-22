@@ -316,7 +316,7 @@ def test_overview_merges_knowledge_usage_sources_and_artifacts(
     response = call(service_as(monkeypatch, who), "GET", "/api/overview")
 
     assert response.status_code == 200, response.text
-    assert set(response.json()) == {"totals", "usage", "recent_sources", "artifacts"}
+    assert set(response.json()) == {"totals", "usage", "recent_documents", "artifacts"}
     assert dashboard.await_args is not None and dashboard.await_args.args == (who.user,)
     assert artifacts.await_args is not None and artifacts.await_args.args == (who.user,)
 

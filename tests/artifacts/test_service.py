@@ -22,6 +22,7 @@ from aizk.artifacts import (
     OriginalDescription,
     VisualModality,
 )
+from aizk.artifacts.service import _resolve_markdown_links
 from aizk.extract.ingest import TextIngestor, TextSource
 from aizk.integrations.clamav import ClamAVClient, CleanScan
 from aizk.integrations.docling import (
@@ -233,6 +234,30 @@ def docling_response(markdown: str = "# Paper") -> DoclingResponse:
             "processing_time": 1.0,
         }
     )
+
+
+@pytest.mark.parametrize(
+    ("markdown", "source_uri", "expected"),
+    [
+        ("[Rule](child)", None, "[Rule](child)"),
+        ("[Rule](child)", "vault:///notes/index.md", "[Rule](child)"),
+        (
+            "[Rule](child) [Web](https://example.org/rule)",
+            "https://docs.example/python/",
+            "[Rule](https://docs.example/python/child) [Web](https://example.org/rule)",
+        ),
+        (
+            "[Rule](<../child>)\n\n[more]: #details",
+            "https://docs.example/python/index.html",
+            "[Rule](<https://docs.example/child>)\n\n"
+            "[more]: https://docs.example/python/index.html#details",
+        ),
+    ],
+)
+def test_converted_markdown_resolves_only_http_source_relative_links(
+    markdown: str, source_uri: str | None, expected: str
+) -> None:
+    assert _resolve_markdown_links(markdown, source_uri) == expected
 
 
 def intake(
@@ -474,7 +499,11 @@ def test_processor_stores_postgres_derivatives_and_makes_one_file_document_recal
     source = original()
     storage, repository = Storage(), Repository(source)
     storage.values[source.storage_key] = b"original"
-    converter = Converter(docling_response())
+    converter = Converter(
+        docling_response(
+            "# Paper\n\n[Local rule](py-clean-code) and [external](https://example.org/rule)."
+        )
+    )
     ingested: list[TextSource] = []
     enqueued: list[tuple[UUID7, Scopes]] = []
 
@@ -498,7 +527,11 @@ def test_processor_stores_postgres_derivatives_and_makes_one_file_document_recal
     asyncio.run(processor.process(source.content_id, source.scopes))
 
     assert converter.artifacts[0].content == b"original"
-    assert repository.conversions[0][1:3] == ("# Paper\n", {"texts": []})
+    assert repository.conversions[0][1:3] == (
+        "# Paper\n\n[Local rule](https://files.example/py-clean-code) and "
+        "[external](https://example.org/rule).\n",
+        {"texts": []},
+    )
     assert storage.values == {source.storage_key: b"original"}
     assert "# paper.pdf" in ingested[0].text
     assert "## Extracted content" in ingested[0].text

@@ -5,9 +5,11 @@
   import InfoTip from '$lib/components/InfoTip.svelte';
   import ScopeBadges from '$lib/components/ScopeBadges.svelte';
   import StageProgress from '$lib/components/StageProgress.svelte';
+  import { Badge } from '$lib/components/ui/badge';
   import * as Card from '$lib/components/ui/card';
   import { formatEtaRange } from '$lib/format';
   import { ProcessingEvents, type ProcessingConnection } from '$lib/processing-events';
+  import { appHref, appRoutes } from '$lib/routes';
   import { webHref } from '$lib/utils';
   import type { PageServerData } from './$types';
 
@@ -25,27 +27,33 @@
     overview
       ? [
           {
-            label: 'Sources',
-            value: overview.totals.sources,
-            href: '/sources',
-            help: 'Original notes, pages, papers, and files visible to you.'
+            label: 'Documents',
+            value: overview.totals.documents,
+            href: appHref(appRoutes.sources, { origin: 'document' }),
+            help: 'Text remembered directly through AIZK clients.'
+          },
+          {
+            label: 'Files',
+            value: overview.totals.files,
+            href: appHref(appRoutes.sources, { origin: 'file' }),
+            help: 'Uploaded or fetched originals preserved by AIZK.'
           },
           {
             label: 'Findings',
             value: overview.totals.findings,
-            href: '/findings',
+            href: appRoutes.findings,
             help: 'Current claims extracted from source text and retained with provenance.'
           },
           {
             label: 'Subjects',
             value: overview.totals.subjects,
-            href: '/subjects',
+            href: appRoutes.subjects,
             help: 'People, projects, places, concepts, and other named things in memory.'
           },
           {
             label: 'Themes',
             value: overview.totals.themes,
-            href: '/themes',
+            href: appRoutes.themes,
             help: 'Groups of related subjects and findings discovered from the graph.'
           }
         ]
@@ -98,7 +106,7 @@
         text="These counts include private memory, organizations you belong to, and any public organizations visible to your account. Select a card to inspect the underlying data."
       />
     </div>
-    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
       {#each metrics as metric (metric.label)}
         <a
           href={metric.href}
@@ -152,7 +160,7 @@
                   ? 'Paused'
                   : 'Reconnecting'}
             </span>
-            <a href="/processing" class="text-primary text-sm font-medium hover:underline"
+            <a href={appRoutes.processing} class="text-primary text-sm font-medium hover:underline"
               >Open processing</a
             >
           </div>
@@ -179,35 +187,33 @@
 {/if}
 
 {#if overview || usage}
-  <div class="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
+  <div class="grid gap-6 xl:grid-cols-3">
     {#if overview}
-      <section aria-label="Recent sources">
+      <section aria-label="Recent documents">
         <Card.Root class="h-full">
           <Card.Header>
             <div class="flex items-center gap-2">
-              <Card.Title>Recent sources</Card.Title>
+              <Card.Title>Recent documents</Card.Title>
               <InfoTip
-                label="What recent sources shows"
-                text="The newest source documents visible through your private and organization scopes. External links open the original location when one exists."
+                label="What recent documents shows"
+                text="The newest text remembered directly through your private and organization scopes. Preserved files are listed separately."
               />
             </div>
-            <Card.Description>The latest documents added to visible memory.</Card.Description>
+            <Card.Description>Recently remembered text without a preserved file.</Card.Description>
             <Card.Action>
-              <a href="/sources" class="text-primary text-sm font-medium hover:underline"
-                >Browse all</a
+              <a
+                href={appHref(appRoutes.sources, { origin: 'document' })}
+                class="text-primary text-sm font-medium hover:underline">Browse all</a
               >
             </Card.Action>
           </Card.Header>
           <Card.Content>
-            {#if overview.recent_sources.length === 0}
-              <p class="text-muted-foreground text-sm">
-                No sources are visible yet. Content remembered by a connected AIZK client will
-                appear here.
-              </p>
+            {#if overview.recent_documents.length === 0}
+              <p class="text-muted-foreground text-sm">No authored documents are visible yet.</p>
             {:else}
               <ul class="divide-border divide-y">
-                {#each overview.recent_sources as source, index (index)}
-                  {@const href = webHref(source.source_uri)}
+                {#each overview.recent_documents as document, index (index)}
+                  {@const href = webHref(document.source_uri)}
                   <li class="flex flex-wrap items-center gap-x-4 gap-y-1 py-3 first:pt-0 last:pb-0">
                     <div class="min-w-0 flex-1">
                       {#if href}
@@ -217,14 +223,68 @@
                           rel="noreferrer"
                           class="hover:text-primary block truncate text-sm font-medium underline-offset-4 hover:underline"
                         >
-                          {source.title}
+                          {document.title}
                         </a>
                       {:else}
-                        <p class="truncate text-sm font-medium">{source.title}</p>
+                        <p class="truncate text-sm font-medium">{document.title}</p>
                       {/if}
-                      <p class="text-muted-foreground text-xs">{source.kind} · {source.date}</p>
+                      <p class="text-muted-foreground text-xs">
+                        {document.kind} · {document.date}
+                      </p>
                     </div>
-                    <ScopeBadges scopes={source.scopes} />
+                    <ScopeBadges scopes={document.scopes} />
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </Card.Content>
+        </Card.Root>
+      </section>
+
+      <section aria-label="Recent files">
+        <Card.Root class="h-full">
+          <Card.Header>
+            <div class="flex items-center gap-2">
+              <Card.Title>Recent files</Card.Title>
+              <InfoTip
+                label="What recent files shows"
+                text="Uploaded or fetched originals kept by AIZK. Their status shows whether conversion made the contents recallable."
+              />
+            </div>
+            <Card.Description>Preserved originals and their conversion status.</Card.Description>
+            <Card.Action>
+              <a
+                href={appHref(appRoutes.sources, { origin: 'file' })}
+                class="text-primary text-sm font-medium hover:underline">Browse all</a
+              >
+            </Card.Action>
+          </Card.Header>
+          <Card.Content>
+            {#if overview.artifacts.length === 0}
+              <p class="text-muted-foreground text-sm">No preserved files are visible yet.</p>
+            {:else}
+              <ul class="divide-border divide-y">
+                {#each overview.artifacts as file, index (index)}
+                  {@const href = webHref(file.source_uri)}
+                  <li class="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0">
+                    <div class="min-w-0 flex-1">
+                      {#if href}
+                        <a
+                          {href}
+                          target="_blank"
+                          rel="noreferrer"
+                          class="hover:text-primary block truncate text-sm font-medium hover:underline"
+                          >{file.name}</a
+                        >
+                      {:else}
+                        <p class="truncate text-sm font-medium">{file.name}</p>
+                      {/if}
+                      <p class="text-muted-foreground mt-1 text-xs">{file.date} · {file.detail}</p>
+                    </div>
+                    <Badge variant={file.status === 'failed' ? 'destructive' : 'secondary'}>
+                      {file.status}
+                    </Badge>
+                    <ScopeBadges scopes={file.scopes} />
                   </li>
                 {/each}
               </ul>
@@ -249,7 +309,7 @@
               >Successful operations recorded durably in PostgreSQL.</Card.Description
             >
             <Card.Action>
-              <a href="/usage" class="text-primary text-sm font-medium hover:underline"
+              <a href={appRoutes.usage} class="text-primary text-sm font-medium hover:underline"
                 >View details</a
               >
             </Card.Action>

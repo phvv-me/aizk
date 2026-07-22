@@ -6,6 +6,7 @@
   import { Badge } from '$lib/components/ui/badge';
   import * as Card from '$lib/components/ui/card';
   import { formatDateTime } from '$lib/format';
+  import { appHref, appRoutes } from '$lib/routes';
   import type { PageServerData } from './$types';
 
   let { data }: { data: PageServerData } = $props();
@@ -80,7 +81,7 @@
               <p class="text-muted-foreground mb-2 text-xs font-medium uppercase">Member preview</p>
               <div class="flex flex-wrap gap-2">
                 {#each theme.members as member (member)}
-                  <a href={`/subjects?search=${encodeURIComponent(member)}`}>
+                  <a href={appHref(appRoutes.subjects, { search: member })}>
                     <Badge variant="secondary" class="hover:bg-accent">{member}</Badge>
                   </a>
                 {/each}

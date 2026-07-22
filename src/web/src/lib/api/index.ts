@@ -18,7 +18,7 @@ export type {
   OrganizationProfile as Organization,
   Overview,
   ProcessingReport,
-  RecentSource,
+  RecentDocument,
   SourcePage,
   SourceView,
   StageEstimate,

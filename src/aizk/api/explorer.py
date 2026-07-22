@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from patos import FrozenModel
 from pydantic import UUID5, UUID7
@@ -6,6 +7,8 @@ from pydantic import UUID5, UUID7
 from ..store import Community, Document, Explorer
 from ..store.identity import User
 from .dashboard import View
+
+type SourceOrigin = Literal["all", "document", "file"]
 
 
 class CountRecord(FrozenModel):
@@ -20,6 +23,7 @@ class SourceView(View):
     id: UUID7
     title: str
     kind: str
+    origin: Literal["document", "file"]
     source_uri: str = ""
     observed_at: datetime | None = None
     updated_at: datetime
@@ -32,6 +36,7 @@ class SourceView(View):
             id=row.id,
             title=row.title or "Untitled source",
             kind=(row.subject_type or "source").replace("_", " ").title(),
+            origin="file" if row.artifact_id is not None else "document",
             source_uri=row.source_uri or "",
             observed_at=row.observed_at,
             updated_at=row.updated_at,
@@ -45,19 +50,26 @@ class SourcePage(View):
     total: int
     offset: int
     limit: int
+    origin: SourceOrigin
     rows: tuple[SourceView, ...] = ()
 
     @classmethod
     async def load(
-        cls, user: User, search: str = "", limit: int = 50, offset: int = 0
+        cls,
+        user: User,
+        search: str = "",
+        origin: SourceOrigin = "all",
+        limit: int = 50,
+        offset: int = 0,
     ) -> SourcePage:
         """Load visible source rows and their matching total."""
-        (count,) = await user.exec[CountRecord](Explorer.source_total(search))
-        rows = await user.exec[Document](Explorer.source_rows(search, limit, offset))
+        (count,) = await user.exec[CountRecord](Explorer.source_total(search, origin))
+        rows = await user.exec[Document](Explorer.source_rows(search, origin, limit, offset))
         return cls(
             total=count.total,
             offset=offset,
             limit=limit,
+            origin=origin,
             rows=tuple(SourceView.from_row(row, user) for row in rows),
         )
 

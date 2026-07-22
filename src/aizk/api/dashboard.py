@@ -22,7 +22,8 @@ class View(FrozenModel):
 class KnowledgeTotals(View):
     """Human-facing totals for the knowledge visible to one caller."""
 
-    sources: int = 0
+    documents: int = 0
+    files: int = 0
     findings: int = 0
     subjects: int = 0
     themes: int = 0
@@ -51,8 +52,8 @@ class ScopedRow(View):
         return value.strftime("%b %d, %Y").replace(" 0", " ")
 
 
-class RecentSource(ScopedRow):
-    """Presentation metadata for one source without exposing internal identifiers."""
+class RecentDocument(ScopedRow):
+    """Presentation metadata for one authored document without internal identifiers."""
 
     title: str
     kind: str
@@ -63,7 +64,7 @@ class Dashboard(FrozenModel):
 
     totals: KnowledgeTotals = KnowledgeTotals()
     usage: UsageTotals = UsageTotals()
-    recent_sources: tuple[RecentSource, ...] = ()
+    recent_documents: tuple[RecentDocument, ...] = ()
 
     @classmethod
     async def load(
@@ -74,16 +75,16 @@ class Dashboard(FrozenModel):
         """Load visible totals and source metadata through caller-bound `User.exec` reads."""
         (counts,) = await user.exec[KnowledgeTotals](Knowledge.totals())
         (usage,) = await user.exec[UsageTotals](Usage.Event.totals())
-        rows = await user.exec[Document](Document.newest(source_limit))
+        rows = await user.exec[Document](Document.newest_authored(source_limit))
         return cls(
             totals=counts,
             usage=usage,
-            recent_sources=tuple(
-                RecentSource(
-                    title=row.title or "Untitled source",
+            recent_documents=tuple(
+                RecentDocument(
+                    title=row.title or "Untitled document",
                     source_uri=row.source_uri or "",
                     kind=(row.subject_type or "source").replace("_", " ").title(),
-                    date=RecentSource.format_date(row.observed_at or row.updated_at),
+                    date=RecentDocument.format_date(row.observed_at or row.updated_at),
                     scopes=tuple(dict.fromkeys(user.scope_labels(row.scopes))),
                 )
                 for row in rows

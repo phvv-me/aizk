@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { GraphSlice } from '$lib/api';
+  import { appHref, appRoutes } from '$lib/routes';
   import InfoTip from './InfoTip.svelte';
 
   let { graph }: { graph: GraphSlice } = $props();
@@ -71,7 +72,7 @@
           {@const point = positions.get(node.id)}
           {#if point}
             <a
-              href={`/subjects?search=${encodeURIComponent(node.label)}`}
+              href={appHref(appRoutes.subjects, { search: node.label })}
               aria-label={`${node.label} with ${node.degree} relationships`}
             >
               <circle

@@ -1,6 +1,9 @@
+import { appRoutes } from './routes';
+
 export type NavIcon =
   | 'dashboard'
   | 'recall'
+  | 'explore'
   | 'sources'
   | 'findings'
   | 'subjects'
@@ -26,29 +29,30 @@ export function navigation(): NavSection[] {
     {
       label: 'Knowledge',
       links: [
-        { label: 'Dashboard', href: '/app/dashboard', icon: 'dashboard' },
-        { label: 'Recall', href: '/app/recall', icon: 'recall' }
+        { label: 'Dashboard', href: appRoutes.dashboard, icon: 'dashboard' },
+        { label: 'Recall', href: appRoutes.recall, icon: 'recall' }
       ]
     },
     {
-      label: 'Explore',
+      label: 'Memory',
       links: [
-        { label: 'Sources', href: '/app/sources', icon: 'sources' },
-        { label: 'Findings', href: '/app/findings', icon: 'findings' },
-        { label: 'Subjects', href: '/app/subjects', icon: 'subjects' },
-        { label: 'Themes', href: '/app/themes', icon: 'themes' }
+        { label: 'Memory map', href: appRoutes.explore, icon: 'explore' },
+        { label: 'Sources', href: appRoutes.sources, icon: 'sources' },
+        { label: 'Findings', href: appRoutes.findings, icon: 'findings' },
+        { label: 'Subjects', href: appRoutes.subjects, icon: 'subjects' },
+        { label: 'Themes', href: appRoutes.themes, icon: 'themes' }
       ]
     },
     {
       label: 'Operations',
       links: [
-        { label: 'Usage', href: '/app/usage', icon: 'usage' },
-        { label: 'Processing', href: '/app/processing', icon: 'processing' }
+        { label: 'Usage', href: appRoutes.usage, icon: 'usage' },
+        { label: 'Processing', href: appRoutes.processing, icon: 'processing' }
       ]
     },
     {
       label: 'Collaboration',
-      links: [{ label: 'Organizations', href: '/app/organizations', icon: 'organizations' }]
+      links: [{ label: 'Organizations', href: appRoutes.organizations, icon: 'organizations' }]
     }
   ];
 }

@@ -6,13 +6,14 @@ describe('navigation', () => {
     const sections = navigation();
     expect(sections.map((section) => section.label)).toEqual([
       'Knowledge',
-      'Explore',
+      'Memory',
       'Operations',
       'Collaboration'
     ]);
     expect(sections.flatMap((section) => section.links).map((link) => link.href)).toEqual([
       '/app/dashboard',
       '/app/recall',
+      '/app/explore',
       '/app/sources',
       '/app/findings',
       '/app/subjects',

@@ -35,6 +35,23 @@ This roadmap separates shipped behavior from hypotheses that still need measured
 - [ ] Add Mem2ActBench once evaluation can judge tool selection and arguments.
 - [ ] Record positive evidence and obsolete negative evidence per benchmark case.
 
+## Investigate before building
+
+- [ ] Evaluate managed workstreams for switching between native Codex and Claude sessions without
+  losing operational context, using [ai-memory](https://github.com/akitaonrails/ai-memory) as prior
+  art rather than as a dependency.
+  - Keep an ordered workstream ledger separate from `SessionItem`, durable documents, and graph
+    enrichment.
+  - Prototype private-only, read-only client adapters with deterministic event IDs, import and
+    delivery cursors, bounded handoffs, one active-writer lease, and repository checkpoints.
+  - Measure transcript volume, storage growth, prompt cost, recall quality, graph queue impact,
+    client format stability, crash recovery, and concurrent handoff behavior.
+  - Threat-model secrets, prompt injection, completed tool-call replay, organization sharing, and
+    authorization boundaries before enabling capture outside private memory.
+  - Require an explicit architecture decision after the prototype. Reject the feature if it cannot
+    preserve native client ownership, avoid automatic raw-event promotion, and fail closed on
+    uncertain or private transcript records.
+
 ## Product hardening
 
 - [ ] Add authenticated invalidation for the fail-closed public organization directory.

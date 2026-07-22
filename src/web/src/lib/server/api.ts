@@ -92,9 +92,14 @@ export class ApiClient {
     });
   }
 
-  async sources(search = '', limit = 50, offset = 0): Promise<SourcePage> {
+  async sources(
+    search = '',
+    origin: 'all' | 'document' | 'file' = 'all',
+    limit = 50,
+    offset = 0
+  ): Promise<SourcePage> {
     return unwrap(
-      await sdk.sources({ client: await this.client(), query: { search, limit, offset } })
+      await sdk.sources({ client: await this.client(), query: { search, origin, limit, offset } })
     );
   }
 

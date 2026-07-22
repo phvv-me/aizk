@@ -11,6 +11,7 @@
   import { Input } from '$lib/components/ui/input';
   import { rankedCounts } from '$lib/collections';
   import { formatDateTime } from '$lib/format';
+  import { appHref, appRoutes } from '$lib/routes';
   import type { PageServerData } from './$types';
 
   let { data }: { data: PageServerData } = $props();
@@ -117,7 +118,7 @@
                   <td class="py-3 pr-4"><Badge variant="secondary">{subject.type}</Badge></td>
                   <td class="py-3 pr-4 text-right tabular-nums">
                     <a
-                      href={`/findings?search=${encodeURIComponent(subject.name)}`}
+                      href={appHref(appRoutes.findings, { search: subject.name })}
                       class="text-primary font-medium hover:underline"
                       >{subject.finding_count.toLocaleString('en-US')}</a
                     >
