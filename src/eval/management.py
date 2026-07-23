@@ -7,7 +7,6 @@ from typing import ClassVar, Literal, TypeIs
 from patos import FrozenModel
 from pydantic import NonNegativeFloat, NonNegativeInt, PositiveInt
 from sqlalchemy import func, or_
-from sqlalchemy.dialects.postgresql import distinct_on
 from sqlmodel import select
 
 from aizk.config import settings as aizk_settings
@@ -201,7 +200,7 @@ class ManagementBenchmark:
                         Document.expires_at > func.now(),
                     ),
                 )
-                .ext(distinct_on(Document.subject_type, Document.title))
+                .distinct(Document.subject_type, Document.title)
                 .order_by(Document.subject_type, Document.title, Document.updated_at.desc())
             )
         return tuple(

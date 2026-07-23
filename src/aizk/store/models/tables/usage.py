@@ -5,12 +5,14 @@ from typing import ClassVar, Self, cast
 from patos import sql
 from patos.sql import NonNegativeFloat, NonNegativeInt
 from pydantic import UUID5
-from sqlalchemy import CheckConstraint, Index, Label, Uuid, func, or_
+from sqlalchemy import BigInteger, CheckConstraint, ColumnElement, Index, Label, Uuid, func, or_
+from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import ARRAY, Insert, insert
 from sqlmodel import select
 from sqlmodel.sql.expression import Select
 
 from ...mixins import CreatedAt, Id, Scoped, TableBase
+from .quota import MonthlyQuotaCounter
 
 
 class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
@@ -55,7 +57,7 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
         """Aggregate operation, item, byte, and duration totals after an optional instant."""
         statement = select(*cls.aggregate()).add_columns(
             cls.id.count().label("requests"),
-            cls.items.sum(default=0).label("items"),
+            cls.integer_sum(func.sum(cls.items), "items"),
             cls.duration_ms.sum(default=0.0).label("duration_ms"),
         )
         if start is not None:
@@ -76,9 +78,9 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
                 cls.id.count().label("requests"),
             )
             .add_columns(
-                cls.items.sum(default=0).label("items"),
-                cls.request_bytes.sum(default=0).label("request_bytes"),
-                cls.response_bytes.sum(default=0).label("response_bytes"),
+                cls.integer_sum(func.sum(cls.items), "items"),
+                cls.integer_sum(func.sum(cls.request_bytes), "request_bytes"),
+                cls.integer_sum(func.sum(cls.response_bytes), "response_bytes"),
                 cls.duration_ms.sum(default=0.0).label("duration_ms"),
             )
             .where(cls.created_at >= start)
@@ -111,18 +113,26 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
             cls.id.count()
             .filter(operation == cls.Operation.artifact_read)
             .label("artifact_reads"),
-            cls.request_bytes.sum(default=0).label("request_bytes"),
-            cls.response_bytes.sum(default=0).label("response_bytes"),
-            func.coalesce(
-                func.sum(cls.request_bytes).filter(operation == cls.Operation.remember_file), 0
-            ).label("uploaded_bytes"),
-            func.coalesce(
-                func.sum(cls.response_bytes).filter(operation == cls.Operation.artifact_read), 0
-            ).label("downloaded_bytes"),
+            cls.integer_sum(func.sum(cls.request_bytes), "request_bytes"),
+            cls.integer_sum(func.sum(cls.response_bytes), "response_bytes"),
+            cls.integer_sum(
+                func.sum(cls.request_bytes).filter(operation == cls.Operation.remember_file),
+                "uploaded_bytes",
+            ),
+            cls.integer_sum(
+                func.sum(cls.response_bytes).filter(operation == cls.Operation.artifact_read),
+                "downloaded_bytes",
+            ),
         )
+
+    @staticmethod
+    def integer_sum(expression: ColumnElement[int], label: str) -> Label[int]:
+        """Cast dialect-specific integer sums back to stable signed 64-bit report values."""
+        return func.coalesce(sql_cast(expression, BigInteger()), 0).label(label)
 
 
 class Usage:
     """Namespace for durable usage accounting models."""
 
     Event: ClassVar[type[UsageEvent]] = UsageEvent
+    MonthlyQuota: ClassVar[type[MonthlyQuotaCounter]] = MonthlyQuotaCounter

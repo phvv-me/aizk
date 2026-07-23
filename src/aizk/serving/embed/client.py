@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from openai.types import CreateEmbeddingResponse
+from pydantic import JsonValue
 
 from ...config import Settings
 from ..base import OpenAIService, openai_client, ordered_results
@@ -26,6 +27,7 @@ class EmbedClient(OpenAIService):
     batch_size: int
     instruction_query: str
     instruction_document: str
+    extra_body: dict[str, JsonValue] = {}
 
     @classmethod
     def from_settings(cls, config: Settings) -> EmbedClient:
@@ -35,12 +37,19 @@ class EmbedClient(OpenAIService):
                 config.embed_url,
                 config.embed_api_key,
                 config.embed_request_timeout,
+                tuple(
+                    sorted(
+                        (name, value.get_secret_value())
+                        for name, value in config.embed_headers.items()
+                    )
+                ),
             ),
             model=config.embed_model,
             dim=config.embed_dim,
             batch_size=config.embed_batch_size,
             instruction_query=config.embed_instruction_query,
             instruction_document=config.embed_instruction_document,
+            extra_body=config.embed_extra_body,
         )
 
     def instruction_for(self, mode: EmbedMode) -> str:
@@ -81,6 +90,7 @@ class EmbedClient(OpenAIService):
                 input=list(batch),
                 dimensions=self.dim,
                 encoding_format="float",
+                extra_body=self.extra_body or None,
             )
             vectors.extend(
                 row.embedding
@@ -98,27 +108,29 @@ class EmbedClient(OpenAIService):
         instruction = self.instruction_for("document")
         vectors: list[list[float]] = []
         for image in images:
+            body: dict[str, JsonValue] = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": [{"type": "text", "text": instruction}]},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": self.image_url(image)}},
+                            {"type": "text", "text": ""},
+                        ],
+                    },
+                    {"role": "assistant", "content": [{"type": "text", "text": ""}]},
+                ],
+                "dimensions": self.dim,
+                "encoding_format": "float",
+                "continue_final_message": True,
+                "add_special_tokens": True,
+            }
+            body.update(self.extra_body)
             response = await self.client.post(
                 "/embeddings",
                 cast_to=CreateEmbeddingResponse,
-                body={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": [{"type": "text", "text": instruction}]},
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "image_url", "image_url": {"url": self.image_url(image)}},
-                                {"type": "text", "text": ""},
-                            ],
-                        },
-                        {"role": "assistant", "content": [{"type": "text", "text": ""}]},
-                    ],
-                    "dimensions": self.dim,
-                    "encoding_format": "float",
-                    "continue_final_message": True,
-                    "add_special_tokens": True,
-                },
+                body=body,
             )
             vectors.append(response.data[0].embedding)
         return vectors

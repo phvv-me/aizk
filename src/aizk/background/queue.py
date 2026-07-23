@@ -1,4 +1,6 @@
 import abc
+from collections import defaultdict
+from datetime import UTC, datetime
 from functools import cached_property, partial
 from types import TracebackType
 from typing import ClassVar, Self, cast
@@ -14,12 +16,15 @@ from pgqueuer.executors import DatabaseRetryEntrypointExecutor
 from pgqueuer.models import Job
 from pydantic import PrivateAttr
 from sqlalchemy import Column as SAColumn
-from sqlalchemy import Index, MetaData, String, Table, and_
-from sqlalchemy.dialects.postgresql import ENUM
+from sqlalchemy import Index, MetaData, String, Table, and_, func
+from sqlalchemy.dialects.postgresql import ENUM, insert
 from sqlalchemy.schema import CreateIndex, DropIndex
+from sqlmodel import select
 
-from ..config import settings
+from ..config import DatabaseBackend, settings
 from ..store.ddl import Grant, GrantTarget, postgresql_sql
+from ..store.identity import User
+from ..store.models.tables.queue import QueueEvent, QueueTask
 from .enum import QueueStatus
 
 
@@ -56,6 +61,16 @@ class QueueSchema(FrozenModel):
         return tuple(f"{table}_id_seq" for table in self.tables)
 
 
+class QueueSnapshot(FrozenModel):
+    """Backend-neutral current queue counts and timestamps."""
+
+    pending: int
+    running: int
+    failed: int
+    last_success: datetime | None
+    oldest_queued: datetime | None
+
+
 class Queue(FrozenModel):
     """Typed application boundary over one PgQueuer connection."""
 
@@ -64,6 +79,8 @@ class Queue(FrozenModel):
 
     async def __aenter__(self) -> Self:
         """Open the queue connection."""
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            return self
         assert self.__pydantic_private__ is not None
         self.__pydantic_private__["_connection"] = await asyncpg.connect(self.dsn)
         cast("dict[str, object]", self.__dict__).pop("queries", None)
@@ -76,6 +93,8 @@ class Queue(FrozenModel):
         traceback: TracebackType | None,
     ) -> None:
         """Close the queue connection."""
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            return
         connection = self.connection
         assert self.__pydantic_private__ is not None
         self.__pydantic_private__["_connection"] = None
@@ -96,6 +115,8 @@ class Queue(FrozenModel):
 
     def worker(self) -> PgQueuer:
         """Build a PgQueuer worker over this queue connection."""
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            raise RuntimeError("CockroachDB uses PortableWorker")
         return PgQueuer.from_asyncpg_connection(self.connection)
 
     async def enqueue[PayloadT: QueuePayload](
@@ -105,6 +126,24 @@ class Queue(FrozenModel):
         dedupe_key: str,
     ) -> bool:
         """Persist one typed job and report whether deduplication admitted it."""
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            async with User.system().owner as session:
+                admitted = await session.exec(
+                    insert(QueueTask)
+                    .values(
+                        entrypoint=job.entrypoint,
+                        payload=payload.encode(),
+                        priority=job.priority,
+                        dedupe_key=dedupe_key,
+                        status=QueueStatus.queued.value,
+                        attempts=0,
+                        max_attempts=job.max_attempts,
+                        available_at=datetime.now(UTC),
+                    )
+                    .on_conflict_do_nothing()
+                    .returning(QueueTask.id)
+                )
+                return admitted.first() is not None
         try:
             await self.queries.enqueue(
                 job.entrypoint,
@@ -129,9 +168,30 @@ class Queue(FrozenModel):
         recovery may cap terminal failure cycles while an explicit operator retry can
         omit the cap.
         """
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            async with User.system().owner as session:
+                statement = (
+                    select(QueueTask)
+                    .where(
+                        QueueTask.status == QueueStatus.failed.value,
+                        QueueTask.entrypoint == job.entrypoint,
+                    )
+                    .order_by(QueueTask.updated_at, QueueTask.id)
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+                if max_cycles is not None:
+                    statement = statement.where(QueueTask.attempts < max_cycles)
+                rows = list(await session.exec(statement))
+                for row in rows:
+                    row.status = QueueStatus.queued.value
+                    row.available_at = datetime.now(UTC)
+                    row.error_type = None
+                    row.error_message = None
+                return len(rows)
         names = self.queries.qbe.settings
         if max_cycles is None:
-            rows = await self.queries.driver.fetch(
+            pg_rows = await self.queries.driver.fetch(
                 f"SELECT id FROM {names.queue_table}"
                 " WHERE status = 'failed' AND entrypoint = $1"
                 " ORDER BY updated LIMIT $2",
@@ -139,7 +199,7 @@ class Queue(FrozenModel):
                 limit,
             )
         else:
-            rows = await self.queries.driver.fetch(
+            pg_rows = await self.queries.driver.fetch(
                 f"SELECT job.id FROM {names.queue_table} AS job"
                 " WHERE job.status = 'failed' AND job.entrypoint = $1"
                 f" AND (SELECT count(*) FROM {names.queue_table_log} AS log"
@@ -149,10 +209,89 @@ class Queue(FrozenModel):
                 limit,
                 max_cycles,
             )
-        ids = [row["id"] for row in rows]
+        ids = [row["id"] for row in pg_rows]
         if ids:
             await self.queries.requeue_jobs(ids)
         return len(ids)
+
+    async def active_payloads(self, entrypoint: str) -> tuple[bytes, ...]:
+        """Return payloads protected by active or retained queue deduplication."""
+        statuses = (
+            QueueStatus.queued.value,
+            QueueStatus.picked.value,
+            QueueStatus.failed.value,
+        )
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            async with User.system().owner as session:
+                return tuple(
+                    await session.exec(
+                        select(QueueTask.payload).where(
+                            QueueTask.entrypoint == entrypoint,
+                            QueueTask.status.in_(statuses),
+                        )
+                    )
+                )
+        names = self.queries.qbe.settings
+        rows = await self.connection.fetch(
+            f"SELECT payload FROM {names.queue_table} "
+            "WHERE entrypoint = $1 AND status IN ('queued', 'picked', 'failed') "
+            "AND payload IS NOT NULL",
+            entrypoint,
+        )
+        return tuple(row["payload"] for row in rows)
+
+    async def snapshot(self) -> QueueSnapshot:
+        """Read backend-neutral queue counts and operational timestamps."""
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            async with User.system().owner as session:
+                portable_counts = dict(
+                    (
+                        await session.exec(
+                            select(QueueTask.status, func.count(QueueTask.id)).group_by(
+                                QueueTask.status
+                            )
+                        )
+                    ).all()
+                )
+                last_success = (
+                    await session.exec(
+                        select(func.max(QueueEvent.created_at)).where(
+                            QueueEvent.status == QueueStatus.successful.value
+                        )
+                    )
+                ).one()
+                oldest_queued = (
+                    await session.exec(
+                        select(func.min(QueueTask.created_at)).where(
+                            QueueTask.status == QueueStatus.queued.value
+                        )
+                    )
+                ).one()
+            return QueueSnapshot(
+                pending=portable_counts.get(QueueStatus.queued.value, 0),
+                running=portable_counts.get(QueueStatus.picked.value, 0),
+                failed=portable_counts.get(QueueStatus.failed.value, 0),
+                last_success=last_success,
+                oldest_queued=oldest_queued,
+            )
+        sizes = await self.queries.queue_size()
+        names = self.queries.qbe.settings
+        last_success = await self.connection.fetchval(
+            f"SELECT max(created) FROM {names.queue_table_log} WHERE status = 'successful'"
+        )
+        oldest_queued = await self.connection.fetchval(
+            f"SELECT min(created) FROM {names.queue_table} WHERE status = 'queued'"
+        )
+        counts: defaultdict[str, int] = defaultdict(int)
+        for row in sizes:
+            counts[row.status] += row.count
+        return QueueSnapshot(
+            pending=counts[QueueStatus.queued],
+            running=counts[QueueStatus.picked],
+            failed=counts[QueueStatus.failed],
+            last_success=last_success,
+            oldest_queued=oldest_queued,
+        )
 
     async def install(self) -> QueueSchema:
         """Install or upgrade the PgQueuer schema and report its configured object names."""
@@ -188,6 +327,10 @@ class QueueJob[PayloadT: QueuePayload](abc.ABC):
         """Decode one raw PgQueuer job and execute its typed body."""
         assert job.payload is not None
         await self.handle(cast(PayloadT, self.payload_type.decode(job.payload)))
+
+    async def handle_encoded(self, payload: bytes) -> None:
+        """Decode and execute one payload read by a backend-neutral worker."""
+        await self.handle(cast(PayloadT, self.payload_type.decode(payload)))
 
     def bind(self, worker: PgQueuer) -> None:
         """Register this job with retries and retained terminal failures."""
@@ -245,6 +388,9 @@ async def install_queue_schema() -> None:
     under the same lock during deploys. Grants are refreshed before the lock releases
     with the connection.
     """
+    if settings.database_backend is DatabaseBackend.cockroachdb:
+        logger.info("portable queue schema is managed by CockroachDB migrations")
+        return
     async with Queue(dsn=settings.admin_asyncpg_dsn) as queue:
         await queue.connection.execute(
             "SELECT pg_advisory_lock(hashtextextended('aizk.install_queue_schema', 0))"

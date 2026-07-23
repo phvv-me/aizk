@@ -711,13 +711,18 @@ def check_backdated_update(bounded: bool) -> None:
             )
         async with dbutil.actor(owner) as session:
             rows = await session.exec(
-                select(Fact.Content.statement, Fact.Claim.recorded, Fact.Claim.valid)
+                select(
+                    Fact.Content.statement,
+                    Fact.Claim.recorded_to,
+                    Fact.Claim.valid_from,
+                    Fact.Claim.valid_to,
+                )
                 .join(Fact.Claim, Fact.Claim.content_id == Fact.Content.id)
                 .execution_options(**GATE_OFF)
             )
             return {
-                statement: (recorded.upper_inf, valid.lower, valid.upper)
-                for statement, recorded, valid in rows
+                statement: (recorded_to is None, valid_from, valid_to)
+                for statement, recorded_to, valid_from, valid_to in rows
             }
 
     claims = dbutil.run(body())
@@ -1269,13 +1274,18 @@ def check_forward_update() -> None:
             )
         async with dbutil.actor(owner) as session:
             rows = await session.exec(
-                select(Fact.Content.statement, Fact.Claim.recorded, Fact.Claim.valid)
+                select(
+                    Fact.Content.statement,
+                    Fact.Claim.recorded_to,
+                    Fact.Claim.valid_from,
+                    Fact.Claim.valid_to,
+                )
                 .join(Fact.Claim, Fact.Claim.content_id == Fact.Content.id)
                 .execution_options(**GATE_OFF)
             )
             return {
-                statement: (recorded.upper_inf, valid.lower, valid.upper)
-                for statement, recorded, valid in rows
+                statement: (recorded_to is None, valid_from, valid_to)
+                for statement, recorded_to, valid_from, valid_to in rows
             }
 
     claims = dbutil.run(body())
@@ -1329,8 +1339,8 @@ def check_future_claim_closed_as_empty() -> None:
             )
         async with dbutil.actor(owner) as session:
             claim = await session.get(Fact.Claim, claim_id, execution_options=GATE_OFF)
-            assert claim is not None and claim.valid is not None
-            return claim.valid.is_empty
+            assert claim is not None
+            return claim.valid_from == claim.valid_to
 
     assert dbutil.run(body())
 

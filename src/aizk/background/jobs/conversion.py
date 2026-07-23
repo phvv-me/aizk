@@ -106,23 +106,11 @@ class ArtifactRecovery:
 
     async def active_content_ids(self, queue: Queue) -> tuple[UUID, ...]:
         """Decode content IDs currently protected by PgQueuer deduplication."""
-        names = queue.queries.qbe.settings
-        rows = await queue.connection.fetch(
-            f"""
-            SELECT payload
-            FROM {names.queue_table}
-            WHERE entrypoint = $1
-              AND status IN ('queued', 'picked', 'failed')
-              AND payload IS NOT NULL
-            """,
-            DoclingConversionJob.entrypoint,
-        )
+        payloads = await queue.active_payloads(DoclingConversionJob.entrypoint)
         content_ids: list[UUID] = []
-        for row in rows:
+        for payload in payloads:
             try:
-                content_ids.append(
-                    ArtifactConversionJob.decode(row["payload"]).artifact_content_id
-                )
+                content_ids.append(ArtifactConversionJob.decode(payload).artifact_content_id)
             except TypeError, ValueError:
                 continue
         return tuple(content_ids)

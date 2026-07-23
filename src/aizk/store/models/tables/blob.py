@@ -10,7 +10,7 @@ from pydantic import UUID8
 from sqlalchemy import CheckConstraint, Index, Uuid
 from sqlmodel import select
 
-from ....config import settings
+from ....config import DatabaseBackend, settings
 from ...mixins import CreatedAt, Id, TableBase
 
 
@@ -78,10 +78,15 @@ class Blob(Id, CreatedAt, TableBase, table=True):
             "artifact_content",
             sa.column("blob_id", Uuid()),
         )
+        readable = (
+            sa.func.aizk_blob_visible(cls.id)
+            if settings.database_backend is DatabaseBackend.cockroachdb
+            else cls.id.in_(select(content.c.blob_id))
+        )
         return (
             rls.Policy.select(
                 "blob_read",
-                cls.id.in_(select(content.c.blob_id)),
+                readable,
                 roles=(settings.app_role,),
             ),
             rls.Policy.insert("blob_insert", sa.true(), roles=(settings.app_role,)),

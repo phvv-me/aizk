@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Callable
+from dataclasses import replace
 from types import ModuleType, SimpleNamespace
 from typing import cast
 
@@ -13,6 +14,7 @@ from pgqueuer import PgQueuer
 from pydantic import UUID5
 
 import aizk.background.schedule as schedule_mod
+from aizk.background.jobs.conversion import ArtifactProcessor, DoclingConversionJob
 from aizk.background.jobs.maintenance import (
     ProfileProjectionJob,
     ScheduledJob,
@@ -20,9 +22,19 @@ from aizk.background.jobs.maintenance import (
 )
 from aizk.background.jobs.models import MaintenanceJob
 from aizk.background.jobs.projection import ChunkProjectionJob
-from aizk.background.schedule import fan_out, run_worker, scope_roster
-from aizk.config import settings
+from aizk.background.portable import PortableWorker
+from aizk.background.schedule import (
+    fan_out,
+    portable_worker,
+    run_worker,
+    run_worker_once,
+    scope_roster,
+)
+from aizk.config import DatabaseBackend, settings
+from aizk.ontology import Ontology
+from aizk.runtime import Runtime
 from aizk.store import SessionItem
+from aizk.store.engine import Session
 from aizk.types import Scopes
 from aizk.usage import UsageAccountingJob
 
@@ -139,6 +151,80 @@ def test_run_worker_registers_every_entrypoint(
         assert registered is job.enabled
     assert pg.runs == [7, settings.queue_batch_size]
     assert recorder.opened == recorder.closed == 2
+
+
+def test_portable_worker_assembles_every_enabled_job_and_schedule() -> None:
+    runtime = fake_runtime()
+    conversion = DoclingConversionJob(cast(ArtifactProcessor, SimpleNamespace()))
+    services = replace(runtime.artifacts, conversion=conversion)
+    runtime = replace(runtime, artifacts=services)
+
+    worker = portable_worker(runtime, batch_size=3)
+
+    assert worker.batch_size == 3
+    assert {
+        ChunkProjectionJob.entrypoint,
+        UsageAccountingJob.entrypoint,
+        DoclingConversionJob.entrypoint,
+    } <= set(worker.jobs)
+    expected_schedules = {
+        job.cron_entrypoint
+        for job_type in ScheduledJob.implementations()
+        if (job := job_type.assemble(runtime)).enabled
+    }
+    assert set(worker.schedules) == expected_schedules
+
+
+class PortableRunner:
+    """Record serverless and continuous portable worker calls."""
+
+    def __init__(self) -> None:
+        self.installed = 0
+        self.once = 0
+        self.runs = 0
+
+    async def install_schedules(self) -> None:
+        self.installed += 1
+
+    async def run_once(self) -> int:
+        self.once += 1
+        return 6
+
+    async def run(self) -> None:
+        self.runs += 1
+
+
+def test_serverless_worker_requires_cockroach_and_drains_one_wave(
+    migrated_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = fake_runtime()
+    runner = PortableRunner()
+    refreshed: list[Session] = []
+
+    async def refresh(cls: type[Ontology], session: Session) -> None:
+        del cls
+        refreshed.append(session)
+
+    def assemble(received: Runtime, batch_size: int | None = None) -> PortableWorker:
+        assert received is runtime
+        assert batch_size == 2
+        return cast(PortableWorker, runner)
+
+    monkeypatch.setattr(Ontology, "refresh", classmethod(refresh))
+    monkeypatch.setattr(schedule_mod, "portable_worker", assemble)
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.postgresql)
+    with pytest.raises(RuntimeError, match="CockroachDB"):
+        asyncio.run(run_worker_once(runtime, 2))
+
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+    assert asyncio.run(run_worker_once(runtime, 2)) == 6
+    asyncio.run(run_worker(runtime, 2))
+
+    assert runner.installed == 1
+    assert runner.once == 1
+    assert runner.runs == 1
+    assert len(refreshed) == 2
 
 
 def test_scope_roster_unions_document_and_session_scopes(migrated_db: None) -> None:

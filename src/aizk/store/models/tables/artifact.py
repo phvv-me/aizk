@@ -4,12 +4,13 @@ from typing import TYPE_CHECKING, ClassVar, Self, cast
 
 from patos import sql
 from pydantic import UUID5, UUID7, UUID8, JsonValue
-from sqlalchemy import CheckConstraint, Index, UniqueConstraint, false, func, literal, or_
+from sqlalchemy import CheckConstraint, Index, UniqueConstraint, false, or_
 from sqlmodel import Relationship, select
 from sqlmodel.sql.expression import Select
 
 from ....exceptions import NotVisibleError
 from ...engine import Session
+from ...locking import acquire_locks
 from ...mixins import Id, Scoped, TableBase, Timestamped
 from .blob import Blob
 
@@ -228,15 +229,9 @@ class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
         artifact, content = pair
         target = sorted(set(target), key=str)
         dedup_key = artifact.source_uri if artifact.source_uri is not None else str(artifact.id)
-        await session.exec(
-            select(
-                func.pg_advisory_xact_lock(
-                    func.hashtextextended(
-                        literal(f"artifact_share|{dedup_key}|{','.join(str(s) for s in target)}"),
-                        0,
-                    )
-                )
-            )
+        await acquire_locks(
+            session,
+            [f"artifact_share|{dedup_key}|{','.join(str(scope) for scope in target)}"],
         )
         target_artifact = (
             await session.exec(

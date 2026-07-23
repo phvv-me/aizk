@@ -19,16 +19,20 @@ GATE_OFF = {settings.skip_live_gate: True}
 @given(state=temporal_states())
 def test_fact_claim_helpers_match_the_temporal_spec(state: TemporalState) -> None:
     now = datetime.now(UTC)
+    valid_from, valid_to = state.window(now)
+    recorded = state.recorded(now)
     claim = Fact.Claim(
         content_id=uuid5(),
         created_by=uuid5(),
-        valid=state.valid(now),
-        recorded=state.recorded(now),
+        valid_from=valid_from,
+        valid_to=valid_to,
+        recorded_from=recorded.lower,
+        recorded_to=recorded.upper,
     )
     assert claim.is_current is state.expected_current(now)
     assert claim.created_at == state.recorded(now).lower
     assert len(Fact.Claim.visible_at(None)) == 1
-    assert len(Fact.Claim.visible_at(now)) == 2
+    assert len(Fact.Claim.visible_at(now)) == 4
 
 
 def _recorded_holds(state: TemporalState, as_of: datetime, now: datetime) -> bool:

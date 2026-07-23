@@ -18,6 +18,8 @@ from sqlalchemy import (
     column,
     func,
     literal,
+    literal_column,
+    true,
     type_coerce,
     union_all,
 )
@@ -26,7 +28,9 @@ from sqlalchemy.sql.selectable import CTE
 from sqlmodel import Field, select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
+from ....config import DatabaseBackend, settings
 from ...mixins import Embedded, Id, Scoped, TableBase
+from ...vector import cosine_distance
 
 if TYPE_CHECKING:
     from ....retrieval.models.lane import QueryContext
@@ -92,7 +96,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
         # its ordered-chunks relationship.
         from .document import Document
 
-        chunk_distance = cls.embedding @ context.vector
+        chunk_distance = cosine_distance(cls.embedding, context.vector)
         active = Document.is_active()
         dense_ranked = (
             select(cls.id, cls.document_id, chunk_distance.label("distance"))
@@ -108,15 +112,25 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
             func.row_number().over(order_by=dense_ranked.c.distance).label("rank"),
         ).cte("dense_chunk")
 
-        # The bm25 column and its index live only in the migration, never on the model.
-        text_query = func.to_bm25query(
-            "ix_chunk_bm25", func.tokenize(bindparam("qtext"), "aizk_bm25")
-        )
-        text_rank = column("bm25").op("<&>")(text_query)
+        text_rank: ColumnElement[float]
+        text_guard: ColumnElement[bool]
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            language: ColumnElement[str] = literal_column("'english'")
+            searchable = func.to_tsvector(language, func.coalesce(cls.lexical, cls.text))
+            text_query = func.plainto_tsquery(language, bindparam("qtext"))
+            text_rank = -func.ts_rank(searchable, text_query)
+            text_guard = searchable.op("@@")(text_query)
+        else:
+            # The bm25 column and its index live only in the PostgreSQL migration.
+            text_query = func.to_bm25query(
+                "ix_chunk_bm25", func.tokenize(bindparam("qtext"), "aizk_bm25")
+            )
+            text_rank = column("bm25").op("<&>")(text_query)
+            text_guard = true()
         lexical_ranked = (
             select(cls.id, cls.document_id, text_rank.label("raw_rank"))
             .join(Document, Document.id == cls.document_id)
-            .where(active)
+            .where(active, text_guard)
             .order_by(text_rank)
             .limit(context.fusion_depth)
             .subquery("lexical_ranked")
@@ -252,6 +266,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
 
 def reciprocal_rank_fusion(rank: ColumnElement[int]) -> ColumnElement[float]:
     """One ranking's reciprocal-rank-fusion vote, 1 / (k + rank), after Cormack et al."""
-    # type_coerce renders no SQL; it only pins the Python-side type the untyped
-    # `rrf_k` bind would otherwise leave unknown.
-    return type_coerce(1.0 / (bindparam("rrf_k") + rank), Float)
+    return type_coerce(
+        literal(1.0, Float) / (bindparam("rrf_k", type_=Float) + rank.cast(Float)),
+        Float,
+    )

@@ -16,7 +16,7 @@ Memory your agents actually keep. aizk is a self-hosted AI Zettelkasten for peop
 
 You tell aizk something and it remembers it for good. Text, files, and public HTTPS sources become an entity-and-fact knowledge graph addressed by meaning, so the same thing learned twice never duplicates. When you ask a question, aizk ranks the evidence you are allowed to see and answers with its sources.
 
-- **PostgreSQL owns everything** that matters, the graph, metadata, temporal state, and the job queue, so there is one source of truth and no second database to keep in sync.
+- **One SQL database owns everything** that matters, including the graph, metadata, temporal state, and job queue. PostgreSQL provides the full local stack. CockroachDB provides the portable cloud path with its native vector index and durable queue.
 - **Row level security is the boundary.** Private notes, shared projects, and overlapping groups are separated at the database, not in application code, so memory never crosses where it should not.
 - **Files stay immutable.** Original bytes live in private S3-compatible storage, scanned and converted, and recall stays text-first until you ask for the exact original.
 - **It speaks MCP.** Claude or any MCP client calls `recall`, `remember`, and `share` directly. A web dashboard over the same service shows what each account can see.
@@ -41,3 +41,5 @@ async with Client("http://localhost:8080/mcp") as client:
 ```
 
 Full explanation, deployment, and the engine internals at [aizk.phvv.me/docs](https://aizk.phvv.me/docs).
+
+The isolated CockroachDB profile uses OpenRouter for Qwen3 embeddings and DeepSeek extraction without changing the existing local deployment. Its setup and cost-bounded AWS CDK path live in [`src/deploy/cockroachdb`](src/deploy/cockroachdb) and [`infra/aws`](infra/aws).

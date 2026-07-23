@@ -41,7 +41,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
             target_url.render_as_string(hide_password=False).replace("%", "%%"),
         )
         try:
-            # Head installs the fused base and the durable usage follow-up.
+            # Head installs the fused base and every portable compatibility follow-up.
             ops.run_alembic(command.upgrade, config, "head")
             document_id = uuid7()
             chunk_id = uuid7()
@@ -106,6 +106,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                                         "blob",
                                         "upload_capability",
                                         "usage_event",
+                                        "monthly_quota_counter",
                                     ]
                                 },
                             )
@@ -128,7 +129,9 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                                     ]
                                 },
                             )
-                        ).all()
+                        )
+                        .tuples()
+                        .all()
                     )
                     chunk_check = (
                         await connection.execute(
@@ -156,10 +159,11 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                     "blob",
                     "upload_capability",
                     "usage_event",
+                    "monthly_quota_counter",
                 }
                 assert all(forced.values())
                 assert "(document_id, scopes) IN" in chunk_check
-                assert revision == "0002_durable_usage"
+                assert revision == "0005_monthly_quota"
             finally:
                 await engine.dispose()
         finally:

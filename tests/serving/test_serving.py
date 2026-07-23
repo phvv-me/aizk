@@ -36,6 +36,7 @@ class EmbedCall:
     input: list[str]
     dimensions: int
     encoding_format: str
+    extra_body: dict[str, JsonValue] | None
 
 
 class RecordingEmbeddings:
@@ -43,9 +44,15 @@ class RecordingEmbeddings:
         self.calls: list[EmbedCall] = []
 
     async def create(
-        self, *, model: str, input: list[str], dimensions: int, encoding_format: str
+        self,
+        *,
+        model: str,
+        input: list[str],
+        dimensions: int,
+        encoding_format: str,
+        extra_body: dict[str, JsonValue] | None,
     ) -> SimpleNamespace:
-        self.calls.append(EmbedCall(model, input, dimensions, encoding_format))
+        self.calls.append(EmbedCall(model, input, dimensions, encoding_format, extra_body))
         rows = [
             SimpleNamespace(index=i, embedding=[float(i), *([0.0] * (dimensions - 1))])
             for i in range(len(input))

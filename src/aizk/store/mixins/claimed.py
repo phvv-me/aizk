@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
-from ...config import settings
+from ...config import DatabaseBackend, settings
 from ..engine import Session
 
 
@@ -50,10 +50,15 @@ class ClaimedContent(sql.Model):
     def __rls__(cls) -> tuple[rls.Policy, ...]:
         content = cls.__table__.c
         claims = cls.claim_table.c
+        readable = (
+            getattr(sa.func, f"aizk_{cls.__tablename__}_visible")(content.id)
+            if settings.database_backend is DatabaseBackend.cockroachdb
+            else content.id.in_(select(claims.content_id))
+        )
         return (
             rls.Policy.select(
                 "content_read",
-                content.id.in_(select(claims.content_id)),
+                readable,
                 roles=(settings.app_role,),
             ),
             rls.Policy.insert("content_insert", sa.true(), roles=(settings.app_role,)),

@@ -12,17 +12,20 @@ from sqlalchemy import (
     and_,
     bindparam,
     case,
+    extract,
     func,
+    literal,
+    type_coerce,
     union,
     union_all,
 )
-from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.sql.selectable import CTE
 from sqlalchemy.sql.selectable import Select as SelectStatement
 from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from ...mixins import ViewBase
+from ...vector import cosine_distance
 from ..tables.fact import FactClaim, FactContent
 
 if TYPE_CHECKING:
@@ -38,7 +41,7 @@ def half_life_decay(
 
 def log_frequency(access_count: ColumnElement[int]) -> ColumnElement[float]:
     """Diminishing-returns access signal, ln(1 + count)."""
-    return func.ln(1 + access_count)
+    return func.ln(literal(1.0, Float) + access_count.cast(Float))
 
 
 class LiveFact(ViewBase):
@@ -61,8 +64,10 @@ class LiveFact(ViewBase):
     embedding: C[list[float] | None]
     created_by: C[UUID5]
     scopes: C[list[UUID5]]
-    valid: C[Range[datetime] | None]
-    recorded: C[Range[datetime]]
+    valid_from: C[datetime | None]
+    valid_to: C[datetime | None]
+    recorded_from: C[datetime]
+    recorded_to: C[datetime | None]
     last_accessed: C[datetime | None]
     access_count: C[int]
     attributes: C[dict[str, JsonValue]]
@@ -103,13 +108,13 @@ class LiveFact(ViewBase):
             select(
                 cls.subject_id.label("entity_id"),
                 cls.statement,
-                cls.recorded.lower(result=datetime).label("recorded_at"),
+                cls.recorded_from.label("recorded_at"),
                 cls.id,
             ).where(cls.subject_id.in_(entity_ids)),
             select(
                 cls.object_id.label("entity_id"),
                 cls.statement,
-                cls.recorded.lower(result=datetime).label("recorded_at"),
+                cls.recorded_from.label("recorded_at"),
                 cls.id,
             ).where(
                 cls.object_id.in_(entity_ids),
@@ -146,9 +151,7 @@ class LiveFact(ViewBase):
 
         limit: how many statements to keep.
         """
-        return (
-            select(cls.statement).order_by(cls.recorded.lower(result=datetime).desc()).limit(limit)
-        )
+        return select(cls.statement).order_by(cls.recorded_from.desc()).limit(limit)
 
     @classmethod
     def dense(cls, context: QueryContext) -> CTE:
@@ -158,7 +161,7 @@ class LiveFact(ViewBase):
         The materialized content cut isolates the vector index scan; live_fact then
         supplies visibility and access history in one join.
         """
-        fact_distance = FactContent.embedding @ context.vector
+        fact_distance = cosine_distance(FactContent.embedding, context.vector)
         dense_fact_content = (
             select(
                 FactContent.id,
@@ -174,13 +177,16 @@ class LiveFact(ViewBase):
             .prefix_with("MATERIALIZED")
         )
         last_seen = cls.last_accessed.coalesce(
-            cls.recorded.lower(result=datetime),
+            cls.recorded_from,
         )
         blended = (
             dense_fact_content.c.distance
             - bindparam("recall_recency_weight", type_=Float)
             * half_life_decay(
-                sql.days_since(last_seen),
+                type_coerce(
+                    extract("epoch", func.now() - last_seen) / 86_400.0,
+                    Float,
+                ),
                 bindparam("recall_recency_half_life_days", type_=Float),
             )
             - bindparam("recall_frequency_weight", type_=Float) * log_frequency(cls.access_count)
@@ -220,7 +226,7 @@ class LiveFact(ViewBase):
         endpoints would fall back to scanning every fact.
         """
         seed_entities = union(*cls.endpoints(dense_facts)).cte("seed_entity")
-        live_distance = cls.embedding @ context.vector
+        live_distance = cosine_distance(cls.embedding, context.vector)
         neighbor_sides = [
             select(cls.id, live_distance.label("ordering"))
             .join(seed_entities, endpoint == seed_entities.c.entity_id)
@@ -269,7 +275,8 @@ class LiveFact(ViewBase):
                 .group_by(edges.c.src)
                 .subquery(f"degree_{hop}")
             )
-            flow = func.sum(frontier.c.mass * ppr_damping / func.greatest(degree.c.edges, 1))
+            degree_scale = func.greatest(degree.c.edges.cast(Float), literal(1.0, Float))
+            flow = func.sum((frontier.c.mass * ppr_damping).op("/")(degree_scale))
             previous = (
                 select(edges.c.dst.label("entity_id"), flow.label("mass"))
                 .select_from(
@@ -335,8 +342,10 @@ class LiveFact(ViewBase):
                 FactContent.embedding.label("embedding"),
                 FactClaim.created_by.label("created_by"),
                 FactClaim.scopes.label("scopes"),
-                FactClaim.valid.label("valid"),
-                FactClaim.recorded.label("recorded"),
+                FactClaim.valid_from.label("valid_from"),
+                FactClaim.valid_to.label("valid_to"),
+                FactClaim.recorded_from.label("recorded_from"),
+                FactClaim.recorded_to.label("recorded_to"),
                 FactClaim.last_accessed.label("last_accessed"),
                 FactClaim.access_count.label("access_count"),
                 FactClaim.attributes.label("attributes"),

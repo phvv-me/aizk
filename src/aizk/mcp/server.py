@@ -14,7 +14,9 @@ from pydantic import UUID5, UUID7, UUID8, Field, StringConstraints
 from ..artifacts.service import ArtifactIntake
 from ..artifacts.uploads import UploadBox, UploadGrantLimitError, UploadRequest
 from ..auth import Auth
+from ..background.wake import NoopWorkerWake, WorkerWake
 from ..config import Settings
+from ..exceptions import QuotaExceededError
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from ..memory import Memory, ShareResult
 from ..status import StatusReport
@@ -58,12 +60,14 @@ class AizkMCP(FastMCP):
         intake: ArtifactIntake,
         config: Settings,
         name: str = "aizk",
+        wake: WorkerWake | None = None,
     ) -> None:
         self.authentication = auth
         self.store = store
         self.uploads = uploads
         self.intake = intake
         self.settings = config
+        self.wake = wake or NoopWorkerWake()
         super().__init__(name, auth=auth.provider())
         self.add_middleware(IdentityMiddleware(auth))
         self.add_middleware(
@@ -92,7 +96,7 @@ class AizkMCP(FastMCP):
 
     def memory(self, user: User) -> Memory:
         """Build the shared memory service bound to one resolved caller."""
-        return Memory(user=user, intake=self.intake)
+        return Memory(user=user, intake=self.intake, wake=self.wake)
 
     def status_tool(self) -> Callable[..., Coroutine[None, None, StatusReport]]:
         """Build the `status` tool over this server's dependencies."""
@@ -132,7 +136,10 @@ class AizkMCP(FastMCP):
             if not (query := query.strip()):
                 raise ToolError("recall query cannot be blank")
             memory = self.memory(await self.user(context))
-            return await (await memory.recall(query, budget)).to_markdown()
+            try:
+                return await (await memory.recall(query, budget)).to_markdown()
+            except QuotaExceededError as exhausted:
+                raise ToolError(str(exhausted)) from exhausted
 
         return recall
 
@@ -181,6 +188,8 @@ class AizkMCP(FastMCP):
             if text is not None:
                 text = text.strip() or None
             if upload is not None:
+                if not config.artifact_ingest_enabled:
+                    raise ToolError("this deployment accepts text memories only")
                 if (
                     source_uri is not None
                     or preserve_source
@@ -212,6 +221,12 @@ class AizkMCP(FastMCP):
                 )
             if text is None and source_uri is None:
                 raise ToolError("remember requires text or a source URI")
+            if (
+                not config.artifact_ingest_enabled
+                and source_uri is not None
+                and (text is None or preserve_source)
+            ):
+                raise ToolError("this deployment accepts text memories only")
             user = await self.user(context, identified=True)
             try:
                 return await self.memory(user).remember(
@@ -232,6 +247,8 @@ class AizkMCP(FastMCP):
                 raise ToolError("the source URI could not be fetched") from unavailable
             except ValueError as invalid:
                 raise ToolError(str(invalid)) from invalid
+            except QuotaExceededError as exhausted:
+                raise ToolError(str(exhausted)) from exhausted
 
         return remember
 
@@ -253,7 +270,10 @@ class AizkMCP(FastMCP):
             scopes: optional authorized Logto organization names. Omission means private memory.
             """
             user = await self.user(context, identified=True)
-            return await self.memory(user).share(documents, scopes)
+            try:
+                return await self.memory(user).share(documents, scopes)
+            except QuotaExceededError as exhausted:
+                raise ToolError(str(exhausted)) from exhausted
 
         return share
 

@@ -4,13 +4,14 @@ from enum import StrEnum, auto
 from typing import TYPE_CHECKING, cast
 
 from patos import FrozenModel, sql
-from pgvector.sqlalchemy import HALFVEC
 from pydantic import UUID5, UUID7
 from sqlalchemy import ColumnElement, Float, Integer, Text, bindparam, literal
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.selectable import Select
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlmodel import select
+
+from ...store.vector import CosineVector, cosine_distance
 
 if TYPE_CHECKING:
     from patos.sql import Expr
@@ -60,7 +61,7 @@ class QueryContext(FrozenModel):
     @property
     def vector(self) -> ColumnElement[list[float]]:
         """The query embedding bind, typed to this context's vector width."""
-        return bindparam("qvec", type_=HALFVEC(self.dimensions))
+        return bindparam("qvec", type_=CosineVector(self.dimensions))
 
     @property
     def k(self) -> ColumnElement[int]:
@@ -160,7 +161,7 @@ class Lane(FrozenModel, abc.ABC):
         floor: ColumnElement[float],
     ) -> LaneSelect:
         """This lane ranked by embedding distance, floored, ordered, and limited."""
-        distance = embedding @ vector
+        distance = cosine_distance(embedding, vector)
         return (
             self.row(
                 evidence_id=evidence_id,

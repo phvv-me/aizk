@@ -29,6 +29,7 @@ from .store import (
 )
 from .store.identity import User
 from .store.models.tables import RelationPolicy
+from .store.vector import cosine_distance
 
 
 class ForgetResult(FrozenModel):
@@ -106,7 +107,7 @@ async def forget(query: str, k: int = 8, user_id: UUID5 | None = None) -> Forget
     actor = user_id or system()
     [vector] = await EmbedClient.from_settings(settings).embed([query], mode="query")
     async with User.system({actor}) as session:
-        distance = Chunk.embedding @ vector
+        distance = cosine_distance(Chunk.embedding, vector)
         doc_ids = list(
             await session.exec(
                 select(Chunk.document_id)
