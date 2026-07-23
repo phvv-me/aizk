@@ -73,9 +73,10 @@ class RecallResult(FrozenModel):
                     ),
                     scopes=(
                         tuple(
-                            sorted(
-                                (scopes[scope] for scope in candidate.scopes),
-                                key=lambda scope: scope.name,
+                            scopes[scope]
+                            for scope in sorted(
+                                candidate.scopes,
+                                key=lambda scope: scopes[scope].name,
                             )
                         )
                         if scopes is not None
