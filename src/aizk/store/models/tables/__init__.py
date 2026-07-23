@@ -9,6 +9,7 @@ from .fact import FactClaim, FactContent
 from .ontology import EntityKind, RelationKind, RelationPolicy
 from .profile import Profile
 from .queue import QueueEvent, QueueSchedule, QueueTask
+from .quota import MonthlyQuotaCounter
 from .session_item import SessionItem
 from .upload import UploadCapability
 from .usage import Usage, UsageEvent
@@ -28,6 +29,7 @@ __all__ = [
     "FactClaim",
     "FactContent",
     "Profile",
+    "MonthlyQuotaCounter",
     "QueueEvent",
     "QueueSchedule",
     "QueueTask",

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import cast
 
 from patos import FrozenModel
 from pydantic import UUID7
@@ -6,13 +7,14 @@ from pydantic import UUID7
 from . import graph, retrieval
 from .artifacts import ArtifactIntake, ArtifactReceipt
 from .background.jobs.projection import enqueue_document
+from .background.wake import NoopWorkerWake, WorkerWake
 from .extract import ingest as extract_ingest
 from .provenance import CaptureContext
 from .retrieval import RecallResult
 from .store import Usage
 from .store.identity import User
 from .types import ScopeNames
-from .usage import annotate_operation
+from .usage import annotate_operation, quota
 
 
 class WriteResult(FrozenModel):
@@ -36,11 +38,17 @@ class Memory:
     constructs one per request with the caller and the process artifact intake.
     """
 
-    __slots__ = ("intake", "user")
+    __slots__ = ("intake", "user", "wake")
 
-    def __init__(self, user: User, intake: ArtifactIntake) -> None:
+    def __init__(
+        self,
+        user: User,
+        intake: ArtifactIntake,
+        wake: WorkerWake | None = None,
+    ) -> None:
         self.user = user
         self.intake = intake
+        self.wake = wake or NoopWorkerWake()
 
     @property
     def status(self) -> User:
@@ -49,6 +57,7 @@ class Memory:
 
     async def recall(self, query: str, budget: int) -> RecallResult:
         """Return structured merit-ordered evidence visible to this caller."""
+        await quota.consume(self.user.id, Usage.Event.Operation.recall)
         candidates = await retrieval.recall(query.strip(), self.user, token_budget=budget)
         annotate_operation(
             Usage.Event.Operation.recall,
@@ -74,8 +83,18 @@ class Memory:
         preserve_source: bool = False,
     ) -> WriteResult | ArtifactReceipt:
         """Store text directly or preserve a URI original with optional companion text."""
+        if text is None and source_uri is None:
+            raise ValueError("remember requires text or a source URI")
+        if preserve_source and source_uri is None:
+            raise ValueError("preserve_source requires a source URI")
+        operation = (
+            Usage.Event.Operation.remember_file
+            if source_uri is not None and (text is None or preserve_source)
+            else Usage.Event.Operation.remember_text
+        )
+        await quota.consume(self.user.id, operation)
         if source_uri is not None and (text is None or preserve_source):
-            return await self.intake.uri(
+            result = await self.intake.uri(
                 self.user,
                 source_uri,
                 scopes=scopes,
@@ -83,10 +102,9 @@ class Memory:
                 observed_at=observed_at,
                 expires_at=expires_at,
             )
-        if text is None:
-            raise ValueError("remember requires text or a source URI")
-        if preserve_source:
-            raise ValueError("preserve_source requires a source URI")
+            await self.wake.wake()
+            return result
+        text = cast("str", text)
         declaration = extract_ingest.SourceDeclaration.from_text(text)
         target = self.user.write_scope(scopes)
         annotate_operation(Usage.Event.Operation.remember_text, target)
@@ -106,10 +124,12 @@ class Memory:
         if document_id is None:
             raise ValueError("memory ingestion did not create a document")
         await enqueue_document(document_id, target)
+        await self.wake.wake()
         return WriteResult(id=document_id)
 
     async def share(self, documents: list[UUID7], scopes: ScopeNames | None = None) -> ShareResult:
         """Copy visible documents into one authorized destination without moving sources."""
+        await quota.consume(self.user.id, Usage.Event.Operation.share)
         target = self.user.write_scope(scopes)
         shared = await graph.promote(documents, target, self.user)
         annotate_operation(Usage.Event.Operation.share, target, shared)

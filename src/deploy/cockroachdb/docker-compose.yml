@@ -98,5 +98,45 @@ services:
       setup:
         condition: service_completed_successfully
 
+  lambda-mcp:
+    profiles: ["lambda"]
+    image: aizk-cockroachdb-lambda
+    build:
+      context: ../../..
+      dockerfile: src/deploy/Dockerfile
+      target: lambda
+      additional_contexts:
+        mainboard: ../../../../mainboard
+        patos: ../../../../patos
+        rls: ../../../../rls
+    environment: *aizk-env
+    ports:
+      - 127.0.0.1:${AIZK_COCKROACH_LAMBDA_MCP_PORT:-9090}:8080
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  lambda-worker:
+    profiles: ["lambda"]
+    image: aizk-cockroachdb-lambda
+    command: ["aizk.commands.aws.worker_handler"]
+    environment: *aizk-env
+    ports:
+      - 127.0.0.1:${AIZK_COCKROACH_LAMBDA_WORKER_PORT:-9091}:8080
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  lambda-setup:
+    profiles: ["lambda"]
+    image: aizk-cockroachdb-lambda
+    command: ["aizk.commands.aws.setup_handler"]
+    environment: *aizk-env
+    ports:
+      - 127.0.0.1:${AIZK_COCKROACH_LAMBDA_SETUP_PORT:-9092}:8080
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
 volumes:
   db-data:

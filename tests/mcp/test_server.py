@@ -28,6 +28,7 @@ from aizk.artifacts.service import ArtifactIntake
 from aizk.artifacts.uploads import InertIntake, UploadBox, UploadGrantLimitError, UploadRequest
 from aizk.auth import Auth
 from aizk.config import settings
+from aizk.exceptions import QuotaExceededError
 from aizk.integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from aizk.integrations.docling import ArtifactBytes
 from aizk.mcp import server as mcp_server
@@ -44,7 +45,7 @@ from aizk.status import (
     UsageStatus,
     UsageSummary,
 )
-from aizk.store import Artifact
+from aizk.store import Artifact, Usage
 from aizk.store.identity import OrganizationMember, OrganizationStanding, User
 from aizk.types import Scopes
 
@@ -401,6 +402,13 @@ def test_remember_writes_and_queues_one_contextual_document(
         ]
     ] = []
     queued: list[tuple[UUID7, frozenset[UUID5]]] = []
+    wakes: list[None] = []
+
+    class Wake:
+        async def wake(self) -> None:
+            wakes.append(None)
+
+    tools = tools_of(build_server(wake=Wake()))
 
     async def stub(
         user: User,
@@ -461,6 +469,7 @@ def test_remember_writes_and_queues_one_contextual_document(
         )
     ]
     assert queued == [(document_id, target)]
+    assert wakes == [None]
 
 
 def test_remember_writes_to_the_exact_authorized_scope_list(
@@ -689,6 +698,56 @@ def test_remember_upload_mints_one_claimable_capability(
     assert ticket.declared.size == 1024
     assert ticket.declared.sha256 == "0" * 64
     assert ticket.declared.companion_text == "Signed original"
+
+
+@pytest.mark.parametrize("mode", ["upload", "preserved-uri"])
+def test_text_only_deployment_refuses_artifact_intake(
+    monkeypatch: pytest.MonkeyPatch,
+    caller_context: Context,
+    mode: str,
+) -> None:
+    monkeypatch.setattr(settings, "artifact_ingest_enabled", False)
+    remember = tools_of(build_server())["remember"]
+    arguments = (
+        {
+            "upload": mcp_server.UploadDeclaration(
+                filename="paper.pdf",
+                media_type="application/pdf",
+                size=4,
+                sha256="0" * 64,
+            )
+        }
+        if mode == "upload"
+        else {"source_uri": "https://example.com/paper.pdf", "preserve_source": True}
+    )
+
+    with pytest.raises(ToolError, match="text memories only"):
+        dbutil.run(remember.fn(context=caller_context, **arguments))
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("recall", {"query": "what changed"}),
+        ("remember", {"text": "A durable memory."}),
+        ("share", {"documents": [uuid7()]}),
+    ],
+)
+def test_tools_report_monthly_quota_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+    caller_context: Context,
+    tools: dict[str, FunctionTool],
+    tool_name: str,
+    arguments: dict,
+) -> None:
+    async def exhausted(user_id: UUID5, operation: Usage.Event.Operation) -> None:
+        del user_id, operation
+        raise QuotaExceededError("monthly operation limit reached")
+
+    monkeypatch.setattr(memory_module.quota, "consume", exhausted)
+
+    with pytest.raises(ToolError, match="monthly operation limit reached"):
+        dbutil.run(tools[tool_name].fn(context=caller_context, **arguments))
 
 
 def test_remember_upload_reports_grant_saturation_as_a_tool_error(

@@ -28,6 +28,7 @@ _APP_TABLES = (
     "session_item",
     "upload_capability",
     "usage_event",
+    "monthly_quota_counter",
     "watermark",
 )
 

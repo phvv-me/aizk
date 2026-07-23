@@ -4,19 +4,37 @@ from dataclasses import dataclass
 import pytest
 from bg_doubles import fake_runtime
 from doubles import AsyncContext
+from mangum.types import LambdaCognitoIdentity, LambdaMobileClientContext
 
 import aizk.commands.aws as aws_mod
+from aizk.artifacts import ArtifactIntake
+from aizk.artifacts.uploads import UploadBox
+from aizk.auth import Auth
+from aizk.background.wake import NoopWorkerWake, WorkerWake
 from aizk.config import Settings
 from aizk.ops import SetupReport
 from aizk.runtime import Runtime
+from aizk.storage import ByteStore
 from aizk.store.engine import Database
+from aizk.store.mixins.base import Json
 
 
 @dataclass
 class Context:
     """Minimal Lambda context for handler tests."""
 
+    function_name: str = "aizk-test"
+    function_version: str = "$LATEST"
+    invoked_function_arn: str = "arn:aws:lambda:us-east-1:123456789012:function:aizk-test"
+    memory_limit_in_mb: int = 1024
     aws_request_id: str = "request-1"
+    log_group_name: str = "/aws/lambda/aizk-test"
+    log_stream_name: str = "test"
+    identity: LambdaCognitoIdentity | None = None
+    client_context: LambdaMobileClientContext | None = None
+
+    def get_remaining_time_in_millis(self) -> int:
+        return 1000
 
 
 def test_lambda_drain_assembles_runtime_and_runs_one_worker_wave(
@@ -36,7 +54,9 @@ def test_lambda_drain_assembles_runtime_and_runs_one_worker_wave(
     monkeypatch.setattr(Runtime, "assemble", classmethod(assemble))
     monkeypatch.setattr(aws_mod, "run_worker_once", drain_once)
     monkeypatch.setattr(aws_mod, "observe", lambda database: observed.append(database))
+    aws_mod.instrument.cache_clear()
 
+    assert asyncio.run(aws_mod.drain()) == 3
     assert asyncio.run(aws_mod.drain()) == 3
     assert observed == [runtime.database]
 
@@ -58,3 +78,68 @@ def test_lambda_handlers_return_json_safe_reports(monkeypatch: pytest.MonkeyPatc
         "queue_installed": False,
     }
     assert callable(aws_mod.mcp_handler)
+
+
+def test_mcp_handler_builds_and_reuses_one_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = fake_runtime()
+    expected_wake = NoopWorkerWake()
+    calls: list[tuple[dict[str, Json], Context]] = []
+    builds: list[int] = []
+    observed: list[Database] = []
+
+    class Application:
+        def __call__(self, event: dict[str, Json], context: Context) -> dict[str, Json]:
+            calls.append((event, context))
+            return {"body": "ok"}
+
+    class Server:
+        def http_app(self, *, path: str, stateless_http: bool) -> str:
+            assert (path, stateless_http) == ("/mcp", True)
+            return "asgi"
+
+    def assemble(cls: type[Runtime], config: Settings) -> Runtime:
+        del cls
+        assert config is runtime.settings
+        return runtime
+
+    def server(
+        auth: Auth,
+        store: ByteStore,
+        uploads: UploadBox,
+        intake: ArtifactIntake,
+        config: Settings,
+        name: str = "aizk",
+        wake: WorkerWake | None = None,
+    ) -> Server:
+        assert (auth, store, uploads, intake, config, name, wake) == (
+            runtime.auth,
+            runtime.store,
+            runtime.uploads,
+            runtime.artifacts.intake,
+            runtime.settings,
+            "aizk",
+            expected_wake,
+        )
+        return Server()
+
+    def application(asgi: str, *, lifespan: str) -> Application:
+        assert (asgi, lifespan) == ("asgi", "auto")
+        builds.append(1)
+        return Application()
+
+    monkeypatch.setattr(Runtime, "assemble", classmethod(assemble))
+    monkeypatch.setattr(aws_mod, "AizkMCP", server)
+    monkeypatch.setattr(aws_mod, "Mangum", application)
+    monkeypatch.setattr(aws_mod, "configured_worker_wake", lambda config: expected_wake)
+    monkeypatch.setattr(aws_mod, "instrument", lambda database: observed.append(database))
+    aws_mod.mcp_application.cache_clear()
+    event: dict[str, Json] = {"version": "2.0"}
+    context = Context()
+
+    assert aws_mod.mcp_handler(event, context) == {"body": "ok"}
+    assert aws_mod.mcp_handler(event, context) == {"body": "ok"}
+    assert builds == [1]
+    assert observed == [runtime.database]
+    assert calls == [(event, context), (event, context)]

@@ -42,4 +42,4 @@ async with Client("http://localhost:8080/mcp") as client:
 
 Full explanation, deployment, and the engine internals at [aizk.phvv.me/docs](https://aizk.phvv.me/docs).
 
-The isolated CockroachDB profile uses OpenRouter for Qwen3 embeddings and DeepSeek extraction without changing the existing local deployment. Its setup and AWS OpenTofu path live in [`src/deploy/cockroachdb`](src/deploy/cockroachdb) and [`infra/aws`](infra/aws).
+The isolated CockroachDB profile uses OpenRouter for Qwen3 embeddings and DeepSeek extraction without changing the existing local deployment. Its setup and cost-bounded AWS CDK path live in [`src/deploy/cockroachdb`](src/deploy/cockroachdb) and [`infra/aws`](infra/aws).

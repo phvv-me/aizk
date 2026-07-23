@@ -174,6 +174,13 @@ def test_public_deployment_requires_an_https_api_origin() -> None:
         Settings.model_validate(_COMPLETE_LOGTO | {"api_public_url": "http://api.test"})
 
 
+def test_text_only_public_deployment_does_not_require_an_upload_api() -> None:
+    configuration = _COMPLETE_LOGTO | {"artifact_ingest_enabled": False}
+    configuration.pop("api_public_url")
+
+    assert Settings.model_validate(configuration).api_public_url is None
+
+
 def test_complete_web_configuration_derives_the_exact_callback() -> None:
     cfg = Settings(**_COMPLETE_WEB)
     assert cfg.web_callback_url == "https://memory.test/auth/sign-in-callback"

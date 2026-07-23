@@ -23,7 +23,7 @@ from aizk.artifacts.service import ArtifactIntake
 from aizk.artifacts.uploads import InertIntake, UploadBox, UploadRequest
 from aizk.auth import Auth, Caller
 from aizk.config import settings
-from aizk.exceptions import ScopeNotFoundError
+from aizk.exceptions import QuotaExceededError, ScopeNotFoundError
 from aizk.integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from aizk.integrations.docling import ArtifactBytes
 from aizk.integrations.logto import LogtoClient, OrganizationChange
@@ -475,6 +475,11 @@ def test_invalid_json_bodies_are_unprocessable(
             ScopeNotFoundError("no writable scope named 'Lab'"),
             403,
             "no writable scope named 'Lab'",
+        ),
+        (
+            QuotaExceededError("monthly operation limit reached"),
+            429,
+            "monthly operation limit reached",
         ),
         (
             PermissionError("organization administration is not permitted"),

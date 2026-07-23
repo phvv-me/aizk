@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from time import perf_counter
 from types import SimpleNamespace, TracebackType
@@ -16,13 +17,18 @@ from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import SpanKind
 from pydantic import UUID5
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.sql.dml import ReturningInsert
 
+import aizk.store.quota as quota_mod
 import aizk.usage as usage_mod
-from aizk.config import settings
+from aizk.config import Settings, settings
+from aizk.exceptions import QuotaExceededError
 from aizk.store import Usage
 from aizk.store.engine import Database
 from aizk.store.identity import User
 from aizk.usage import (
+    MonthlyQuota,
     UsageAccountingJob,
     UsageCapture,
     UsageRecorder,
@@ -35,6 +41,170 @@ from aizk.usage import (
     observe,
     serving_span,
 )
+
+
+def test_monthly_quota_selects_only_configured_operation_classes() -> None:
+    owner = uuid5()
+    quota = MonthlyQuota(
+        Settings(
+            monthly_total_operation_limit=10,
+            monthly_user_operation_limit=2,
+            monthly_total_remember_limit=4,
+            monthly_user_remember_limit=1,
+        )
+    )
+
+    assert quota.limits(owner, Usage.Event.Operation.recall) == (
+        (quota.config.system_user_id, "operation", 10),
+        (owner, "operation", 2),
+    )
+    assert quota.limits(owner, Usage.Event.Operation.remember_text) == (
+        (quota.config.system_user_id, "operation", 10),
+        (owner, "operation", 2),
+        (quota.config.system_user_id, "remember", 4),
+        (owner, "remember", 1),
+    )
+    assert quota.period().day == 1
+
+
+def test_monthly_quota_rejects_invalid_retry_configuration() -> None:
+    with pytest.raises(ValueError, match="at least one attempt"):
+        MonthlyQuota(attempts=0)
+    with pytest.raises(ValueError, match="backoff cannot be negative"):
+        MonthlyQuota(backoff_seconds=-1)
+    with pytest.raises(ValueError, match="backoff cannot be negative"):
+        MonthlyQuota(max_backoff_seconds=-1)
+
+
+def install_failing_quota_session(
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    failures: int,
+) -> list[ReturningInsert[tuple[int]]]:
+    """Replace the quota transaction with one controlled SQLSTATE sequence."""
+    calls: list[ReturningInsert[tuple[int]]] = []
+
+    class OriginalFailure(Exception):
+        sqlstate = code
+
+    class Result:
+        def one_or_none(self) -> int:
+            return 1
+
+    class Session:
+        async def exec(self, statement: ReturningInsert[tuple[int]]) -> Result:
+            calls.append(statement)
+            if len(calls) <= failures:
+                raise DBAPIError("quota", {}, OriginalFailure(), False)
+            return Result()
+
+    class Scope:
+        async def __aenter__(self) -> Session:
+            return Session()
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback: TracebackType | None,
+        ) -> None: ...
+
+    class FakeUser:
+        @property
+        def app(self) -> Scope:
+            return Scope()
+
+    def system(cls: type[User], scopes: Iterable[UUID5] = ()) -> FakeUser:
+        del cls, scopes
+        return FakeUser()
+
+    monkeypatch.setattr(quota_mod.User, "system", classmethod(system))
+    monkeypatch.setattr(quota_mod, "uniform", lambda start, end: 0.0)
+    return calls
+
+
+def test_monthly_quota_retries_serialization_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = install_failing_quota_session(monkeypatch, "40001", failures=1)
+    quota = MonthlyQuota(
+        Settings(monthly_total_operation_limit=1),
+        attempts=2,
+        backoff_seconds=0,
+    )
+
+    dbutil.run(quota.consume(uuid5(), Usage.Event.Operation.recall))
+
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(("code", "expected_calls"), [("23505", 1), ("40001", 2)])
+def test_monthly_quota_propagates_terminal_database_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    expected_calls: int,
+) -> None:
+    calls = install_failing_quota_session(monkeypatch, code, failures=2)
+    quota = MonthlyQuota(Settings(monthly_total_operation_limit=1), attempts=2)
+
+    with pytest.raises(DBAPIError):
+        dbutil.run(quota.consume(uuid5(), Usage.Event.Operation.recall))
+
+    assert len(calls) == expected_calls
+
+
+def test_monthly_quota_is_atomic_when_a_caller_limit_is_exhausted(
+    migrated_db: None,
+) -> None:
+    owner = uuid5()
+    quota = MonthlyQuota(
+        Settings(
+            monthly_total_operation_limit=10,
+            monthly_user_operation_limit=1,
+        )
+    )
+
+    async def body() -> list[tuple[str, int]]:
+        await dbutil.reset_db()
+        await quota.consume(owner, Usage.Event.Operation.recall)
+        with pytest.raises(QuotaExceededError, match="monthly operation"):
+            await quota.consume(owner, Usage.Event.Operation.share)
+        async with dbutil.admin_engine().connect() as connection:
+            rows = await connection.execute(
+                text("SELECT kind, used FROM monthly_quota_counter ORDER BY subject_id")
+            )
+            return [tuple(row) for row in rows]
+
+    assert dbutil.run(body()) == [("operation", 1), ("operation", 1)]
+
+
+def test_monthly_remember_quota_rolls_back_other_counters_on_exhaustion(
+    migrated_db: None,
+) -> None:
+    owner = uuid5()
+    quota = MonthlyQuota(
+        Settings(
+            monthly_total_operation_limit=10,
+            monthly_user_operation_limit=10,
+            monthly_total_remember_limit=1,
+            monthly_user_remember_limit=10,
+        )
+    )
+
+    async def body() -> dict[str, int]:
+        await dbutil.reset_db()
+        await quota.consume(owner, Usage.Event.Operation.remember_file)
+        with pytest.raises(QuotaExceededError, match="monthly remember"):
+            await quota.consume(owner, Usage.Event.Operation.remember_text)
+        async with dbutil.admin_engine().connect() as connection:
+            rows = await connection.execute(
+                text(
+                    "SELECT kind, SUM(used) FROM monthly_quota_counter GROUP BY kind ORDER BY kind"
+                )
+            )
+            return {kind: total for kind, total in rows}
+
+    assert dbutil.run(body()) == {"operation": 2, "remember": 2}
 
 
 def capture(

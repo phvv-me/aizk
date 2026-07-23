@@ -14,6 +14,7 @@ from opentelemetry.trace import SpanKind
 from aizk.artifacts.service import ArtifactIntake
 from aizk.artifacts.uploads import UploadBox
 from aizk.auth import Auth
+from aizk.background.wake import WorkerWake
 from aizk.config import settings
 from aizk.mcp.middleware import IdentityMiddleware, bind_user
 from aizk.mcp.server import AizkMCP
@@ -39,6 +40,7 @@ def build_server(
     store: ByteStore | None = None,
     uploads: UploadBox | None = None,
     name: str = "aizk",
+    wake: WorkerWake | None = None,
 ) -> AizkMCP:
     """Construct one MCP server over the probe runtime with optional fake dependencies."""
     return AizkMCP(
@@ -48,6 +50,7 @@ def build_server(
         intake if intake is not None else runtime.artifacts.intake,
         settings,
         name=name,
+        wake=wake,
     )
 
 

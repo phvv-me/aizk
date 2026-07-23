@@ -106,6 +106,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                                         "blob",
                                         "upload_capability",
                                         "usage_event",
+                                        "monthly_quota_counter",
                                     ]
                                 },
                             )
@@ -158,10 +159,11 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                     "blob",
                     "upload_capability",
                     "usage_event",
+                    "monthly_quota_counter",
                 }
                 assert all(forced.values())
                 assert "(document_id, scopes) IN" in chunk_check
-                assert revision == "0004_portable_runtime"
+                assert revision == "0005_monthly_quota"
             finally:
                 await engine.dispose()
         finally:

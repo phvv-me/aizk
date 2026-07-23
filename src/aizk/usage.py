@@ -28,6 +28,7 @@ from .store import Usage
 from .store.engine import Database
 from .store.identity import User
 from .store.models.tables import UsageEvent
+from .store.quota import MonthlyQuota
 
 _OPERATION = "aizk.operation"
 _USER = "aizk.user_id"
@@ -195,6 +196,7 @@ class UsageRecorder:
 
 
 recorder = UsageRecorder()
+quota = MonthlyQuota()
 
 
 async def account_usage(

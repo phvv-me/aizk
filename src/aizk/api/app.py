@@ -23,7 +23,7 @@ from ..artifacts.uploads import (
 )
 from ..auth import Auth, Caller
 from ..config import settings
-from ..exceptions import ScopeNotFoundError
+from ..exceptions import QuotaExceededError, ScopeNotFoundError
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from ..integrations.logto import OrganizationChange, OrganizationManager
 from ..memory import Memory
@@ -341,6 +341,8 @@ class AizkAPI:
                 return error.status_code
             case UploadCapabilityError():
                 return HTTPStatus.GONE
+            case QuotaExceededError():
+                return HTTPStatus.TOO_MANY_REQUESTS
             case ByteLimitExceeded():
                 return HTTPStatus.REQUEST_ENTITY_TOO_LARGE
             case ValidationError() | MalwareRejectedError():

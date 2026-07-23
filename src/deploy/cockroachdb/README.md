@@ -16,6 +16,33 @@ docker compose \
 The MCP endpoint is available at `http://127.0.0.1:8088/mcp`. Cockroach SQL and its local
 console bind only to loopback on ports `26258` and `8181`.
 
+The optional `lambda` profile builds the same image used by AWS and runs its MCP and worker
+entrypoints through the local Lambda runtime emulator. It keeps the normal server and worker
+running and exposes the MCP, worker, and setup emulators only on loopback ports `9090`, `9091`,
+and `9092`.
+
+```sh
+docker compose \
+  --profile lambda \
+  --env-file ../../.env \
+  -f src/deploy/cockroachdb/docker-compose.yml \
+  up -d --build lambda-mcp lambda-worker lambda-setup
+```
+
+Invoke the worker with an empty event.
+
+```sh
+curl -X POST \
+  http://127.0.0.1:9091/2015-03-31/functions/function/invocations \
+  -H 'content-type: application/json' \
+  --data '{}'
+```
+
+The MCP emulator accepts API Gateway HTTP API version two events at the corresponding path on port
+`9090`. The setup emulator accepts an empty event on port `9092` and safely reports an unchanged
+migration head after the normal setup service has run. The Lambda image is about 902 MB locally.
+ECR keeps only the two newest immutable images.
+
 The profile sends embeddings to `qwen/qwen3-embedding-8b` and extraction to
 `deepseek/deepseek-v4-flash`. Both requests require OpenRouter zero data retention and deny
 data collection. Reranking stays disabled because no eligible zero data retention reranking
@@ -57,6 +84,8 @@ Remove only this profile with the same file and project name.
 ```sh
 docker compose -f src/deploy/cockroachdb/docker-compose.yml down
 ```
+
+Include `--profile lambda` when the Lambda emulators are running.
 
 Add `--volumes` only when the CockroachDB data in this isolated profile is intentionally being
 discarded.

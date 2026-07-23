@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     artifact_dispatch_batch_size: PositiveInt = 100
     artifact_dispatch_cron: str = "* * * * *"
     artifact_dispatch_enabled: bool = True
+    artifact_ingest_enabled: bool = True
     chunk_dispatch_batch_size: PositiveInt = 512
     chunk_dispatch_cron: str = "* * * * *"
     chunk_dispatch_enabled: bool = True
@@ -297,6 +298,10 @@ class Settings(BaseSettings):
     mcp_source_uri_max_chars: PositiveInt = 4096
     mcp_public_url: AnyHttpUrl | None = None
     mcp_port: int = 8000
+    monthly_total_operation_limit: PositiveInt | None = None
+    monthly_total_remember_limit: PositiveInt | None = None
+    monthly_user_operation_limit: PositiveInt | None = None
+    monthly_user_remember_limit: PositiveInt | None = None
     oauth_client_id: str = ""
     oauth_client_secret: SecretStr = SecretStr("")
     oauth_reference_token_seconds: PositiveInt = 31_536_000
@@ -430,6 +435,7 @@ class Settings(BaseSettings):
     web_recent_artifact_limit: PositiveInt = 12
     web_recent_source_limit: PositiveInt = 6
     web_session_secret: SecretStr = SecretStr("")
+    worker_function_name: str = ""
 
     @model_validator(mode="after")
     def default_dsns(self) -> Self:
@@ -534,16 +540,23 @@ class Settings(BaseSettings):
             if self.mcp_public_url is not None or self.require_auth:
                 raise ValueError("public MCP deployment requires logto_url")
             return self
+        auth = {
+            "mcp_public_url": self.mcp_public_url,
+            "logto_client_id": self.logto_client_id,
+            "logto_client_secret": self.logto_client_secret.get_secret_value(),
+            "oauth_client_id": self.oauth_client_id,
+            "oauth_client_secret": self.oauth_client_secret.get_secret_value(),
+        }
+        if self.artifact_ingest_enabled:
+            auth["api_public_url"] = self.api_public_url
         require_together(
             "Logto authentication",
-            mcp_public_url=self.mcp_public_url,
-            api_public_url=self.api_public_url,
-            logto_client_id=self.logto_client_id,
-            logto_client_secret=self.logto_client_secret.get_secret_value(),
-            oauth_client_id=self.oauth_client_id,
-            oauth_client_secret=self.oauth_client_secret.get_secret_value(),
+            **auth,
         )
-        if urlsplit(str(self.api_public_url)).scheme != "https":
+        if (
+            self.api_public_url is not None
+            and urlsplit(str(self.api_public_url)).scheme != "https"
+        ):
             raise ValueError("public MCP deployment requires an https api_public_url")
         return self
 
