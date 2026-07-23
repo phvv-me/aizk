@@ -35,9 +35,7 @@ _seeds = cast(
 def mapped_tables() -> tuple[Table, ...]:
     """Return mapped base tables in dependency order, excluding mapped views."""
     return tuple(
-        table
-        for table in TableBase.metadata.sorted_tables
-        if not table.info.get("is_view") and table.name != "monthly_quota_counter"
+        table for table in TableBase.metadata.sorted_tables if not table.info.get("is_view")
     )
 
 

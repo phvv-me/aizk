@@ -1,3 +1,4 @@
+import json
 from collections.abc import Mapping
 from typing import cast
 
@@ -12,6 +13,8 @@ from aws_cdk import (
 )
 from aws_cdk import aws_apigatewayv2 as gateway
 from aws_cdk import aws_budgets as budgets
+from aws_cdk import aws_cloudwatch as cloudwatch
+from aws_cdk import aws_cloudwatch_actions as cloudwatch_actions
 from aws_cdk import aws_ecr as ecr
 from aws_cdk import aws_events as events
 from aws_cdk import aws_events_targets as targets
@@ -20,6 +23,7 @@ from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_lambda_event_sources as event_sources
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_sns as sns
+from aws_cdk import aws_sns_subscriptions as subscriptions
 from aws_cdk.aws_apigatewayv2_authorizers import HttpJwtAuthorizer
 from aws_cdk.aws_apigatewayv2_integrations import HttpLambdaIntegration
 from constructs import Construct
@@ -31,7 +35,7 @@ class AizkAwsStack(Stack):
     """Deploy the bounded Lambda alpha around an external CockroachDB Basic cluster."""
 
     def __init__(self, scope: Construct, construct_id: str, config: DeploymentConfig) -> None:
-        super().__init__(scope, construct_id, env=Environment(region="us-east-1"))
+        super().__init__(scope, construct_id, env=Environment(region=config.region))
         self.config = config
         self.repository = self._repository()
         self._outputs()
@@ -119,6 +123,7 @@ class AizkAwsStack(Stack):
             ],
         )
         api = self._api(public)
+        self._observability(api, public, worker, setup)
         self._cost_controls(public, worker)
         CfnOutput(self, "McpUrl", value=f"{api.api_endpoint}/mcp")
         CfnOutput(self, "SetupFunctionName", value=setup.function_name)
@@ -235,7 +240,134 @@ class AizkAwsStack(Stack):
             throttling_burst_limit=2,
             throttling_rate_limit=2,
         )
+        access_logs = logs.LogGroup(
+            self,
+            "ApiAccessLogs",
+            log_group_name=f"/aws/apigateway/{self.config.name}",
+            retention=logs.RetentionDays.ONE_WEEK,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+        access_logs.add_to_resource_policy(
+            iam.PolicyStatement(
+                actions=["logs:CreateLogStream", "logs:PutLogEvents"],
+                principals=[
+                    cast(
+                        "iam.IPrincipal",
+                        iam.ServicePrincipal("apigateway.amazonaws.com"),
+                    )
+                ],
+                resources=[f"{access_logs.log_group_arn}:*"],
+            )
+        )
+        resource.access_log_settings = gateway.CfnStage.AccessLogSettingsProperty(
+            destination_arn=access_logs.log_group_arn,
+            format=json.dumps(
+                {
+                    "requestId": "$context.requestId",
+                    "routeKey": "$context.routeKey",
+                    "status": "$context.status",
+                    "responseLatencyMs": "$context.responseLatency",
+                    "integrationLatencyMs": "$context.integrationLatency",
+                    "integrationError": "$context.integrationErrorMessage",
+                },
+                separators=(",", ":"),
+            ),
+        )
         return api
+
+    def _observability(
+        self,
+        api: gateway.HttpApi,
+        public: lambda_.DockerImageFunction,
+        worker: lambda_.DockerImageFunction,
+        setup: lambda_.DockerImageFunction,
+    ) -> None:
+        """Alert on failed requests, failed work, and a silent recovery schedule."""
+        topic = sns.Topic(self, "OperationsAlerts", display_name="AIZK operations alerts")
+        if self.config.billing_email:
+            topic.add_subscription(
+                cast(
+                    "sns.ITopicSubscription",
+                    subscriptions.EmailSubscription(self.config.billing_email),
+                )
+            )
+
+        alarms = (
+            cloudwatch.Alarm(
+                self,
+                "McpErrors",
+                alarm_description="The public AIZK Lambda returned an error.",
+                metric=public.metric_errors(period=Duration.minutes(5), statistic="Sum"),
+                threshold=1,
+                evaluation_periods=1,
+                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            ),
+            cloudwatch.Alarm(
+                self,
+                "WorkerErrors",
+                alarm_description="The durable AIZK queue worker returned an error.",
+                metric=worker.metric_errors(period=Duration.minutes(15), statistic="Sum"),
+                threshold=1,
+                evaluation_periods=1,
+                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            ),
+            cloudwatch.Alarm(
+                self,
+                "WorkerScheduleSilent",
+                alarm_description="No AIZK worker invocation was observed for thirty minutes.",
+                metric=worker.metric_invocations(
+                    period=Duration.minutes(30),
+                    statistic="Sum",
+                ),
+                threshold=1,
+                evaluation_periods=1,
+                comparison_operator=cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+                treat_missing_data=cloudwatch.TreatMissingData.BREACHING,
+            ),
+            cloudwatch.Alarm(
+                self,
+                "WorkerNearTimeout",
+                alarm_description="An AIZK worker used over thirteen of its fourteen minutes.",
+                metric=worker.metric_duration(
+                    period=Duration.minutes(15),
+                    statistic="Maximum",
+                ),
+                threshold=Duration.minutes(13).to_milliseconds(),
+                evaluation_periods=1,
+                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            ),
+            cloudwatch.Alarm(
+                self,
+                "SetupErrors",
+                alarm_description="The explicitly invoked AIZK database setup failed.",
+                metric=setup.metric_errors(period=Duration.minutes(5), statistic="Sum"),
+                threshold=1,
+                evaluation_periods=1,
+                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            ),
+            cloudwatch.Alarm(
+                self,
+                "ApiServerErrors",
+                alarm_description="API Gateway returned a server error before or after Lambda.",
+                metric=cloudwatch.Metric(
+                    namespace="AWS/ApiGateway",
+                    metric_name="5xx",
+                    dimensions_map={"ApiId": api.api_id, "Stage": "$default"},
+                    period=Duration.minutes(5),
+                    statistic="Sum",
+                ),
+                threshold=1,
+                evaluation_periods=1,
+                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            ),
+        )
+        for alarm in alarms:
+            alarm.add_alarm_action(
+                cast(
+                    "cloudwatch.IAlarmAction",
+                    cloudwatch_actions.SnsAction(cast("sns.ITopic", topic)),
+                )
+            )
 
     def _cost_controls(
         self,

@@ -7,6 +7,7 @@ from mangum import Mangum
 from mangum.types import LambdaContext
 
 from .. import ops
+from ..background.queue import Queue
 from ..background.schedule import run_worker_once
 from ..background.wake import configured_worker_wake
 from ..config import settings
@@ -17,11 +18,21 @@ from ..store.mixins.base import Json
 from ..usage import observe
 
 
-async def drain() -> int:
-    """Assemble one short-lived runtime and drain one portable queue wave."""
+async def drain() -> dict[str, Json]:
+    """Drain one portable queue wave and return its durable state for monitoring."""
     async with Runtime.assemble(settings) as runtime:
         instrument(runtime.database)
-        return await run_worker_once(runtime)
+        handled = await run_worker_once(runtime)
+        async with Queue(dsn=settings.asyncpg_dsn) as queue:
+            snapshot = await queue.snapshot()
+    return {
+        "handled": handled,
+        "pending": snapshot.pending,
+        "running": snapshot.running,
+        "failed": snapshot.failed,
+        "last_success_at": snapshot.last_success.isoformat() if snapshot.last_success else None,
+        "oldest_queued_at": snapshot.oldest_queued.isoformat() if snapshot.oldest_queued else None,
+    }
 
 
 @cache
@@ -35,8 +46,11 @@ def worker_handler(
     context: LambdaContext,
 ) -> dict[str, Json]:
     """Handle an EventBridge Scheduler invocation for the portable worker."""
-    logger.bind(request_id=context.aws_request_id).info("draining portable queue")
-    return {"handled": asyncio.run(drain())}
+    report = asyncio.run(drain())
+    logger.bind(request_id=context.aws_request_id, **report).info("portable queue drain complete")
+    if report["failed"] != 0:
+        raise RuntimeError(f"portable queue retains {report['failed']} terminal failures")
+    return report
 
 
 def setup_handler(
@@ -44,8 +58,9 @@ def setup_handler(
     context: LambdaContext,
 ) -> dict[str, Json]:
     """Apply database migrations from an explicitly invoked deployment function."""
-    logger.bind(request_id=context.aws_request_id).info("applying database setup")
-    return ops.SetupReport.model_validate(asyncio.run(ops.setup())).model_dump(mode="json")
+    report = ops.SetupReport.model_validate(asyncio.run(ops.setup())).model_dump(mode="json")
+    logger.bind(request_id=context.aws_request_id, **report).info("database setup complete")
+    return report
 
 
 @cache

@@ -15,6 +15,7 @@ class DeploymentConfig:
     """Values that shape one isolated alpha stack without carrying secrets."""
 
     name: str = "aizk-cockroachdb"
+    region: str = "ap-southeast-1"
     deploy_compute: bool = False
     image_digest: str = ""
     public_url: str = "https://aizk.phvv.me"
@@ -49,6 +50,7 @@ class DeploymentConfig:
         get = os.environ.get
         return cls(
             name=get("AIZK_AWS_NAME", cls.name),
+            region=get("AIZK_AWS_REGION", cls.region),
             deploy_compute=enabled(get("AIZK_AWS_DEPLOY_COMPUTE", "false")),
             image_digest=get("AIZK_AWS_IMAGE_DIGEST", ""),
             public_url=get("AIZK_AWS_PUBLIC_URL", cls.public_url),

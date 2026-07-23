@@ -10,6 +10,7 @@ import aizk.commands.aws as aws_mod
 from aizk.artifacts import ArtifactIntake
 from aizk.artifacts.uploads import UploadBox
 from aizk.auth import Auth
+from aizk.background.queue import QueueSnapshot
 from aizk.background.wake import NoopWorkerWake, WorkerWake
 from aizk.config import Settings
 from aizk.ops import SetupReport
@@ -43,6 +44,25 @@ def test_lambda_drain_assembles_runtime_and_runs_one_worker_wave(
     runtime = fake_runtime()
     observed: list[Database] = []
 
+    class Queue:
+        def __init__(self, dsn: str) -> None:
+            assert dsn
+
+        async def __aenter__(self) -> Queue:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            del args
+
+        async def snapshot(self) -> QueueSnapshot:
+            return QueueSnapshot(
+                pending=2,
+                running=0,
+                failed=1,
+                last_success=None,
+                oldest_queued=None,
+            )
+
     def assemble(cls: type[Runtime], settings: Settings) -> AsyncContext[Runtime]:
         del cls, settings
         return AsyncContext(runtime)
@@ -53,17 +73,35 @@ def test_lambda_drain_assembles_runtime_and_runs_one_worker_wave(
 
     monkeypatch.setattr(Runtime, "assemble", classmethod(assemble))
     monkeypatch.setattr(aws_mod, "run_worker_once", drain_once)
+    monkeypatch.setattr(aws_mod, "Queue", Queue)
     monkeypatch.setattr(aws_mod, "observe", lambda database: observed.append(database))
     aws_mod.instrument.cache_clear()
 
-    assert asyncio.run(aws_mod.drain()) == 3
-    assert asyncio.run(aws_mod.drain()) == 3
+    expected = {
+        "handled": 3,
+        "pending": 2,
+        "running": 0,
+        "failed": 1,
+        "last_success_at": None,
+        "oldest_queued_at": None,
+    }
+    assert asyncio.run(aws_mod.drain()) == expected
+    assert asyncio.run(aws_mod.drain()) == expected
     assert observed == [runtime.database]
 
 
 def test_lambda_handlers_return_json_safe_reports(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def drained() -> int:
-        return 5
+    worker_report: dict[str, Json] = {
+        "handled": 5,
+        "pending": 1,
+        "running": 0,
+        "failed": 0,
+        "last_success_at": "2026-07-23T00:00:00+00:00",
+        "oldest_queued_at": None,
+    }
+
+    async def drained() -> dict[str, Json]:
+        return worker_report
 
     async def setup() -> SetupReport:
         return SetupReport(migrated_from="0003", migrated_to="0004", queue_installed=False)
@@ -71,13 +109,32 @@ def test_lambda_handlers_return_json_safe_reports(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(aws_mod, "drain", drained)
     monkeypatch.setattr(aws_mod.ops, "setup", setup)
 
-    assert aws_mod.worker_handler({}, Context()) == {"handled": 5}
+    assert aws_mod.worker_handler({}, Context()) == worker_report
     assert aws_mod.setup_handler({}, Context()) == {
         "migrated_from": "0003",
         "migrated_to": "0004",
         "queue_installed": False,
     }
     assert callable(aws_mod.mcp_handler)
+
+
+def test_lambda_worker_fails_the_invocation_for_retained_queue_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def drained() -> dict[str, Json]:
+        return {
+            "handled": 1,
+            "pending": 0,
+            "running": 0,
+            "failed": 2,
+            "last_success_at": None,
+            "oldest_queued_at": None,
+        }
+
+    monkeypatch.setattr(aws_mod, "drain", drained)
+
+    with pytest.raises(RuntimeError, match="2 terminal failures"):
+        aws_mod.worker_handler({}, Context())
 
 
 def test_mcp_handler_builds_and_reuses_one_application(

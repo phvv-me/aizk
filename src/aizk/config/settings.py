@@ -18,6 +18,7 @@ from pydantic.types import (
     StringConstraints,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
 from sqlalchemy.sql.elements import BindParameter
 from sqlalchemy.sql.selectable import Select
 from sqlalchemy.sql.visitors import iterate
@@ -69,6 +70,7 @@ class Settings(BaseSettings):
 
     admin_database_url: str = ""
     admin_password: str = ""
+    admin_user: str = "aizk_admin"
     anonymous_user_id: UUID5 = _ANONYMOUS_USER_ID
     api_host: str = "127.0.0.1"
     api_port: int = 8010
@@ -76,6 +78,7 @@ class Settings(BaseSettings):
     api_upload_live_grants_per_caller: PositiveInt = 8
     api_upload_ttl_seconds: PositiveInt = 600
     app_password: str = ""
+    app_user: str = "aizk_app"
     artifact_dispatch_batch_size: PositiveInt = 100
     artifact_dispatch_cron: str = "* * * * *"
     artifact_dispatch_enabled: bool = True
@@ -148,6 +151,8 @@ class Settings(BaseSettings):
     db_pool_max_overflow: int = 10
     db_pool_size: int = 10
     db_ssl_root_certificate: str = ""
+    db_ssl_root_certificate_path: Path | None = None
+    db_ssl_mode: Literal["disable", "require", "verify-ca", "verify-full"] | None = None
     db_port: int = 5433
     decay_cron: str = "0 3 * * *"
     decay_enabled: bool = True
@@ -441,12 +446,32 @@ class Settings(BaseSettings):
     def default_dsns(self) -> Self:
         """Fill an unset `database_url`/`admin_database_url` from the host/port/db and
         passwords."""
-        location = f"{self.db_host}:{self.db_port}/{self.db_name}"
         scheme = self.database_backend.sqlalchemy_scheme
+        query: dict[str, str] = {}
+        if self.db_ssl_mode is not None:
+            query["sslmode"] = self.db_ssl_mode
+        if self.db_ssl_root_certificate_path is not None:
+            query["sslrootcert"] = str(self.db_ssl_root_certificate_path)
         if not self.database_url:
-            self.database_url = f"{scheme}://aizk_app:{self.app_password}@{location}"
+            self.database_url = URL.create(
+                scheme,
+                username=self.app_user,
+                password=self.app_password,
+                host=self.db_host,
+                port=self.db_port,
+                database=self.db_name,
+                query=query,
+            ).render_as_string(hide_password=False)
         if not self.admin_database_url:
-            self.admin_database_url = f"{scheme}://aizk_admin:{self.admin_password}@{location}"
+            self.admin_database_url = URL.create(
+                scheme,
+                username=self.admin_user,
+                password=self.admin_password,
+                host=self.db_host,
+                port=self.db_port,
+                database=self.db_name,
+                query=query,
+            ).render_as_string(hide_password=False)
         return self
 
     @model_validator(mode="after")

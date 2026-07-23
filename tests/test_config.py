@@ -29,10 +29,24 @@ _WEB_DEPENDENCIES = tuple(_COMPLETE_WEB)
 
 def test_default_dsns_are_built_from_host_port_db_and_passwords() -> None:
     cfg = Settings(
-        db_host="h", db_port=6000, db_name="mem", app_password="ap", admin_password="op"
+        db_host="h",
+        db_port=6000,
+        db_name="mem",
+        app_user="runtime",
+        app_password="ap%word",
+        admin_user="migration",
+        admin_password="op@word",
+        db_ssl_mode="verify-full",
+        db_ssl_root_certificate_path="/certs/root.crt",
     )
-    assert cfg.database_url == "postgresql+asyncpg://aizk_app:ap@h:6000/mem"
-    assert cfg.admin_database_url == "postgresql+asyncpg://aizk_admin:op@h:6000/mem"
+    assert cfg.database_url == (
+        "postgresql+asyncpg://runtime:ap%25word@h:6000/mem"
+        "?sslmode=verify-full&sslrootcert=%2Fcerts%2Froot.crt"
+    )
+    assert cfg.admin_database_url == (
+        "postgresql+asyncpg://migration:op%40word@h:6000/mem"
+        "?sslmode=verify-full&sslrootcert=%2Fcerts%2Froot.crt"
+    )
 
 
 def test_cockroach_defaults_and_driver_dsns_use_the_compatible_schemes() -> None:

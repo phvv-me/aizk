@@ -42,10 +42,16 @@ aws ssm put-parameter --type SecureString --name /aizk/logto/management-client-s
 aws ssm put-parameter --type SecureString --name /aizk/logto/mcp-client-secret --value 'REPLACE'
 ```
 
+The database URLs use `sslmode=verify-full` and omit a local `sslrootcert` file path. CockroachDB
+Cloud currently supplies ISRG Root X1, which the Lambda base image already trusts through its
+system CA bundle. Keeping the 2.7 KB PEM out of the environment also preserves Lambda's 4 KB total
+environment limit.
+
 Set the nonsecret deployment inputs in the shell that runs CDK.
 
 ```sh
 export AIZK_AWS_DEPLOY_COMPUTE=true
+export AIZK_AWS_REGION=ap-southeast-1
 export AIZK_AWS_IMAGE_DIGEST=REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS
 export AIZK_AWS_PUBLIC_URL=https://memory.example.com
 export AIZK_AWS_LOGTO_URL=https://tenant.logto.app
@@ -66,7 +72,19 @@ aws lambda invoke --function-name aizk-cockroachdb-setup --payload '{}' /tmp/aiz
 The MCP function has 1 GiB of memory, a 25 second timeout, and reserved concurrency of two. The
 worker has 2 GiB, a 14 minute timeout, a queue batch of eight, and reserved concurrency of one.
 Every durable `remember` write wakes the worker asynchronously. EventBridge retries recovery every
-15 minutes. Logs expire after seven days.
+15 minutes. Lambda and API Gateway access logs expire after seven days. Every worker invocation
+records handled, pending, running, and failed counts plus the oldest queued and latest successful
+timestamps without logging queue payloads.
+
+A retained terminal queue failure makes that worker invocation fail after its state is logged.
+This activates the normal Lambda error alarm while preserving the task and its durable event for
+operator inspection and explicit retry.
+
+Six CloudWatch alarms cover MCP errors, worker errors, a silent 30 minute recovery schedule, worker
+invocations near the 14 minute timeout, setup errors, and API Gateway server errors. A separate
+operations SNS topic emails `AIZK_AWS_BILLING_EMAIL` after its subscription is confirmed. It never
+invokes the cost breaker. The emergency budget keeps its own SNS topic and remains the only path
+that disables compute.
 
 The alpha accepts text memories only. File and preserved URL ingestion stay disabled until the
 artifact scanner and object upload boundary have a complete serverless implementation. This avoids
@@ -96,9 +114,9 @@ The model lanes require OpenRouter zero data retention and deny provider data co
 remains disabled because the July 2026 live check found no eligible zero data retention reranking
 endpoint.
 
-Provision the external CockroachDB Basic cluster through the pinned `ccloud` profile documented in
-`src/deploy/cockroachdb/README.md`. That CLI is the second contest tool beside Distributed Vector
-Indexing. This CDK stack never creates the database cluster.
+Operate the external CockroachDB Cloud cluster through the pinned `ccloud` profile and managed MCP
+documented in `src/deploy/cockroachdb/README.md`. Alongside Distributed Vector Indexing, these give
+the submission three CockroachDB tools. This CDK stack never creates the database cluster.
 
 Run a load probe after the first deployment. Keep API Gateway only if MCP request latency stays
 below its 25 second integration limit at the 95th percentile. The measured local Lambda image cold

@@ -56,6 +56,7 @@ def test_runtime_is_serverless_bounded_and_recovers_every_fifteen_minutes() -> N
     stack.resource_count_is("AWS::Lambda::Function", 4)
     stack.resource_count_is("AWS::ApiGatewayV2::Api", 1)
     stack.resource_count_is("AWS::Events::Rule", 1)
+    stack.resource_count_is("AWS::CloudWatch::Alarm", 6)
     stack.resource_count_is("AWS::EC2::NatGateway", 0)
     stack.resource_count_is("AWS::EC2::VPC", 0)
     stack.resource_count_is("AWS::ElasticLoadBalancingV2::LoadBalancer", 0)
@@ -108,10 +109,22 @@ def test_edge_uses_logto_jwt_throttling_and_an_emergency_budget() -> None:
     stack.has_resource_properties(
         "AWS::ApiGatewayV2::Stage",
         {
+            "AccessLogSettings": {
+                "DestinationArn": Match.any_value(),
+                "Format": Match.string_like_regexp("integrationLatencyMs"),
+            },
             "DefaultRouteSettings": {
                 "ThrottlingBurstLimit": 2,
                 "ThrottlingRateLimit": 2,
-            }
+            },
+        },
+    )
+    stack.has_resource_properties(
+        "AWS::CloudWatch::Alarm",
+        {
+            "AlarmDescription": "No AIZK worker invocation was observed for thirty minutes.",
+            "ComparisonOperator": "LessThanThreshold",
+            "TreatMissingData": "breaching",
         },
     )
     stack.has_resource_properties(
@@ -153,3 +166,13 @@ def test_deployment_config_rejects_unready_compute() -> None:
             image_digest=_DIGEST,
             logto_url="https://replace.logto.app",
         )
+
+
+def test_deployment_defaults_to_the_cockroachdb_singapore_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("AIZK_AWS_REGION", raising=False)
+    assert DeploymentConfig.from_environment().region == "ap-southeast-1"
+
+    monkeypatch.setenv("AIZK_AWS_REGION", "ap-northeast-1")
+    assert DeploymentConfig.from_environment().region == "ap-northeast-1"
