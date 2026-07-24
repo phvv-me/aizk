@@ -26,7 +26,7 @@ jobs:
           uv tool install "chefe>=0.0.25"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: cache the pixi binary and solved packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.pixi
@@ -74,7 +74,7 @@ jobs:
           uv tool install "chefe>=0.0.25"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: cache the pixi binary and solved packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.pixi
