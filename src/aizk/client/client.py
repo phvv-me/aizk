@@ -12,20 +12,20 @@ from key_value.aio.stores.keyring import KeyringStore
 from pydantic import TypeAdapter
 
 from ..artifacts.models import ArtifactReceipt
-from ..mcp.models import RememberResult, UploadTicketAccepted
+from ..mcp.models import KeepResult, UploadTicketAccepted
 from ..memory import ShareResult
 from ..status import StatusReport
 from .models import (
     AuthenticationStatus,
     ClientProfile,
+    KeepBatchResult,
+    KeepRequest,
+    KeptFile,
     LocalUpload,
-    RememberBatchResult,
-    RememberedFile,
-    RememberRequest,
     ShareRequest,
 )
 
-_REMEMBER_RESULT = TypeAdapter[RememberResult](RememberResult)
+_KEEP_RESULT = TypeAdapter[KeepResult](KeepResult)
 
 
 class LoginRequiredError(PermissionError):
@@ -128,33 +128,46 @@ class MemoryClient:
             result = await client.call_tool("status", {"days": days})
         return TypeAdapter(StatusReport).validate_python(result.data)
 
-    async def recall(self, query: str, budget: int | None = None) -> str:
-        """Return visible evidence for one natural-language question."""
-        arguments: dict[str, str | int] = {"query": query}
+    async def find(
+        self,
+        query: str,
+        budget: int | None = None,
+        scopes: list[str] | None = None,
+        web: str = "auto",
+        fresh: bool = False,
+    ) -> str:
+        """Answer one natural-language question from memory and, when allowed, the web."""
+        arguments: dict[str, str | int | bool | list[str]] = {
+            "query": query,
+            "web": web,
+            "fresh": fresh,
+        }
         if budget is not None:
             arguments["budget"] = budget
+        if scopes:
+            arguments["scopes"] = scopes
         await self.require_credentials()
         async with self.connection() as client:
-            result = await client.call_tool("recall", arguments)
+            result = await client.call_tool("find", arguments)
         return TypeAdapter(str).validate_python(result.data)
 
-    async def remember(self, request: RememberRequest) -> RememberResult:
-        """Remember text, a URI, or one local file through the two-step upload flow."""
+    async def keep(self, request: KeepRequest) -> KeepResult:
+        """Keep text, a URI, or one local file through the two-step upload flow."""
         declaration = request.upload.declaration() if request.upload is not None else None
         await self.require_credentials()
         async with self.connection() as client:
             result = await client.call_tool(
-                "remember",
+                "keep",
                 request.tool_arguments(declaration),
             )
-        remembered = _REMEMBER_RESULT.validate_python(result.data)
+        kept = _KEEP_RESULT.validate_python(result.data)
         if request.upload is None:
-            if isinstance(remembered, UploadTicketAccepted):
+            if isinstance(kept, UploadTicketAccepted):
                 raise ProtocolError("server returned an upload ticket without an upload")
-            return remembered
-        if not isinstance(remembered, UploadTicketAccepted):
+            return kept
+        if not isinstance(kept, UploadTicketAccepted):
             raise ProtocolError("server did not return a ticket for the declared upload")
-        return await self.upload(remembered, request.upload.path)
+        return await self.upload(kept, request.upload.path)
 
     async def share(self, request: ShareRequest) -> ShareResult:
         """Copy or move selected documents into one authorized destination."""
@@ -163,20 +176,20 @@ class MemoryClient:
             result = await client.call_tool("share", request.tool_arguments())
         return TypeAdapter(ShareResult).validate_python(result.data)
 
-    async def remember_files(
+    async def keep_files(
         self,
         uploads: list[LocalUpload],
         *,
         companion_text: str | None = None,
         scopes: list[str] | None = None,
-    ) -> RememberBatchResult:
-        """Remember explicit local files in order and redeem every ticket internally."""
+    ) -> KeepBatchResult:
+        """Keep explicit local files in order and redeem every ticket internally."""
         if not uploads:
-            raise ValueError("remember_files requires at least one file")
-        remembered: list[RememberedFile] = []
+            raise ValueError("keep_files requires at least one file")
+        kept: list[KeptFile] = []
         for upload in uploads:
-            result = await self.remember(
-                RememberRequest(
+            result = await self.keep(
+                KeepRequest(
                     text=companion_text,
                     scopes=scopes,
                     upload=upload,
@@ -184,8 +197,8 @@ class MemoryClient:
             )
             if not isinstance(result, ArtifactReceipt):
                 raise ProtocolError("file upload did not return an artifact receipt")
-            remembered.append(RememberedFile(path=upload.path, receipt=result))
-        return RememberBatchResult(files=tuple(remembered))
+            kept.append(KeptFile(path=upload.path, receipt=result))
+        return KeepBatchResult(files=tuple(kept))
 
     async def upload(
         self,

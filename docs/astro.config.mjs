@@ -56,6 +56,7 @@ export default defineConfig({
           items: [
             { label: 'Writing memory well', slug: 'docs/user/using/remember' },
             { label: 'Asking memory well', slug: 'docs/user/using/recall' },
+            { label: 'Finding on the web', slug: 'docs/user/using/web' },
             { label: 'Files, PDFs and web sources', slug: 'docs/user/using/files' },
             { label: 'Sharing and organizations', slug: 'docs/user/using/sharing' },
             { label: 'The web app', slug: 'docs/user/using/web-app' },
@@ -119,7 +120,8 @@ export default defineConfig({
           badge: { text: 'dev', variant: 'note' },
           items: [
             { label: 'The job system', slug: 'docs/dev/passes/jobs' },
-            { label: 'Communities and RAPTOR', slug: 'docs/dev/passes/communities-raptor' },
+            { label: 'Communities', slug: 'docs/dev/passes/communities' },
+            { label: 'RAPTOR', slug: 'docs/dev/passes/raptor' },
             { label: 'Profiles, insights, decay', slug: 'docs/dev/passes/profiles-insights' },
             { label: 'Promotion and sharing', slug: 'docs/dev/passes/promotion' },
           ],

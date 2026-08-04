@@ -25,6 +25,8 @@ type RecallRow = tuple[
     datetime | None,
     UUID5 | None,
     bool,
+    bool,
+    datetime | None,
 ]
 type RecallSelect = Select[RecallRow]
 
@@ -85,6 +87,8 @@ def ordered(lanes: list[LaneSelect]) -> RecallSelect:
             candidates.c.document_created_at,
             candidates.c.created_by,
             candidates.c.direct,
+            candidates.c.web_cache,
+            candidates.c.document_expires_at,
         )
         .order_by(candidates.c.priority, candidates.c.ordering, candidates.c.evidence_id),
     )

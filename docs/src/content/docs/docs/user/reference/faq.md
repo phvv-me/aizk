@@ -9,7 +9,7 @@ The questions that come up in the first week, answered plainly. This page assume
 ## Does it read my files?
 
 No. aizk never scans a disk, a repository, or a folder. It holds exactly what was handed to it through
-`remember` and nothing else.
+`keep` and nothing else.
 
 The boundary is one step further out, though. Your agent can read your files and decides what to send,
 so the rule that actually protects you is the one in your own agent instructions, which
@@ -83,7 +83,7 @@ setup once memory has to cross projects, people, or years. See [Scopes](/docs/us
 The models aizk itself runs, for embedding and extraction, run on the deployment's own hardware. Your
 text is not sent to a model vendor by aizk.
 
-Your assistant is a different matter. When your agent calls `recall`, the evidence enters that agent's
+Your assistant is a different matter. When your agent calls `find`, the evidence enters that agent's
 context, and if the agent is hosted then that text travels to its provider like everything else in the
 conversation. aizk does not change what your assistant does with what it reads, so if that matters for
 a note, the decision belongs at the point of asking.
@@ -101,7 +101,7 @@ supersedes an earlier one. [Entities, facts, ontology](/docs/user/concepts/graph
 
 ## Is there a review step?
 
-No, and there is not going to be one. Nothing sits in a queue between `remember` and the moment that
+No, and there is not going to be one. Nothing sits in a queue between `keep` and the moment that
 memory can be recalled. There is no approval state and no human gate.
 
 That is deliberate. A review queue only works if somebody drains it, and a memory that fills faster

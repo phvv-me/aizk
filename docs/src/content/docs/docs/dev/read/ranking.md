@@ -91,9 +91,11 @@ those same scores.
 `reordered` sorts the scored candidates by a three-part key.
 
 ```python
-key = (-(candidate.direct and candidate.direct_title not in shadowed),
-       -scores[candidate.evidence_id],
-       candidate.evidence_id)
+key = (
+    -(candidate.direct and candidate.direct_title not in shadowed),
+    -scores[candidate.evidence_id],
+    candidate.evidence_id,
+)
 ```
 
 First comes the identity group, then merit inside it, then `evidence_id` so ties break exactly as

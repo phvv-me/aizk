@@ -8,7 +8,12 @@ import httpx
 from ..background.jobs.conversion import ArtifactQueue, DoclingConversionJob
 from ..config import Settings
 from ..integrations.clamav import ClamAVClient
-from ..integrations.docling import ArtifactReader, DoclingOptions, docling_client
+from ..integrations.docling import (
+    ArtifactReader,
+    DoclingClient,
+    DoclingOptions,
+    docling_client,
+)
 from ..serving.embed import EmbedClient
 from ..storage import ByteStore, s3_backend
 from .boilerplate import WebBoilerplateCleaner
@@ -44,6 +49,9 @@ class ArtifactServices:
     intake: ArtifactIntake
     conversion: DoclingConversionJob
     integrity: ArtifactIntegrity
+    reader: ArtifactReader
+    converter: DoclingClient
+    scanner: ClamAVClient
     http_clients: tuple[httpx.AsyncClient, ...] = ()
 
     async def aclose(self) -> None:
@@ -92,20 +100,18 @@ def build_artifact_services(config: Settings, storage: ByteStore) -> ArtifactSer
         max_bytes=config.object_store_upload_byte_limit,
         max_redirects=config.artifact_uri_max_redirects,
     )
+    scanner = ClamAVClient(
+        host=config.clamav_host,
+        port=config.clamav_port,
+        timeout=config.clamav_timeout,
+        max_bytes=config.object_store_upload_byte_limit,
+    )
     return ArtifactServices(
-        intake=ArtifactIntake(
-            reader,
-            ClamAVClient(
-                host=config.clamav_host,
-                port=config.clamav_port,
-                timeout=config.clamav_timeout,
-                max_bytes=config.object_store_upload_byte_limit,
-            ),
-            storage,
-            repository,
-            ArtifactQueue(conversion),
-        ),
+        intake=ArtifactIntake(reader, scanner, storage, repository, ArtifactQueue(conversion)),
         conversion=conversion,
         integrity=ArtifactIntegrity(storage, repository),
+        reader=reader,
+        converter=converter,
+        scanner=scanner,
         http_clients=(reader.http, converter.http),
     )

@@ -8,7 +8,7 @@ that you know aizk returns evidence rather than answers, which
 [What aizk is](/docs/user/what-is-aizk/) explains. It is about phrasing the question and reading
 what comes back.
 
-Asking is one call named `recall` with one field that matters, the question itself.
+Asking is one call named `find` with one field that matters, the question itself.
 
 ## One focused question per call
 
@@ -16,7 +16,7 @@ Write the question the way you would ask a colleague. Natural language works, an
 worse than a sentence. Your harness makes the call for you.
 
 ```text
-aizk.recall(query="why did we move extraction off the LLM backend?")
+aizk.find(query="why did we move extraction off the LLM backend?")
 ```
 
 A compound question splits the ranking budget across two subjects and returns the strongest half of
@@ -40,7 +40,7 @@ Ask twice. It costs one more call and returns far more.
 ## Never name a scope
 
 :::caution[The most common mistake]
-There is no scope selector on `recall`, and inventing one is the most common mistake. One question
+There is no scope selector on `find`, and inventing one is the most common mistake. One question
 already reads your full visible union, which is your private memory plus every organization you
 belong to plus every intersection you qualify for.
 :::
@@ -116,7 +116,7 @@ than it can use, such as a small model with a tight context window or a loop tha
 times in a row.
 
 ```text
-aizk.recall(query="current status of the assay project", budget=800)
+aizk.find(query="current status of the assay project", budget=800)
 ```
 
 Do not shrink it to make the answer shorter. A smaller budget drops the least relevant items first,

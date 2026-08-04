@@ -16,9 +16,9 @@ from ...serving.gate import GateClient
 from ...store import Fact
 from ...store.identity import User
 from ...types import Scopes
-from ..models import Candidate, Plan, QueryContext, RecallTrace
+from ..models import Candidate, Plan, QueryContext, RecallEvidence, RecallTrace
 from ..packing import deduplicate, pack
-from ..rerank import merit_order
+from ..rerank import MeritOrder, merit_order
 from .program import build_recall_statement
 
 _speaker_query_template = "{query}\nThe asking speaker is {label}."
@@ -79,8 +79,25 @@ async def recall(
     plan: a forced retrieval plan, the eval study's plan-forcing lever, while null
         runs the production maximal plan.
     """
-    kept, _, _ = await _execute(query, user, k, token_budget, plan, record_access=True)
-    return list(kept)
+    return list((await evidence(query, user, k, token_budget, plan)).candidates)
+
+
+async def evidence(
+    query: str,
+    user: User,
+    k: PositiveInt = 8,
+    token_budget: PositiveInt = settings.context_token_budget,
+    plan: Plan | None = None,
+) -> RecallEvidence:
+    """The same retrieval `recall` runs, keeping the scores and mentions it computed.
+
+    `find` reads both to decide whether the public web could add anything, so the decision
+    costs one dictionary lookup rather than a second pass over the same evidence.
+    """
+    kept, ranking, named, _ = await _execute(
+        query, user, k, token_budget, plan, record_access=True
+    )
+    return RecallEvidence(candidates=kept, scores=ranking.scores, mentions=tuple(named))
 
 
 async def trace(
@@ -91,7 +108,7 @@ async def trace(
     plan: Plan | None = None,
 ) -> RecallTrace:
     """Explain one recall without changing fact access history."""
-    _, _, diagnostic = await _execute(query, user, k, token_budget, plan, record_access=False)
+    _, _, _, diagnostic = await _execute(query, user, k, token_budget, plan, record_access=False)
     return diagnostic
 
 
@@ -114,7 +131,7 @@ async def documents(
         under the promoted bonus, and a lane that cut first would let them crowd the
         originals out of the selection before this walk ever saw them.
     """
-    _, ranked, _ = await _execute(
+    _, ranking, _, _ = await _execute(
         query,
         user,
         k=limit * settings.recall_per_document,
@@ -125,7 +142,7 @@ async def documents(
     )
     named = dict.fromkeys(
         candidate.document_id
-        for candidate in ranked
+        for candidate in ranking.candidates
         if candidate.document_id is not None and (scopes is None or candidate.scopes == scopes)
     )
     return list(named)[:limit]
@@ -140,13 +157,14 @@ async def _execute(
     plan: Plan | None,
     record_access: bool,
     scopes: Scopes | None = None,
-) -> tuple[tuple[Candidate, ...], tuple[Candidate, ...], RecallTrace]:
+) -> tuple[tuple[Candidate, ...], MeritOrder, list[str], RecallTrace]:
     """Run the statement, merit ordering, packing, and optional access write.
 
-    The packed prefix, the complete merit ranking, and the diagnostic trace all leave here
-    because each caller needs a different one of the three. An exact scope set narrows the
-    source lane inside the statement, so the restriction shapes the SQL and rides in the
-    statement cache key rather than being applied to whatever the lane happened to return.
+    The packed prefix, the complete merit ordering with its scores, the query mentions, and
+    the diagnostic trace all leave here because each caller needs a different one of the
+    four. An exact scope set narrows the source lane inside the statement, so the
+    restriction shapes the SQL and rides in the statement cache key rather than being
+    applied to whatever the lane happened to return.
     """
     resolved = plan if plan is not None else Plan.maximal()
     search_query = (
@@ -186,7 +204,8 @@ async def _execute(
     )
     return (
         kept,
-        ranking.candidates,
+        ranking,
+        named,
         RecallTrace.build(
             query,
             token_budget,

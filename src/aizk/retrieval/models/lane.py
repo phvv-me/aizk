@@ -34,6 +34,8 @@ type LaneRow = tuple[
     datetime | None,
     UUID5 | None,
     bool,
+    bool,
+    datetime | None,
 ]
 type LaneSelect = Select[LaneRow]
 type OptionalUUID7Column = ColumnElement[UUID7] | ColumnElement[UUID7 | None] | None
@@ -150,6 +152,8 @@ class Lane(FrozenModel, abc.ABC):
         document_created_at: OptionalDatetimeColumn = None,
         created_by: ColumnElement[UUID5] | None = None,
         direct: ColumnElement[bool] | None = None,
+        web_cache: ColumnElement[bool] | None = None,
+        document_expires_at: OptionalDatetimeColumn = None,
     ) -> LaneSelect:
         """This lane's candidates in the shared column shape every lane unions into."""
         return cast(
@@ -172,6 +176,8 @@ class Lane(FrozenModel, abc.ABC):
                 _provided_datetime(document_created_at).label("document_created_at"),
                 sql.provided(created_by).label("created_by"),
                 (literal(False) if direct is None else direct).label("direct"),
+                (literal(False) if web_cache is None else web_cache).label("web_cache"),
+                _provided_datetime(document_expires_at).label("document_expires_at"),
             ),
         )
 

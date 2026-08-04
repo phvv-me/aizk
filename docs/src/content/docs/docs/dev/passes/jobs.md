@@ -70,8 +70,8 @@ of them run at priority 10 with `concurrency_limit = 1`.
 | `SessionPromoteJob` | `*/15 * * * *` | `promote_sessions` |
 | `DecayJob` | `0 3 * * *` | `decay`, half life 90 days |
 | `DedupJob` | `30 3 * * *` | `dedup_entities` |
-| `CommunitiesJob` | `0 4 * * 0` | `build_communities` behind the growth gate |
-| `RaptorJob` | `30 4 * * 0` | `build_raptor` behind the growth gate |
+| `CommunitiesJob` | `0 4 * * 0` | `build_communities` behind the growth gate, then queues RAPTOR |
+| `RaptorJob` | off by default | `build_raptor`, queued by the community pass that feeds it |
 | `ProfileRefreshJob` | `0 5 * * 0` | `refresh_profiles` |
 | `InsightJob` | `0 7 * * 0` | `derive_insights` |
 
@@ -150,7 +150,7 @@ per-scope session and never widen the owner query into a job body.
 
 <div class="not-content">
 
-- [Communities and RAPTOR](/docs/dev/passes/communities-raptor/) covers the clustering passes and the growth gate that holds them back.
+- [Communities](/docs/dev/passes/communities/) covers the clustering pass and the growth gate that holds it back.
 - [Profiles, insights, decay](/docs/dev/passes/profiles-insights/) covers the per-entity summaries and the aging pass.
 - [Promotion and sharing](/docs/dev/passes/promotion/) covers working memory graduating into the graph.
 - [Observability](/docs/dev/run/observability/) covers watching the queue in production.

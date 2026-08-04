@@ -66,7 +66,7 @@ def upload() -> mcp_server.UploadDeclaration:
 def test_remember_upload_mints_minimal_hash_bound_ticket() -> None:
     uploads = _MintingUploads()
     server = cast(AizkMCP, _Server(uploads))
-    remember = AizkMCP.remember_tool(server)
+    remember = AizkMCP.keep_tool(server)
 
     result = dbutil.run(
         remember(
@@ -105,7 +105,7 @@ def test_remember_upload_rejects_uri_and_temporal_modes(
 ) -> None:
     uploads = _MintingUploads()
     server = cast(AizkMCP, _Server(uploads))
-    remember = AizkMCP.remember_tool(server)
+    remember = AizkMCP.keep_tool(server)
 
     with pytest.raises(ToolError, match="file upload cannot be combined"):
         dbutil.run(
@@ -148,7 +148,7 @@ def test_remember_upload_translates_mint_failures(
     message: str,
 ) -> None:
     server = cast(AizkMCP, _Server(_FailingUploads(error)))
-    remember = AizkMCP.remember_tool(server)
+    remember = AizkMCP.keep_tool(server)
 
     with pytest.raises(ToolError, match=message):
         dbutil.run(remember(context=cast(Context, object()), upload=upload()))

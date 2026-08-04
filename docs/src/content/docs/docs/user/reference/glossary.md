@@ -9,7 +9,7 @@ Every word these docs lean on, in one place, each linked to the page that owns i
 Most terms trace one path, from something you wrote to something an agent gets back.
 
 ```text
-   remember ──▶ document ──▶ chunk ──▶ entity + fact ──▶ community + profile
+   keep ──▶ document ──▶ chunk ──▶ entity + fact ──▶ community + profile
                 (source)                  (derived memory)
         │                                        │
         └──────────── every row carries a scope ─┘
@@ -96,7 +96,7 @@ See [Evidence and provenance](/docs/user/concepts/evidence/).
 
 **RAPTOR** is the pass that builds layered summaries so a broad question can be answered from a
 summary rather than a hundred fragments. See
-[Communities and RAPTOR](/docs/dev/passes/communities-raptor/).
+[Communities](/docs/dev/passes/communities/).
 
 **Recall** is the tool that takes one question and returns evidence. It searches everything you can
 see and takes no scope selector. See [Asking memory well](/docs/user/using/recall/).
@@ -104,7 +104,7 @@ see and takes no scope selector. See [Asking memory well](/docs/user/using/recal
 **Recorded time** is when aizk was told something, as opposed to when it was true. Correcting a note
 opens a new recorded window. See [Time and history](/docs/user/concepts/time/).
 
-**Remember** is the tool that stores a note, preserves an original, or prepares a file upload. See
+**Keep** is the tool that stores a note, preserves an original, or prepares a file upload. See
 [Writing memory well](/docs/user/using/remember/).
 
 **Scope** is the answer to who can read a memory, expressed as a set of organizations. Naming none

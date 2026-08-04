@@ -167,7 +167,30 @@ class Promoter:
         found = {source.id: source for source in rows}
         if missing := [document_id for document_id in document_ids if document_id not in found]:
             raise NotVisibleError(f"no visible document {missing[0]}")
+        self.reject_quarantined(found.values())
         return found
+
+    @staticmethod
+    def reject_quarantined(sources: Collection[Document]) -> None:
+        """Refuse to carry a cached web page into any other scope.
+
+        A cached page is a stranger's text held only so the next question is cheaper. It is
+        quarantined where it landed, out of the graph and under the web label, and a copy is
+        a new document that would have to earn that quarantine all over again. Promotion of
+        it is not meaningful either, since anyone in the destination can reach the same page
+        by asking, so the honest answer is to refuse rather than to carry a page across a
+        boundary it was never allowed to cross.
+        """
+        quarantined = [source for source in sources if source.origin is Document.Origin.web_cache]
+        if not quarantined:
+            return
+        named = ", ".join(sorted(str(source.id) for source in quarantined))
+        raise ValueError(
+            f"{len(quarantined)} of the named documents are cached web pages rather than "
+            "your own notes, and a cached page is never shared. Anyone in the destination "
+            "can find the same page themselves, so keep what you concluded from it "
+            f"instead and share that: {named}"
+        )
 
     async def standing_copies(self, sources: dict[UUID7, Document]) -> dict[UUID7, Document]:
         """The copies earlier shares already promoted into the target, keyed by their source."""
@@ -206,6 +229,7 @@ class Promoter:
                 artifact_id=artifact_id,
                 artifact_content_id=artifact_content_id,
                 content_hash=source.content_hash,
+                origin=source.origin,
                 created_by=self.user_id,
                 scopes=self.target,
                 promoted_from=source.id,
@@ -239,6 +263,7 @@ class Promoter:
         copy.artifact_id = artifact_id
         copy.artifact_content_id = artifact_content_id
         copy.content_hash = source.content_hash
+        copy.origin = source.origin
         self.session.add(copy)
         await self.session.flush()
         await self.ground(source, copy.id, facts)

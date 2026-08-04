@@ -106,7 +106,7 @@ fact count has not grown past a threshold since the last run.
 <div class="not-content">
 
 - [The job system](/docs/dev/passes/jobs/) covers the queue, the schedule and retries.
-- [Communities and RAPTOR](/docs/dev/passes/communities-raptor/) is the biggest consumer of this.
+- [Communities](/docs/dev/passes/communities/) is the biggest consumer of this.
 - [Scope sets in depth](/docs/dev/identity/scope-sets/) has the policy these jobs run under.
 
 </div>

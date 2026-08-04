@@ -6,7 +6,8 @@ from pydantic import UUID7
 
 from ...config import settings
 from ...graph.build import GraphClients, extract_and_consolidate, pending_chunks
-from ...store import Chunk, Watermark
+from ...store import Chunk, Document, Watermark
+from ...store.engine import Session
 from ...store.identity import User
 from ...types import Scopes
 from ..enum import JobPriority
@@ -29,19 +30,22 @@ class ChunkProjectionJob(QueueJob[ChunkJob]):
         key = frozenset(payload.scopes)
         async with User.system(key) as session:
             chunk = await session.get(Chunk, payload.chunk_id)
-        if chunk is None:
-            logger.warning(
-                "chunk {} not visible in scope {}, skipping",
-                payload.chunk_id,
-                ",".join(map(str, sorted(key))),
-            )
-            return
-        if frozenset(chunk.scopes) != key:
-            logger.warning("chunk {} does not belong to its queued scope, skipping", chunk.id)
-            return
-        if chunk.processed_at is not None:
-            logger.info("chunk {} is already projected, skipping duplicate job", chunk.id)
-            return
+            if chunk is None:
+                logger.warning(
+                    "chunk {} not visible in scope {}, skipping",
+                    payload.chunk_id,
+                    ",".join(map(str, sorted(key))),
+                )
+                return
+            if frozenset(chunk.scopes) != key:
+                logger.warning("chunk {} does not belong to its queued scope, skipping", chunk.id)
+                return
+            if chunk.processed_at is not None:
+                logger.info("chunk {} is already projected, skipping duplicate job", chunk.id)
+                return
+            if not await self.projectable(session, chunk):
+                logger.warning("chunk {} belongs to a quarantined source, skipping", chunk.id)
+                return
         touched = await extract_and_consolidate(chunk, self.clients)
         if not touched:
             return
@@ -52,6 +56,18 @@ class ChunkProjectionJob(QueueJob[ChunkJob]):
                 Watermark.Kind.entity_dirty,
                 [str(entity_id) for entity_id in touched],
             )
+
+    @staticmethod
+    async def projectable(session: Session, chunk: Chunk) -> bool:
+        """Whether this chunk's document still admits graph projection.
+
+        The selection that enqueued the job already refused quarantined sources, so this is
+        insurance rather than the rule. A job can outlive the state that produced it, by
+        sitting in the queue while a document is refreshed into a cached page or by being
+        replayed, and the cost of asking again is one primary-key read.
+        """
+        document = await session.get(Document, chunk.document_id)
+        return document is not None and document.origin is not Document.Origin.web_cache
 
 
 async def enqueue_pending(

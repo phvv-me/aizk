@@ -5,7 +5,7 @@ from typing import cast
 
 from loguru import logger
 from patos import FrozenModel, sql
-from pydantic import UUID5, UUID7, UUID8
+from pydantic import UUID5, UUID7, UUID8, JsonValue
 from sqlalchemy import Integer, LargeBinary, column, or_
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import delete, select, update
@@ -45,6 +45,7 @@ class TextSource(FrozenModel):
     created_by: UUID5 | None = None
     scopes: Scopes = frozenset()
     capture: CaptureContext | None = None
+    origin: Document.Origin = Document.Origin.authored
 
 
 class PreparedText(FrozenModel):
@@ -82,6 +83,7 @@ class PreparedText(FrozenModel):
                 document.artifact_content_id,
                 document.observed_at,
                 document.expires_at,
+                document.origin,
             )
             == (
                 self.source.source_uri,
@@ -89,6 +91,7 @@ class PreparedText(FrozenModel):
                 self.source.artifact_content_id,
                 self.source.capture.observed_at if self.source.capture is not None else None,
                 self.source.capture.expires_at if self.source.capture is not None else None,
+                self.source.origin,
             )
         )
 
@@ -127,6 +130,7 @@ class DocumentStore:
                 source_uri=plan.source.source_uri,
                 artifact_id=plan.source.artifact_id,
                 content_hash=plan.digest,
+                origin=plan.source.origin,
             )
             & (Document.scopes == sorted(plan.scopes))
             for plan in plans
@@ -140,6 +144,7 @@ class DocumentStore:
                     source_uri=document.source_uri,
                     artifact_id=document.artifact_id,
                     content_hash=document.content_hash,
+                    origin=document.origin,
                 ),
                 frozenset(document.scopes),
             ): document
@@ -154,6 +159,7 @@ class DocumentStore:
                         source_uri=plan.source.source_uri,
                         artifact_id=plan.source.artifact_id,
                         content_hash=plan.digest,
+                        origin=plan.source.origin,
                     ),
                     plan.scopes,
                 )
@@ -197,6 +203,7 @@ class DocumentStore:
         stale.observed_at = document.observed_at
         stale.expires_at = document.expires_at
         stale.content_hash = document.content_hash
+        stale.origin = document.origin
         await Fact.Claim.retract_from_documents(self.session, [stale.id], "source_refreshed")
         await self.session.exec(
             delete(Chunk)
@@ -223,6 +230,7 @@ class DocumentStore:
                 artifact_content_id=source.artifact_content_id,
                 observed_at=capture.observed_at if capture is not None else None,
                 expires_at=capture.expires_at if capture is not None else None,
+                origin=source.origin,
             )
             .returning(Document.id)
         )
@@ -230,13 +238,17 @@ class DocumentStore:
         await Fact.Claim.retract_from_documents(
             self.session, [document_id], "source_metadata_changed"
         )
+        # A quarantined page is never projected, so reopening its chunks would only leave
+        # them pending for a sweep that is required to skip them, forever.
+        revised: dict[str, JsonValue | None] = {
+            "provenance": capture.record() if capture is not None else {}
+        }
+        if source.origin is not Document.Origin.web_cache:
+            revised["processed_at"] = None
         await self.session.exec(
             update(Chunk)
             .where(Chunk.document_id == document_id)
-            .values(
-                processed_at=None,
-                provenance=capture.record() if capture is not None else {},
-            )
+            .values(**revised)
             .execution_options(synchronize_session=False)
         )
         return cast(UUID7, resolved)
@@ -257,11 +269,7 @@ class TextIngestor:
             return None
         created_by = source.created_by or settings.system_user_id
         ontology = Ontology.current()
-        declaration = SourceDeclaration.from_text(source.text, source.title).canonical(ontology)
-        subject_type = source.subject_type or declaration.subject_type
-        if subject_type is not None:
-            subject_type = ontology.entity_kind(subject_type)
-        title = declaration.title or " ".join(source.text.split()[:8])
+        title, subject_type = self.identity(source, ontology)
         searchable = tuple(
             source.capture.search_text(span) if source.capture is not None else span
             for span in spans
@@ -276,6 +284,24 @@ class TextIngestor:
             spans=tuple(spans),
             searchable=searchable,
         )
+
+    @staticmethod
+    def identity(source: TextSource, ontology: Ontology) -> tuple[str, str | None]:
+        """The title and ontology subject one source is stored under.
+
+        An authored source declares both in its own text, which is the whole point of the
+        source-declaration syntax. A fetched page declares nothing, because its text belongs
+        to a stranger and an `# H1` plus a `- Type Project` line in a search result would
+        otherwise let that stranger choose which of the caller's notes it becomes. Its title
+        is the one the fetcher read from the page metadata, and it claims no subject at all.
+        """
+        if source.origin is Document.Origin.web_cache:
+            return source.title or (source.source_uri or "web page"), None
+        declaration = SourceDeclaration.from_text(source.text, source.title).canonical(ontology)
+        subject_type = source.subject_type or declaration.subject_type
+        if subject_type is not None:
+            subject_type = ontology.entity_kind(subject_type)
+        return declaration.title or " ".join(source.text.split()[:8]), subject_type
 
     async def ingest_many(self, sources: Sequence[TextSource]) -> list[tuple[UUID7 | None, bool]]:
         """Ingest sources in order after removing unchanged documents before embedding."""
@@ -362,6 +388,7 @@ class TextIngestor:
                     source_uri=plan.source.source_uri,
                     artifact_id=plan.source.artifact_id,
                     content_hash=plan.digest,
+                    origin=plan.source.origin,
                 )
                 document_id, created = await store.store(dedupe, document)
                 logger.info("resolved document {}", document_id)
@@ -387,6 +414,7 @@ class TextIngestor:
             observed_at=capture.observed_at if capture is not None else None,
             expires_at=capture.expires_at if capture is not None else None,
             content_hash=plan.digest,
+            origin=plan.source.origin,
             created_by=plan.created_by,
             scopes=list(plan.scopes),
             chunks=[

@@ -31,6 +31,8 @@ class SourceLane(Lane):
             document_created_at=hits.c.document_created_at,
             created_by=hits.c.created_by,
             direct=hits.c.direct,
+            web_cache=hits.c.web_cache,
+            document_expires_at=hits.c.document_expires_at,
         ).select_from(hits)
 
 

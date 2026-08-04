@@ -120,7 +120,7 @@ this runs under the database owner, since a merge spans what any one caller can 
 
 <div class="not-content">
 
-- [Communities and RAPTOR](/docs/dev/passes/communities-raptor/) covers the two clustering passes.
+- [Communities](/docs/dev/passes/communities/) and [RAPTOR](/docs/dev/passes/raptor/) cluster the graph.
 - [The bi-temporal model](/docs/dev/store/bitemporal/) explains why archiving closes a range instead of deleting.
 - [The lanes](/docs/dev/read/lanes/) shows where profiles and observations enter recall.
 - [The job system](/docs/dev/passes/jobs/) has the schedules that trigger all of this.

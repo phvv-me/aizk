@@ -7,8 +7,9 @@ from sqlalchemy import func, literal, union_all
 from sqlmodel import select
 from sqlmodel.sql.expression import Select
 
-from . import export, graph, ops
+from . import export, graph, ops, retrieval
 from .background.jobs.projection import enqueue_pending
+from .background.schedule import scope_roster
 from .background.status import TasksStatus, tasks_overview
 from .config import settings
 from .extract import ingest as extract_ingest
@@ -30,6 +31,7 @@ from .store import (
 from .store.identity import User
 from .store.models.tables import RelationPolicy
 from .store.vector import cosine_distance
+from .web import RouterProbe, WebSearch
 
 
 class ForgetResult(FrozenModel):
@@ -91,9 +93,20 @@ async def reembed(user_id: UUID5 | None = None) -> int:
     return await graph.reembed(scopes=frozenset({user_id or system()}))
 
 
-async def communities(user_id: UUID5 | None = None) -> int:
-    """Build graph communities and their global summaries now."""
-    return await graph.build_communities(scopes=frozenset({user_id or system()}))
+async def communities(
+    user_id: UUID5 | None = None, scopes: str | None = None, everywhere: bool = False
+) -> int:
+    """Rebuild graph communities and their summaries now, the post-deploy catch-up path.
+
+    `everywhere` walks the same scope roster the scheduled fan-out uses, so one call
+    refreshes every private and shared corpus the deployment stores.
+    """
+    keys = (
+        await scope_roster()
+        if everywhere
+        else [settings.scope_ids(scopes) or frozenset({user_id or system()})]
+    )
+    return sum([await graph.build_communities(scopes=key) for key in keys])
 
 
 async def raptor(llm: LLM, embed: Embedder, user_id: UUID5 | None = None) -> int:
@@ -120,6 +133,31 @@ async def forget(query: str, k: int = 8, user_id: UUID5 | None = None) -> Forget
         titles = list(await session.exec(select(Document.title).where(Document.id.in_(doc_ids))))
         retracted = await Fact.Claim.forget_from_documents(session, doc_ids)
     return ForgetResult(documents=[t for t in titles if t], claims=len(retracted))
+
+
+async def probe_web(
+    web: WebSearch,
+    query: str,
+    user_id: UUID5 | None = None,
+    fresh: bool = False,
+    execute: bool = False,
+) -> RouterProbe:
+    """Show what the egress router and sanitizer would do with one question.
+
+    The rehearsal an operator runs before turning `web_search_enabled` on. It reads the
+    same memory the caller would, asks the same planner, and applies the same sanitizer,
+    then prints the exact text that would have left the machine. Nothing is sent unless
+    `execute` is asked for, so this is safe to run against real questions on a deployment
+    that has egress switched off.
+    """
+    caller = User.system({user_id or system()})
+    return await web.probe(
+        caller,
+        query,
+        await retrieval.evidence(query, caller),
+        fresh,
+        execute,
+    )
 
 
 async def promote(document: str, to_scopes: str, user_id: UUID5 | None = None) -> int:

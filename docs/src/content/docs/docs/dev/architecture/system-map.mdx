@@ -23,7 +23,7 @@ import Diagram from '../../../../../components/Diagram.astro';
     { id:'evidence', label:'sourced evidence', col:2, row:4, href:'/docs/user/concepts/evidence/' },
   ]}
   edges={[
-    { from:'client', to:'write', label:'remember' },
+    { from:'client', to:'write', label:'keep' },
     { from:'write', to:'graph' },
     { from:'graph', to:'store' },
     { from:'client', to:'read', label:'recall' },
@@ -59,12 +59,12 @@ fronts all of it. [Deployment topology](/docs/dev/run/topology/) has the full li
 
 ## The write path
 
-A `remember` call lands on `Memory.remember` in `src/aizk/memory.py`, the one service both the
+A `keep` call lands on `Memory.remember` in `src/aizk/memory.py`, the one service both the
 MCP server and the browser API share. Plain text and a file take different routes from there.
 
 ```text
   caller
-    │ remember
+    │ keep
     ▼
   Memory.remember
     ├── text ──────────▶ extract.ingest ──┐
@@ -100,7 +100,7 @@ happens in that job, and [The job system](/docs/dev/passes/jobs/) covers how it 
 
 ## The read path
 
-A `recall` call is synchronous and touches no queue. `Memory.recall` calls
+A `find` call is synchronous and touches no queue. `Memory.find` calls
 `retrieval.recall`, which runs the lanes in `src/aizk/retrieval/lanes/`, fuses them, reranks the
 survivors with a cross-encoder, and packs the highest-merit prefix that fits the token budget.
 The result is rendered from `src/aizk/retrieval/templates/recall.md.j2` into one prompt-ready

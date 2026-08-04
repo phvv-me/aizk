@@ -26,7 +26,7 @@ Twenty-nine top-level modules, grouped here by what they are for rather than by 
 | Group | Modules | What lives there |
 |---|---|---|
 | transports | `mcp/`, `api/`, `cli.py`, `commands/`, `client/` | the four ways in |
-| the shared service | `memory.py` | `recall`, `remember` and `share` for one caller |
+| the shared service | `memory.py` | `find`, `keep` and `share` for one caller |
 | the store | `store/` | models, mixins, DDL, migrations, engine, identity |
 | the write path | `extract/`, `artifacts/`, `serving/` | ingest, uploads, model clients |
 | derived knowledge | `graph/`, `ontology/` | extraction, grounding, communities, vocabulary |

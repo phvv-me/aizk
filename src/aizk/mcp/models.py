@@ -29,4 +29,4 @@ class UploadTicketAccepted(FrozenModel):
     expires_seconds: Annotated[int, Field(gt=0)]
 
 
-type RememberResult = WriteResult | ArtifactReceipt | UploadTicketAccepted
+type KeepResult = WriteResult | ArtifactReceipt | UploadTicketAccepted

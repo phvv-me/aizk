@@ -9,6 +9,7 @@ from .config import Settings
 from .extract.extractor import Extractor
 from .graph.build import GraphClients
 from .integrations.logto import LogtoClient
+from .integrations.web import close_web_clients
 from .serving.base import close_clients
 from .serving.embed import EmbedClient
 from .serving.extract import LLM, GLiNER
@@ -16,6 +17,7 @@ from .serving.gate import GateClient
 from .serving.rerank import RerankClient
 from .storage import ByteStore
 from .store.engine import Database
+from .web import WebSearch
 
 
 @dataclass(frozen=True)
@@ -46,6 +48,7 @@ class Runtime:
     llm: LLM
     extractor: Extractor
     graph: GraphClients
+    web: WebSearch
 
     @classmethod
     def assemble(cls, settings: Settings) -> Self:
@@ -71,12 +74,21 @@ class Runtime:
             llm=llm,
             extractor=extractor,
             graph=GraphClients(extractor=extractor, gate=gate, embed=embed, llm=llm),
+            web=WebSearch(
+                settings,
+                llm,
+                gate,
+                artifacts.reader,
+                artifacts.converter,
+                artifacts.scanner,
+            ),
         )
 
     async def aclose(self) -> None:
         """Close every owned network client exactly once, ending this runtime's lifetime."""
         await self.artifacts.aclose()
         await self.logto.close()
+        await close_web_clients()
         await close_clients()
 
     async def __aenter__(self) -> Self:

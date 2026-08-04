@@ -48,8 +48,8 @@ class LocalUpload(FrozenModel):
         )
 
 
-class RememberRequest(FrozenModel):
-    """Typed CLI input that maps exactly onto one MCP `remember` call."""
+class KeepRequest(FrozenModel):
+    """Typed CLI input that maps exactly onto one MCP `keep` call."""
 
     text: str | None = None
     source_uri: str | None = None
@@ -63,7 +63,7 @@ class RememberRequest(FrozenModel):
     def valid_mode(self) -> Self:
         """Reject combinations the MCP tool cannot execute before doing file work."""
         if self.text is None and self.source_uri is None and self.upload is None:
-            raise ValueError("remember requires text, a source URI, or an upload")
+            raise ValueError("keep requires text, a source URI, or an upload")
         if self.upload is not None and (
             self.source_uri is not None
             or self.preserve_source
@@ -114,14 +114,14 @@ class AuthenticationStatus(FrozenModel):
     status: StatusReport | None = None
 
 
-class RememberedFile(FrozenModel):
+class KeptFile(FrozenModel):
     """One local path and the durable artifact receipt returned after upload."""
 
     path: Path
     receipt: ArtifactReceipt
 
 
-class RememberBatchResult(FrozenModel):
+class KeepBatchResult(FrozenModel):
     """Ordered receipts for one explicit batch of local files."""
 
-    files: tuple[RememberedFile, ...]
+    files: tuple[KeptFile, ...]

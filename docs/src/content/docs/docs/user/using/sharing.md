@@ -47,7 +47,7 @@ match character for character. `Book Club` is not `book-club` and not `Book club
 Passing one organization writes into that team's memory.
 
 ```text
-aizk.remember(
+aizk.keep(
   text="# Meeting nights\n\nWe meet the first Monday of each month through August.",
   scopes=["Book Club"],
 )
@@ -56,7 +56,7 @@ aizk.remember(
 Passing two writes something only people who belong to both can read.
 
 ```text
-aizk.remember(
+aizk.keep(
   text="# Joint sci-fi evening\n\nThe two clubs co-host one science fiction pick each quarter.",
   scopes=["Book Club", "Sci-Fi Circle"],
 )
@@ -87,7 +87,7 @@ rather than moving it.
 aizk.share(documents=["019b2d0a-1d42-7d6e-a9aa-8f8443ec6f4a"], scopes=["Book Club"])
 ```
 
-The IDs are the ones `remember` returned, and also the ones `recall` prints under every piece of
+The IDs are the ones `keep` returned, and also the ones `find` prints under every piece of
 evidence, so you can ask a question, read the documents behind the answer, and share exactly those.
 A `query` never writes. It answers which of your private documents it would take, so you read that
 list and then call again naming the IDs you approve.

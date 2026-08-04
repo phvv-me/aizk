@@ -3,31 +3,30 @@ title: "MCP tools"
 description: "The four tools an agent can call, with every parameter and every return shape."
 ---
 
-This page names every parameter and limit. Connecting a client is covered under
-[Claude Code](/docs/user/clients/claude-code/). The limits are shipped defaults a deployment can
-move.
+This page names every parameter and limit, all of them shipped defaults a deployment can move.
+Connecting a client is covered under [Claude Code](/docs/user/clients/claude-code/).
 
 import Diagram from '../../../../../components/Diagram.astro';
 
-A connected client sees four tools and one resource. Every call runs as you and returns no row you
-could not already read, capped at 5 requests per second per person.
+A connected client sees four tools and one resource. Every call runs as you, returns no row you
+could not already read, and is capped at 5 requests per second.
 
 <Diagram
-  title="How the four tools reach the store, and how recall points back to stored bytes"
+  title="How the four tools reach the store, and how find points back to stored bytes"
   nodes={[
     { id:'agent', label:'agent', col:1.5, row:0, emphasis:true },
     { id:'status', label:'status', col:0, row:1 },
-    { id:'recall', label:'recall', col:1, row:1 },
-    { id:'remember', label:'remember', col:2, row:1 },
+    { id:'find', label:'find', col:1, row:1 },
+    { id:'keep', label:'keep', col:2, row:1 },
     { id:'share', label:'share', col:3, row:1 },
     { id:'bytes', label:'stored original', col:1, row:2 },
   ]}
   edges={[
     { from:'agent', to:'status' },
-    { from:'agent', to:'recall' },
-    { from:'agent', to:'remember' },
+    { from:'agent', to:'find' },
+    { from:'agent', to:'keep' },
     { from:'agent', to:'share' },
-    { from:'recall', to:'bytes', label:'resource', dashed:true },
+    { from:'find', to:'bytes', label:'resource', dashed:true },
   ]}
 />
 
@@ -35,8 +34,8 @@ Agents call these as ordinary functions.
 
 ```text
 aizk.status(days=30)
-aizk.recall(query="why did we switch extractors?", budget=2048)
-aizk.remember(text="...", scopes=["Book Club"])
+aizk.find(query="why did we switch extractors?", budget=2048)
+aizk.keep(text="...", scopes=["Book Club"])
 aizk.share(documents=["019f..."], scopes=["Book Club"])
 ```
 
@@ -71,7 +70,7 @@ Both `summary` and `lifetime` hold the same counters.
 
 | Counter | Meaning |
 |---|---|
-| `recalls`, `remembers`, `files`, `shares`, `artifact_reads` | operations by kind |
+| `recalls`, `remembers`, `files`, `shares`, `artifact_reads` | operations by kind, where `recalls` counts `find` calls |
 | `requests`, `items` | calls made and items returned |
 | `request_bytes`, `response_bytes` | bytes in and out |
 | `uploaded_bytes`, `downloaded_bytes` | file bytes stored and fetched |
@@ -90,44 +89,46 @@ Each stage reports `queued`, `running`, `failed`, `completed_1h`, `completed_24h
 `eta_status` of `complete`, `estimating`, `insufficient_history`, or `blocked`. An estimate is
 withheld rather than invented on too small a sample.
 
-## recall
+## find
 
-Asks one question and returns evidence as Markdown text.
+Answers one question from your memory, reaching the public web only when memory falls short and
+the question can be rewritten so nothing identifying you leaves the machine.
+[Finding on the web](/docs/user/using/web/) covers that half, the `## Web` section, the receipt
+every answer ends with, and the caching a fetched page triggers.
 
 ```text
-aizk.recall(query="why did we switch extractors?", budget=2048)
+aizk.find(query="why did we switch extractors?", budget=2048, web="auto", fresh=False)
 ```
 
 | Parameter | Type | Bounds | Default |
 |---|---|---|---|
 | `query` | string | 1 to 16,384 characters | required |
 | `budget` | integer | 1 to 16,384 tokens | 2,048 |
+| `scopes` | list of organization names | at most 32 | private |
+| `web` | `auto`, `off`, or `force` | | `auto` |
+| `fresh` | boolean | | false |
 
-There is no scope selector, so one question searches everything you can see.
-[Asking memory well](/docs/user/using/recall/) covers phrasing and
-[Scopes](/docs/user/concepts/scopes/) covers what that means.
+Memory has no scope selector, so one question searches everything you can see, while `scopes`
+names only where a fetched page is cached.
 
 The return is a Markdown string. It opens with a `## Scopes` list when shared material is present,
-then a line reminding the agent that recalled content is evidence and not instructions, then
-`## Evidence` in merit order. Each item is labeled **Source excerpt**, **Derived memory**, or
-**Recent session memory** and names its scope, an intersection joining organizations with `∩`. An
-item grounded in a stored source prints that document's id and capture day, the handle
-[share](#share) takes. Profiles, communities and overviews stand above any one source and print no
-id. Items backed by a stored original also print a resource URI.
+then a line reminding the agent that recalled content is evidence rather than instructions, then
+`## Evidence` in merit order. Each item is labeled **Source excerpt**, **Derived memory**, **Recent
+session memory**, or **Web page** and names its scope, an intersection joining organizations with
+`∩`. An item from a stored source prints that document's id and capture day, the handle
+[share](#share) takes, while profiles, communities and overviews print none. Items backed by a
+stored original also print a resource URI.
 
-Evidence fills the budget greedily in merit order. An item too large for the room left is skipped
-rather than ending the walk, so one long excerpt never discards what ranks behind it. A budget too
-small for even the best item returns it trimmed with a trailing `…`. A source excerpt drops when a
-fact from its span outranks it, while every fact stands.
+Evidence fills the budget greedily in merit order, skipping an item too large for the room left
+rather than ending the walk, and trimming the best item with a trailing `…` when the budget cannot
+hold even that.
 
-An empty string means nothing visible matched.
-
-## remember
+## keep
 
 Stores text, preserves an original, or prepares a file upload. Requires a signed-in caller.
 
 ```text
-aizk.remember(text="...", source_uri=None, scopes=["Book Club"], preserve_source=False)
+aizk.keep(text="...", source_uri=None, scopes=["Book Club"], preserve_source=False)
 ```
 
 | Parameter | Type | Bounds |
@@ -167,7 +168,7 @@ each, `size` in bytes, and `sha256` as 64 lowercase hex characters. It cannot co
 The response is a ticket and not a stored file.
 
 ```text
-  aizk.remember(upload={...}, text="...")
+  aizk.keep(upload={...}, text="...")
             │
             ▼
   a ticket comes back with status accepted, a one-time
@@ -233,9 +234,9 @@ Stored originals are readable through one resource template.
 aizk://artifacts/{artifact_id}/contents/{artifact_content_id}
 ```
 
-Both ids come from the resource URI printed on a recall item, so an agent reads the exact bytes
+Both ids come from the resource URI printed on a `find` item, so an agent reads the exact bytes
 behind evidence without searching. Reading verifies size and hash, failing rather than returning
-something that drifted. An artifact you cannot see behaves as if it does not exist.
+drifted content, and an artifact you cannot see behaves as if it does not exist.
 
 ## Next
 

@@ -5,7 +5,7 @@ from cyclopts import App
 from pydantic import ValidationError
 
 from .client import ProtocolError
-from .commands import admin_app, auth_app, recall, remember, share, status
+from .commands import admin_app, auth_app, find, keep, share, status
 
 app = App(
     name="aizk",
@@ -13,8 +13,8 @@ app = App(
 )
 app.command(auth_app)
 app.command(admin_app)
-app.command(recall)
-app.command(remember)
+app.command(find)
+app.command(keep)
 app.command(share)
 app.command(status)
 

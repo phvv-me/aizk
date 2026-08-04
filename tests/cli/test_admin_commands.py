@@ -12,6 +12,8 @@ from pydantic import AnyHttpUrl, SecretStr
 
 import aizk.commands.admin as commands
 from aizk.integrations.logto import Account, PolicyReport, RoleAssignment, RoleReport
+from aizk.integrations.web import Freshness, SearchLane
+from aizk.web import MemorySignals, RouterProbe, SanctionedPlan
 
 _DOCUMENT_ID = uuid.UUID("01900000-0000-7000-8000-000000000001")
 
@@ -41,6 +43,7 @@ class FakeRuntime:
         self.llm = Mock()
         self.embed = Mock()
         self.extractor = Mock()
+        self.web = Mock()
         self.closes = 0
 
     async def __aenter__(self) -> FakeRuntime:
@@ -109,6 +112,7 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
         "queue",
         "server",
         "settings",
+        "web",
     }
     assert command_names(commands.server_app) == {"api", "mcp", "worker"}
     assert command_names(commands.queue_app) == {"doctor", "retry", "status"}
@@ -687,3 +691,34 @@ def test_openapi_writes_the_browser_schema(
     schema = json.loads(target.read_text(encoding="utf-8"))
     assert "/api/processing" in schema["paths"]
     assert f"wrote {target}" in capsys.readouterr().out
+
+
+def test_web_probe_prints_what_would_leave_the_machine(
+    seams: Seams,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    probe = RouterProbe(
+        query="what changed upstream",
+        signals=MemorySignals(world_marker=True),
+        plan=SanctionedPlan(
+            query="how does a public thing work",
+            lane=SearchLane.keyword,
+            freshness=Freshness.stable,
+            reason="memory holds nothing public",
+        ),
+    )
+    probe_web = AsyncMock(return_value=probe)
+    monkeypatch.setattr(commands.admin, "probe_web", probe_web)
+
+    dispatch(["web", "probe", "what changed upstream", "--execute"])
+
+    assert probe_web.await_args is not None
+    assert probe_web.await_args.args == (
+        seams.runtime.web,
+        "what changed upstream",
+        None,
+        False,
+        True,
+    )
+    assert "egress     how does a public thing work" in capsys.readouterr().out

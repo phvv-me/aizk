@@ -2,10 +2,10 @@ from .client import LoginRequiredError, MemoryClient, ProtocolError
 from .models import (
     AuthenticationStatus,
     ClientProfile,
+    KeepBatchResult,
+    KeepRequest,
+    KeptFile,
     LocalUpload,
-    RememberBatchResult,
-    RememberedFile,
-    RememberRequest,
     ShareRequest,
 )
 from .profile import ProfileStore
@@ -15,14 +15,14 @@ __all__ = [
     "AuthenticationStatus",
     "ClientProfile",
     "CommandInput",
+    "KeepBatchResult",
+    "KeepRequest",
+    "KeptFile",
     "LocalUpload",
     "LoginRequiredError",
     "MemoryClient",
-    "ProtocolError",
     "ProfileStore",
-    "RememberBatchResult",
-    "RememberedFile",
-    "RememberRequest",
+    "ProtocolError",
     "ResultSerializer",
     "ShareRequest",
 ]

@@ -72,8 +72,7 @@ setting takes effect on the next call with no cache invalidation.
 ## 5. Execute it as the caller
 
 ```python
-rows = await user.exec[Candidate](statement, qvec=vector, qtext=search_query,
-                                  qentities=named, k=k)
+rows = await user.exec[Candidate](statement, qvec=vector, qtext=search_query, qentities=named, k=k)
 ```
 
 `RowStatement.__call__` in `src/aizk/store/identity/user.py` merges

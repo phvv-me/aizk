@@ -12,7 +12,7 @@ URL in place of that one.
 ```text
   1  connect     add the URL to your client, then sign in through the browser
                         │
-  2  remember    tell your assistant something worth keeping
+  2  keep        tell your assistant something worth keeping
                         │
   3  recall      ask it back, in your own words, a week later
 ```
@@ -28,7 +28,7 @@ claude mcp login aizk
 ```
 
 A browser opens, you sign in, and the client is connected. It now sees four tools named `status`,
-`recall`, `remember`, and `share`.
+`find`, `keep`, and `share`.
 
 Other clients take a config file rather than a command, so use
 [Codex](/docs/user/clients/codex/) or [OpenCode](/docs/user/clients/opencode/) if that is what you
@@ -37,14 +37,16 @@ run. If the browser never comes back, or the client claims it is signed out,
 
 ## 2. Store your first memory
 
-Just say it. Your assistant calls `remember` with self-describing Markdown, and the first
+Just say it. Your assistant calls `keep` with self-describing Markdown, and the first
 level-one heading becomes the title that recall will show later.
 
 ```python
-aizk.remember(text="""# Retrieval reranker choice
+aizk.keep(
+    text="""# Retrieval reranker choice
 
 We kept the cross-encoder reranker on by default. Turning it off saved 40 ms and cost more in
-answer quality than the latency was worth.""")
+answer quality than the latency was worth."""
+)
 ```
 
 You named no organization, so this note is private to you. Nothing else needs to be set. Dates,
@@ -56,7 +58,7 @@ The call returns an ID. Keep it if you think you may want to share that exact no
 ## 3. Ask for it back
 
 ```python
-aizk.recall(query="why is the reranker on by default?")
+aizk.find(query="why is the reranker on by default?")
 ```
 
 What comes back is not an answer. It is a short block of Markdown holding the most relevant things

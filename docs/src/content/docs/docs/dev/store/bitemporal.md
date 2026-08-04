@@ -56,11 +56,20 @@ Four indexes sit on `fact_claim`. Two are plain GiST indexes over `valid` and `r
 range containment. One is partial.
 
 ```python
-Index("ix_fact_claim_live", "valid", postgresql_using="gist",
-      postgresql_where=func.upper_inf(SAColumn("recorded"), type_=Boolean))
-Index("uq_fact_claim_live", "content_id", "scopes", "perspective_key",
-      unique=True,
-      postgresql_where=func.upper_inf(SAColumn("recorded"), type_=Boolean))
+Index(
+    "ix_fact_claim_live",
+    "valid",
+    postgresql_using="gist",
+    postgresql_where=func.upper_inf(SAColumn("recorded"), type_=Boolean),
+)
+Index(
+    "uq_fact_claim_live",
+    "content_id",
+    "scopes",
+    "perspective_key",
+    unique=True,
+    postgresql_where=func.upper_inf(SAColumn("recorded"), type_=Boolean),
+)
 ```
 
 `ix_fact_claim_live` keeps the hot path small, since only open claims are indexed and history

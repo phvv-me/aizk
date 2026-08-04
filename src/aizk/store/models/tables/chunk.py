@@ -71,12 +71,25 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
         )
 
     @classmethod
+    def projectable(cls) -> ColumnElement[bool]:
+        """Whether this chunk's source may enter the graph at all.
+
+        A cached page is quarantined and its chunks are never projected, so counting them as
+        backlog would show an operator a queue that no pass will ever drain.
+        """
+        # The runtime import breaks the cycle with Document, which imports Chunk for
+        # its ordered-chunks relationship.
+        from .document import Document
+
+        return cls.document_id.in_(select(Document.id).where(Document.projectable()))
+
+    @classmethod
     def processing_counts(
         cls, one_hour_ago: datetime, six_hours_ago: datetime, day_ago: datetime
     ) -> Select[tuple[int, int, int, int]]:
         """Caller-visible graph backlog and recent chunk completions in one row."""
         return select(
-            cls.id.count().filter(cls.processed_at.is_(None)).label("queued"),
+            cls.id.count().filter(cls.processed_at.is_(None), cls.projectable()).label("queued"),
             cls.id.count().filter(cls.processed_at >= one_hour_ago).label("completed_1h"),
             cls.id.count().filter(cls.processed_at >= six_hours_ago).label("completed_6h"),
             cls.id.count().filter(cls.processed_at >= day_ago).label("completed_24h"),
@@ -217,6 +230,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
                 Document.expires_at,
                 Document.created_at.label("document_created_at"),
                 Document.named_in_query().label("direct"),
+                (Document.origin == Document.Origin.web_cache).label("web_cache"),
                 source_score.label("score"),
                 func.row_number()
                 .over(partition_by=fused.c.document_id, order_by=source_score.desc())
@@ -245,6 +259,8 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
                 chunk_scored.c.expires_at,
                 chunk_scored.c.document_created_at,
                 chunk_scored.c.direct,
+                chunk_scored.c.web_cache,
+                chunk_scored.c.expires_at.label("document_expires_at"),
                 chunk_scored.c.score,
                 chunk_scored.c.document_rank,
             )

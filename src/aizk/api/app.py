@@ -202,7 +202,7 @@ class AizkAPI:
     Every route authenticates a raw bearer token through the shared `Auth`
     verifier as the `verified` dependency, resolves the caller's current Logto
     authority, and leaves PostgreSQL row security as the final boundary. Upload
-    capabilities are minted by the MCP `remember` upload mode into one
+    capabilities are minted by the MCP `keep` upload mode into one
     PostgreSQL-backed store, and only this service redeems them through the
     capability PUT. The FastAPI response models make `FastAPI.openapi` the
     generated web client's contract.
@@ -438,9 +438,11 @@ class AizkAPI:
         """Return one page of visible subject claims and graph degrees."""
         return await SubjectPage.load(who.user, search.strip(), *self.page(limit, offset))
 
-    async def themes(self, who: Verified) -> ThemePage:
-        """Return every visible graph theme and its bounded member preview."""
-        return await ThemePage.load(who.user)
+    async def themes(
+        self, who: Verified, limit: int = settings.web_theme_limit, offset: int = 0
+    ) -> ThemePage:
+        """Return one page of visible graph themes and their bounded member previews."""
+        return await ThemePage.load(who.user, *self.page(limit, offset))
 
     async def graph(self, who: Verified, limit: int = 40) -> GraphSlice:
         """Return one bounded latest-finding relationship graph."""

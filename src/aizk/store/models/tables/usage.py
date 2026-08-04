@@ -19,13 +19,21 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
     """One immutable successful operation for durable cost and quota accounting."""
 
     class Operation(sql.PGEnum):
-        """Public AIZK operations whose resource use needs attribution."""
+        """Public AIZK operations whose resource use needs attribution.
+
+        `recall` is the stored name of what the `find` tool does. The value predates the
+        rename and stays, because it is the label every published usage report column, the
+        browser dashboard, and the generated TypeScript client already key on, and renaming
+        a stored enum to match a tool name would break all of them for no accounting gain.
+        """
 
         recall = auto()
         remember_text = auto()
         remember_file = auto()
         share = auto()
         artifact_read = auto()
+        web_search = auto()
+        web_fetch = auto()
 
     mutable: ClassVar[bool] = False
 

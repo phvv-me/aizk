@@ -39,7 +39,7 @@ Start with the thing you would otherwise explain to a new teammate. One project,
 choices already made, and the reasons behind them.
 
 ```python
-aizk.remember(text="""# Assay validation
+aizk.keep(text="""# Assay validation
 
 #project: Assay validation
 #area: Research
@@ -65,7 +65,7 @@ Ask straight away, because a text note is searchable as soon as the call returns
 not write verbatim.
 
 ```python
-aizk.recall(query="why did we choose the plate reader for the assay?")
+aizk.find(query="why did we choose the plate reader for the assay?")
 ```
 
 You should get your own sentence back, labeled as a source excerpt. Derived items take longer to
@@ -79,7 +79,7 @@ A URL is enough. Pass it and no text, and aizk fetches the page or file, scans i
 original, and converts it into something recallable.
 
 ```python
-aizk.remember(source_uri="https://example.org/binding-assay-protocol.pdf")
+aizk.keep(source_uri="https://example.org/binding-assay-protocol.pdf")
 ```
 
 This one comes back queued rather than done, because conversion happens in the background. A large
@@ -107,7 +107,7 @@ to match exactly what identity says they are.
 Now write a note the team actually needs, straight into the team scope rather than privately.
 
 ```python
-aizk.remember(
+aizk.keep(
     text="# Plate reader booking\n\nThe reader is booked Tuesdays and Thursdays for the assay run through August.",
     scopes=["Research Lab"],
 )
@@ -119,7 +119,7 @@ both can read, which is narrower than either one and not wider.
 [Sharing and organizations](/docs/user/using/sharing/) is the practical side.
 
 If you have something private that turns out to be worth sharing, `share` copies it into a team
-scope using the ID `remember` gave you. It makes a snapshot rather than moving the note, so your
+scope using the ID `keep` gave you. It makes a snapshot rather than moving the note, so your
 private copy stays yours and later edits to it do not travel.
 
 ## Correct something
@@ -128,7 +128,7 @@ Change your mind about the reader booking and write the corrected version. Do no
 and do not add a note saying the old one is wrong.
 
 ```python
-aizk.remember(
+aizk.keep(
     text="# Plate reader booking\n\nThe reader moved to Mondays and Wednesdays from July, because the Tuesday slot collides with the imaging rig maintenance window.",
     scopes=["Research Lab"],
 )

@@ -124,6 +124,47 @@ class UsageCapture(QueuePayload):
         )
 
 
+def request_key() -> str:
+    """The accounted request's stable identity, or a fresh one outside a recorded span."""
+    span_context = trace.get_current_span().get_span_context()
+    if span_context.is_valid:
+        return f"{format_trace_id(span_context.trace_id)}:{format_span_id(span_context.span_id)}"
+    return uuid4().hex
+
+
+def capture_step(
+    operation: UsageEvent.Operation,
+    user_id: UUID5,
+    targets: Iterable[UUID5],
+    step: str,
+    ordinal: int = 0,
+    items: int = 1,
+    request_bytes: int = 0,
+    response_bytes: int = 0,
+    duration_ms: float = 0.0,
+) -> UsageCapture:
+    """Build one durable row for a metered step inside a larger transport call.
+
+    The transport records exactly one row for the call itself. A step that separately costs
+    real money, such as one external provider request, needs its own row beside that one,
+    so it names itself in the capture key and stays idempotent under a queue retry.
+
+    step: what distinguishes this row from the call's own, such as the provider reached.
+    ordinal: which call to that provider this was, so two identical steps stay two rows.
+    """
+    return UsageCapture(
+        capture_key=f"{request_key()}:{step}:{ordinal}",
+        occurred_at=datetime.now(UTC),
+        user_id=user_id,
+        operation=operation,
+        targets=tuple(targets) or (user_id,),
+        request_bytes=request_bytes,
+        response_bytes=response_bytes,
+        items=items,
+        duration_ms=duration_ms,
+    )
+
+
 def capture_usage(
     request_bytes: int,
     response_bytes: int,
@@ -139,14 +180,8 @@ def capture_usage(
     state = current_context()
     if state.anonymous or state.user_id is None or state.operation is None:
         return None
-    span_context = span.get_span_context()
-    capture_key = (
-        f"{format_trace_id(span_context.trace_id)}:{format_span_id(span_context.span_id)}"
-        if span_context.is_valid
-        else uuid4().hex
-    )
     return UsageCapture(
-        capture_key=capture_key,
+        capture_key=request_key(),
         occurred_at=datetime.now(UTC),
         user_id=state.user_id,
         operation=state.operation,

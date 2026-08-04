@@ -1,11 +1,13 @@
 from collections.abc import Sequence
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from patos import sql
 from pydantic import UUID5
-from sqlalchemy import Index, Table, UniqueConstraint
+from sqlalchemy import Index, Table, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import declared_attr
+from sqlmodel import select
+from sqlmodel.sql.expression import SelectOfScalar
 
 from ....types import Scopes
 from ...engine import Session
@@ -72,3 +74,37 @@ class EntityContent(DeterministicId, Embedded, ClaimedContent, TableBase, table=
     name = sql.Field(str)
     type = sql.FK(EntityKind.name)
     claim_table: ClassVar[Table] = EntityClaim.__table__
+
+    @classmethod
+    def roster(cls, scopes: Sequence[UUID5], limit: int) -> SelectOfScalar[str]:
+        """The lowered entity names in one exact scope set, the egress sanitizer's roster.
+
+        The join runs through the scoped claim rather than the shared content table, so row
+        security decides what the roster can contain at all and the caller's own scope set
+        narrows it further. That narrowing matters, because a name in a public organization
+        belongs to everyone who can read it rather than to this caller, and the same list is
+        checked as literal substrings against every rewritten query.
+
+        The longest names come first, since a long name is the one that identifies somebody
+        and a short one is usually a word, so a roster cut by `limit` keeps the entries that
+        were worth checking.
+
+        scopes: the exact claim scopes whose names count, normally the caller's writable set.
+        limit: how many names the sanitizer will hold, bounding one substring pass.
+        """
+        # The distinct cut is its own subquery, because PostgreSQL requires every ORDER BY
+        # expression of a SELECT DISTINCT to appear in its select list, and ordering by a
+        # name's length is exactly an expression that does not.
+        names = (
+            select(func.lower(cls.name).label("name"))
+            .join(EntityClaim, EntityClaim.content_id == cls.id)
+            .where(EntityClaim.scopes.overlap(list(scopes)))
+            .distinct()
+            .subquery("roster_name")
+        )
+        return cast(
+            "SelectOfScalar[str]",
+            select(names.c.name)
+            .order_by(func.length(names.c.name).desc(), names.c.name)
+            .limit(limit),
+        )

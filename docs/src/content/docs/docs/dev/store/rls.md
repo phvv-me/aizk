@@ -70,6 +70,21 @@ when that scope is in the caller's `public` set. `write` requires a nonempty arr
 subset of the caller's writable set. Both are array containment with `<@`, which the GIN index
 on every `scopes` column serves.
 
+### Visibility is wider than ownership
+
+Reading a public organization is not the same as owning what is in it. `Standing.counted` in the
+same module answers that second question, and it drops a row only when every scope on it is public
+and unwritable. A note filed into a member organization beside a public one is still the caller's own
+work and still counts, while the public corpus it can only read does not. The private scope always
+counts, an ordinary member
+organization counts whether the caller writes there or not, and the public corpus counts only for
+the people who maintain it. `Standing.owned_total` wraps that into the scalar counts
+`Knowledge.totals` assembles, which is what the overview page and the browser dashboard show.
+
+This narrows numbers, never rows. Recall, the catalogs and every lane still read the whole public
+corpus, because a brand-new account should be able to ask questions of shared knowledge on its first
+day. What it should not see is that corpus counted as forty thousand things it wrote.
+
 ### read_through parent inheritance
 
 A child table can set `read_through` to a parent table name.
@@ -101,6 +116,7 @@ Registration is one line in `src/aizk/store/__init__.py`.
 
 ```python
 _catalog = rls.Catalog(TableBase.mapper_registry)
+
 
 def verify_rls(connection: Connection) -> list[str]:
     """Report drift from Aizk's complete row security declaration."""

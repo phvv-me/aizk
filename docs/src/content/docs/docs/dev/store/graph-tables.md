@@ -117,6 +117,7 @@ Two small helpers in the same module supply the ranking arithmetic.
 def half_life_decay(age_days, half_life_days):
     return func.power(0.5, age_days / half_life_days)
 
+
 def log_frequency(access_count):
     return func.ln(1 + access_count)
 ```
@@ -182,8 +183,9 @@ communities.
 increments arriving mid-pass are never erased.
 
 `UsageEvent` is an append-only ledger of successful operations for cost and quota accounting.
-`UsageEvent.Operation` has five values, `recall`, `remember_text`, `remember_file`, `share` and
-`artifact_read`. It is `Scoped` but neither mutable nor deletable, so the app role can read and
+`UsageEvent.Operation` has seven values, `recall`, `remember_text`, `remember_file`, `share`,
+`artifact_read`, `web_search` and `web_fetch`. The `recall` value keeps its stored name even
+though the tool is now `find`, since every published report column already reads it. It is `Scoped` but neither mutable nor deletable, so the app role can read and
 insert and nothing else. `capture_key` carries a unique index and is what makes a capture
 idempotent across worker restarts, which is the entire subject of the second migration.
 
@@ -194,6 +196,6 @@ idempotent across worker restarts, which is the entire subject of the second mig
 - [The bi-temporal model](/docs/dev/store/bitemporal/) explains `valid`, `recorded` and corrections.
 - [Row level security](/docs/dev/store/rls/) explains the content policy these claims drive.
 - [The lanes](/docs/dev/read/lanes/) shows where `dense`, `neighbors` and `connected` are called.
-- [Communities and RAPTOR](/docs/dev/passes/communities-raptor/) covers who writes the projections.
+- [Communities](/docs/dev/passes/communities/) and [RAPTOR](/docs/dev/passes/raptor/) cover who writes the projections.
 
 </div>

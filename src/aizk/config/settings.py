@@ -1,6 +1,7 @@
 import uuid
 from enum import StrEnum, auto
 from functools import cache
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self, cast
 from urllib.parse import urlsplit
@@ -33,6 +34,8 @@ _LOGTO_POLICY_FILE = _PACKAGE_ROOT / "src" / "deploy" / "logto.conf"
 _ENV_FILE = _PACKAGE_ROOT / ".env"
 _ANONYMOUS_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "https://aizk.phvv.me/subjects/anonymous")
 _SYSTEM_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "https://aizk.phvv.me/subjects/system")
+# A bare, dot-free host is the docker-compose service naming convention (e.g. `vllm-llm`).
+_LOCAL_LLM_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class DatabaseBackend(StrEnum):
@@ -56,6 +59,27 @@ def reject(names: set[str] | frozenset[str], problem: str) -> None:
 def require_together(feature: str, **values: str | AnyHttpUrl | None) -> None:
     """Fail closed when only part of a feature's required settings are configured."""
     reject({name for name, value in values.items() if not value}, f"{feature} requires")
+
+
+def is_external_llm_endpoint(url: str) -> bool:
+    """Whether `url` points at an LLM host outside this deployment.
+
+    True when the scheme is https, or the host is not loopback, private, link-local, or a
+    bare compose-style service name. Compose only ever overrides `AIZK_LLM_URL` from
+    `AIZK_RUNTIME_LLM_URL` before the container starts, so `llm_url` is the only value
+    settings ever sees.
+    """
+    parsed = urlsplit(url)
+    if parsed.scheme == "https":
+        return True
+    host = parsed.hostname or ""
+    if host in _LOCAL_LLM_HOSTS:
+        return False
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return "." in host
+    return not (address.is_loopback or address.is_private or address.is_link_local)
 
 
 class Settings(BaseSettings):
@@ -121,7 +145,23 @@ class Settings(BaseSettings):
     community_facts_k: int = 64
     communities_every_n_facts: int = 50
     community_backend: str = "networkx"
-    community_min_size: int = 3
+    # Granularity of the theme partition. Modularity hides any community smaller than about
+    # the square root of the edge count, so a single Louvain pass over a large graph returns
+    # a few dozen blobs of thousands of members. `community_max_size` is the real knob: any
+    # community above it is re-partitioned on its own induced subgraph until the leaves are
+    # small enough to summarize in one paragraph, which makes the theme count grow with the
+    # graph instead of saturating. `community_resolution` scales the same modularity term
+    # for operators who want finer or coarser first passes, and `community_max_depth` only
+    # stops a pathological refinement from recursing without end.
+    community_max_depth: PositiveInt = 8
+    community_max_size: PositiveInt = 32
+    community_min_size: PositiveInt = 3
+    community_resolution: PositiveFloat = 1.0
+    # A full rebuild is one model call per theme, so a rebuild of a large graph makes
+    # thousands of them and a few will fail. A failed call degrades to a roster written from
+    # the cluster's own member names, and only a run that degrades more than this fraction of
+    # its themes abandons the generation instead of storing it.
+    community_summary_failure_ratio: PositiveFloat = 0.05
     community_summary_system: str = (
         "You summarize one cluster of a knowledge graph. Given the cluster's entities and the"
         " facts\namong them, write a short label naming the theme and a one-paragraph summary of"
@@ -310,8 +350,10 @@ class Settings(BaseSettings):
     mcp_port: int = 8000
     monthly_total_operation_limit: PositiveInt | None = None
     monthly_total_remember_limit: PositiveInt | None = None
+    monthly_total_web_limit: PositiveInt | None = None
     monthly_user_operation_limit: PositiveInt | None = None
     monthly_user_remember_limit: PositiveInt | None = None
+    monthly_user_web_limit: PositiveInt | None = None
     oauth_client_id: str = ""
     oauth_client_secret: SecretStr = SecretStr("")
     oauth_reference_token_seconds: PositiveInt = 31_536_000
@@ -410,12 +452,20 @@ class Settings(BaseSettings):
     rerank_url: str = "http://localhost:8004"
     require_auth: bool = False
     raptor_cron: str = "30 4 * * 0"
-    raptor_enabled: bool = True
+    # The tree is queued by the community pass that feeds it, so its own clock stays off. A
+    # refined partition takes as long as it takes, and a cron half an hour behind the pass it
+    # depends on would build a tree over a generation being replaced underneath it. An
+    # operator who wants the standalone schedule back only has to turn this on.
+    raptor_enabled: bool = False
     raptor_branch_factor: int = 12
     raptor_build_concurrency: int = 4
     raptor_child_summary_chars: int = 384
     raptor_every_n_facts: int = 50
     raptor_k: int = 3
+    # The tree starts from the biggest themes because level one compares every pair of
+    # leaves in one SQL distance join, which is quadratic and would stall a build once the
+    # refined partition returns thousands of communities.
+    raptor_leaf_limit: PositiveInt = 512
     raptor_max_levels: int = 5
     raptor_redundancy_threshold: float = 0.95
     raptor_rollup_system: str = (
@@ -445,6 +495,120 @@ class Settings(BaseSettings):
     web_recent_artifact_limit: PositiveInt = 12
     web_recent_source_limit: PositiveInt = 6
     web_session_secret: SecretStr = SecretStr("")
+    # The default theme page. A refined partition of a large graph holds thousands of themes,
+    # so the browser asks for one ordered page of them rather than the whole catalog.
+    web_theme_limit: PositiveInt = 50
+    # The `find` egress lane. Everything below governs whether a question may leave the
+    # machine, where it goes, and how long a fetched page stays cached. `web_search_enabled`
+    # is the deployment kill switch and stays off until an operator has run
+    # `aizk admin web probe` against real questions.
+    web_search_enabled: bool = False
+    # Callers reach the web only while they belong to the Logto organization with this name,
+    # so egress is granted per person in Logto rather than per deployment here.
+    web_search_organization: str = "Web"
+    web_exa_api_key: SecretStr = SecretStr("")
+    web_exa_url: AnyHttpUrl = AnyHttpUrl("https://api.exa.ai")
+    web_firecrawl_api_key: SecretStr = SecretStr("")
+    web_firecrawl_url: AnyHttpUrl = AnyHttpUrl("https://api.firecrawl.dev")
+    web_jina_api_key: SecretStr = SecretStr("")
+    web_jina_search_url: AnyHttpUrl = AnyHttpUrl("https://s.jina.ai")
+    # Ordered provider chains. The first configured provider that answers wins and a whole
+    # chain that fails degrades the call to memory alone.
+    web_search_keyword_providers: tuple[str, ...] = ("firecrawl",)
+    web_search_semantic_providers: tuple[str, ...] = ("exa",)
+    web_search_fetch_providers: tuple[str, ...] = ("firecrawl-reader", "docling-reader")
+    web_search_results: PositiveInt = 5
+    web_search_pages: PositiveInt = 2
+    web_search_page_max_chars: PositiveInt = 20_000
+    web_search_timeout: PositiveFloat = 60.0
+    # One budget over the whole web half of a find, planner and both chains together, so a
+    # slow provider costs a slow answer rather than no answer.
+    web_search_deadline: PositiveFloat = 90.0
+    # The sanitizer checks every roster name as a literal substring, so the roster is bounded
+    # and takes the longest names, which are the ones that identify somebody.
+    web_search_roster_max: PositiveInt = 2_000
+    # Memory answers the question on its own once this many candidates clear the rerank
+    # floor, or once the question names a stored document's complete title.
+    web_search_sufficient_candidates: PositiveInt = 3
+    # Cache lifetimes per freshness bucket the planner assigns.
+    web_search_stable_days: PositiveInt = 30
+    web_search_dated_days: PositiveInt = 3
+    web_search_volatile_days: PositiveInt = 1
+    # The deterministic post-rewrite detector. GLiNER runs at a deliberately low threshold
+    # because a false refusal costs one web call while a false pass leaks a private name.
+    web_search_detector_threshold: float = 0.35
+    # The literal-substring half of the sanitizer ignores roster names shorter than this,
+    # because a two or three letter name is a fragment of ordinary English far more often
+    # than it is a private identity, and refusing on those would refuse nearly every query.
+    # Short names remain covered by the detector below.
+    web_search_roster_min_chars: PositiveInt = 4
+    # Memory answers on its own once this many candidates clear the cross-encoder's yes/no
+    # decision boundary. The reranker is a binary classifier, so the boundary is its 0.5.
+    web_search_rerank_floor: float = 0.5
+    # The closed vocabulary that says a question points outward even when it also names
+    # something the caller stores. Without one of these, a roster hit ends the call in
+    # memory and nothing is sent anywhere.
+    web_search_world_markers: tuple[str, ...] = (
+        "benchmark",
+        "changelog",
+        "compare",
+        "cost",
+        "current version",
+        "cve",
+        "deprecated",
+        "documentation",
+        "forecast",
+        "how to",
+        "latest",
+        "news",
+        "official",
+        "price",
+        "public",
+        "release",
+        "released",
+        "roadmap",
+        "specification",
+        "standard",
+        "state of the art",
+        "today",
+        "tutorial",
+        "upstream",
+        "weather",
+        "what is",
+        "who is",
+    )
+    web_search_detector_labels: tuple[str, ...] = (
+        "software project or codebase name",
+        "server or machine hostname",
+        "person name",
+        "organization or team name",
+        "private identifier",
+        "person",
+        "organization",
+        "location",
+        "email address",
+        "phone number",
+        "address",
+    )
+    web_search_planner_system: str = (
+        "You decide whether one question needs the public web and, when it does, you rewrite"
+        " it for a\nsearch engine. Memory evidence already gathered is shown to you. Answer"
+        " with needs_web false\nwhenever the evidence answers the question, whenever the"
+        " question is about the asker's own\nnotes, people, projects or machines, and whenever"
+        " the question has no public answer at all.\n"
+        "The rewritten search_query LEAVES THIS MACHINE and is sent to a third-party search"
+        " company.\nIt must carry no personal name, no employer, no project or codebase name,"
+        " no file path, no\nhostname, no internal identifier, and nothing else that identifies"
+        " the asker or any\norganization they belong to. Write it as a stranger with the same"
+        " question would type it,\nusing only public, general vocabulary. Return search_query"
+        " as null whenever the question\ncannot be asked without one of those details, and null"
+        " also forbids the call from going out.\n"
+        "Choose lane keyword for a question with exact terms a text index will match, semantic"
+        " for a\ndescriptive question, and none when needs_web is false. Choose freshness stable"
+        " for knowledge\nthat rarely changes, dated for figures and releases, and volatile for"
+        " prices, weather, news and\nanything that changes within a day. Give a short reason a"
+        " reader can audit."
+    )
     worker_function_name: str = ""
 
     @model_validator(mode="after")
@@ -477,6 +641,27 @@ class Settings(BaseSettings):
                 database=self.db_name,
                 query=query,
             ).render_as_string(hide_password=False)
+        return self
+
+    @model_validator(mode="after")
+    def default_external_llm_posture(self) -> Self:
+        """Default the external-endpoint privacy and caching posture unless the operator set it.
+
+        Applies only when `llm_is_external`, and only to whichever of `llm_extra_body` or
+        `llm_headers` the operator left unset, each field replaced whole rather than merged
+        with an operator value.
+        """
+        if not self.llm_is_external:
+            return self
+        if "llm_extra_body" not in self.model_fields_set:
+            self.llm_extra_body = {
+                "provider": {"zdr": True},  # keeps source text off retention on ZDR endpoints
+                "reasoning": {"enabled": False},  # extraction pays nothing for hidden reasoning
+                "session_id": "aizk-extractor",  # sticky routing hits the provider prompt cache
+            }
+        if "llm_headers" not in self.model_fields_set:
+            # A retried identical request reads from the response cache instead of billing again.
+            self.llm_headers = {"X-OpenRouter-Cache": SecretStr("true")}
         return self
 
     @model_validator(mode="after")
@@ -622,6 +807,26 @@ class Settings(BaseSettings):
             raise ValueError("web_session_secret must be independent from client secrets")
         return self
 
+    @model_validator(mode="after")
+    def honest_web_planning(self) -> Self:
+        """Refuse web egress while the planner's endpoint could retain the question.
+
+        `find` plans every outbound search by handing the caller's raw question and its
+        memory excerpt to the extraction lane. When that lane is external, which is the
+        ordinary production shape, the question genuinely leaves the machine and the only
+        thing keeping it from being retained is the provider's zero-retention pin. A
+        deployment that wants egress therefore has to carry that pin, because without it the
+        privacy receipt would be describing a guarantee nobody is offering.
+        """
+        if not self.web_search_enabled or self.llm_zdr_pinned:
+            return self
+        raise ValueError(
+            "web_search_enabled requires zero data retention on the external extraction "
+            "endpoint, because find sends the caller's question there to plan the search. "
+            'Set AIZK_LLM_EXTRA_BODY to carry {"provider": {"zdr": true}}, or point '
+            "AIZK_LLM_URL at an endpoint inside this deployment."
+        )
+
     @property
     def asyncpg_dsn(self) -> str:
         """The app-role `database_url` with the `+asyncpg` driver tag dropped."""
@@ -647,6 +852,24 @@ class Settings(BaseSettings):
         if self.database_backend is DatabaseBackend.cockroachdb:
             return "cspann"
         return self.index_backend
+
+    @property
+    def llm_is_external(self) -> bool:
+        """Whether `llm_url` points at an LLM host outside this deployment, see
+        `is_external_llm_endpoint`."""
+        return is_external_llm_endpoint(self.llm_url)
+
+    @property
+    def llm_zdr_pinned(self) -> bool:
+        """Whether the extraction lane is pinned to zero data retention at its provider.
+
+        Only meaningful for an external endpoint. A local lane retains nothing because
+        nothing leaves, so it is trivially pinned.
+        """
+        if not self.llm_is_external:
+            return True
+        provider = self.llm_extra_body.get("provider")
+        return isinstance(provider, dict) and provider.get("zdr") is True
 
     @property
     def mcp_resource_id(self) -> str:

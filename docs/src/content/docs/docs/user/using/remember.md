@@ -7,11 +7,11 @@ This page assumes you have a client connected and have stored at least one note,
 [Quickstart](/docs/user/quickstart/) covers. It is about the shape of what you write rather than the
 mechanics of writing it.
 
-Writing to aizk is one call named `remember` that carries self-describing Markdown. Your harness
+Writing to aizk is one call named `keep` that carries self-describing Markdown. Your harness
 makes it look like this.
 
 ```text
-aizk.remember(text="# Reranker stays on by default\n\n...the reasoning...")
+aizk.keep(text="# Reranker stays on by default\n\n...the reasoning...")
 ```
 
 Everything else is optional, and the defaults are almost always the right answer.
@@ -123,8 +123,8 @@ Naming no organization writes privately, which is the default. Naming one writes
 and your assistant can only name organizations you are actually allowed to write to.
 
 ```text
-aizk.remember(text="# Session pooling settings ...")                  # private, the default
-aizk.remember(text="# Assay protocol ...", scopes=["Book Club"])      # into a team scope
+aizk.keep(text="# Session pooling settings ...")                  # private, the default
+aizk.keep(text="# Assay protocol ...", scopes=["Book Club"])      # into a team scope
 ```
 
 [Sharing and organizations](/docs/user/using/sharing/) covers checking that before the first shared

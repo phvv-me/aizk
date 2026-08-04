@@ -31,7 +31,7 @@ decorators, so the whole surface is one readable list.
 | GET | `/api/sources` | `sources` | `SourcePage`, `search`, `limit` 1 to 100, `offset` |
 | GET | `/api/findings` | `findings` | `FindingPage`, same paging |
 | GET | `/api/subjects` | `subjects` | `SubjectPage`, same paging |
-| GET | `/api/themes` | `themes` | `ThemePage`, every visible theme |
+| GET | `/api/themes` | `themes` | `ThemePage`, same paging, biggest themes first |
 | GET | `/api/graph` | `graph` | `GraphSlice`, `limit` 1 to 80 |
 | POST | `/api/recall` | `recall` | `Answer`, one Markdown string |
 | PUT | `/api/uploads/{capability}` | `receive_upload` | `ArtifactReceipt` |

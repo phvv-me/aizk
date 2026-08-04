@@ -55,6 +55,7 @@ ontology_app = App(name="ontology", help="Inspect and maintain the controlled vo
 auth_app = App(name="auth", help="Validate and reconcile server authorization policy.")
 settings_app = App(name="settings", help="Inspect and validate effective server settings.")
 api_app = App(name="api", help="Maintain browser API development artifacts.")
+web_app = App(name="web", help="Rehearse and validate the public web egress lane.")
 
 queue_app.command(retry_app)
 for subcommand in (
@@ -67,6 +68,7 @@ for subcommand in (
     auth_app,
     settings_app,
     api_app,
+    web_app,
 ):
     admin_app.command(subcommand)
 
@@ -125,6 +127,7 @@ async def serve_mcp() -> None:
             runtime.uploads,
             runtime.artifacts.intake,
             runtime.settings,
+            web=runtime.web,
         )
         serving = server.run_http_async(host=settings.mcp_host, port=settings.mcp_port)
         if settings.serve_with_worker:
@@ -306,9 +309,13 @@ async def reembed_graph(user: UUID5 | None = None) -> None:
 
 
 @graph_app.command(name="communities")
-async def build_communities(user: UUID5 | None = None) -> None:
-    """Build graph communities and their global summaries."""
-    written = await _run_profiled(admin.communities(user_id=user))
+async def build_communities(
+    user: UUID5 | None = None, scopes: str | None = None, everywhere: bool = False
+) -> None:
+    """Rebuild graph communities and their summaries, optionally for every stored scope."""
+    written = await _run_profiled(
+        admin.communities(user_id=user, scopes=scopes, everywhere=everywhere)
+    )
     print(f"built {written} communities")
 
 
@@ -448,6 +455,24 @@ def validate_settings() -> None:
     """Validate effective environment settings without starting services."""
     Settings()
     print(_json({"valid": True}))
+
+
+@web_app.command(name="probe")
+async def probe_web(
+    query: str,
+    execute: bool = False,
+    fresh: bool = False,
+    user: UUID5 | None = None,
+) -> None:
+    """Print what the egress router and sanitizer would send for one question.
+
+    Run this against real questions before turning `AIZK_WEB_SEARCH_ENABLED` on, and read
+    the `egress` line. It is either the exact text a third party would receive or the word
+    refused. No provider is called unless `--execute` asks for one.
+    """
+    async with Runtime.assemble(settings) as runtime:
+        probe = await admin.probe_web(runtime.web, query, user, fresh, execute)
+    print(probe.render())
 
 
 @api_app.command(name="openapi")

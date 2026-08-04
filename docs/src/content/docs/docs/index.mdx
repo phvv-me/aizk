@@ -15,7 +15,7 @@ Read any page on its own in ten minutes or less. When a page needs an idea it do
 links the one page that does instead of explaining it twice.
 
 <Diagram
-  title="You remember and recall through one agent, everything lands in one database, and Logto decides who reads what"
+  title="You keep and find through one agent, everything lands in one database, and Logto decides who reads what"
   nodes={[
     { id: 'agent', label: 'your agent', col: 0, row: 1 },
     { id: 'write', label: 'write path', col: 1, row: 0 },
@@ -25,7 +25,7 @@ links the one page that does instead of explaining it twice.
     { id: 'logto', label: 'Logto', col: 2, row: 2.2 },
   ]}
   edges={[
-    { from: 'agent', to: 'write', label: 'remember' },
+    { from: 'agent', to: 'write', label: 'keep' },
     { from: 'write', to: 'db' },
     { from: 'db', to: 'read', label: 'recall' },
     { from: 'read', to: 'agent', label: 'evidence' },

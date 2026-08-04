@@ -24,6 +24,7 @@ from aizk.graph.models import (
 from aizk.ontology import WireExtraction
 from aizk.serving.embed import EmbedMode
 from aizk.serving.extract import LLM
+from aizk.web import WebQueryPlan
 
 
 class AsyncContext[ValueT]:
@@ -97,6 +98,9 @@ def default_response(schema: type[BaseModel]) -> BaseModel:
         ProfileReport.__name__: ProfileReport(summary="a static and dynamic paragraph"),
         RaptorReport.__name__: RaptorReport(label="broad theme", summary="a rolled-up paragraph"),
         InsightReport.__name__: InsightReport(observations=[]),
+        # A planner that says nothing asks for nothing, which is the safe default for
+        # every test that never meant to exercise egress at all.
+        WebQueryPlan.__name__: WebQueryPlan(needs_web=False, reason="memory answered it"),
     }
     return defaults[schema.__name__]
 
@@ -165,6 +169,7 @@ class FakeLLM:
                 ProfileReport,
                 RaptorReport,
                 InsightReport,
+                WebQueryPlan,
             )
             if schema.__name__ == output.name
         )

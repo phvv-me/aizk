@@ -16,9 +16,9 @@ from aizk.artifacts.models import ArtifactReceipt
 from aizk.client import (
     AuthenticationStatus,
     ClientProfile,
+    KeepBatchResult,
+    KeptFile,
     ProtocolError,
-    RememberBatchResult,
-    RememberedFile,
 )
 from aizk.mcp.models import UploadTicketAccepted
 from aizk.memory import SharedDocument, ShareResult, WriteResult
@@ -94,8 +94,8 @@ def test_root_tree_has_only_client_and_admin_surfaces() -> None:
     assert command_names(cli.app) == {
         "admin",
         "auth",
-        "recall",
-        "remember",
+        "find",
+        "keep",
         "share",
         "status",
     }
@@ -280,40 +280,46 @@ def test_authentication_status_is_noninteractive_and_clear(
 
 
 @pytest.mark.parametrize("json_output", [False, True])
-def test_recall_forwards_query_budget_and_output_mode(
+def test_find_forwards_query_budget_web_mode_and_output_mode(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     json_output: bool,
 ) -> None:
-    recall = AsyncMock(return_value="Evidence")
+    found = AsyncMock(return_value="Evidence")
     monkeypatch.setattr(
         commands,
         "MemoryClient",
-        Mock(return_value=SimpleNamespace(recall=recall)),
+        Mock(return_value=SimpleNamespace(find=found)),
     )
 
     dbutil.run(
-        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).recall(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).find(
             "Question",
             512,
+            ("Research",),
+            "force",
+            True,
             None,
             json_output,
         )
     )
 
-    recall.assert_awaited_once_with("Question", 512)
+    found.assert_awaited_once_with("Question", 512, ["Research"], "force", True)
     expected = '"Evidence"' if json_output else "Evidence"
     assert expected in capsys.readouterr().out
 
 
-def test_recall_rejects_missing_input(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_find_rejects_missing_input(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(commands.CommandInput, "text", Mock(return_value=None))
 
     with pytest.raises(ValueError, match="requires a query"):
         dbutil.run(
-            commands.ClientCommands(cast("commands.ProfileStore", Profiles())).recall(
+            commands.ClientCommands(cast("commands.ProfileStore", Profiles())).find(
                 None,
                 None,
+                (),
+                "auto",
+                False,
                 None,
                 False,
             )
@@ -342,7 +348,7 @@ def test_file_paths_reject_source_only_options(
 
     with pytest.raises(ValueError, match=message):
         dbutil.run(
-            subject.remember(
+            subject.keep(
                 (Path("file.pdf"),),
                 None,
                 source_uri,
@@ -357,7 +363,7 @@ def test_file_paths_reject_source_only_options(
 
 
 @pytest.mark.parametrize("json_output", [False, True])
-def test_remember_files_accepts_paths_directly(
+def test_keep_files_accepts_paths_directly(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     json_output: bool,
@@ -368,22 +374,22 @@ def test_remember_files_accepts_paths_directly(
         content_id=uuid7(),
         state=Artifact.Content.State.queued,
     )
-    result = RememberBatchResult(
+    result = KeepBatchResult(
         files=(
-            RememberedFile(path=first, receipt=receipt),
-            RememberedFile(path=second, receipt=receipt),
+            KeptFile(path=first, receipt=receipt),
+            KeptFile(path=second, receipt=receipt),
         )
     )
-    remember_files = AsyncMock(return_value=result)
+    keep_files = AsyncMock(return_value=result)
     monkeypatch.setattr(commands.CommandInput, "text", Mock(return_value="Companion"))
     monkeypatch.setattr(
         commands,
         "MemoryClient",
-        Mock(return_value=SimpleNamespace(remember_files=remember_files)),
+        Mock(return_value=SimpleNamespace(keep_files=keep_files)),
     )
 
     dbutil.run(
-        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).remember(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).keep(
             (first, second),
             "Companion",
             None,
@@ -396,7 +402,7 @@ def test_remember_files_accepts_paths_directly(
         )
     )
 
-    call = remember_files.await_args
+    call = keep_files.await_args
     assert call is not None
     assert [upload.path for upload in call.args[0]] == [first, second]
     assert call.kwargs == {
@@ -409,22 +415,22 @@ def test_remember_files_accepts_paths_directly(
 
 
 @pytest.mark.parametrize("json_output", [False, True])
-def test_remember_text_maps_to_the_mcp_request(
+def test_keep_text_maps_to_the_mcp_request(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     json_output: bool,
 ) -> None:
-    remembered = WriteResult(id=uuid7())
-    remember = AsyncMock(return_value=remembered)
+    kept = WriteResult(id=uuid7())
+    keep = AsyncMock(return_value=kept)
     monkeypatch.setattr(commands.CommandInput, "text", Mock(return_value="A durable fact"))
     monkeypatch.setattr(
         commands,
         "MemoryClient",
-        Mock(return_value=SimpleNamespace(remember=remember)),
+        Mock(return_value=SimpleNamespace(keep=keep)),
     )
 
     dbutil.run(
-        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).remember(
+        commands.ClientCommands(cast("commands.ProfileStore", Profiles())).keep(
             (),
             "A durable fact",
             "https://example.com/source",
@@ -437,13 +443,13 @@ def test_remember_text_maps_to_the_mcp_request(
         )
     )
 
-    assert remember.await_args is not None
-    request = remember.await_args.args[0]
+    assert keep.await_args is not None
+    request = keep.await_args.args[0]
     assert request.text == "A durable fact"
     assert request.source_uri == "https://example.com/source"
     output = capsys.readouterr().out
     assert ('"id"' in output) is json_output
-    assert ("remembered document" in output) is not json_output
+    assert ("kept document" in output) is not json_output
 
 
 @pytest.mark.parametrize("json_output", [False, True])
@@ -574,8 +580,8 @@ def test_remember_renderers_cover_every_protocol_result() -> None:
         expires_seconds=60,
     )
 
-    assert "accepted file" in commands.ClientCommands.render_remember(receipt)
-    assert commands.ClientCommands.render_remember(ticket) == "accepted upload ticket"
+    assert "accepted file" in commands.ClientCommands.render_keep(receipt)
+    assert commands.ClientCommands.render_keep(ticket) == "accepted upload ticket"
 
 
 def test_command_adapters_delegate_without_business_logic(
@@ -585,8 +591,8 @@ def test_command_adapters_delegate_without_business_logic(
         login=AsyncMock(),
         logout=AsyncMock(),
         authentication_status=AsyncMock(),
-        recall=AsyncMock(),
-        remember=AsyncMock(),
+        find=AsyncMock(),
+        keep=AsyncMock(),
         share=AsyncMock(),
         status=AsyncMock(),
     )
@@ -596,15 +602,15 @@ def test_command_adapters_delegate_without_business_logic(
     dbutil.run(commands.login("https://example.com/mcp"))
     dbutil.run(commands.logout())
     dbutil.run(commands.authentication_status())
-    dbutil.run(commands.recall("question"))
-    dbutil.run(commands.remember(Path("file.pdf")))
+    dbutil.run(commands.find("question"))
+    dbutil.run(commands.keep(Path("file.pdf")))
     dbutil.run(commands.share(document))
     dbutil.run(commands.status())
 
     instance.login.assert_awaited_once()
     instance.logout.assert_awaited_once()
     instance.authentication_status.assert_awaited_once()
-    instance.recall.assert_awaited_once()
-    instance.remember.assert_awaited_once()
+    instance.find.assert_awaited_once()
+    instance.keep.assert_awaited_once()
     instance.share.assert_awaited_once()
     instance.status.assert_awaited_once()

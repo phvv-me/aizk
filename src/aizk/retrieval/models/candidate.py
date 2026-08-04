@@ -60,6 +60,21 @@ class Candidate(FrozenModel):
         exclude=True,
         description="source title is named completely in the query",
     )
+    web_cache: bool = Field(
+        default=False,
+        description="evidence came from a cached third-party page, never from the caller",
+    )
+    document_expires_at: datetime | None = Field(
+        default=None, description="when the source document stops being allowed to answer"
+    )
+
+    def current_at(self, moment: datetime) -> bool:
+        """Whether this evidence's source still holds, its own expiry being the authority.
+
+        A cached page carries the expiry its freshness bucket earned when it was written or
+        last refreshed, so this is exact per bucket rather than one horizon for all three.
+        """
+        return self.document_expires_at is None or self.document_expires_at > moment
 
     @property
     def document_note(self) -> str | None:

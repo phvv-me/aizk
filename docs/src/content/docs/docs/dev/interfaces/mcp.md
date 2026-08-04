@@ -26,24 +26,24 @@ limit without a code change.
 | Tool | Identified | What it does |
 |---|---|---|
 | `status` | yes | caller authority plus durable usage and processing health |
-| `recall` | no | visible evidence for one question, rendered as Markdown |
-| `remember` | yes | store text, preserve a URI original, or mint an upload ticket |
+| `find` | no | visible evidence for one question, rendered as Markdown |
+| `keep` | yes | store text, preserve a URI original, or mint an upload ticket |
 | `share` | yes | copy visible documents into one authorized destination |
 
 A user never hand-writes the MCP JSON. An agent harness reaches the four tools by name, like this.
 
 ```text
 aizk.status(days=30)
-aizk.recall(query="why did we switch extractors?", budget=2048)
-aizk.remember(text="reranker sidecar is back up", scopes=["Book Club"])
-aizk.remember(upload={"filename": "contract.pdf", "media_type": "application/pdf",
+aizk.find(query="why did we switch extractors?", budget=2048)
+aizk.keep(text="reranker sidecar is back up", scopes=["Book Club"])
+aizk.keep(upload={"filename": "contract.pdf", "media_type": "application/pdf",
                       "size": 84213, "sha256": "..."})
 aizk.share(documents=["019820a1-..."], scopes=["Book Club"])
 ```
 
 `AizkMCP.user(context, identified=True)` is what enforces that column. It reads the caller bound by
 the middleware and raises `ToolError` when an anonymous caller tries to write, so
-`recall` is the only tool the read-only anonymous identity can reach.
+`find` is the only tool the read-only anonymous identity can reach, and never for the web.
 
 The resource template is `aizk://artifacts/{artifact_id}/contents/{artifact_content_id}`. It reads
 one exact original revision, checks visibility with `user.exec[_ArtifactObject]` rather than in
@@ -51,7 +51,7 @@ Python, and attributes the read to the artifact's own scopes rather than the cal
 
 ## The upload mode
 
-`remember` with an `upload` declaration is the one tool call that does not write memory. It refuses
+`keep` with an `upload` declaration is the one tool call that does not write memory. It refuses
 to be combined with `source_uri`, `preserve_source`, `observed_at` or `expires_at`, mints a grant
 through `UploadBox.mint`, and returns exactly this.
 
@@ -111,7 +111,7 @@ Caddy forwards the proxy's paths to this process explicitly, `/mcp`, both
 ## Errors are translated, never leaked
 
 Every expected failure becomes a `ToolError` with text a model can act on, and the original is
-chained as the cause. `remember` maps `MalwareRejectedError`, `MalwareUnavailableError`,
+chained as the cause. `keep` maps `MalwareRejectedError`, `MalwareUnavailableError`,
 `ObjectStoreError`, `httpx.HTTPError` and `ValueError`, and the artifact resource maps
 `IntegrityMismatch` and store outages to `ResourceError`. Nothing lets a stack trace or an internal
 message reach a client.

@@ -15,11 +15,11 @@ architecture note. It assumes you have read
 ## Agentic first
 
 The primary caller is an agent, not a person. The MCP server is the interface that gets designed
-first, and it exposes four tools, `status`, `recall`, `remember` and `share`, plus one resource
+first, and it exposes four tools, `status`, `find`, `keep` and `share`, plus one resource
 for reading an exact artifact revision. That is the whole surface, and it is deliberately small
 enough that a model can hold it in working memory without a per-tool prompt.
 
-The consequences run deep. `recall` returns evidence rather than an answer, because an agent can
+The consequences run deep. `find` returns evidence rather than an answer, because an agent can
 weigh evidence and cannot check an answer. Writes are cheap and asynchronous, because an agent
 that has to wait on extraction stops writing. The web app is a second-class citizen by design and
 calls the same `Memory` service in `src/aizk/memory.py` that the MCP tools do.

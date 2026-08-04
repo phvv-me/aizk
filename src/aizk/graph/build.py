@@ -87,6 +87,9 @@ async def pending_chunks(
         .order_by(Chunk.id)
         .limit(limit)
     )
+    selection = selection.where(
+        Chunk.document_id.in_(select(Document.id).where(Document.projectable()))
+    )
     if source is not None:
         titled = select(Document.id).where(Document.title.ilike(f"%{source}%"))
         selection = selection.where(Chunk.document_id.in_(titled))

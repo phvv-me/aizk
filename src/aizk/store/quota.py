@@ -32,8 +32,15 @@ class MonthlyQuota:
         self.backoff_seconds = backoff_seconds
         self.max_backoff_seconds = max_backoff_seconds
 
-    async def consume(self, user_id: UUID5, operation: UsageEvent.Operation) -> None:
-        """Consume every applicable allowance in one rollback-safe transaction."""
+    async def consume(
+        self, user_id: UUID5, operation: UsageEvent.Operation, units: int = 1
+    ) -> None:
+        """Consume every applicable allowance in one rollback-safe transaction.
+
+        units: what this operation costs against each counter. One `find` can spend several,
+            because it may search more than one provider and fetch more than one page, and
+            an external provider's own credit charge is what a web unit stands for.
+        """
         limits = self.limits(user_id, operation)
         if not limits:
             return
@@ -44,7 +51,7 @@ class MonthlyQuota:
                 async with User.system().app as session:
                     for subject_id, kind, limit in limits:
                         result = await session.exec(
-                            MonthlyQuotaCounter.consume(subject_id, period, kind, limit)
+                            MonthlyQuotaCounter.consume(subject_id, period, kind, limit, units)
                         )
                         if result.one_or_none() is None:
                             raise QuotaExceededError(f"monthly {kind} limit reached")
@@ -86,6 +93,18 @@ class MonthlyQuota:
                     self.config.monthly_total_remember_limit,
                 ),
                 (user_id, "remember", self.config.monthly_user_remember_limit),
+            )
+        if operation in {
+            UsageEvent.Operation.web_search,
+            UsageEvent.Operation.web_fetch,
+        }:
+            configured += (
+                (
+                    self.config.system_user_id,
+                    "web",
+                    self.config.monthly_total_web_limit,
+                ),
+                (user_id, "web", self.config.monthly_user_web_limit),
             )
         return tuple(
             (subject_id, kind, limit)

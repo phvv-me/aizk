@@ -167,7 +167,7 @@ layers = [
     "mcp | api | ops",
     "memory",
     "status",
-    "artifacts : background : graph : retrieval : extract : serving : ontology : usage",
+    "artifacts : background : graph : retrieval : extract : serving : ontology : usage : web",
     "auth | backup | export",
     "integrations | storage",
     "store",
@@ -202,6 +202,7 @@ source_modules = [
     "aizk.status",
     "aizk.types",
     "aizk.usage",
+    "aizk.web",
 ]
 forbidden_modules = ["sqlmodel", "sqlalchemy"]
 allow_indirect_imports = true

@@ -25,8 +25,9 @@ entities, and Themes are communities. Sources keep their name.
 ## Dashboard
 
 Four counters run across the top for sources, findings, subjects, and themes, each linking to its own
-screen. The counts cover everything visible to you, which is your private memory plus every
-organization you belong to plus any public ones.
+screen. The counts cover the memory that is yours, your private notes plus every organization you
+belong to. A shared corpus anyone can read, and that you cannot write to, stays out of your numbers
+while staying fully readable and recallable.
 
 Below that sits a processing card with two bars. Source conversion is preserved originals being
 turned into text, and graph enrichment is findings, subjects, and themes being built from that text.
@@ -80,7 +81,8 @@ member names that link back to Subjects.
 
 This screen stays empty for a while on a new memory, which is correct rather than broken. Themes are
 rebuilt after enough findings accumulate, so sources become recallable well before the next theme
-pass runs.
+pass runs. Once a memory grows large the screen pages through the biggest themes first and reports
+the total, since a big graph is cut into thousands.
 
 ## Usage
 

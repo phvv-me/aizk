@@ -49,8 +49,8 @@ model rather than a rendered summary.
 | `aizk auth login [server]` | interactive OAuth, then `status` to prove the session |
 | `aizk auth logout` | clears this server's OAuth material only |
 | `aizk auth status` | validates stored credentials without opening a browser |
-| `aizk recall [query]` | the `recall` tool, reading stdin when the argument is absent |
-| `aizk remember [paths...]` | the `remember` tool, in text, URI or upload mode |
+| `aizk find [query]` | the `find` tool, reading stdin when the argument is absent |
+| `aizk keep [paths...]` | the `keep` tool, in text, URI or upload mode |
 | `aizk share <ids...>` | the `share` tool, also taking `--query`, `--move` and `--dry-run` |
 | `aizk status` | the `status` tool, rendered as account, usage and processing lines |
 
@@ -59,7 +59,7 @@ root. Tokens go to the system keyring through `KeyringStore`, never to that file
 
 ## Signing in and sending a file
 
-`aizk remember ./contract.pdf` is worth tracing, because it is three round trips and no credential
+`aizk keep ./contract.pdf` is worth tracing, because it is three round trips and no credential
 ever touches the upload.
 
 ```text
@@ -96,6 +96,7 @@ inspects across tenants, or rewrites rows in place needs it.
 | `admin database *` | migrations, queue install, backup, restore and reset |
 | `admin queue status`, `admin queue doctor` | queue tables sit outside row security |
 | `admin server worker` | `scope_roster()` reads distinct scope arrays past RLS |
+| `admin graph communities --everywhere` | walks that same roster, so it needs the owner DSN too |
 | `admin graph reembed` and `admin graph raptor` | rewrite stored vectors and summary tiers in place |
 | `admin graph diagnose-extraction` | loads one chunk by ID with no caller |
 
@@ -104,6 +105,12 @@ and `audit`, `admin graph rebuild`, `decay`, `communities` and `forget`, and the
 commands all open `User.system(scopes)` and are filtered by the same policies a request would be.
 They take
 `--user` to act as a specific identity and `--scopes` where a destination is needed.
+
+`admin graph communities` is the one to reach for after a deploy that changes how themes are cut.
+Alone it rebuilds a single scope set, the operator's own by default, while `--everywhere` walks the
+same scope roster the weekly fan-out uses and refreshes every private and shared corpus the
+deployment stores. It replaces one generation per scope set, so it is safe to repeat and costs one
+model call per theme.
 
 Three groups touch no database at all. `admin auth audit`, `apply` and `roles` talk only to Logto
 and are covered on [The Logto boundary](/docs/dev/identity/logto/). `roles` prints every global

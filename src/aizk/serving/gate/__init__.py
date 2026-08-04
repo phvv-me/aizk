@@ -1,3 +1,3 @@
-from .client import GateClient, RelevanceGate
+from .client import GateClient, MentionDetector, RelevanceGate
 
-__all__ = ["GateClient", "RelevanceGate"]
+__all__ = ["GateClient", "MentionDetector", "RelevanceGate"]

@@ -20,6 +20,18 @@ class RelevanceGate(Protocol):
     async def relevant(self, text: str) -> bool: ...
 
 
+@runtime_checkable
+class MentionDetector(Protocol):
+    """The one detection call the egress sanitizer makes.
+
+    Typed as the used surface so a double validates in place of the real `GateClient`
+    without weakening field validation, and so the sanitizer depends on the one method it
+    calls rather than on the whole classification client.
+    """
+
+    async def mentions(self, text: str, labels: Iterable[str], threshold: float) -> list[str]: ...
+
+
 class GateClient(HttpService):
     """Classification and mention extraction through one GLiNER sidecar."""
 
@@ -107,19 +119,23 @@ class GateClient(HttpService):
             self._multiple(task, value, options) if multi else self._single(task, value, options)
         )
 
-    async def named_entities(self, text: str) -> list[str]:
-        """Return normalized unique names mentioned in text."""
+    async def mentions(self, text: str, labels: Iterable[str], threshold: float) -> list[str]:
+        """Return normalized unique names of the given types mentioned in text.
+
+        labels: the entity descriptions GLiNER is asked to find.
+        threshold: the span confidence below which a mention is dropped.
+        """
         extracted = await self.post(
             "/extract",
-            ExtractRequest(
-                text=text,
-                entity_types=Ontology.current().gate_labels,
-                threshold=self.gate_threshold,
-            ),
+            ExtractRequest(text=text, entity_types=list(labels), threshold=threshold),
             ExtractResponse,
         )
         spans = (span for group in extracted.entities.values() for span in group)
         return sorted({span.strip().lower() for span in spans if span.strip()})
+
+    async def named_entities(self, text: str) -> list[str]:
+        """Return normalized unique names of live ontology types mentioned in text."""
+        return await self.mentions(text, Ontology.current().gate_labels, self.gate_threshold)
 
     async def relevant(self, text: str) -> bool:
         """Return whether text carries an extractable ontology type."""

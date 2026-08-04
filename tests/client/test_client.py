@@ -20,11 +20,11 @@ from aizk.artifacts.models import ArtifactReceipt
 from aizk.client import (
     ClientProfile,
     CommandInput,
+    KeepRequest,
     LocalUpload,
     LoginRequiredError,
     MemoryClient,
     ProfileStore,
-    RememberRequest,
     ResultSerializer,
     ShareRequest,
 )
@@ -314,10 +314,10 @@ def test_logout_clears_only_the_selected_server_oauth_keys() -> None:
     dbutil.run(MemoryClient(profile()).logout())
 
 
-def test_recall_and_share_keep_the_mcp_wire_names(
+def test_find_and_share_keep_the_mcp_wire_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    recall = ToolClient("evidence")
+    found = ToolClient("evidence")
     first, second = uuid7(), uuid7()
     shared = ToolClient(
         {
@@ -329,12 +329,12 @@ def test_recall_and_share_keep_the_mcp_wire_names(
             "preview": False,
         }
     )
-    clients = iter((recall, shared))
+    clients = iter((found, shared))
     monkeypatch.setattr(MemoryClient, "connection", lambda self, interactive=False: next(clients))
     client = MemoryClient(profile())
 
     async def exercise() -> tuple[str, int]:
-        evidence = await client.recall("what changed", budget=512)
+        evidence = await client.find("what changed", budget=512, scopes=["Research"])
         result = await client.share(
             ShareRequest(
                 documents=[first, second],
@@ -348,7 +348,18 @@ def test_recall_and_share_keep_the_mcp_wire_names(
 
     assert evidence == "evidence"
     assert count == 2
-    assert recall.calls == [("recall", {"query": "what changed", "budget": 512})]
+    assert found.calls == [
+        (
+            "find",
+            {
+                "query": "what changed",
+                "web": "auto",
+                "fresh": False,
+                "budget": 512,
+                "scopes": ["Research"],
+            },
+        )
+    ]
     assert shared.calls == [
         (
             "share",
@@ -366,14 +377,14 @@ def test_recall_and_share_keep_the_mcp_wire_names(
     ]
 
 
-def test_recall_omits_an_unspecified_budget(
+def test_find_omits_an_unspecified_budget_and_scope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     remote = ToolClient("evidence")
     monkeypatch.setattr(MemoryClient, "connection", lambda self, interactive=False: remote)
 
-    assert dbutil.run(MemoryClient(profile()).recall("question")) == "evidence"
-    assert remote.calls == [("recall", {"query": "question"})]
+    assert dbutil.run(MemoryClient(profile()).find("question")) == "evidence"
+    assert remote.calls == [("find", {"query": "question", "web": "auto", "fresh": False})]
 
 
 def test_remember_text_returns_the_typed_write_result(
@@ -383,10 +394,10 @@ def test_remember_text_returns_the_typed_write_result(
     remote = ToolClient({"id": str(document)})
     monkeypatch.setattr(MemoryClient, "connection", lambda self, interactive=False: remote)
 
-    result = dbutil.run(MemoryClient(profile()).remember(RememberRequest(text="literal path.txt")))
+    result = dbutil.run(MemoryClient(profile()).keep(KeepRequest(text="literal path.txt")))
 
     assert result == WriteResult(id=document)
-    assert remote.calls == [("remember", {"text": "literal path.txt"})]
+    assert remote.calls == [("keep", {"text": "literal path.txt"})]
 
 
 def test_remember_rejects_upload_protocol_mismatches(
@@ -408,9 +419,9 @@ def test_remember_rejects_upload_protocol_mismatches(
     client = MemoryClient(profile())
 
     with pytest.raises(ProtocolError, match="without an upload"):
-        dbutil.run(client.remember(RememberRequest(text="plain")))
+        dbutil.run(client.keep(KeepRequest(text="plain")))
     with pytest.raises(ProtocolError, match="did not return a ticket"):
-        dbutil.run(client.remember(RememberRequest(upload=LocalUpload(path=source))))
+        dbutil.run(client.keep(KeepRequest(upload=LocalUpload(path=source))))
 
 
 def test_remember_upload_hashes_streams_and_returns_the_final_receipt(
@@ -443,8 +454,8 @@ def test_remember_upload_hashes_streams_and_returns_the_final_receipt(
             client = MemoryClient(profile(), upload_http=http)
             return cast(
                 "ArtifactReceipt",
-                await client.remember(
-                    RememberRequest(
+                await client.keep(
+                    KeepRequest(
                         text="Companion",
                         scopes=["Research"],
                         upload=LocalUpload(path=source),
@@ -456,7 +467,7 @@ def test_remember_upload_hashes_streams_and_returns_the_final_receipt(
 
     assert result == receipt
     name, arguments = remote.calls[0]
-    assert name == "remember"
+    assert name == "keep"
     assert arguments["text"] == "Companion"
     assert arguments["scopes"] == ["Research"]
     assert arguments["upload"] == {
@@ -467,7 +478,7 @@ def test_remember_upload_hashes_streams_and_returns_the_final_receipt(
     }
 
 
-def test_remember_files_batches_only_explicit_paths_and_keeps_text_literal(
+def test_keep_files_batches_only_explicit_paths_and_keeps_text_literal(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -487,19 +498,19 @@ def test_remember_files_batches_only_explicit_paths_and_keeps_text_literal(
             state=Artifact.Content.State.queued,
         ),
     )
-    requests: list[RememberRequest] = []
+    requests: list[KeepRequest] = []
 
-    async def remember(
+    async def keep(
         self: MemoryClient,
-        request: RememberRequest,
+        request: KeepRequest,
     ) -> ArtifactReceipt:
         requests.append(request)
         return receipts[len(requests) - 1]
 
-    monkeypatch.setattr(MemoryClient, "remember", remember)
+    monkeypatch.setattr(MemoryClient, "keep", keep)
     client = MemoryClient(profile())
     result = dbutil.run(
-        client.remember_files(
+        client.keep_files(
             [LocalUpload(path=first), LocalUpload(path=second)],
             companion_text=str(first),
             scopes=["Research"],
@@ -516,27 +527,27 @@ def test_remember_files_batches_only_explicit_paths_and_keeps_text_literal(
     assert [request.scopes for request in requests] == [["Research"], ["Research"]]
 
 
-def test_remember_files_refuses_an_empty_batch() -> None:
+def test_keep_files_refuses_an_empty_batch() -> None:
     with pytest.raises(ValueError, match="at least one"):
-        dbutil.run(MemoryClient(profile()).remember_files([]))
+        dbutil.run(MemoryClient(profile()).keep_files([]))
 
 
-def test_remember_files_rejects_a_nonreceipt_result(
+def test_keep_files_rejects_a_nonreceipt_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = tmp_path / "source.txt"
     source.write_text("source", encoding="utf-8")
 
-    async def remember(
+    async def keep(
         self: MemoryClient,
-        request: RememberRequest,
+        request: KeepRequest,
     ) -> WriteResult:
         return WriteResult(id=uuid7())
 
-    monkeypatch.setattr(MemoryClient, "remember", remember)
+    monkeypatch.setattr(MemoryClient, "keep", keep)
     with pytest.raises(ProtocolError, match="artifact receipt"):
-        dbutil.run(MemoryClient(profile()).remember_files([LocalUpload(path=source)]))
+        dbutil.run(MemoryClient(profile()).keep_files([LocalUpload(path=source)]))
 
 
 def test_upload_builds_a_nonredirecting_client_when_none_was_injected(
@@ -623,7 +634,7 @@ def test_remember_request_rejects_invalid_modes(
     invalid: dict[str, JsonValue | LocalUpload | datetime],
 ) -> None:
     with pytest.raises(ValueError):
-        RememberRequest.model_validate(invalid)
+        KeepRequest.model_validate(invalid)
 
 
 def test_local_upload_honors_wire_overrides_and_unknown_media_fallback(

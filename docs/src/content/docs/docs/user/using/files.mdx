@@ -9,7 +9,7 @@ This page assumes you can already write plain notes, which
 [Writing memory well](/docs/user/using/remember/) covers. It is about the other kind of thing you
 can put in memory, which is a document you did not write yourself.
 
-The same `remember` call handles all of it. What changes is whether you hand it text, a URL, or a
+The same `keep` call handles all of it. What changes is whether you hand it text, a URL, or a
 local file.
 
 ## Pass a URL and let aizk do the work
@@ -17,7 +17,7 @@ local file.
 For one web page, PDF, or other supported file, give the original URL and no text at all.
 
 ```text
-aizk.remember(source_uri="https://example.org/binding-assay-protocol.pdf")
+aizk.keep(source_uri="https://example.org/binding-assay-protocol.pdf")
 ```
 
 aizk fetches it once, scans the bytes, keeps the exact original unchanged, converts it to readable
@@ -62,7 +62,7 @@ If you have a URL but only want the text of your own reading of it, pass both `t
 the file.
 
 ```text
-aizk.remember(
+aizk.keep(
     text="# Assay protocol, the parts that matter\n\nIt fixes incubation at 37 C for nine hours ...",
     source_uri="https://example.org/binding-assay-protocol.pdf",
 )
@@ -75,7 +75,7 @@ on. The text is stored as companion context on the same revision, so recall can 
 together with the converted contents rather than as two unrelated notes.
 
 ```text
-aizk.remember(
+aizk.keep(
     text="Primary reference for the current retrieval design. Section 4 is the part we implemented.",
     source_uri="https://example.org/paper.pdf",
     preserve_source=True,
@@ -89,7 +89,7 @@ line tool, which handles the whole flow itself, or through a client that impleme
 handshake.
 
 ```sh
-aizk remember report.pdf notes.md --text "Primary references for the current design."
+aizk keep report.pdf notes.md --text "Primary references for the current design."
 ```
 
 An assistant doing it through the tool declares the exact filename, media type, byte size and

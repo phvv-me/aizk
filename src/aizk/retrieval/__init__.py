@@ -1,14 +1,26 @@
-from .models import Candidate, Lane, Plan, QueryContext, RecallResult, RecallTrace
-from .recall import documents, recall, trace
+from .models import (
+    Candidate,
+    Evidence,
+    Lane,
+    Plan,
+    QueryContext,
+    RecallEvidence,
+    RecallResult,
+    RecallTrace,
+)
+from .recall import documents, evidence, recall, trace
 
 __all__ = [
     "Candidate",
+    "Evidence",
     "Lane",
     "Plan",
     "QueryContext",
+    "RecallEvidence",
     "RecallResult",
     "RecallTrace",
     "documents",
+    "evidence",
     "recall",
     "trace",
 ]

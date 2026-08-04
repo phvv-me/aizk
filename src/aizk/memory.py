@@ -10,15 +10,16 @@ from .background.jobs.projection import enqueue_document
 from .background.wake import NoopWorkerWake, WorkerWake
 from .extract import ingest as extract_ingest
 from .provenance import CaptureContext
-from .retrieval import RecallResult
+from .retrieval import Evidence, RecallEvidence, RecallResult
 from .store import Document, Usage
 from .store.identity import User
 from .types import ScopeNames, Scopes
 from .usage import annotate_operation, quota
+from .web import Refusal, WebFinding, WebMode, WebOutcome, WebSearch
 
 
 class WriteResult(FrozenModel):
-    """Identify the durable source document created or updated by `remember`."""
+    """Identify the durable source document created or updated by `keep`."""
 
     id: UUID7
 
@@ -58,17 +59,19 @@ class Memory:
     constructs one per request with the caller and the process artifact intake.
     """
 
-    __slots__ = ("intake", "user", "wake")
+    __slots__ = ("intake", "user", "wake", "web")
 
     def __init__(
         self,
         user: User,
         intake: ArtifactIntake,
         wake: WorkerWake | None = None,
+        web: WebSearch | None = None,
     ) -> None:
         self.user = user
         self.intake = intake
         self.wake = wake or NoopWorkerWake()
+        self.web = web
 
     @property
     def status(self) -> User:
@@ -77,8 +80,14 @@ class Memory:
 
     async def recall(self, query: str, budget: int) -> RecallResult:
         """Return structured merit-ordered evidence visible to this caller."""
+        _, result = await self.remembered(query, budget)
+        return result
+
+    async def remembered(self, query: str, budget: int) -> tuple[RecallEvidence, RecallResult]:
+        """Run the memory half of a question, keeping the signals an egress router reads."""
         await quota.consume(self.user.id, Usage.Event.Operation.recall)
-        candidates = await retrieval.recall(query.strip(), self.user, token_budget=budget)
+        evidence = await retrieval.evidence(query.strip(), self.user, token_budget=budget)
+        candidates = evidence.candidates
         annotate_operation(
             Usage.Event.Operation.recall,
             frozenset().union(*(candidate.scopes for candidate in candidates)),
@@ -91,7 +100,59 @@ class Memory:
             )
             for organization in self.user.organizations
         }
-        return RecallResult.from_candidates(candidates, scope_details)
+        return evidence, RecallResult.from_candidates(candidates, scope_details)
+
+    async def find(
+        self,
+        query: str,
+        budget: int,
+        scopes: ScopeNames | None = None,
+        web: WebMode = WebMode.auto,
+        fresh: bool = False,
+    ) -> RecallResult:
+        """Answer one question from memory, and from the public web when memory cannot.
+
+            memory retrieval, always, free
+                    |
+            router and sanitizer, reading what memory already produced
+                    |
+            the public web, only for what survived both
+                    |
+            fetched pages cached as ordinary expiring documents
+                    |
+            one receipt naming exactly what left the machine
+
+        Memory always runs and always renders first, so a call that also reached the web
+        answers as both halves rather than as the web alone. A deployment with no web
+        service wired refuses in the same shape a disabled one does, which keeps the
+        receipt honest on every path.
+        """
+        evidence, result = await self.remembered(query, budget)
+        outcome = (
+            WebOutcome.refused(Refusal.not_permitted)
+            if self.web is None
+            else await self.web.run(self.user, query.strip(), evidence, web, fresh, scopes)
+        )
+        return result.model_copy(
+            update={
+                "web": self.web_evidence(outcome.findings),
+                "receipt": outcome.receipt,
+            }
+        )
+
+    @staticmethod
+    def web_evidence(findings: tuple[WebFinding, ...]) -> tuple[Evidence, ...]:
+        """Render fetched pages as evidence carrying their provider and retrieval date."""
+        return tuple(
+            RecallResult.Evidence(
+                provenance=RecallResult.Provenance.WEB,
+                text=finding.text,
+                provider=finding.provider,
+                retrieved_at=finding.retrieved_at,
+                source_url=str(finding.url),
+            )
+            for finding in findings
+        )
 
     async def remember(
         self,

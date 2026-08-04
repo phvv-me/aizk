@@ -9,11 +9,11 @@ from ..artifacts.models import ArtifactReceipt
 from ..client import (
     ClientProfile,
     CommandInput,
+    KeepBatchResult,
+    KeepRequest,
     LocalUpload,
     MemoryClient,
     ProfileStore,
-    RememberBatchResult,
-    RememberRequest,
     ResultSerializer,
     ShareRequest,
 )
@@ -91,21 +91,26 @@ class ClientCommands:
         else:
             print("not authenticated")
 
-    async def recall(
+    async def find(
         self,
         query: str | None,
         budget: int | None,
+        scopes: tuple[str, ...],
+        web: Literal["auto", "off", "force"],
+        fresh: bool,
         server: str | None,
         json_output: bool,
     ) -> None:
-        """Recall evidence through the public MCP tool."""
+        """Answer one question through the public MCP tool."""
         resolved = CommandInput.text(query)
         if not resolved:
-            raise ValueError("recall requires a query argument or piped text")
-        result = await MemoryClient(self.profile(server)).recall(resolved, budget)
+            raise ValueError("find requires a query argument or piped text")
+        result = await MemoryClient(self.profile(server)).find(
+            resolved, budget, list(scopes) or None, web, fresh
+        )
         print(ResultSerializer.json(result) if json_output else result)
 
-    async def remember(
+    async def keep(
         self,
         paths: tuple[Path, ...],
         text: str | None,
@@ -117,22 +122,22 @@ class ClientCommands:
         server: str | None,
         json_output: bool,
     ) -> None:
-        """Remember authored text, one public source, or explicit local file paths."""
+        """Keep authored text, one public source, or explicit local file paths."""
         companion = CommandInput.text(text)
-        result: RememberBatchResult | WriteResult | ArtifactReceipt | UploadTicketAccepted
+        result: KeepBatchResult | WriteResult | ArtifactReceipt | UploadTicketAccepted
         if paths:
             if source_uri is not None or observed_at is not None or expires_at is not None:
                 raise ValueError("file paths cannot be combined with source or time options")
             if preserve_source:
                 raise ValueError("preserve-source applies only to source-uri")
-            result = await MemoryClient(self.profile(server)).remember_files(
+            result = await MemoryClient(self.profile(server)).keep_files(
                 [LocalUpload(path=path) for path in paths],
                 companion_text=companion,
                 scopes=list(scopes) or None,
             )
         else:
-            result = await MemoryClient(self.profile(server)).remember(
-                RememberRequest(
+            result = await MemoryClient(self.profile(server)).keep(
+                KeepRequest(
                     text=companion,
                     source_uri=source_uri,
                     observed_at=observed_at,
@@ -141,7 +146,7 @@ class ClientCommands:
                     preserve_source=preserve_source,
                 )
             )
-        print(ResultSerializer.json(result) if json_output else self.render_remember(result))
+        print(ResultSerializer.json(result) if json_output else self.render_keep(result))
 
     async def share(
         self,
@@ -234,12 +239,12 @@ class ClientCommands:
         )
 
     @staticmethod
-    def render_remember(
-        result: WriteResult | ArtifactReceipt | UploadTicketAccepted | RememberBatchResult,
+    def render_keep(
+        result: WriteResult | ArtifactReceipt | UploadTicketAccepted | KeepBatchResult,
     ) -> str:
         """Render one accepted memory operation without hiding its durable identity."""
         if isinstance(result, WriteResult):
-            return f"remembered document {result.id}"
+            return f"kept document {result.id}"
         if isinstance(result, ArtifactReceipt):
             return f"accepted file {result.content_id}  {result.state}"
         if isinstance(result, UploadTicketAccepted):
@@ -314,18 +319,21 @@ async def authentication_status(
     await ClientCommands().authentication_status(server, days, json_output)
 
 
-async def recall(
+async def find(
     query: str | None = None,
     *,
     budget: int | None = None,
+    scope: tuple[str, ...] = (),
+    web: Literal["auto", "off", "force"] = "auto",
+    fresh: bool = False,
     server: str | None = None,
     json_output: JsonOutput = False,
 ) -> None:
-    """Recall evidence for a question, accepting a positional query or stdin."""
-    await ClientCommands().recall(query, budget, server, json_output)
+    """Answer a question from memory and the web, taking a positional query or stdin."""
+    await ClientCommands().find(query, budget, scope, web, fresh, server, json_output)
 
 
-async def remember(
+async def keep(
     *paths: Path,
     text: str | None = None,
     source_uri: str | None = None,
@@ -336,8 +344,8 @@ async def remember(
     server: str | None = None,
     json_output: JsonOutput = False,
 ) -> None:
-    """Remember local paths directly, or remember text and sources through options."""
-    await ClientCommands().remember(
+    """Keep local paths directly, or keep text and sources through options."""
+    await ClientCommands().keep(
         paths,
         text,
         source_uri,
