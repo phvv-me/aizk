@@ -9,7 +9,7 @@ from id_factory import uuid5, uuid8
 from pydantic import ValidationError
 from rls import Catalog, Command, CompiledPolicy
 from rls.ddl import RLSAction, RLSStatement
-from sqlalchemy import ColumnElement, MetaData, Table
+from sqlalchemy import ColumnElement, MetaData, Table, any_, delete
 from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session as OrmSession
@@ -21,7 +21,7 @@ import aizk.store.backend as backend
 from aizk.config import DatabaseBackend, settings
 from aizk.exceptions import NoTenantContext
 from aizk.retrieval.models.lane import QueryContext
-from aizk.store import Chunk, Document, Fact, TableBase
+from aizk.store import Chunk, Document, Entity, Fact, TableBase, id_array
 from aizk.store.backend import (
     CockroachDBAdapter,
     PostgreSQLAdapter,
@@ -386,3 +386,19 @@ def test_direct_source_identity_requires_a_complete_normalized_title(
         "Open SWE Book.md": True,
         "SWE Book": True,
     }
+
+
+def test_an_id_set_travels_as_one_parameter_however_many_ids_it_holds() -> None:
+    """A bind per id has a 32767 ceiling a large scope's entity roster walks straight past."""
+    ids = [uuid5() for _ in range(5_000)]
+
+    names = Entity.Content.names_of(ids).compile(dialect=postgresql_dialect())
+    deletion = (
+        delete(Fact.Content)
+        .where(Fact.Content.id == any_(id_array(ids)))
+        .compile(dialect=postgresql_dialect())
+    )
+
+    assert len(names.params) == len(deletion.params) == 1
+    assert "= ANY (CAST(" in str(names)
+    assert "= ANY (CAST(" in str(deletion)

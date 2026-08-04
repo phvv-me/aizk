@@ -11,7 +11,7 @@ from networkx.classes import Graph
 from patos import FlexModel, sql
 from pgvector import HalfVector, Vector
 from pydantic import UUID5, Field
-from sqlalchemy import Integer, column, delete, func, or_
+from sqlalchemy import Integer, any_, column, delete, func, or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 
@@ -19,7 +19,7 @@ from ..config import settings
 from ..ontology import System
 from ..serving.embed import Embedder
 from ..serving.extract import LLM
-from ..store import Community, Entity, Fact
+from ..store import Community, Entity, Fact, id_array
 from ..store.engine import Session
 from ..store.identity import User
 from ..store.locking import acquire_locks
@@ -325,8 +325,8 @@ class RaptorBuilder(FlexModel):
                             Fact.Claim.scopes == scope_list,
                             Fact.Content.predicate == _PART_OF,
                             or_(
-                                Fact.Content.subject_id.in_(stale),
-                                Fact.Content.object_id.in_(stale),
+                                Fact.Content.subject_id == any_(id_array(stale)),
+                                Fact.Content.object_id == any_(id_array(stale)),
                             ),
                         )
                     )
@@ -335,13 +335,13 @@ class RaptorBuilder(FlexModel):
                     await opened.exec(
                         delete(Fact.Claim).where(
                             Fact.Claim.scopes == scope_list,
-                            Fact.Claim.content_id.in_(stale_edges),
+                            Fact.Claim.content_id == any_(id_array(stale_edges)),
                         )
                     )
                 await opened.exec(
                     delete(Entity.Claim).where(
                         Entity.Claim.scopes == scope_list,
-                        Entity.Claim.content_id.in_(stale),
+                        Entity.Claim.content_id == any_(id_array(stale)),
                     )
                 )
             await Entity.Content.mint_all(opened, self.contents)
@@ -355,7 +355,7 @@ class RaptorBuilder(FlexModel):
                 )
                 await opened.exec(
                     delete(Fact.Content).where(
-                        Fact.Content.id.in_(stale_edges),
+                        Fact.Content.id == any_(id_array(stale_edges)),
                         ~claimed,
                     )
                 )
@@ -367,7 +367,7 @@ class RaptorBuilder(FlexModel):
                 )
                 await opened.exec(
                     delete(Entity.Content).where(
-                        Entity.Content.id.in_(stale),
+                        Entity.Content.id == any_(id_array(stale)),
                         ~claimed_entity,
                     )
                 )

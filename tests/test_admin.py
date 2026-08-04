@@ -119,6 +119,21 @@ def test_rebuilding_communities_everywhere_walks_the_stored_scope_roster(
     assert built == keys
 
 
+@pytest.mark.parametrize(
+    ("name", "budget", "expected"),
+    [("reconvert_web_pages", 9, 3), ("reconvert_scanned_documents", 4, 5)],
+)
+def test_reconversion_sweeps_hand_their_budget_to_the_conversion_queue(
+    monkeypatch: pytest.MonkeyPatch, name: str, budget: int, expected: int
+) -> None:
+    """Stored text changes only by converting the original again, so this is the catch-up path."""
+    recorder = Recorder(ret=expected)
+    monkeypatch.setattr(admin.conversion, name, recorder)
+
+    assert dbutil.run(getattr(admin, name)(limit=budget)) == expected
+    assert recorder.args == (budget,)
+
+
 def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -350,6 +350,20 @@ async def promote_data(document: str, to_scopes: str, user: UUID5 | None = None)
     print(f"promoted {count} document into {to_scopes}")
 
 
+@data_app.command(name="reconvert-web-pages")
+async def reconvert_web_pages(limit: int = 100) -> None:
+    """Requeue converted web pages so stored boilerplate leaves their text."""
+    count = await admin.reconvert_web_pages(limit=limit)
+    print(f"requeued {count} web pages")
+
+
+@data_app.command(name="reconvert-scanned-documents")
+async def reconvert_scanned_documents(limit: int = 100) -> None:
+    """Requeue what OCR read so a corrected engine and language rewrite their text."""
+    count = await admin.reconvert_scanned_documents(limit=limit)
+    print(f"requeued {count} scanned documents")
+
+
 @data_app.command(name="export")
 async def export_data(path: str, user: UUID5 | None = None) -> None:
     """Export visible memory to a scoped JSONL file."""

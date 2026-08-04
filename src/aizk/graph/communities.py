@@ -274,11 +274,7 @@ async def build_communities(
             }
             entities = {
                 entity_id: name
-                for entity_id, name in await session.exec(
-                    select(Entity.Content.id, Entity.Content.name).where(
-                        Entity.Content.id.in_(entity_ids)
-                    )
-                )
+                for entity_id, name in await session.exec(Entity.Content.names_of(entity_ids))
             }
             stored = list(
                 await session.exec(select(Community).where(Community.scopes == sorted(key)))

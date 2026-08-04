@@ -1,15 +1,16 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import ClassVar, cast
 
 from patos import sql
 from pydantic import UUID5
-from sqlalchemy import Index, Table, UniqueConstraint, func
+from sqlalchemy import Index, Table, UniqueConstraint, any_, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import declared_attr
 from sqlmodel import select
-from sqlmodel.sql.expression import SelectOfScalar
+from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from ....types import Scopes
+from ...binds import id_array
 from ...engine import Session
 from ...mixins import ClaimedContent, DeterministicId, Embedded, Id, Scoped, TableBase, Timestamped
 from .ontology import EntityKind
@@ -74,6 +75,17 @@ class EntityContent(DeterministicId, Embedded, ClaimedContent, TableBase, table=
     name = sql.Field(str)
     type = sql.FK(EntityKind.name)
     claim_table: ClassVar[Table] = EntityClaim.__table__
+
+    @classmethod
+    def names_of(cls, ids: Iterable[UUID5]) -> Select[tuple[UUID5, str]]:
+        """The canonical names of one id set, carried as a single array parameter.
+
+        A community rebuild names every entity its facts touch, which on a large private
+        scope is tens of thousands of them. Spending one bind per id put that read past the
+        driver's 32767-parameter ceiling and failed the whole pass, so the ids travel as one
+        array and the lookup stays an ordinary index scan.
+        """
+        return select(cls.id, cls.name).where(cls.id == any_(id_array(ids)))
 
     @classmethod
     def roster(cls, scopes: Sequence[UUID5], limit: int) -> SelectOfScalar[str]:

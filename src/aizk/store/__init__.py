@@ -3,6 +3,7 @@ from sqlalchemy.engine import Connection
 
 from ..exceptions import NoTenantContext
 from . import events as events
+from .binds import id_array
 from .mixins import TableBase
 from .models import (
     Artifact,
@@ -45,8 +46,9 @@ __all__ = [
     "Relation",
     "SessionItem",
     "UploadCapability",
-    "Usage",
     "TableBase",
+    "Usage",
     "Watermark",
+    "id_array",
     "verify_rls",
 ]

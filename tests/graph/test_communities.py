@@ -254,7 +254,7 @@ def test_prompt_bounds_and_deduplicates_the_cluster_snapshot(
 @pytest.mark.usefixtures("fake_embedder")
 def test_build_lands_an_embedded_community(owner: UUID5 | UUID7, fake_llm: FakeLLM) -> None:
     async def probe() -> tuple[int, list[Community]]:
-        nodes = [uuid5() for _ in range(3)]
+        nodes = [uuid5() for _ in range(20)]
         async with dbutil.actor(owner) as session:
             for index, node in enumerate(nodes):
                 session.add(

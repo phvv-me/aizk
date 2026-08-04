@@ -3,13 +3,13 @@ from typing import cast
 
 from loguru import logger
 from pydantic import UUID5
-from sqlalchemy import delete, or_, update
+from sqlalchemy import any_, delete, or_, update
 from sqlalchemy.orm import aliased
 from sqlmodel import select
 
 from ..config import settings
 from ..ontology import System
-from ..store import Entity, Fact
+from ..store import Entity, Fact, id_array
 from ..store.engine import Session
 from ..store.identity import User
 from ..store.models.tables import FactClaim, FactContent
@@ -128,8 +128,8 @@ async def affected_fact_ids(
         await session.exec(
             select(Fact.Content.id).where(
                 or_(
-                    Fact.Content.subject_id.in_(redirect),
-                    Fact.Content.object_id.in_(redirect),
+                    Fact.Content.subject_id == any_(id_array(redirect)),
+                    Fact.Content.object_id == any_(id_array(redirect)),
                 )
             )
         )

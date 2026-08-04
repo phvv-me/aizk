@@ -136,7 +136,14 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
         "rebuild",
         "reembed",
     }
-    assert command_names(commands.data_app) == {"audit", "export", "ingest", "promote"}
+    assert command_names(commands.data_app) == {
+        "audit",
+        "export",
+        "ingest",
+        "promote",
+        "reconvert-scanned-documents",
+        "reconvert-web-pages",
+    }
     assert command_names(commands.ontology_app) == {
         "define-entity",
         "define-relation",
@@ -199,6 +206,18 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
             "ingested 4 documents",
         ),
         (
+            ["data", "reconvert-web-pages", "--limit", "5"],
+            "reconvert_web_pages",
+            2,
+            "requeued 2 web pages",
+        ),
+        (
+            ["data", "reconvert-scanned-documents"],
+            "reconvert_scanned_documents",
+            7,
+            "requeued 7 scanned documents",
+        ),
+        (
             ["data", "promote", str(_DOCUMENT_ID), "team"],
             "promote",
             5,
@@ -237,6 +256,8 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
         "graph-communities",
         "graph-forget",
         "data-ingest",
+        "data-reconvert-web",
+        "data-reconvert-scanned",
         "data-promote",
         "data-export",
         "ontology-entity",

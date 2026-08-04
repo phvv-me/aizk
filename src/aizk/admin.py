@@ -8,6 +8,7 @@ from sqlmodel import select
 from sqlmodel.sql.expression import Select
 
 from . import export, graph, ops, retrieval
+from .background.jobs import conversion
 from .background.jobs.projection import enqueue_pending
 from .background.schedule import scope_roster
 from .background.status import TasksStatus, tasks_overview
@@ -180,6 +181,21 @@ async def ingest(path: str, scopes: str | None = None, user_id: UUID5 | None = N
     )
     await enqueue_pending(scopes=target)
     return ingested
+
+
+async def reconvert_web_pages(limit: int = 100) -> int:
+    """Offer converted web pages to the queue again, the boilerplate catch-up.
+
+    Stored text only changes when the original is converted again, so a policy change like
+    switching the boilerplate cleaner on reaches an existing corpus through this sweep and
+    nowhere else. Oldest conversion first, `limit` at a time, safe to repeat.
+    """
+    return await conversion.reconvert_web_pages(limit)
+
+
+async def reconvert_scanned_documents(limit: int = 100) -> int:
+    """Offer what OCR read to the queue again, so a corrected engine or language rewrites it."""
+    return await conversion.reconvert_scanned_documents(limit)
 
 
 async def export_scope(path: str, user_id: UUID5 | None = None) -> export.ExportReport:
