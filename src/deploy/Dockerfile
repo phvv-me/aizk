@@ -118,6 +118,28 @@ USER 10001:10001
 ENTRYPOINT ["python", "-m", "pytest"]
 CMD ["tests/integration/test_artifact_stack.py", "-m", "integration and artifact_stack", "--no-cov"]
 
+# The AWS target uses the managed Python runtime interface and the same source and dependency
+# graph as the local image. Lambda selects the MCP, worker, or setup handler through an image
+# command override, so one immutable digest serves all three functions.
+FROM public.ecr.aws/lambda/python:3.14 AS lambda
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+WORKDIR ${LAMBDA_TASK_ROOT}
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY src ./src
+COPY --from=patos pyproject.toml README.md /tmp/patos/
+COPY --from=patos src /tmp/patos/src
+COPY --from=rls pyproject.toml README.md /tmp/rls/
+COPY --from=rls rls /tmp/rls/rls
+COPY --from=mainboard pyproject.toml README.md LICENSE /tmp/mainboard/
+COPY --from=mainboard src /tmp/mainboard/src
+RUN uv pip install --python .venv --reinstall --no-deps /tmp/patos \
+    && uv pip install --python .venv --reinstall --no-deps /tmp/rls \
+    && uv pip install --python .venv --reinstall --no-deps /tmp/mainboard \
+    && uv pip install --python .venv --reinstall --no-deps .
+ENV PYTHONPATH="${LAMBDA_TASK_ROOT}/.venv/lib/python3.14/site-packages:${LAMBDA_TASK_ROOT}/src"
+CMD ["aizk.commands.aws.mcp_handler"]
+
 # Caddy is the single public origin router for the MCP, OAuth, API, and interface paths. The
 # stage strips the binary's file capabilities and runs as an unprivileged caddy user, which the
 # upstream image does not create, on its high port with every capability dropped. Its config and

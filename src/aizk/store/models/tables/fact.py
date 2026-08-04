@@ -4,8 +4,8 @@ from typing import ClassVar, cast
 
 from patos import sql
 from pydantic import UUID5, UUID7
+from sqlalchemy import Column as SAColumn
 from sqlalchemy import (
-    Boolean,
     ColumnElement,
     DateTime,
     Float,
@@ -24,8 +24,6 @@ from sqlalchemy import (
     or_,
     update,
 )
-from sqlalchemy import Column as SAColumn
-from sqlalchemy.dialects.postgresql import TSTZRANGE, Range
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import declared_attr
 from sqlmodel import select
@@ -50,15 +48,26 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         ondelete="CASCADE",
         index=True,
     )
-    valid = sql.Field(
-        Range[datetime] | None,
-        sa_type=TSTZRANGE,
-    )
-    recorded = sql.Field(
-        Range[datetime],
+    valid_from = sql.Field(
+        datetime | None,
         default=None,
-        sa_type=TSTZRANGE,
-        server_default=func.tstzrange(func.now(), None, "[)"),
+        sa_type=DateTime(timezone=True),
+    )
+    valid_to = sql.Field(
+        datetime | None,
+        default=None,
+        sa_type=DateTime(timezone=True),
+    )
+    recorded_from = sql.Field(
+        datetime,
+        default=None,
+        sa_type=DateTime(timezone=True),
+        server_default=func.now(),
+    )
+    recorded_to = sql.Field(
+        datetime | None,
+        default=None,
+        sa_type=DateTime(timezone=True),
     )
     last_accessed = sql.Nullable(datetime)
     access_count = sql.Field(int, default=0)
@@ -89,13 +98,13 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     @declared_attr.directive
     def __table_args__(cls) -> tuple[Index, ...]:
         return (
-            Index("ix_fact_claim_valid", "valid", postgresql_using="gist"),
-            Index("ix_fact_claim_recorded", "recorded", postgresql_using="gist"),
+            Index("ix_fact_claim_valid", "valid_from", "valid_to"),
+            Index("ix_fact_claim_recorded", "recorded_from", "recorded_to"),
             Index(
                 "ix_fact_claim_live",
-                "valid",
-                postgresql_using="gist",
-                postgresql_where=func.upper_inf(SAColumn("recorded"), type_=Boolean),
+                "valid_from",
+                "valid_to",
+                postgresql_where=SAColumn("recorded_to").is_(None),
             ),
             Index(
                 "uq_fact_claim_live",
@@ -103,7 +112,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
                 "scopes",
                 "perspective_key",
                 unique=True,
-                postgresql_where=func.upper_inf(SAColumn("recorded"), type_=Boolean),
+                postgresql_where=SAColumn("recorded_to").is_(None),
             ),
             Index("ix_fact_claim_scopes", "scopes", postgresql_using="gin"),
         )
@@ -111,15 +120,20 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     @classmethod
     def _is_current_predicate(cls) -> ColumnElement[bool]:
         return and_(
-            cls.recorded.f.upper_inf(result=bool),
-            or_(cls.valid.is_(None), cls.valid.contains(func.now())),
+            cls.recorded_to.is_(None),
+            or_(cls.valid_from.is_(None), cls.valid_from <= func.now()),
+            or_(cls.valid_to.is_(None), cls.valid_to > func.now()),
         )
 
     @hybrid_property
     def is_current(self) -> bool:
         """Whether this claim is open in recorded and valid time."""
         now = datetime.now(UTC)
-        return bool(self.recorded.upper_inf and (self.valid is None or now in self.valid))
+        return bool(
+            self.recorded_to is None
+            and (self.valid_from is None or self.valid_from <= now)
+            and (self.valid_to is None or self.valid_to > now)
+        )
 
     @is_current.inplace.expression
     @classmethod
@@ -129,13 +143,12 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     @hybrid_property
     def created_at(self) -> datetime:
         """Return the claim's first recorded time."""
-        assert self.recorded.lower is not None
-        return self.recorded.lower
+        return self.recorded_from
 
     @created_at.inplace.expression
     @classmethod
     def created_at_expression(cls) -> ColumnElement[datetime]:
-        return cls.recorded.lower(result=datetime)
+        return cls.recorded_from
 
     @classmethod
     def visible_at(cls, as_of: datetime | None) -> tuple[ColumnElement[bool], ...]:
@@ -143,14 +156,15 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         if as_of is None:
             return (cls._is_current_predicate(),)
         return (
-            or_(cls.valid.is_(None), cls.valid.contains(as_of)),
-            cls.recorded.contains(as_of),
+            or_(cls.valid_from.is_(None), cls.valid_from <= as_of),
+            or_(cls.valid_to.is_(None), cls.valid_to > as_of),
+            cls.recorded_from <= as_of,
+            or_(cls.recorded_to.is_(None), cls.recorded_to > as_of),
         )
 
     def relevance(self, now: datetime, half_life_days: float) -> float:
         """Score access recency and frequency with exponential decay."""
-        reference = self.last_accessed or self.recorded.lower
-        assert reference is not None
+        reference = self.last_accessed or self.recorded_from
         age_days = (now - reference) / timedelta(days=1)
         return cast(float, 0.5 ** (age_days / half_life_days) * (1 + self.access_count))
 
@@ -162,7 +176,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         await session.exec(
             update(cls)
             .where(
-                cls.recorded.f.upper_inf(result=bool),
+                cls.recorded_to.is_(None),
                 cls.id.in_(claim_ids),
             )
             .values(last_accessed=func.now(), access_count=cls.access_count + 1)
@@ -190,14 +204,15 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         )
         valid_from = inputs.c.valid_from.cast(DateTime(timezone=True))
         input_valid_to = inputs.c.valid_to.cast(DateTime(timezone=True))
-        lower = cls.valid.lower(result=datetime)
+        lower = cls.valid_from
         backdated = and_(
             valid_from.is_not(None),
             lower.is_not(None),
             valid_from < lower,
         )
         closing = func.greatest(func.coalesce(valid_from, func.now()), lower)
-        valid_to = case(
+        adjusted_valid_to = case(
+            (backdated & input_valid_to.is_(None), lower),
             (backdated, func.least(input_valid_to, lower)),
             else_=input_valid_to,
         )
@@ -205,16 +220,10 @@ class FactClaim(Id, Scoped, TableBase, table=True):
             update(cls)
             .where(cls.id == inputs.c.id)
             .values(
-                valid=case(
-                    (backdated, cls.valid),
-                    else_=func.tstzrange(lower, closing, "[)"),
-                ),
-                recorded=case(
-                    (backdated, cls.recorded),
-                    else_=func.tstzrange(cls.recorded.lower(result=datetime), func.now(), "[)"),
-                ),
+                valid_to=case((backdated, cls.valid_to), else_=closing),
+                recorded_to=case((backdated, cls.recorded_to), else_=func.now()),
             )
-            .returning(inputs.c.ordinal, valid_to)
+            .returning(inputs.c.ordinal, adjusted_valid_to)
             .execution_options(**{settings.skip_live_gate: True})
         )
         return dict(cast("Sequence[tuple[int, datetime | None]]", rows.all()))
@@ -235,22 +244,25 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         half_lives = (
             extract(
                 "epoch",
-                func.now() - cls.last_accessed.coalesce(cls.recorded.lower(result=datetime)),
+                func.now() - cls.last_accessed.coalesce(cls.recorded_from),
             )
             / timedelta(days=1).total_seconds()
             / half_life_days
         )
-        relevance = func.power(literal(0.5, Float), half_lives) * (1 + cls.access_count)
+        relevance = func.power(literal(0.5, Float), half_lives) * (
+            literal(1.0, Float) + cls.access_count.cast(Float)
+        )
         result = await session.exec(
             update(cls)
             .where(
-                cls.recorded.f.upper_inf(result=bool),
-                or_(cls.valid.is_(None), cls.valid.contains(func.now())),
+                cls.recorded_to.is_(None),
+                or_(cls.valid_from.is_(None), cls.valid_from <= func.now()),
+                or_(cls.valid_to.is_(None), cls.valid_to > func.now()),
                 cls.scopes == sorted(scopes),
                 relevance < floor,
             )
             .values(
-                recorded=func.tstzrange(cls.recorded.lower(result=datetime), func.now()),
+                recorded_to=func.now(),
                 attributes=cls.attributes.op("||")(func.jsonb_build_object("decayed", func.now())),
             )
             .returning(cls.id)
@@ -271,13 +283,13 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         result = await session.exec(
             update(cls)
             .where(
-                cls.recorded.f.upper_inf(result=bool),
+                cls.recorded_to.is_(None),
                 cls.source_chunk_id.in_(
                     select(Chunk.id).where(Chunk.document_id.in_(document_ids))
                 ),
             )
             .values(
-                recorded=func.tstzrange(cls.recorded.lower(result=datetime), now_ts),
+                recorded_to=now_ts,
                 attributes=cls.attributes.op("||")(
                     func.jsonb_build_object(reason, literal(now.isoformat(), Text))
                 ),

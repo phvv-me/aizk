@@ -100,6 +100,8 @@ class FactLane(Lane):
                 source_uri=fact_document.source_uri,
                 artifact_id=fact_document.artifact_id,
                 artifact_content_id=fact_document.artifact_content_id,
+                document_id=fact_document.id,
+                document_created_at=fact_document.created_at,
                 created_by=Fact.Live.created_by,
             )
             .select_from(fact_candidates)

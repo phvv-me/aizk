@@ -157,7 +157,7 @@ class MemoryClient:
         return await self.upload(remembered, request.upload.path)
 
     async def share(self, request: ShareRequest) -> ShareResult:
-        """Copy visible documents into one authorized destination."""
+        """Copy or move selected documents into one authorized destination."""
         await self.require_credentials()
         async with self.connection() as client:
             result = await client.call_tool("share", request.tool_arguments())

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 import dbutil
 from id_factory import uuid5, uuid8
@@ -63,9 +63,22 @@ async def add_fact(
         )
     )
     await session.flush()
-    claim = Fact.Claim(content_id=content_id, created_by=owner, scopes=[owner], valid=valid)
+    empty_bound = datetime.max.replace(tzinfo=UTC)
+    claim = Fact.Claim(
+        content_id=content_id,
+        created_by=owner,
+        scopes=[owner],
+        valid_from=(
+            empty_bound if valid is not None and valid.is_empty else valid.lower if valid else None
+        ),
+        valid_to=(
+            empty_bound if valid is not None and valid.is_empty else valid.upper if valid else None
+        ),
+    )
     if recorded is not None:
-        claim.recorded = recorded
+        assert recorded.lower is not None
+        claim.recorded_from = recorded.lower
+        claim.recorded_to = recorded.upper
     session.add(claim)
     await session.flush()
     return content_id, claim.id

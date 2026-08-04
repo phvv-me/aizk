@@ -4,8 +4,7 @@ description: "Writing into a team scope, sharing an existing note, and what an i
 ---
 
 Read [Scopes](/docs/user/concepts/scopes/) first. It explains why a memory carries a set of
-organizations and why naming two makes it narrower, not wider. This page is the practical part,
-getting a note into the right team without guessing.
+organizations and why naming two narrows it. This page is the practical part.
 
 :::note[Where this comes from]
 The split between private and shared memory follows
@@ -17,8 +16,8 @@ teams narrows a memory instead of widening it, is aizk's own. The full
 ## Check your standing first
 
 Before the first shared write in a task, ask for your standing. `status` tells you who you are and,
-for every organization you belong to, your roles, what the team is for, who else is in it, whether it
-is public, and whether you may write to it.
+for every organization, your roles, its purpose, its members, whether it is public, and whether you
+may write to it.
 
 ```text
 aizk.status(days=30)
@@ -34,14 +33,14 @@ One field decides everything, and that is `writable`. Read it rather than assumi
   Docs               no         no        read only, it is public
 ```
 
-Being on a team is not the same as being able to add to it. Reading and writing are separate
-permissions. A viewer sees everything the team stores and adds nothing.
+Being on a team is not the same as being able to add to it. A viewer sees everything the team
+stores and adds nothing.
 
 ## Name organizations exactly
 
-Organization names come from your identity provider and aizk keeps no copy, so the name in your call
-has to match the real one character for character. `Book Club` is not `book-club` and not `Book club`.
-Copy it from what `status` returned rather than from memory.
+Organization names come from your identity provider and aizk keeps no copy, so your call has to
+match character for character. `Book Club` is not `book-club` and not `Book club`. Copy it from what
+`status` returned rather than from memory.
 
 ## One name for a team, several for an overlap
 
@@ -63,18 +62,15 @@ aizk.remember(
 )
 ```
 
-Reach for an intersection only when the knowledge genuinely belongs to the overlap, and only when
-both organizations came back writable. It is the right home for one specific collaboration and the
-wrong home for anything either team would want on its own, because a member of only one of them will
-never see it.
+Reach for an intersection only when the knowledge belongs to the overlap and both organizations
+came back writable. It is the wrong home for anything either team would want alone, because a member
+of only one never sees it.
 
 ## Write where it belongs, do not move it later
 
 The habit that saves the most trouble is writing straight into the destination. A note a teammate
-will need should go to the team on the first call, not privately with a plan to share it once it is
-polished.
-
-That is because sharing an existing document makes a copy rather than moving it.
+will need should go to the team on the first call, because sharing an existing document copies it
+rather than moving it.
 
 ```text
    private note  ──── share ────▶  team snapshot
@@ -85,29 +81,61 @@ That is because sharing an existing document makes a copy rather than moving it.
    moves on                       stays where it was
 ```
 
-`share` takes the document IDs that `remember` returned and one destination.
+`share` takes one destination and either document IDs or a question that selects them.
 
 ```text
 aizk.share(documents=["019b2d0a-1d42-7d6e-a9aa-8f8443ec6f4a"], scopes=["Book Club"])
 ```
 
-Your private original stays yours and stays exactly as it was. The copy in the team keeps its
-provenance so people can see where it came from, and later edits to your version never reach it. A
-shared file reuses the same stored bytes rather than duplicating them, while still getting its own
-scoped record.
+The IDs are the ones `remember` returned, and also the ones `recall` prints under every piece of
+evidence, so you can ask a question, read the documents behind the answer, and share exactly those.
+A `query` never writes. It answers which of your private documents it would take, so you read that
+list and then call again naming the IDs you approve.
 
-That is a deliberate trade. A team can rely on a shared note being stable rather than shifting under
-them because one person revised a private copy. It also means a copy is a fork, and forks drift,
-which is the whole reason to write into the scope in the first place.
+Your private original stays exactly as it was. The team's copy keeps its provenance so people can
+see where it came from, later edits to your version never reach it, and a shared file reuses the
+same stored bytes while getting its own scoped record.
+
+That trade is deliberate. A team can rely on a shared note staying stable rather than shifting
+because one person revised a private copy. It also makes a copy a fork, and forks drift, which is
+why you write into the scope in the first place.
+
+## Moving a topic you already wrote privately
+
+Sometimes the fork is exactly what you do not want. A body of private notes turns out to belong to a
+team, and the team's copy should be the only one anyone recalls. That is `move`, and it takes two
+calls.
+
+```text
+aizk.share(query="interpretability", scopes=["CVLAB Interpretability"])
+aizk.share(documents=["019b..."], scopes=["CVLAB Interpretability"], move=True)
+```
+
+The first answers which of your private documents it would take, at most `limit` of them, never
+reaching into an organization, and writes nothing. Read those titles, then name the IDs you approve.
+A query cannot move, and asking it to is refused rather than ignored, so a refusal never reads as a
+move that happened.
+
+A move copies into the destination first and then retires the private original, so the note keeps
+its rows, its bytes, and its provenance chain while ordinary recall returns only the team's copy.
+Both halves commit together, so a move that fails partway leaves nothing to reconcile, and running
+the same move twice changes nothing. If you revised the note after an earlier share, the move
+refreshes the team's copy onto your current text first, so it can never strand the team on an older
+draft.
+
+Because a move takes something out of recall, it only ever touches your own private documents. It
+can never pull evidence out from under the other members of a shared scope, and it needs a real
+organization as its destination, since moving a private note into the private scope it already
+occupies is not a move at all.
 
 ## The Docs organization
 
 `Docs` is the public organization for durable, agent-maintained findings about tools, libraries,
-languages, aizk itself, onboarding, and note-taking. When you work something out about how a tool
-really behaves and the next person will hit the same wall, that belongs in `Docs`, and it should be
-refreshed when the tool changes rather than left to rot beside a newer note that contradicts it.
+languages, aizk itself, onboarding, and note-taking. When you work out how a tool behaves and the
+next person will hit the same wall, that belongs in `Docs`, refreshed when the tool changes rather
+than left to rot beside a newer note contradicting it.
 
-What does not belong there is anything about a project, a customer, a person, or a credential.
+What does not belong there is anything about a project, customer, person, or credential.
 
 :::caution[Public means everyone]
 Public grants read access to every signed-in user and nothing else. Writing still needs a member
@@ -118,13 +146,13 @@ partial switch and no way to learn afterward who read what while it was open.
 ## Membership lives outside aizk
 
 aizk does not own users, organizations, roles, or membership. Your identity provider does, and aizk
-reads your standing from the token on every call. So when somebody joins a team, their next question
-sees that team's memory, and when they leave it stops at once. There is one place to manage access
-and no chance of the two systems disagreeing.
+reads your standing from the token on every call. Somebody joining a team sees its memory on their
+next question and loses it the moment they leave. One place manages access, so the two systems
+cannot disagree.
 
-Creating an organization, adding a member by email, and moving somebody between viewer, editor, and
+Creating an organization, adding a member by email, and moving somebody between viewer, editor and
 admin all happen on the organizations screen in [The web app](/docs/user/using/web-app/), when your
-own role allows it.
+role allows it.
 
 ## Next
 

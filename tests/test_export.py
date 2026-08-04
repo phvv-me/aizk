@@ -5,7 +5,6 @@ from pathlib import Path
 import dbutil
 from id_factory import uuid5, uuid8
 from pydantic import UUID5, UUID7, JsonValue
-from sqlalchemy.dialects.postgresql import Range
 
 from aizk.config import settings
 from aizk.export import ExportReport, export_scope
@@ -27,7 +26,7 @@ EXPORTED_TABLES = {
     "fact_claim",
 }
 
-FACT_CLAIM_WINDOW_KEYS = {"valid", "recorded"}
+FACT_CLAIM_WINDOW_KEYS = {"valid_from", "valid_to", "recorded_from", "recorded_to"}
 
 type JSONRecord = dict[str, JsonValue]
 
@@ -84,8 +83,9 @@ async def seed_graph(owner: UUID5 | UUID7, tag: str) -> dict[str, UUID5 | UUID7]
                 content_id=ids["fact_content"],
                 created_by=owner,
                 scopes=[owner],
-                recorded=Range(now - timedelta(hours=1), now),
-                valid=Range(None, now),
+                recorded_from=now - timedelta(hours=1),
+                recorded_to=now,
+                valid_to=now,
             )
         )
         session.add(

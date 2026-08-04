@@ -57,11 +57,9 @@ class OrganizationDirectory(View):
         """Load only the signed-in subject's organizations and permission-filtered members."""
         return cls(
             organizations=tuple(
-                sorted(
-                    (
-                        OrganizationView.from_org(item)
-                        for item in await client.user_orgs(subject, fresh=True)
-                    ),
+                OrganizationView.from_org(item)
+                for item in sorted(
+                    await client.user_orgs(subject, fresh=True),
                     key=lambda item: item.name.casefold(),
                 )
             )

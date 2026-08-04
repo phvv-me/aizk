@@ -7,6 +7,7 @@ from pydantic.types import JsonValue, PositiveInt, StringConstraints
 
 from ...config import settings
 from .client import LogtoClient
+from .models import Account
 
 type HttpMethod = Literal["GET", "POST", "PUT", "PATCH", "DELETE"]
 
@@ -16,6 +17,22 @@ class PolicyReport(FrozenModel):
 
     clean: bool
     changes: tuple[str, ...] = ()
+
+
+class RoleAssignment(FrozenModel):
+    """One global role under the managed prefix and the accounts Logto assigns to it."""
+
+    name: str
+    description: str | None = None
+    default: bool = False
+    managed: bool = True
+    members: tuple[Account, ...] = ()
+
+
+class RoleReport(FrozenModel):
+    """Every global role under the managed prefix with its current assignments."""
+
+    roles: tuple[RoleAssignment, ...] = ()
 
 
 class _Scope(FrozenModel):
@@ -59,10 +76,38 @@ class _Change(FrozenModel):
     payload: dict[str, JsonValue] | None = None
 
 
+class _Managed(FrozenModel):
+    """One global role AIZK owns, named as the operator reads it in a change message."""
+
+    name: str
+    description: str
+    label: str
+    default: bool
+
+
 _RESOURCES = TypeAdapter(tuple[_Resource, ...])
 _SCOPES = TypeAdapter(tuple[_Scope, ...])
 _ROLES = TypeAdapter(tuple[_Role, ...])
 _ORGANIZATION_ROLES = TypeAdapter(tuple[_OrganizationRole, ...])
+_ACCOUNTS = TypeAdapter(tuple[Account, ...])
+
+
+def _managed_roles() -> tuple[_Managed, ...]:
+    """The two global roles policy owns, the default one for people and the operator one."""
+    return (
+        _Managed(
+            name=settings.logto_user_role,
+            description=settings.logto_user_role_description,
+            label="default user role",
+            default=True,
+        ),
+        _Managed(
+            name=settings.logto_admin_role,
+            description=settings.logto_admin_role_description,
+            label="operator role",
+            default=False,
+        ),
+    )
 
 
 class LogtoPolicy:
@@ -101,6 +146,33 @@ class LogtoPolicy:
                 # authority snapshot must die with them rather than outlive a revocation.
                 self.client.caches.invalidate_all()
         raise RuntimeError("Logto authorization policy did not converge after eight passes")
+
+    async def roles(self) -> RoleReport:
+        """Report every global role under the managed prefix with the accounts assigned to it.
+
+        A role the configuration no longer names is reported as unmanaged, which is exactly
+        what the next `apply` deletes.
+        """
+        owned = {spec.name for spec in _managed_roles()}
+        found = [
+            role
+            for role in await self.client.pages("api/roles", _ROLES)
+            if role.name.startswith(settings.logto_managed_role_prefix)
+        ]
+        assignments = [
+            RoleAssignment(
+                name=role.name,
+                description=role.description,
+                default=role.is_default,
+                managed=role.name in owned,
+                members=await self.client.pages(
+                    f"api/roles/{quote(role.id, safe='')}/users",
+                    _ACCOUNTS,
+                ),
+            )
+            for role in sorted(found, key=lambda role: role.name)
+        ]
+        return RoleReport(roles=tuple(assignments))
 
     async def _plan(self) -> tuple[_Change, ...]:
         """Build the next dependency-safe set of idempotent Management API mutations."""
@@ -188,11 +260,21 @@ class LogtoPolicy:
         return [scopes_by_name[name].id for name in sorted(settings.logto_required_scopes)]
 
     async def _global_roles(self, required_scope_ids: list[str], changes: list[_Change]) -> bool:
-        """Plan the default user role, its API permissions, and obsolete managed roles."""
+        """Plan every owned global role, its API permissions, and obsolete managed roles.
+
+        Both the default user role and the operator role carry the same required API
+        permissions, so a token minted for either verifies against the AIZK resource.
+        """
         roles = await self.client.pages("api/roles", _ROLES)
-        user_role = next((role for role in roles if role.name == settings.logto_user_role), None)
-        if not await self._user_role(user_role, required_scope_ids, changes):
+        by_name = {role.name: role for role in roles}
+        managed = _managed_roles()
+        ready = [
+            await self._managed_role(by_name.get(spec.name), spec, required_scope_ids, changes)
+            for spec in managed
+        ]
+        if not all(ready):
             return False
+        owned = {spec.name for spec in managed}
         changes.extend(
             _Change(
                 method="DELETE",
@@ -202,70 +284,65 @@ class LogtoPolicy:
             for role in roles
             if role.type == "User"
             and role.name.startswith(settings.logto_managed_role_prefix)
-            and role.name != settings.logto_user_role
+            and role.name not in owned
         )
         return True
 
-    async def _user_role(
+    async def _managed_role(
         self,
-        user_role: _Role | None,
+        role: _Role | None,
+        spec: _Managed,
         required_scope_ids: list[str],
         changes: list[_Change],
     ) -> bool:
-        """Plan the one default global human role and its required API permissions."""
-        if user_role is not None and user_role.type != "User":
+        """Plan one owned global role and its required API permissions."""
+        if role is not None and role.type != "User":
             changes.append(
                 _Change(
                     method="DELETE",
-                    path=f"api/roles/{quote(user_role.id, safe='')}",
-                    message=f"replace non-user role {settings.logto_user_role}",
+                    path=f"api/roles/{quote(role.id, safe='')}",
+                    message=f"replace non-user role {spec.name}",
                 )
             )
             return False
-        if user_role is None:
+        if role is None:
             changes.append(
                 _Change(
                     method="POST",
                     path="api/roles",
-                    message=f"create default user role {settings.logto_user_role}",
+                    message=f"create {spec.label} {spec.name}",
                     payload=cast(
                         "dict[str, JsonValue]",
                         {
-                            "name": settings.logto_user_role,
-                            "description": settings.logto_user_role_description,
+                            "name": spec.name,
+                            "description": spec.description,
                             "type": "User",
-                            "isDefault": True,
+                            "isDefault": spec.default,
                             "scopeIds": required_scope_ids,
                         },
                     ),
                 )
             )
         else:
-            changes.extend(await self._user_role_drift(user_role, required_scope_ids))
+            changes.extend(await self._managed_role_drift(role, spec, required_scope_ids))
         return True
 
-    async def _user_role_drift(
-        self, user_role: _Role, required_scope_ids: list[str]
+    async def _managed_role_drift(
+        self, role: _Role, spec: _Managed, required_scope_ids: list[str]
     ) -> tuple[_Change, ...]:
-        """Plan description, default flag, and permission drift on the existing user role."""
+        """Plan description, default flag, and permission drift on one existing owned role."""
         changes: list[_Change] = []
-        if (
-            user_role.description != settings.logto_user_role_description
-            or not user_role.is_default
-        ):
+        if role.description != spec.description or role.is_default != spec.default:
             changes.append(
                 _Change(
                     method="PATCH",
-                    path=f"api/roles/{quote(user_role.id, safe='')}",
-                    message=f"update default user role {settings.logto_user_role}",
-                    payload={
-                        "description": settings.logto_user_role_description,
-                        "isDefault": True,
-                    },
+                    path=f"api/roles/{quote(role.id, safe='')}",
+                    message=f"update {spec.label} {spec.name}",
+                    payload={"description": spec.description, "isDefault": spec.default},
                 )
             )
         assigned = await self.client.pages(
-            f"api/roles/{quote(user_role.id, safe='')}/scopes",
+            f"api/roles/{quote(role.id, safe='')}/scopes",
             _SCOPES,
         )
         assigned_ids = {scope.id for scope in assigned}
@@ -274,8 +351,8 @@ class LogtoPolicy:
             changes.append(
                 _Change(
                     method="POST",
-                    path=f"api/roles/{quote(user_role.id, safe='')}/scopes",
-                    message=f"grant API permissions to {settings.logto_user_role}",
+                    path=f"api/roles/{quote(role.id, safe='')}/scopes",
+                    message=f"grant API permissions to {spec.name}",
                     payload=cast("dict[str, JsonValue]", {"scopeIds": missing_ids}),
                 )
             )

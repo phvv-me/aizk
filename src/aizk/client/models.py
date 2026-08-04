@@ -92,13 +92,17 @@ class RememberRequest(FrozenModel):
 
 
 class ShareRequest(FrozenModel):
-    """Typed input for one provenance-preserving MCP share."""
+    """Typed input for one provenance-preserving MCP share or move."""
 
-    documents: list[UUID7] = Field(min_length=1)
+    documents: list[UUID7] | None = Field(default=None, min_length=1)
+    query: str | None = None
     scopes: ScopeNames | None = None
+    move: bool = False
+    limit: int = 20
+    dry_run: bool = False
 
-    def tool_arguments(self) -> dict[str, list[str]]:
-        """Serialize UUIDs and optional scopes into the MCP wire shape."""
+    def tool_arguments(self) -> dict[str, list[str] | str | bool | int]:
+        """Serialize the selection, destination, and mode into the MCP wire shape."""
         return self.model_dump(mode="json", exclude_none=True)
 
 

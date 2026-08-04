@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import ClassVar, Self
 
 from patos import sql
@@ -60,8 +60,7 @@ class SessionItem(Id, Scoped, Timestamped, Embedded, TableBase, table=True):
             .subquery("working")
         )
         working = ranked.c
-        # make_interval only accepts a fractional value in its seconds slot.
-        age = func.make_interval(0, 0, 0, 0, 0, 0, age_minutes * 60.0)
+        age = timedelta(minutes=age_minutes)
         aged = working.created_at <= func.now() - age
         overflow = working.position <= working.total - threshold
         return (

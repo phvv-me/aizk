@@ -26,7 +26,7 @@ code is `src/aizk/cli.py`, `src/aizk/commands/` and `src/aizk/admin.py`.
         │            communities | raptor | forget
         ├── data     ingest | promote | export | audit
         ├── ontology define-entity | define-relation | list
-        ├── auth     audit | apply | check-public | check-web
+        ├── auth     audit | apply | roles | check-public | check-web
         ├── settings show | validate
         └── api      openapi
 ```
@@ -51,7 +51,7 @@ model rather than a rendered summary.
 | `aizk auth status` | validates stored credentials without opening a browser |
 | `aizk recall [query]` | the `recall` tool, reading stdin when the argument is absent |
 | `aizk remember [paths...]` | the `remember` tool, in text, URI or upload mode |
-| `aizk share <ids...>` | the `share` tool |
+| `aizk share <ids...>` | the `share` tool, also taking `--query`, `--move` and `--dry-run` |
 | `aizk status` | the `status` tool, rendered as account, usage and processing lines |
 
 Two stores back this. `ProfileStore` writes the nonsecret server selection under the XDG config
@@ -105,8 +105,10 @@ commands all open `User.system(scopes)` and are filtered by the same policies a 
 They take
 `--user` to act as a specific identity and `--scopes` where a destination is needed.
 
-Three groups touch no database at all. `admin auth audit` and `apply` talk only to Logto and are
-covered on [The Logto boundary](/docs/dev/identity/logto/). `admin settings show` prints the
+Three groups touch no database at all. `admin auth audit`, `apply` and `roles` talk only to Logto
+and are covered on [The Logto boundary](/docs/dev/identity/logto/). `roles` prints every global
+role under the managed prefix with the accounts assigned to it, which is how an operator sees who
+holds `aizk-admin` before granting or revoking it. `admin settings show` prints the
 effective configuration with every field named in `_SENSITIVE_FIELDS` or ending in `_api_key`,
 `_password`, `_secret` or `_token` replaced by `<redacted>`. `admin api openapi` builds a throwaway
 API around an `InertIntake` and writes `src/web/openapi.json`.

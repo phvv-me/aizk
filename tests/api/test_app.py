@@ -23,7 +23,7 @@ from aizk.artifacts.service import ArtifactIntake
 from aizk.artifacts.uploads import InertIntake, UploadBox, UploadRequest
 from aizk.auth import Auth, Caller
 from aizk.config import settings
-from aizk.exceptions import ScopeNotFoundError
+from aizk.exceptions import QuotaExceededError, ScopeNotFoundError
 from aizk.integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from aizk.integrations.docling import ArtifactBytes
 from aizk.integrations.logto import LogtoClient, OrganizationChange
@@ -256,6 +256,7 @@ def test_me_returns_the_label_and_exact_organization_standing(
     assert response.status_code == 200, response.text
     assert response.json() == {
         "label": "Pedro Valois",
+        "admin": False,
         "organizations": [
             {
                 "name": "Lab",
@@ -267,6 +268,18 @@ def test_me_returns_the_label_and_exact_organization_standing(
             }
         ],
     }
+
+
+def test_me_marks_the_caller_an_operator_from_the_managed_admin_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = uuid5()
+    user = User.authorized(owner, read=(owner,), roles=(settings.logto_admin_role,))
+
+    response = call(service_as(monkeypatch, verified(user)), "GET", "/api/me")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"label": None, "admin": True, "organizations": []}
 
 
 def test_status_returns_combined_caller_usage_and_processing(
@@ -475,6 +488,11 @@ def test_invalid_json_bodies_are_unprocessable(
             ScopeNotFoundError("no writable scope named 'Lab'"),
             403,
             "no writable scope named 'Lab'",
+        ),
+        (
+            QuotaExceededError("monthly operation limit reached"),
+            429,
+            "monthly operation limit reached",
         ),
         (
             PermissionError("organization administration is not permitted"),

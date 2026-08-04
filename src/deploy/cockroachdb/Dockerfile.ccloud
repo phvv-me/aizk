@@ -1,0 +1,19 @@
+FROM debian:bookworm-slim
+
+ARG CCLOUD_VERSION=0.6.12
+ARG CCLOUD_SHA256=a0d26bd1dd2f904a8464cadb2f0c062afa8cb68b5aadd9717dd7109dc9ad61b2
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL \
+       "https://binaries.cockroachdb.com/ccloud/ccloud_linux-amd64_${CCLOUD_VERSION}.tar.gz" \
+       -o /tmp/ccloud.tar.gz \
+    && echo "${CCLOUD_SHA256}  /tmp/ccloud.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/ccloud.tar.gz -C /usr/local/bin ./ccloud \
+    && useradd --uid 10001 --create-home --home-dir /state ccloud \
+    && rm -rf /var/lib/apt/lists/* /tmp/ccloud.tar.gz
+
+ENV HOME=/state
+USER 10001:10001
+ENTRYPOINT ["ccloud"]
+CMD ["version"]

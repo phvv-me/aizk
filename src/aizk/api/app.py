@@ -23,7 +23,7 @@ from ..artifacts.uploads import (
 )
 from ..auth import Auth, Caller
 from ..config import settings
-from ..exceptions import ScopeNotFoundError
+from ..exceptions import QuotaExceededError, ScopeNotFoundError
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from ..integrations.logto import OrganizationChange, OrganizationManager
 from ..memory import Memory
@@ -102,9 +102,10 @@ class OrganizationProfile(FrozenModel):
 
 
 class Me(FrozenModel):
-    """The signed-in caller's label and current organization standing from Logto."""
+    """The signed-in caller's label, operator standing, and organizations from Logto."""
 
     label: str | None
+    admin: bool
     organizations: tuple[OrganizationProfile, ...]
 
     @classmethod
@@ -112,6 +113,7 @@ class Me(FrozenModel):
         """Present the verified caller without exposing identifiers or scope internals."""
         return cls(
             label=user.label,
+            admin=settings.logto_admin_role in user.roles,
             organizations=tuple(
                 OrganizationProfile.model_validate(organization, from_attributes=True)
                 for organization in user.organizations
@@ -341,6 +343,8 @@ class AizkAPI:
                 return error.status_code
             case UploadCapabilityError():
                 return HTTPStatus.GONE
+            case QuotaExceededError():
+                return HTTPStatus.TOO_MANY_REQUESTS
             case ByteLimitExceeded():
                 return HTTPStatus.REQUEST_ENTITY_TOO_LARGE
             case ValidationError() | MalwareRejectedError():

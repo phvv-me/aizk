@@ -107,6 +107,8 @@ export default defineConfig({
           items: [
             { label: 'Intake', slug: 'docs/dev/write/intake' },
             { label: 'Artifacts', slug: 'docs/dev/write/artifacts' },
+            { label: 'Web boilerplate', slug: 'docs/dev/write/boilerplate' },
+            { label: 'OCR and languages', slug: 'docs/dev/write/ocr' },
             { label: 'Chunking and embedding', slug: 'docs/dev/write/chunking' },
             { label: 'Extraction and the gate', slug: 'docs/dev/write/extraction' },
             { label: 'Grounding and consolidation', slug: 'docs/dev/write/consolidation' },
@@ -161,6 +163,7 @@ export default defineConfig({
             { label: 'First start', slug: 'docs/dev/run/first-start' },
             { label: 'PostgreSQL and storage', slug: 'docs/dev/run/postgres' },
             { label: 'Backups and recovery', slug: 'docs/dev/run/backups' },
+            { label: 'The operator console', slug: 'docs/dev/run/console' },
             { label: 'Observability', slug: 'docs/dev/run/observability' },
             { label: 'Upgrades', slug: 'docs/dev/run/upgrades' },
             { label: 'The security model', slug: 'docs/dev/run/security' },

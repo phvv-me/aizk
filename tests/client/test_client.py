@@ -318,11 +318,20 @@ def test_recall_and_share_keep_the_mcp_wire_names(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     recall = ToolClient("evidence")
-    shared = ToolClient({"shared": 2})
+    first, second = uuid7(), uuid7()
+    shared = ToolClient(
+        {
+            "documents": [
+                {"id": str(first), "title": "First", "destination": str(uuid7())},
+                {"id": str(second), "title": None, "destination": str(uuid7())},
+            ],
+            "moved": True,
+            "preview": False,
+        }
+    )
     clients = iter((recall, shared))
     monkeypatch.setattr(MemoryClient, "connection", lambda self, interactive=False: next(clients))
     client = MemoryClient(profile())
-    first, second = uuid7(), uuid7()
 
     async def exercise() -> tuple[str, int]:
         evidence = await client.recall("what changed", budget=512)
@@ -330,9 +339,10 @@ def test_recall_and_share_keep_the_mcp_wire_names(
             ShareRequest(
                 documents=[first, second],
                 scopes=["Research"],
+                move=True,
             )
         )
-        return evidence, result.shared
+        return evidence, len(result.documents)
 
     evidence, count = dbutil.run(exercise())
 
@@ -348,6 +358,9 @@ def test_recall_and_share_keep_the_mcp_wire_names(
                     str(second),
                 ],
                 "scopes": ["Research"],
+                "move": True,
+                "limit": 20,
+                "dry_run": False,
             },
         )
     ]

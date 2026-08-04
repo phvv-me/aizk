@@ -1,0 +1,79 @@
+---
+title: "Web boilerplate"
+description: "Separating a page's article from the menus and footer wrapped around it."
+---
+
+Converting an HTML page yields the site's header, menus, dialogs and footer beside the article.
+Those blocks make the worst chunks a store can hold, being short, dense in the words any query
+shares with any page, and repeated, so a GitHub project page once answered a question about a
+project plan with three chunks of sign-in links and pricing menus.
+
+import { Steps } from '@astrojs/starlight/components';
+
+`WebBoilerplateCleaner` in `src/aizk/artifacts/boilerplate.py` runs inside
+`ArtifactProcessor.declutter`, after source-relative links resolve and before the Markdown is
+stored or chunked, and only for a `text/html` or `application/xhtml+xml` original fetched from an
+HTTP `source_uri`. A PDF and an uploaded file pass through untouched, and
+`AIZK_ARTIFACT_BOILERPLATE_REMOVAL_ENABLED=false` turns it off entirely.
+
+```text
+        page                     one block                    verdict
+   ┌──────────────┐        ┌──────────────────┐        ┌──────────────────┐
+   │ header, menu │  ───▶  │ readable text    │  ───▶  │ prose wins       │
+   │ ARTICLE      │        │ link labels      │        │ shape says menu  │
+   │ sidebar      │        │ destinations     │        │ placement agrees │
+   │ footer       │        │ placement        │        │ so it goes       │
+   └──────────────┘        └──────────────────┘        └──────────────────┘
+```
+
+## Reading a block the way a reader would
+
+The Markdown splits into blank-line separated blocks, a fenced code block staying atomic, and
+each block is measured by the characters a reader actually reads, inside link labels and outside
+them. A block is dropped only when every one of these agrees.
+
+<Steps>
+
+1. Prose value wins first. A block holding at least `min_prose_chars` readable characters of its
+   own text, 200 by default, stays whatever its links look like, and so does any block with no
+   links, any heading and any code fence.
+2. A block whose readable text is empty, such as a row of badge images, always goes, and so does
+   a link block the page repeats, since a page repeats its menus and not its article.
+3. Otherwise link labels must hold at least `link_density` of the readable text, 0.6 by default,
+   and most destinations must point back into the page's own site.
+4. The page's layout must agree through `BlockPlacement`, which asks whether the block repeats,
+   sits outside the span running from the first substantial paragraph to the last, or stands
+   inside a chrome section. A one-off list of internal links inside the article is the article,
+   so a documentation index survives.
+5. Only then does size decide, and the block goes when it runs `min_menu_links` links or fits in
+   `max_menu_chars` readable characters.
+
+</Steps>
+
+## Chrome sections and what ends them
+
+A heading named as chrome, `Footer` or `Navigation Menu` among others, opens a section that is
+discarded outright, but only until the first block that reads like content at all. A code fence
+qualifies, and so does `min_intro_chars` of prose, two dozen characters by default, which is one
+sentence in a language that writes densely. A page may open its article right under a menu with
+no heading of its own, and eating that opening would cost far more than keeping a menu. The rest
+of the section stays chrome context for rule four above, until a heading of the same rank or
+higher closes it. Headings left standing over an emptied section are pruned last.
+
+:::note[Reconverting what is already stored]
+Artifacts converted before this landed still hold their chrome. `reconvert_web_pages` in
+`src/aizk/background/jobs/conversion.py` requeues ready originals whose media type is HTML and
+whose artifact carries an HTTP `source_uri`, oldest conversion first. Each page commits its move
+back to `queued` before its task exists, never after, so a worker that finishes while the sweep
+is still running cannot be overwritten by a stale transaction. The conversion job rewrites the
+stored Markdown and the ingest pass rechunks it, since the document digest changes with the text.
+:::
+
+## Next
+
+<div class="not-content">
+
+- [Artifacts](/docs/dev/write/artifacts/) covers the pipeline this step sits inside.
+- [Chunking and embedding](/docs/dev/write/chunking/) covers what happens to the cleaned text.
+
+</div>

@@ -28,12 +28,14 @@ from aizk.artifacts.service import ArtifactIntake
 from aizk.artifacts.uploads import InertIntake, UploadBox, UploadGrantLimitError, UploadRequest
 from aizk.auth import Auth
 from aizk.config import settings
+from aizk.exceptions import QuotaExceededError
+from aizk.graph import Promotion
 from aizk.integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from aizk.integrations.docling import ArtifactBytes
 from aizk.mcp import server as mcp_server
 from aizk.mcp.middleware import CallerRateLimit
 from aizk.mcp.server import AizkMCP
-from aizk.memory import ShareResult, WriteResult
+from aizk.memory import SharedDocument, ShareResult, WriteResult
 from aizk.provenance import CaptureContext
 from aizk.retrieval import Candidate, Lane
 from aizk.status import (
@@ -44,7 +46,7 @@ from aizk.status import (
     UsageStatus,
     UsageSummary,
 )
-from aizk.store import Artifact
+from aizk.store import Artifact, Usage
 from aizk.store.identity import OrganizationMember, OrganizationStanding, User
 from aizk.types import Scopes
 
@@ -81,6 +83,16 @@ def test_registration_is_exactly_the_client_verbs(tools: dict[str, FunctionTool]
         "upload",
     }
     assert "required" not in tools["remember"].parameters
+    # every share input is optional so a caller may bring either selection alone
+    assert set(tools["share"].parameters["properties"]) == {
+        "documents",
+        "query",
+        "scopes",
+        "move",
+        "limit",
+        "dry_run",
+    }
+    assert "required" not in tools["share"].parameters
     status_schema = tools["status"].output_schema
     assert status_schema is not None
     assert set(status_schema["properties"]) == {
@@ -111,7 +123,13 @@ def test_tool_schemas_bound_expensive_inputs(tools: dict[str, FunctionTool]) -> 
     assert remember_properties["source_uri"]["anyOf"][0]["maxLength"] == (
         settings.mcp_source_uri_max_chars
     )
-    assert share_properties["documents"]["maxItems"] == settings.mcp_share_documents_max
+    assert share_properties["documents"]["anyOf"][0]["maxItems"] == (
+        settings.mcp_share_documents_max
+    )
+    assert (
+        share_properties["query"]["anyOf"][0]["maxLength"] == settings.mcp_recall_query_max_chars
+    )
+    assert share_properties["limit"]["maximum"] == settings.mcp_share_documents_max
     assert upload_properties["filename"]["maxLength"] == 255
     assert upload_properties["media_type"]["maxLength"] == 255
 
@@ -401,6 +419,13 @@ def test_remember_writes_and_queues_one_contextual_document(
         ]
     ] = []
     queued: list[tuple[UUID7, frozenset[UUID5]]] = []
+    wakes: list[None] = []
+
+    class Wake:
+        async def wake(self) -> None:
+            wakes.append(None)
+
+    tools = tools_of(build_server(wake=Wake()))
 
     async def stub(
         user: User,
@@ -461,6 +486,7 @@ def test_remember_writes_and_queues_one_contextual_document(
         )
     ]
     assert queued == [(document_id, target)]
+    assert wakes == [None]
 
 
 def test_remember_writes_to_the_exact_authorized_scope_list(
@@ -691,6 +717,56 @@ def test_remember_upload_mints_one_claimable_capability(
     assert ticket.declared.companion_text == "Signed original"
 
 
+@pytest.mark.parametrize("mode", ["upload", "preserved-uri"])
+def test_text_only_deployment_refuses_artifact_intake(
+    monkeypatch: pytest.MonkeyPatch,
+    caller_context: Context,
+    mode: str,
+) -> None:
+    monkeypatch.setattr(settings, "artifact_ingest_enabled", False)
+    remember = tools_of(build_server())["remember"]
+    arguments = (
+        {
+            "upload": mcp_server.UploadDeclaration(
+                filename="paper.pdf",
+                media_type="application/pdf",
+                size=4,
+                sha256="0" * 64,
+            )
+        }
+        if mode == "upload"
+        else {"source_uri": "https://example.com/paper.pdf", "preserve_source": True}
+    )
+
+    with pytest.raises(ToolError, match="text memories only"):
+        dbutil.run(remember.fn(context=caller_context, **arguments))
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("recall", {"query": "what changed"}),
+        ("remember", {"text": "A durable memory."}),
+        ("share", {"documents": [uuid7()]}),
+    ],
+)
+def test_tools_report_monthly_quota_exhaustion(
+    monkeypatch: pytest.MonkeyPatch,
+    caller_context: Context,
+    tools: dict[str, FunctionTool],
+    tool_name: str,
+    arguments: dict,
+) -> None:
+    async def exhausted(user_id: UUID5, operation: Usage.Event.Operation) -> None:
+        del user_id, operation
+        raise QuotaExceededError("monthly operation limit reached")
+
+    monkeypatch.setattr(memory_module.quota, "consume", exhausted)
+
+    with pytest.raises(ToolError, match="monthly operation limit reached"):
+        dbutil.run(tools[tool_name].fn(context=caller_context, **arguments))
+
+
 def test_remember_upload_reports_grant_saturation_as_a_tool_error(
     monkeypatch: pytest.MonkeyPatch,
     caller_context: Context,
@@ -873,21 +949,31 @@ def test_share_resolves_the_exact_destination_scope(
     captured_documents: list[list[UUID5 | UUID7]] = []
     captured_scopes: list[frozenset[UUID5 | UUID7]] = []
     captured_users: list[User] = []
+    captured_moves: list[bool] = []
+    copy = uuid7()
 
-    async def stub_promote(
-        document_ids: list[UUID5 | UUID7], scopes: frozenset[UUID5 | UUID7], user: User
-    ) -> int:
+    async def stub_transfer(
+        document_ids: list[UUID5 | UUID7],
+        scopes: frozenset[UUID5 | UUID7],
+        user: User,
+        move: bool = False,
+    ) -> list[Promotion]:
         captured_documents.append(document_ids)
         captured_scopes.append(scopes)
         captured_users.append(user)
-        return 3
+        captured_moves.append(move)
+        return [
+            Promotion(source=document_ids[0], destination=copy, outcome=Promotion.Outcome.created)
+        ]
 
-    doc = uuid7()
-    monkeypatch.setattr(memory_module.graph, "promote", stub_promote)
+    # the source sits in one organization, so both destinations are somewhere it does not stand
+    doc = dbutil.run(dbutil.seed_document(owner, [first]))
+    monkeypatch.setattr(memory_module.graph, "transfer", stub_transfer)
     out = dbutil.run(
         tools["share"].fn(documents=[doc], scopes=scope_names, context=context_for(caller))
     )
-    assert out == ShareResult(shared=3)
+    assert out == ShareResult(documents=(SharedDocument(id=doc, destination=copy),))
     assert captured_documents == [[doc]]
     assert captured_scopes == [organizations if scope_names else frozenset({owner})]
     assert captured_users == [caller]
+    assert captured_moves == [False]

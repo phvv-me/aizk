@@ -11,7 +11,7 @@ from id_factory import uuid7
 from pydantic import AnyHttpUrl, SecretStr
 
 import aizk.commands.admin as commands
-from aizk.integrations.logto import PolicyReport
+from aizk.integrations.logto import Account, PolicyReport, RoleAssignment, RoleReport
 
 _DOCUMENT_ID = uuid.UUID("01900000-0000-7000-8000-000000000001")
 
@@ -138,7 +138,13 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
         "define-relation",
         "list",
     }
-    assert command_names(commands.auth_app) == {"apply", "audit", "check-public", "check-web"}
+    assert command_names(commands.auth_app) == {
+        "apply",
+        "audit",
+        "check-public",
+        "check-web",
+        "roles",
+    }
     assert command_names(commands.settings_app) == {"show", "validate"}
     assert command_names(commands.api_app) == {"openapi"}
 
@@ -588,6 +594,27 @@ def test_auth_policy_commands_close_the_management_client(
     assert getattr(policy, command_name).await_count == 1
     assert client.close.await_count == 1
     assert f'"clean": {str(clean).lower()}' in capsys.readouterr().out
+
+
+def test_auth_roles_lists_managed_assignments_and_closes_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client = SimpleNamespace(close=AsyncMock())
+    report = RoleReport(
+        roles=(RoleAssignment(name="aizk-admin", members=(Account(id="user-1"),)),)
+    )
+    policy = SimpleNamespace(roles=AsyncMock(return_value=report))
+    monkeypatch.setattr(commands, "LogtoClient", Mock(return_value=client))
+    monkeypatch.setattr(commands, "LogtoPolicy", Mock(return_value=policy))
+
+    dispatch(["auth", "roles"])
+
+    assert policy.roles.await_count == 1
+    assert client.close.await_count == 1
+    output = capsys.readouterr().out
+    assert '"name": "aizk-admin"' in output
+    assert '"id": "user-1"' in output
 
 
 def test_auth_configuration_checks(

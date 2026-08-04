@@ -8,8 +8,16 @@ from aizk.store.identity import User
 
 
 def fact_bundle(statements: list[str]) -> tuple[Candidate, ...]:
+    # Ungrounded fact lines carry no source document, so the rendered context stays the
+    # statement the eval arms score.
     return tuple(
-        CandidateFactory.build(lane=Lane.Kind.FACTS, line=statement, scopes=frozenset())
+        CandidateFactory.build(
+            lane=Lane.Kind.FACTS,
+            line=statement,
+            scopes=frozenset(),
+            document_id=None,
+            document_created_at=None,
+        )
         for statement in statements
     )
 

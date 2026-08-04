@@ -21,7 +21,7 @@ from aizk.client import (
     RememberedFile,
 )
 from aizk.mcp.models import UploadTicketAccepted
-from aizk.memory import ShareResult, WriteResult
+from aizk.memory import SharedDocument, ShareResult, WriteResult
 from aizk.status import (
     CallerStatus,
     OrganizationStatus,
@@ -452,18 +452,31 @@ def test_share_forwards_documents_and_scopes(
     capsys: pytest.CaptureFixture[str],
     json_output: bool,
 ) -> None:
-    share = AsyncMock(return_value=ShareResult(shared=2))
+    documents = (uuid7(), uuid7())
+    destination = uuid7()
+    share = AsyncMock(
+        return_value=ShareResult(
+            documents=(
+                SharedDocument(id=documents[0], title="Interpretability", destination=destination),
+                SharedDocument(id=documents[1]),
+            ),
+            moved=True,
+        )
+    )
     monkeypatch.setattr(
         commands,
         "MemoryClient",
         Mock(return_value=SimpleNamespace(share=share)),
     )
-    documents = (uuid7(), uuid7())
 
     dbutil.run(
         commands.ClientCommands(cast("commands.ProfileStore", Profiles())).share(
             documents,
+            None,
             ("Research",),
+            True,
+            20,
+            False,
             None,
             json_output,
         )
@@ -473,9 +486,12 @@ def test_share_forwards_documents_and_scopes(
     request = share.await_args.args[0]
     assert tuple(request.documents) == documents
     assert request.scopes == ["Research"]
+    assert request.move is True
     output = capsys.readouterr().out
-    assert ('"shared"' in output) is json_output
-    assert ("shared 2 documents" in output) is not json_output
+    assert ('"moved"' in output) is json_output
+    assert ("moved 2 documents" in output) is not json_output
+    assert (f"{documents[0]}  Interpretability  now {destination}" in output) is not json_output
+    assert (f"{documents[1]}  untitled" in output) is not json_output
 
 
 @pytest.mark.parametrize("json_output", [False, True])

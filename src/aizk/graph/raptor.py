@@ -9,9 +9,9 @@ from mainboard.profiling import span
 from networkx.algorithms.community.modularity_max import greedy_modularity_communities
 from networkx.classes import Graph
 from patos import FlexModel, sql
-from pgvector import HalfVector
+from pgvector import HalfVector, Vector
 from pydantic import UUID5, Field
-from sqlalchemy import Integer, column, delete, func, literal, or_
+from sqlalchemy import Integer, column, delete, or_
 from sqlmodel import select
 
 from ..config import settings
@@ -20,7 +20,9 @@ from ..serving.embed import Embedder
 from ..serving.extract import LLM
 from ..store import Community, Entity, Fact
 from ..store.identity import User
+from ..store.locking import acquire_locks
 from ..store.models.tables import EntityClaim, EntityContent, FactClaim, FactContent
+from ..store.vector import CosineVector, cosine_distance
 from ..types import Scopes
 from .ids import entity_id, fact_id
 from .models import Node, RaptorReport
@@ -32,10 +34,10 @@ _entity_content = cast("Callable[..., EntityContent]", Entity.Content)
 _fact_content = cast("Callable[..., FactContent]", Fact.Content)
 
 
-def to_floats(vector: HalfVector | list[float] | None) -> list[float]:
+def to_floats(vector: HalfVector | Vector | list[float] | None) -> list[float]:
     """Materialize a stored embedding as ordinary float values."""
     assert vector is not None
-    return vector.to_list() if isinstance(vector, HalfVector) else vector
+    return vector.to_list() if isinstance(vector, (HalfVector, Vector)) else vector
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -146,13 +148,13 @@ class RaptorBuilder(FlexModel):
             "raptor_vector",
             (
                 column("ordinal", Integer),
-                column("embedding", sql.CosineHalfvec(settings.embed_dim)),
+                column("embedding", CosineVector(settings.embed_dim)),
             ),
             list(enumerate(embeddings)),
         )
         left = vectors.alias("raptor_left")
         right = vectors.alias("raptor_right")
-        distance = left.c.embedding @ right.c.embedding
+        distance = cosine_distance(left.c.embedding, right.c.embedding)
         with span("raptor_similarity_query"):
             async with User.system(self.scopes) as session:
                 pairs = await session.exec(
@@ -261,10 +263,10 @@ class RaptorBuilder(FlexModel):
         """
         scope_list = sorted(self.scopes)
         async with User.system().owner as opened:
-            lock_key = func.hashtextextended(
-                literal("raptor|" + ",".join(str(scope) for scope in scope_list)), 0
+            await acquire_locks(
+                opened,
+                ["raptor|" + ",".join(str(scope) for scope in scope_list)],
             )
-            await opened.exec(select(func.pg_advisory_xact_lock(lock_key)))
             stale = list(
                 await opened.exec(
                     select(Entity.Claim.content_id)

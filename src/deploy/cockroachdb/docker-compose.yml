@@ -1,0 +1,142 @@
+name: aizk-cockroachdb
+
+x-aizk-env: &aizk-env
+  AIZK_DATABASE_BACKEND: cockroachdb
+  AIZK_DATABASE_URL: cockroachdb+asyncpg://aizk_app@db:26257/aizk?ssl=disable
+  AIZK_ADMIN_DATABASE_URL: cockroachdb+asyncpg://aizk_admin@db:26257/aizk?ssl=disable
+  AIZK_AUTO_SETUP: "false"
+  AIZK_EMBED_URL: https://openrouter.ai/api/v1
+  AIZK_EMBED_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+  AIZK_EMBED_MODEL: qwen/qwen3-embedding-8b
+  AIZK_EMBED_DIM: "1024"
+  AIZK_EMBED_EXTRA_BODY: '{"provider":{"zdr":true,"data_collection":"deny"}}'
+  AIZK_LLM_URL: https://openrouter.ai/api/v1
+  AIZK_LLM_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+  AIZK_LLM_MODEL: deepseek/deepseek-v4-flash
+  AIZK_LLM_EXTRA_BODY: '{"provider":{"zdr":true,"data_collection":"deny"}}'
+  AIZK_RERANK_ENABLED: "false"
+  AIZK_EXTRACT_BACKEND: llm
+  AIZK_EXTRACTION_GATE_ENABLED: "false"
+  AIZK_GRAPH_ENTITY_SEEDING: "false"
+  AIZK_SERVE_WITH_WORKER: "false"
+  AIZK_BACKUP_ENABLED: "false"
+  AIZK_ARTIFACT_DISPATCH_ENABLED: "false"
+  AIZK_ARTIFACT_INTEGRITY_ENABLED: "false"
+  AIZK_MCP_HOST: 0.0.0.0
+  AIZK_MCP_PORT: "8000"
+  AIZK_LOG_JSON: "true"
+
+x-aizk-runtime: &aizk-runtime
+  image: aizk-cockroachdb-runtime
+  build:
+    context: ../../..
+    dockerfile: src/deploy/Dockerfile
+    target: runtime
+    additional_contexts:
+      mainboard: ../../../../mainboard
+      patos: ../../../../patos
+      rls: ../../../../rls
+  environment: *aizk-env
+  cap_drop: ["ALL"]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=256m
+  restart: unless-stopped
+
+services:
+  db:
+    image: cockroachdb/cockroach:v26.2.3@sha256:fdbcdb6eb621e0d6f17e4b8591b7acae5cad6355b41965358813e78c1b67419c
+    command:
+      - start-single-node
+      - --insecure
+      - --store=/cockroach/cockroach-data
+      - --http-addr=0.0.0.0:8080
+    volumes:
+      - db-data:/cockroach/cockroach-data
+    ports:
+      - 127.0.0.1:${AIZK_COCKROACH_SQL_PORT:-26258}:26257
+      - 127.0.0.1:${AIZK_COCKROACH_HTTP_PORT:-8181}:8080
+    healthcheck:
+      test: ["CMD", "cockroach", "sql", "--insecure", "--host=127.0.0.1:26257", "--execute=SELECT 1"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  db-init:
+    image: cockroachdb/cockroach:v26.2.3@sha256:fdbcdb6eb621e0d6f17e4b8591b7acae5cad6355b41965358813e78c1b67419c
+    entrypoint: ["/bin/sh", "/init/roles.sh"]
+    volumes:
+      - ./roles.sh:/init/roles.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  setup:
+    <<: *aizk-runtime
+    command: ["admin", "database", "setup"]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    restart: "no"
+
+  server:
+    <<: *aizk-runtime
+    command: ["admin", "server", "mcp"]
+    ports:
+      - 127.0.0.1:${AIZK_COCKROACH_MCP_PORT:-8088}:8000
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *aizk-runtime
+    command: ["admin", "server", "worker"]
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  lambda-mcp:
+    profiles: ["lambda"]
+    image: aizk-cockroachdb-lambda
+    build:
+      context: ../../..
+      dockerfile: src/deploy/Dockerfile
+      target: lambda
+      additional_contexts:
+        mainboard: ../../../../mainboard
+        patos: ../../../../patos
+        rls: ../../../../rls
+    environment: *aizk-env
+    ports:
+      - 127.0.0.1:${AIZK_COCKROACH_LAMBDA_MCP_PORT:-9090}:8080
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  lambda-worker:
+    profiles: ["lambda"]
+    image: aizk-cockroachdb-lambda
+    command: ["aizk.commands.aws.worker_handler"]
+    environment: *aizk-env
+    ports:
+      - 127.0.0.1:${AIZK_COCKROACH_LAMBDA_WORKER_PORT:-9091}:8080
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+  lambda-setup:
+    profiles: ["lambda"]
+    image: aizk-cockroachdb-lambda
+    command: ["aizk.commands.aws.setup_handler"]
+    environment: *aizk-env
+    ports:
+      - 127.0.0.1:${AIZK_COCKROACH_LAMBDA_SETUP_PORT:-9092}:8080
+    depends_on:
+      setup:
+        condition: service_completed_successfully
+
+volumes:
+  db-data:

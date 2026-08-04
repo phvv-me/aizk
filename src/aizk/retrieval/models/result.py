@@ -1,10 +1,11 @@
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from enum import StrEnum, auto
 from functools import cached_property
 from typing import ClassVar, Self
 
 from patos import FrozenModel
-from pydantic import UUID5, Field
+from pydantic import UUID5, UUID7, Field
 
 from ..templates import environment
 from .candidate import Candidate
@@ -35,6 +36,11 @@ class _Evidence(FrozenModel):
     text: str
     scopes: tuple[_Scope, ...] = ()
     resource_uri: str | None = None
+    document_id: UUID7 | None = None
+    document_created_at: datetime | None = None
+    document_note: str | None = Field(
+        default=None, description="the document line the template renders, priced by packing"
+    )
 
 
 class RecallResult(FrozenModel):
@@ -64,18 +70,16 @@ class RecallResult(FrozenModel):
                         else cls.Provenance.DERIVED
                     ),
                     text=candidate.line,
-                    resource_uri=(
-                        f"aizk://artifacts/{candidate.artifact_id}/contents/"
-                        f"{candidate.artifact_content_id}"
-                        if candidate.artifact_id is not None
-                        and candidate.artifact_content_id is not None
-                        else None
-                    ),
+                    resource_uri=candidate.resource_uri,
+                    document_id=candidate.document_id,
+                    document_created_at=candidate.document_created_at,
+                    document_note=candidate.document_note,
                     scopes=(
                         tuple(
-                            sorted(
-                                (scopes[scope] for scope in candidate.scopes),
-                                key=lambda scope: scope.name,
+                            scopes[scope]
+                            for scope in sorted(
+                                candidate.scopes,
+                                key=lambda scope: scopes[scope].name,
                             )
                         )
                         if scopes is not None

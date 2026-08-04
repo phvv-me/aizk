@@ -1,18 +1,20 @@
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 from pydantic import UUID5
 from sqlmodel.sql.expression import Select
 
-from ..config import settings
+from ..config import DatabaseBackend, settings
 from ..ontology import Ontology
 from ..store import Artifact, Document, SessionItem
 from ..store.identity import User
 from ..types import Scopes
 from ..usage import UsageAccountingJob
-from .jobs.maintenance import ScheduledJob, ScopedScheduledJob
+from .jobs.maintenance import ScheduledJob, ScopedScheduledJob, SystemScheduledJob
 from .jobs.models import MaintenanceJob
 from .jobs.projection import ChunkProjectionJob
+from .portable import PortableJob, PortableWorker
 from .queue import Queue
 
 if TYPE_CHECKING:
@@ -48,11 +50,48 @@ async def scope_roster() -> list[Scopes]:
         return sorted(keys, key=lambda scopes: sorted(scopes))
 
 
+def portable_worker(runtime: Runtime, batch_size: int | None = None) -> PortableWorker:
+    """Assemble the CockroachDB worker with every queue and schedule callback."""
+    batch = batch_size or settings.queue_batch_size
+    scheduled = [job_type.assemble(runtime) for job_type in ScheduledJob.implementations()]
+    queued_jobs: list[PortableJob] = [
+        ChunkProjectionJob(runtime.graph),
+        UsageAccountingJob(),
+        runtime.artifacts.conversion,
+        *(job for job in scheduled if isinstance(job, ScopedScheduledJob)),
+    ]
+    schedules = {
+        job.cron_entrypoint: (
+            job.expression,
+            partial(fan_out, job)
+            if isinstance(job, ScopedScheduledJob)
+            else partial(cast(SystemScheduledJob, job).execute),
+        )
+        for job in scheduled
+        if job.enabled
+    }
+    return PortableWorker(queued_jobs, schedules, batch)
+
+
+async def run_worker_once(runtime: Runtime, batch_size: int | None = None) -> int:
+    """Drain one CockroachDB batch and due schedule wave for serverless invocation."""
+    if settings.database_backend is not DatabaseBackend.cockroachdb:
+        raise RuntimeError("serverless queue draining requires CockroachDB")
+    async with User.system() as session:
+        await Ontology.refresh(session)
+    worker = portable_worker(runtime, batch_size)
+    await worker.install_schedules()
+    return await worker.run_once()
+
+
 async def run_worker(runtime: Runtime, batch_size: int | None = None) -> None:
     """Run the autonomous engine, draining on-write jobs and firing the scheduled passes."""
     batch = batch_size or settings.queue_batch_size
     async with User.system() as session:
         await Ontology.refresh(session)
+    if settings.database_backend is DatabaseBackend.cockroachdb:
+        await portable_worker(runtime, batch_size).run()
+        return
     async with Queue(dsn=settings.asyncpg_dsn) as queue:
         pg = queue.worker()
         ChunkProjectionJob(runtime.graph).bind(pg)

@@ -19,6 +19,7 @@ from ..integrations.docling import ArtifactBytes
 from ..storage import ByteLimitExceeded
 from ..store import UploadCapability
 from ..store.identity import User
+from ..store.locking import acquire_locks
 from ..types import ScopeNames, Scopes
 from .models import ArtifactReceipt
 
@@ -212,9 +213,7 @@ class UploadBox(FlexModel):
         capability = secrets.token_urlsafe(32)
         now = datetime.now(UTC)
         async with User.system() as session:
-            await session.exec(
-                select(func.pg_advisory_xact_lock(func.hashtextextended(str(user.id), 0)))
-            )
+            await acquire_locks(session, [f"upload|{user.id}"])
             await session.exec(delete(UploadCapability).where(UploadCapability.expires_at < now))
             live = (
                 await session.exec(

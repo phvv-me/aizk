@@ -29,6 +29,7 @@ class EmbeddingsResource(Protocol):
         input: list[str],
         dimensions: int,
         encoding_format: Literal["float"],
+        extra_body: Mapping[str, JsonValue] | None,
     ) -> CreateEmbeddingResponse: ...
 
 
@@ -90,12 +91,19 @@ def llm_model(
 
 
 @cache
-def http_client(url: str, api_key: str, timeout: float) -> httpx.AsyncClient:
+def http_client(
+    url: str,
+    api_key: str,
+    timeout: float,
+    headers: tuple[tuple[str, str], ...] = (),
+) -> httpx.AsyncClient:
     """Intern one JSON HTTP client per endpoint configuration."""
-    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    default_headers = dict(headers)
+    if api_key:
+        default_headers["Authorization"] = f"Bearer {api_key}"
     client = httpx.AsyncClient(
         base_url=f"{url.rstrip('/')}/",
-        headers=headers,
+        headers=default_headers,
         timeout=timeout,
     )
     _open_clients.append(client)
@@ -162,11 +170,12 @@ class HttpService(FrozenFlexModel):
     async def post[ResponseT: BaseModel](
         self,
         route: str,
-        request: BaseModel,
+        request: BaseModel | Mapping[str, JsonValue],
         response: type[ResponseT],
     ) -> ResponseT:
         """Post one model request and validate its successful response."""
+        payload = request.model_dump() if isinstance(request, BaseModel) else dict(request)
         async with self.throttle:
-            reply = await self.client.post(route, json=request.model_dump())
+            reply = await self.client.post(route, json=payload)
         reply.raise_for_status()
         return response.model_validate(reply.json())

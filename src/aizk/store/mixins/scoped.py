@@ -1,4 +1,4 @@
-from typing import Any, ClassVar
+from typing import ClassVar, cast
 
 import rls
 import sqlalchemy as sa
@@ -10,7 +10,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import CompoundSelect
 from sqlmodel import select
 
-from ...config import settings
+from ...config import DatabaseBackend, settings
 from ..identity import User
 
 
@@ -29,6 +29,12 @@ class Scoped(sql.Model):
     read_through: ClassVar[str | None] = None
 
     created_by = sql.Field(UUID5, index=True)
+    # A scope set is stored as an ordered array, so equality and any unique index over it
+    # only mean set identity while every writer sorts. Every writer does: the scope set
+    # always arrives from `User.write_scope` or a `sorted(...)` at the call site, and
+    # migration `0006_document_promotion_identity` sorts the rows written before that
+    # invariant was relied upon. A row inserted around the ORM would break it, which is why
+    # raw inserts into scoped tables belong in tests and migrations alone.
     scopes = sql.Field(
         list[UUID5],
         min_length=1,
@@ -42,7 +48,7 @@ class Scoped(sql.Model):
         return select(cls.scopes).union(*(select(peer.scopes) for peer in peers))
 
     @staticmethod
-    def _authority(standing: ColumnElement[Any], permission: str) -> ColumnElement[list[UUID5]]:
+    def _authority[T](standing: ColumnElement[T], permission: str) -> ColumnElement[list[UUID5]]:
         """Turn one JSON scope permission into a native PostgreSQL UUID array."""
         values = (
             sa.func.jsonb_array_elements_text(standing.op("->")(permission))
@@ -55,25 +61,42 @@ class Scoped(sql.Model):
     def __rls__(cls) -> tuple[rls.Policy, ...]:
         """Require complete standing in the row's scope intersection."""
         scopes = cls.scopes
-        standing = User.setting("scopes")
-        writable = cls._authority(standing, "write")
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            application_name = sa.func.current_setting("application_name", True)
+
+            def authority(position: int) -> ColumnElement[list[UUID5]]:
+                encoded = sa.func.nullif(
+                    sa.func.split_part(application_name, "|", position),
+                    "",
+                )
+                return cast(ColumnElement[list[UUID5]], encoded.cast(ARRAY(Uuid())))
+
+            readable = authority(2)
+            writable = authority(3)
+            public = authority(4)
+        else:
+            standing = User.setting("scopes")
+            readable = cls._authority(standing, "read")
+            writable = cls._authority(standing, "write")
+            public = cls._authority(standing, "public")
         nonempty = sa.func.cardinality(scopes) > 0
         if parent_name := cls.read_through:
-            parent = sa.table(
-                parent_name,
-                sa.column("id", Uuid()),
-                sa.column("scopes", ARRAY(Uuid())),
-            )
             parent_id = cls.__table__.c[f"{parent_name}_id"]
-            read: ColumnElement[bool] = cls.__table__.c[f"{parent_name}_id"].in_(
-                select(parent.c.id)
-            )
-            parent_scope: ColumnElement[bool] = sa.tuple_(parent_id, scopes).in_(
-                select(parent.c.id, parent.c.scopes)
-            )
+            if settings.database_backend is DatabaseBackend.cockroachdb:
+                visible = getattr(sa.func, f"aizk_{parent_name}_visible")
+                read = visible(parent_id, scopes)
+                parent_scope = read
+            else:
+                parent = sa.table(
+                    parent_name,
+                    sa.column("id", Uuid()),
+                    sa.column("scopes", ARRAY(Uuid())),
+                )
+                read = parent_id.in_(select(parent.c.id))
+                parent_scope = sa.tuple_(parent_id, scopes).in_(
+                    select(parent.c.id, parent.c.scopes)
+                )
         else:
-            readable = cls._authority(standing, "read")
-            public = cls._authority(standing, "public")
             read = sa.and_(
                 nonempty,
                 sa.or_(

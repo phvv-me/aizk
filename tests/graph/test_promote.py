@@ -9,7 +9,7 @@ from sqlmodel import select
 
 from aizk.config import settings
 from aizk.exceptions import NotVisibleError
-from aizk.graph.promote import promote
+from aizk.graph.promote import Promotion, promote
 from aizk.store import (
     Artifact,
     Blob,
@@ -85,7 +85,12 @@ async def visible_copy(
 
 def test_promote_copies_once_into_scope_and_an_outsider_stays_blind() -> None:
     async def probe() -> tuple[
-        int, int, UUID5 | UUID7 | None, UUID5 | UUID7 | None, UUID5 | UUID7 | None, list
+        list[Promotion],
+        list[Promotion],
+        UUID5 | UUID7 | None,
+        UUID5 | UUID7 | None,
+        UUID5 | UUID7 | None,
+        list,
     ]:
         await dbutil.reset_db()
         promoter, member, outsider = uuid5(), uuid5(), uuid5()
@@ -115,7 +120,10 @@ def test_promote_copies_once_into_scope_and_an_outsider_stays_blind() -> None:
         )
 
     count, repeated, promoter_sees, member_sees, outsider_sees, source_scopes = dbutil.run(probe())
-    assert count == 1 and repeated == 0
+    assert [promotion.outcome for promotion in count] == [Promotion.Outcome.created]
+    # the second call finds the standing copy current and names it without writing again
+    assert [promotion.outcome for promotion in repeated] == [Promotion.Outcome.current]
+    assert count[0].destination == repeated[0].destination
     assert promoter_sees is not None
     assert member_sees == promoter_sees  # a member standing in the target org reads the same copy
     assert outsider_sees is None  # no standing in the target org, no copy
@@ -197,6 +205,6 @@ def test_promote_shares_artifact_metadata_without_copying_its_blob() -> None:
                 await session.exec(select(Document).where(Document.scopes == [team]))
             ).all()
             target_contents = {document.artifact_content_id for document in target_documents}
-        return shared, blobs, artifacts, contents, len(target_contents) == 1
+        return len(shared), blobs, artifacts, contents, len(target_contents) == 1
 
     assert dbutil.run(probe()) == (2, 1, 2, 2, True)

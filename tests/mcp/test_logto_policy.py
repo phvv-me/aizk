@@ -20,6 +20,7 @@ class LogtoState:
         self.resource_scopes: list[JsonObject] = []
         self.roles: list[JsonObject] = []
         self.role_scopes: dict[str, list[JsonObject]] = {}
+        self.role_users: dict[str, list[JsonObject]] = {}
         self.organization_scopes: list[JsonObject] = []
         self.organization_roles: list[JsonObject] = []
 
@@ -50,12 +51,22 @@ class LogtoState:
                 "isDefault": True,
             },
             {
+                "id": "role-admin",
+                "name": settings.logto_admin_role,
+                "description": settings.logto_admin_role_description,
+                "type": "User",
+                "isDefault": False,
+            },
+            {
                 "id": "role-m2m",
                 "name": "Logto Management API access",
                 "type": "MachineToMachine",
             },
         ]
-        state.role_scopes = {"role-user": [state.resource_scopes[0]]}
+        state.role_scopes = {
+            "role-user": [state.resource_scopes[0]],
+            "role-admin": [state.resource_scopes[0]],
+        }
         state.organization_scopes = [
             {
                 "id": f"scope-{name.replace(':', '-')}",
@@ -101,6 +112,8 @@ class FakeLogto:
             items = self.state.roles
         elif path.endswith("/scopes") and path.startswith("api/roles/"):
             items = self.state.role_scopes.get(path.split("/")[2], [])
+        elif path.endswith("/users") and path.startswith("api/roles/"):
+            items = self.state.role_users.get(path.split("/")[2], [])
         elif path == "api/organization-scopes":
             items = self.state.organization_scopes
         else:
@@ -131,9 +144,10 @@ class FakeLogto:
         elif path == "api/resources/resource-a/scopes":
             self.state.resource_scopes.append({"id": "scope-control", **body})
         elif path == "api/roles" and method == "POST":
-            self.state.roles.append({"id": "role-user", **body})
+            role_id = f"role-{body['name']}"
+            self.state.roles.append({"id": role_id, **body})
             scope_ids = cast("list[str]", body["scopeIds"])
-            self.state.role_scopes["role-user"] = [
+            self.state.role_scopes[role_id] = [
                 scope for scope in self.state.resource_scopes if scope["id"] in scope_ids
             ]
         elif path.startswith("api/roles/"):
@@ -278,13 +292,21 @@ def test_policy_apply_repairs_every_managed_layer_and_is_idempotent() -> None:
     mutating_passes = fake.invalidations
     second = dbutil.run(policy(fake).apply())
 
-    assert report.clean and len(report.changes) == 12
+    assert report.clean and len(report.changes) == 13
     assert second == type(second)(clean=True)
     # Every mutating pass evicts the cached authority snapshots; the clean apply keeps them.
     assert mutating_passes > 0
     assert fake.invalidations == mutating_passes
-    assert {role["name"] for role in state.roles} == {settings.logto_user_role, "external"}
+    assert {role["name"] for role in state.roles} == {
+        settings.logto_user_role,
+        settings.logto_admin_role,
+        "external",
+    }
     assert next(role for role in state.roles if role["name"] == "external")["id"] == "external"
+    operator = next(role for role in state.roles if role["name"] == settings.logto_admin_role)
+    assert operator["isDefault"] is False
+    assert operator["description"] == settings.logto_admin_role_description
+    assert state.role_scopes[cast("str", operator["id"])] == [state.resource_scopes[0]]
     custom = next(role for role in state.organization_roles if role["name"] == "custom")
     assert custom["scopes"] == [{"id": "other", "name": "other"}]
     viewer = next(role for role in state.organization_roles if role["name"] == "viewer")
@@ -312,6 +334,62 @@ def test_policy_reports_existing_user_role_and_permission_drift() -> None:
         "grant API permissions to aizk-user",
         "grant organization permissions to admin",
     )
+
+
+def test_policy_reconciles_the_operator_role_without_ever_deleting_it() -> None:
+    state = LogtoState.clean()
+    operator = next(role for role in state.roles if role["name"] == settings.logto_admin_role)
+    operator.update({"description": "Hand written", "isDefault": True})
+    state.role_scopes["role-admin"] = []
+    fake = FakeLogto(state)
+
+    report = dbutil.run(policy(fake).apply())
+
+    assert report.clean
+    assert report.changes == (
+        f"update operator role {settings.logto_admin_role}",
+        f"grant API permissions to {settings.logto_admin_role}",
+    )
+    assert operator["description"] == settings.logto_admin_role_description
+    assert operator["isDefault"] is False
+    assert state.role_scopes["role-admin"] == [state.resource_scopes[0]]
+
+
+def test_policy_replaces_an_operator_role_of_the_wrong_kind() -> None:
+    state = LogtoState.clean()
+    operator = next(role for role in state.roles if role["name"] == settings.logto_admin_role)
+    operator["type"] = "MachineToMachine"
+    fake = FakeLogto(state)
+
+    report = dbutil.run(policy(fake).apply())
+
+    assert report.clean
+    assert report.changes == (
+        f"replace non-user role {settings.logto_admin_role}",
+        f"create operator role {settings.logto_admin_role}",
+    )
+    replaced = next(role for role in state.roles if role["name"] == settings.logto_admin_role)
+    assert replaced["type"] == "User"
+
+
+def test_policy_lists_managed_roles_with_their_assignments() -> None:
+    state = LogtoState.clean()
+    state.roles.append({"id": "role-old", "name": "aizk-editor", "type": "User"})
+    state.role_users = {
+        "role-admin": [{"id": "user-1", "name": "Pedro Valois", "primaryEmail": "pedro@test"}]
+    }
+    fake = FakeLogto(state)
+
+    report = dbutil.run(policy(fake).roles())
+
+    assert [(item.name, item.managed, item.default) for item in report.roles] == [
+        (settings.logto_admin_role, True, False),
+        ("aizk-editor", False, False),
+        (settings.logto_user_role, True, True),
+    ]
+    assert [member.primary_email for member in report.roles[0].members] == ["pedro@test"]
+    assert report.roles[2].members == ()
+    assert fake.calls == []
 
 
 def test_policy_removes_the_retired_invitation_permission() -> None:

@@ -630,7 +630,8 @@ services:
   # Caddy is the AIZK tunnel origin. It forwards FastMCP and its OAuth routes to the server,
   # only capability upload PUTs to the api service, the signed-in application paths to SvelteKit,
   # and every remaining path, which is the landing page and the documentation, to the docs site.
-  # Cloudflare reaches caddy:8081 over Compose; no Caddy host port is published.
+  # Its second site on 8082 is the operator console, gated by oauth2-proxy. Cloudflare reaches
+  # caddy:8081 and caddy:8082 over Compose, and no Caddy host port is published.
   caddy:
     networks:
       default:
@@ -652,6 +653,12 @@ services:
         condition: service_healthy
       docs:
         condition: service_healthy
+      # The gate ships as a distroless image with no shell to probe, so a started container is
+      # the strongest condition available. Caddy answers 502 on the console until it is ready.
+      oauth2-proxy:
+        condition: service_started
+    environment:
+      AIZK_LOGTO_ADMIN_ENDPOINT: ${AIZK_LOGTO_ADMIN_ENDPOINT:-https://console.phvv.me}
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     read_only: true
@@ -665,6 +672,47 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+    restart: unless-stopped
+
+  # The one gate in front of the operator console. Caddy asks it about every console request and
+  # it answers only for a Logto session whose roles claim carries the managed operator role, so
+  # Grafana, the tracing UI, and the operator pages share one sign-in and one authorization rule.
+  # It proxies nothing itself, which is what the static upstream declares.
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.2
+    profiles: ["public"]
+    depends_on:
+      cloudflared:
+        condition: service_healthy
+      logto:
+        condition: service_healthy
+    environment:
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_UPSTREAMS: static://202
+      OAUTH2_PROXY_PROVIDER: oidc
+      # The canonical public issuer, the same one the tunnel publishes, never the Compose address.
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${AIZK_LOGTO_ENDPOINT:-}/oidc
+      OAUTH2_PROXY_CLIENT_ID: ${AIZK_ADMIN_CLIENT_ID:-}
+      OAUTH2_PROXY_CLIENT_SECRET: ${AIZK_ADMIN_CLIENT_SECRET:-}
+      OAUTH2_PROXY_COOKIE_SECRET: ${AIZK_ADMIN_COOKIE_SECRET:-}
+      OAUTH2_PROXY_REDIRECT_URL: ${AIZK_ADMIN_PUBLIC_URL:-https://admin.phvv.me}/oauth2/callback
+      OAUTH2_PROXY_COOKIE_DOMAINS: ${AIZK_ADMIN_HOST:-admin.phvv.me}
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${AIZK_ADMIN_HOST:-admin.phvv.me}
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+      # Logto puts tenant roles in the `roles` claim once the `roles` scope is requested, so the
+      # managed operator role from `logto.conf` is the group this gate admits.
+      OAUTH2_PROXY_SCOPE: openid profile email roles
+      OAUTH2_PROXY_OIDC_GROUPS_CLAIM: roles
+      OAUTH2_PROXY_ALLOWED_GROUPS: ${AIZK_LOGTO_ADMIN_ROLE:-aizk-admin}
+      # The role is the whole authorization rule, so no address domain narrows it further.
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    pids_limit: 64
     restart: unless-stopped
 
   # The private worker owns privileged maintenance and backups but publishes no port. An exploit
@@ -834,15 +882,22 @@ services:
     depends_on:
       loki:
         condition: service_healthy
+    # Grafana answers under `/grafana` on the operator console, so it must build its own links
+    # with that prefix and keep serving the prefix Caddy forwards unchanged. Its own account
+    # remains the login, because oauth2-proxy has already proven who the caller is.
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SECURITY_ADMIN_USER: ${AIZK_GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${AIZK_GRAFANA_ADMIN_PASSWORD:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${AIZK_ADMIN_PUBLIC_URL:-https://admin.phvv.me}/grafana
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - ./observability/grafana:/etc/grafana/provisioning:ro
       - ${AIZK_GRAFANA_VOLUME:-grafana-data}:/var/lib/grafana
     # Operator access only: Grafana is the sole host-published port and remains loopback-bound.
+    # It stays published so a broken oauth2-proxy cannot lock the operator out of the dashboards.
+    # Drop this block once the console gate has proven itself on the deployed host.
     ports:
       - "127.0.0.1:${AIZK_GRAFANA_PORT:-3003}:3000"
     cap_drop: ["ALL"]

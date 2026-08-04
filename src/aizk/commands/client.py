@@ -18,7 +18,7 @@ from ..client import (
     ShareRequest,
 )
 from ..mcp.models import UploadTicketAccepted
-from ..memory import WriteResult
+from ..memory import ShareResult, WriteResult
 from ..status import StageEstimate, StatusReport
 
 JsonOutput = Annotated[bool, Parameter(name="--json")]
@@ -146,20 +146,43 @@ class ClientCommands:
     async def share(
         self,
         documents: tuple[UUID7, ...],
+        query: str | None,
         scopes: tuple[str, ...],
+        move: bool,
+        limit: int,
+        dry_run: bool,
         server: str | None,
         json_output: bool,
     ) -> None:
-        """Share visible documents through the public MCP tool."""
+        """Share or move named documents, or preview what a query would select."""
         result = await MemoryClient(self.profile(server)).share(
             ShareRequest(
-                documents=list(documents),
+                documents=list(documents) or None,
+                query=query,
                 scopes=list(scopes) or None,
+                move=move,
+                limit=limit,
+                dry_run=dry_run,
             )
         )
-        print(
-            ResultSerializer.json(result) if json_output else f"shared {result.shared} documents"
+        print(ResultSerializer.json(result) if json_output else self.render_share(result))
+
+    @staticmethod
+    def render_share(result: ShareResult) -> str:
+        """Render what a share carried, or would carry, so the operator can verify it."""
+        verb = "moved" if result.moved else "shared"
+        header = (
+            f"preview only, nothing was written. {len(result.documents)} documents would be {verb}"
+            if result.preview
+            else f"{verb} {len(result.documents)} documents"
         )
+        lines = [header]
+        lines.extend(
+            f"  {item.id}  {item.title or 'untitled'}"
+            f"{'' if item.destination is None else f'  now {item.destination}'}"
+            for item in result.documents
+        )
+        return "\n".join(lines)
 
     async def status(
         self,
@@ -329,12 +352,18 @@ async def remember(
 
 async def share(
     *documents: UUID7,
+    query: str | None = None,
     scope: tuple[str, ...] = (),
+    move: bool = False,
+    limit: int = 20,
+    dry_run: bool = False,
     server: str | None = None,
     json_output: JsonOutput = False,
 ) -> None:
-    """Share one or more document IDs into authorized destination scopes."""
-    await ClientCommands().share(documents, scope, server, json_output)
+    """Share document IDs into destination scopes, or preview what a query would select."""
+    await ClientCommands().share(
+        documents, query, scope, move, limit, dry_run, server, json_output
+    )
 
 
 async def status(

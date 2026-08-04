@@ -29,6 +29,7 @@ from .store import (
 )
 from .store.identity import User
 from .store.models.tables import RelationPolicy
+from .store.vector import cosine_distance
 
 
 class ForgetResult(FrozenModel):
@@ -106,7 +107,7 @@ async def forget(query: str, k: int = 8, user_id: UUID5 | None = None) -> Forget
     actor = user_id or system()
     [vector] = await EmbedClient.from_settings(settings).embed([query], mode="query")
     async with User.system({actor}) as session:
-        distance = Chunk.embedding @ vector
+        distance = cosine_distance(Chunk.embedding, vector)
         doc_ids = list(
             await session.exec(
                 select(Chunk.document_id)
@@ -128,7 +129,8 @@ async def promote(document: str, to_scopes: str, user_id: UUID5 | None = None) -
     target = settings.scope_ids(to_scopes)
     authority = frozenset((actor, *target))
     user = User.authorized(actor, read=authority, write=authority)
-    return await graph.promote([TypeAdapter(UUID7).validate_python(document)], target, user)
+    promoted = await graph.promote([TypeAdapter(UUID7).validate_python(document)], target, user)
+    return sum(promotion.changed for promotion in promoted)
 
 
 async def ingest(path: str, scopes: str | None = None, user_id: UUID5 | None = None) -> int:

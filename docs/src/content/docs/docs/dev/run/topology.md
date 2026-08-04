@@ -16,6 +16,7 @@ host: "one Docker host, Compose project aizk" {
   public: "profile public" {
     cloudflared
     caddy
+    gate: "oauth2-proxy"
     frontend: "frontend, SvelteKit"
     docs: "docs, static Astro"
     api
@@ -53,6 +54,9 @@ host.public.caddy -> host.core.server: "MCP and OAuth"
 host.public.caddy -> host.public.api: "upload PUTs"
 host.public.caddy -> host.public.frontend: "app paths"
 host.public.caddy -> host.public.docs: "everything else"
+host.public.caddy -> host.public.gate: "console authorization"
+host.public.gate -> host.public.logto: "operator sign-in"
+host.public.caddy -> host.obs.grafana: "/grafana"
 host.core.server -> host.core.db
 host.core.worker -> host.core.db
 host.core.server -> host.core.clamav
@@ -94,14 +98,16 @@ its own hostname. `logto-setup` reconciles the committed authorization policy an
 refuses to finish when authentication is only half configured. `web-check` does the same for the
 browser settings. `api` serves the browser JSON API, `frontend` is the SvelteKit server, and
 `docs` serves the landing page and this documentation as one static Astro build. `caddy` is the
-tunnel origin in front of all four.
+tunnel origin in front of all four. `oauth2-proxy` guards the operator console described below and
+proxies nothing itself, which is what its `static://202` upstream declares.
 
 `docs` is worth calling out. It is built from the `docs` target in `src/deploy/Dockerfile`, holds
 no credential, and dials no other service, so it keeps answering while the engine is down.
 
 ## Caddy routing
 
-`src/deploy/Caddyfile` listens on 8081 and matches in source order.
+`src/deploy/Caddyfile` holds two sites in one container. The public one listens on 8081 and matches
+in source order.
 
 | Match | Goes to |
 |---|---|
@@ -121,11 +127,17 @@ ingress still targets `web:8081`. Rename the service without carrying that alias
 tunnel breaks while every container still looks perfectly healthy.
 :::
 
+The same container serves a second site on 8082, the operator console on `admin.phvv.me`, which
+[The operator console](/docs/dev/run/console/) covers along with every public hostname the
+Cloudflare tunnel carries.
+
 ## The observability and integration profiles
 
 `--profile observability` adds `observability-init`, `loki`, `alloy` and `grafana`, described on
 [Observability](/docs/dev/run/observability/). Grafana is the only service in the whole file that
-publishes a host port, and it is bound to `127.0.0.1`.
+publishes a host port, and it is bound to `127.0.0.1`. It answers on the console under `/grafana`
+only when both profiles are up, and Caddy returns 502 there when the observability profile is not
+running.
 
 `--profile integration` starts one service, `artifact-integration`, built from the
 `integration-test` Dockerfile target. It runs the real artifact suite against the real
@@ -193,6 +205,7 @@ wrote and not the whole host.
 
 <div class="not-content">
 
+- [The operator console](/docs/dev/run/console/) covers the gated admin host and its hostnames.
 - [First start](/docs/dev/run/first-start/) takes an empty host to a running deployment.
 - [Hardware and cost](/docs/dev/run/hardware/) sizes the GPUs, RAM and disk this needs.
 - [The security model](/docs/dev/run/security/) explains why the process split looks like this.

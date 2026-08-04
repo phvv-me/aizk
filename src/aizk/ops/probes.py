@@ -7,7 +7,6 @@ from patos import FrozenModel
 from pydantic import JsonValue, ValidationError
 from sqlalchemy import func, true
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import select
 
 from ..background.status import tasks_overview
@@ -25,6 +24,7 @@ from ..store import (
     Usage,
     verify_rls,
 )
+from ..store.backend import database_adapter
 from ..store.identity import User
 from .provision import alembic_config, alembic_current, alembic_head
 from .reports import (
@@ -114,7 +114,7 @@ class ServingIdentity(FrozenModel):
 
 async def scoped_rls_violations() -> list[str]:
     """Reasons the live schema fails the no-leak contract for any registered scoped table."""
-    admin = create_async_engine(settings.admin_database_url)
+    admin = database_adapter().engine(settings.admin_database_url, False)
     try:
         async with admin.connect() as connection:
             return await connection.run_sync(verify_rls)
@@ -124,7 +124,7 @@ async def scoped_rls_violations() -> list[str]:
 
 async def row_counts() -> dict[str, int]:
     """Read every principal table count in one owner-side SQLAlchemy statement."""
-    admin = create_async_engine(settings.admin_database_url)
+    admin = database_adapter().engine(settings.admin_database_url, False)
     counts = tuple(
         select(func.count())
         .select_from(TableBase.metadata.tables[table])
@@ -225,7 +225,7 @@ async def corpus_health() -> list[ScopeHealth]:
         )
         .order_by(corpora.c.documents.desc())
     )
-    admin = create_async_engine(settings.admin_database_url)
+    admin = database_adapter().engine(settings.admin_database_url, False)
     try:
         async with admin.connect() as connection:
             rows = (await connection.execute(statement)).all()
@@ -299,7 +299,7 @@ async def usage_health() -> tuple[
         .join(Blob, Blob.id == Artifact.Content.blob_id)
         .group_by(Artifact.Content.scopes)
     )
-    admin = create_async_engine(settings.admin_database_url)
+    admin = database_adapter().engine(settings.admin_database_url, False)
     try:
         async with admin.connect() as connection:
             actor_rows = (await connection.execute(actors)).all()

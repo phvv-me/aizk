@@ -5,11 +5,13 @@ from typing import Any, cast
 import sqlalchemy as sa
 from rls.alembic import omit_runtime_table_info
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
 from sqlmodel import select
+
+from aizk.config import DatabaseBackend, settings
 
 # Importing the store maps models and attaches their RLS declarations.
 from aizk.store import TableBase
+from aizk.store.backend import database_adapter
 from alembic import context
 from alembic.runtime.environment import IncludeNameFn, IncludeObjectFn
 
@@ -40,15 +42,19 @@ def do_run_migrations(connection: Connection) -> None:
     """Run migrations on an already-open synchronous connection."""
 
     views: set[str] = target_metadata.info.get("views", set())
-    extension_owned: set[str] = set(
-        cast(
-            "Iterable[str]",
-            connection.execute(
-                select(_pg_class.c.relname)
-                .join(_pg_depend, _pg_depend.c.objid == _pg_class.c.oid)
-                .join(_pg_extension, _pg_depend.c.refobjid == _pg_extension.c.oid)
-                .where(_pg_depend.c.deptype == "e")
-            ).scalars(),
+    extension_owned: set[str] = (
+        set()
+        if settings.database_backend is DatabaseBackend.cockroachdb
+        else set(
+            cast(
+                "Iterable[str]",
+                connection.execute(
+                    select(_pg_class.c.relname)
+                    .join(_pg_depend, _pg_depend.c.objid == _pg_class.c.oid)
+                    .join(_pg_extension, _pg_depend.c.refobjid == _pg_extension.c.oid)
+                    .where(_pg_depend.c.deptype == "e")
+                ).scalars(),
+            )
         )
     )
 
@@ -98,9 +104,10 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_migrations_online() -> None:
     """Run and commit migrations through an async connection."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}), prefix="sqlalchemy."
-    )
+    url = config.get_main_option("sqlalchemy.url")
+    if url is None:
+        raise RuntimeError("Alembic requires sqlalchemy.url")
+    connectable = database_adapter().engine(url, False)
     async with connectable.begin() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()

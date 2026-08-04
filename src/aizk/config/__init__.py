@@ -4,7 +4,7 @@ from typing import cast
 
 from loguru import logger
 
-from .settings import Settings
+from .settings import DatabaseBackend, Settings
 
 # Shared process configuration
 settings = cast("Callable[[], Settings]", Settings)()
@@ -24,4 +24,4 @@ def configure_logging(level: str, serialize: bool = False) -> None:
 configure_logging(settings.log_level, settings.log_json)
 
 
-__all__ = ["configure_logging", "settings"]
+__all__ = ["DatabaseBackend", "Settings", "configure_logging", "settings"]

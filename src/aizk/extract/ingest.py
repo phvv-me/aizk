@@ -18,6 +18,7 @@ from ..serving.embed import EmbedClient
 from ..store import Chunk, Document, Fact, SessionItem
 from ..store.engine import Session
 from ..store.identity import User
+from ..store.locking import acquire_locks, document_revision
 from ..types import Scopes
 from .declaration import SourceDeclaration
 
@@ -175,6 +176,10 @@ class DocumentStore:
                 document.subject_type,
             ):
                 return existing.id, False
+            # Revising a document's spans takes the same lock a share holds while it reads
+            # them, so a move cannot copy this document's previous revision and retire the
+            # source underneath the newer one committed here.
+            await acquire_locks(self.session, [document_revision(existing.id)])
             return await self.refresh(existing, document), True
         self.session.add(document)
         await self.session.flush()

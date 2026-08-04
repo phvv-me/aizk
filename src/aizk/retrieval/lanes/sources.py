@@ -27,6 +27,8 @@ class SourceLane(Lane):
             source_uri=hits.c.source_uri,
             artifact_id=hits.c.artifact_id,
             artifact_content_id=hits.c.artifact_content_id,
+            document_id=hits.c.document_id,
+            document_created_at=hits.c.document_created_at,
             created_by=hits.c.created_by,
             direct=hits.c.direct,
         ).select_from(hits)

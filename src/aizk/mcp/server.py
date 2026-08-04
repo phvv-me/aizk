@@ -14,7 +14,9 @@ from pydantic import UUID5, UUID7, UUID8, Field, StringConstraints
 from ..artifacts.service import ArtifactIntake
 from ..artifacts.uploads import UploadBox, UploadGrantLimitError, UploadRequest
 from ..auth import Auth
+from ..background.wake import NoopWorkerWake, WorkerWake
 from ..config import Settings
+from ..exceptions import QuotaExceededError
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
 from ..memory import Memory, ShareResult
 from ..status import StatusReport
@@ -58,12 +60,14 @@ class AizkMCP(FastMCP):
         intake: ArtifactIntake,
         config: Settings,
         name: str = "aizk",
+        wake: WorkerWake | None = None,
     ) -> None:
         self.authentication = auth
         self.store = store
         self.uploads = uploads
         self.intake = intake
         self.settings = config
+        self.wake = wake or NoopWorkerWake()
         super().__init__(name, auth=auth.provider())
         self.add_middleware(IdentityMiddleware(auth))
         self.add_middleware(
@@ -92,7 +96,7 @@ class AizkMCP(FastMCP):
 
     def memory(self, user: User) -> Memory:
         """Build the shared memory service bound to one resolved caller."""
-        return Memory(user=user, intake=self.intake)
+        return Memory(user=user, intake=self.intake, wake=self.wake)
 
     def status_tool(self) -> Callable[..., Coroutine[None, None, StatusReport]]:
         """Build the `status` tool over this server's dependencies."""
@@ -126,13 +130,21 @@ class AizkMCP(FastMCP):
         ) -> str:
             """Return visible evidence for one question as clear, ordered Markdown.
 
+            Evidence that came from a stored source names the document it came from, and that
+            ID is the handle `share` takes to copy or move the document into an organization.
+            Derived summaries such as profiles, communities, and overviews stand above any one
+            source and so name no document, which is expected rather than missing data.
+
             query: natural-language question whose length is bounded by deployment settings.
             budget: optional evidence cap. Omit it unless repeated responses are too long.
             """
             if not (query := query.strip()):
                 raise ToolError("recall query cannot be blank")
             memory = self.memory(await self.user(context))
-            return await (await memory.recall(query, budget)).to_markdown()
+            try:
+                return await (await memory.recall(query, budget)).to_markdown()
+            except QuotaExceededError as exhausted:
+                raise ToolError(str(exhausted)) from exhausted
 
         return recall
 
@@ -181,6 +193,8 @@ class AizkMCP(FastMCP):
             if text is not None:
                 text = text.strip() or None
             if upload is not None:
+                if not config.artifact_ingest_enabled:
+                    raise ToolError("this deployment accepts text memories only")
                 if (
                     source_uri is not None
                     or preserve_source
@@ -212,6 +226,12 @@ class AizkMCP(FastMCP):
                 )
             if text is None and source_uri is None:
                 raise ToolError("remember requires text or a source URI")
+            if (
+                not config.artifact_ingest_enabled
+                and source_uri is not None
+                and (text is None or preserve_source)
+            ):
+                raise ToolError("this deployment accepts text memories only")
             user = await self.user(context, identified=True)
             try:
                 return await self.memory(user).remember(
@@ -232,6 +252,8 @@ class AizkMCP(FastMCP):
                 raise ToolError("the source URI could not be fetched") from unavailable
             except ValueError as invalid:
                 raise ToolError(str(invalid)) from invalid
+            except QuotaExceededError as exhausted:
+                raise ToolError(str(exhausted)) from exhausted
 
         return remember
 
@@ -240,20 +262,76 @@ class AizkMCP(FastMCP):
         config = self.settings
 
         async def share(
+            context: Context,
             documents: Annotated[
                 list[UUID7], Field(min_length=1, max_length=config.mcp_share_documents_max)
-            ],
-            context: Context,
+            ]
+            | None = None,
+            query: Annotated[
+                str,
+                StringConstraints(
+                    strip_whitespace=True,
+                    min_length=1,
+                    max_length=config.mcp_recall_query_max_chars,
+                ),
+            ]
+            | None = None,
             scopes: Annotated[ScopeNames, Field(max_length=config.mcp_scope_names_max)]
             | None = None,
+            move: bool = False,
+            limit: Annotated[int, Field(ge=1, le=config.mcp_share_documents_max)] = 20,
+            dry_run: bool = False,
         ) -> ShareResult:
-            """Copy visible documents into one authorized destination without moving sources.
+            """Copy or move documents you name into one authorized destination.
 
-            documents: visible document IDs to copy, bounded per call.
-            scopes: optional authorized Logto organization names. Omission means private memory.
+            Only `documents` ever writes. A `query` answers which of your private documents it
+            would select and writes nothing at all, whatever else you pass, because a question
+            matches on similarity rather than on what you meant and must not be able to hand a
+            dozen notes to an organization in one call. Sharing a topic therefore takes two
+            steps.
+
+                1. share(query="...", scopes=["Team"]) and read the candidates it returns.
+                2. share(documents=[...the IDs you approve], scopes=["Team"]) to act.
+
+            `recall` prints the `Document` ID under evidence that came from a stored source,
+            so step one is optional whenever you already know the IDs you want.
+
+            A result with `preview` set was not written. Check that field, and check each
+            document's `destination`, which names the copy only once one exists. A document
+            already standing in the destination is left alone, repeating a call that already
+            ran changes nothing, and a source revised since an earlier share refreshes its
+            copy so the destination always carries the source's current text.
+
+            documents: visible document IDs to act on, bounded per call. The only writing mode.
+            query: natural-language question that previews which of your own private documents
+                it would select. It never selects an organization's documents, and it never
+                writes, so it needs an organization in `scopes` to preview against.
+            scopes: optional authorized Logto organization names. Omission means private
+                memory, which `query` and `move` both refuse since both start from private
+                documents and would be carrying a scope onto itself.
+            move: transfer instead of copy, valid only with `documents`. The copy lands in the
+                destination and the original stops appearing in recall, so use it to relocate
+                private notes into an organization. A move only ever touches your own private
+                documents. Passing it with a `query` is refused rather than ignored, so that a
+                refusal can never read as a move that happened.
+            limit: how many documents one `query` may offer, in merit order.
+            dry_run: preview an explicit `documents` list without writing. A `query` already
+                previews, so this adds nothing there.
             """
             user = await self.user(context, identified=True)
-            return await self.memory(user).share(documents, scopes)
+            try:
+                return await self.memory(user).share(
+                    documents,
+                    query=query,
+                    scopes=scopes,
+                    move=move,
+                    limit=limit,
+                    preview=dry_run,
+                )
+            except ValueError as invalid:
+                raise ToolError(str(invalid)) from invalid
+            except QuotaExceededError as exhausted:
+                raise ToolError(str(exhausted)) from exhausted
 
         return share
 

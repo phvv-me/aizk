@@ -1,0 +1,81 @@
+---
+title: "OCR and languages"
+description: "Naming the OCR engine and its languages, because the default reads Chinese."
+---
+
+A scanned page carries no text layer, so Docling reads it with an OCR engine, and the engine
+decides what the page becomes. aizk sent `do_ocr=true` and named neither the engine nor the
+language, which left the choice to Docling.
+
+import { Steps } from '@astrojs/starlight/components';
+
+That choice was RapidOCR. Its bundled recognition model set is Chinese, and the version we deploy
+maps requested languages onto exactly three bundled sets, english, latin and chinese, with no
+Japanese set at all. A Japanese scan was therefore read by a Chinese model and came back as
+plausible but wrong CJK, which chunking, embedding and extraction all accepted without a
+complaint. Wrong text that looks right is the worst thing a memory engine can store.
+
+```text
+   scanned page        engine chosen by          what recall stored
+   ┌──────────┐        ┌──────────────┐          ┌────────────────┐
+   │ 日本語    │ ──▶   │ RapidOCR     │  ──────▶ │ plausible but  │
+   │ (image)  │        │ chinese set  │          │ wrong CJK      │
+   └──────────┘        └──────────────┘          └────────────────┘
+   ┌──────────┐        ┌──────────────┐          ┌────────────────┐
+   │ 日本語    │ ──▶   │ tesseract    │  ──────▶ │ the page       │
+   │ (image)  │        │ jpn + eng    │          │ as written     │
+   └──────────┘        └──────────────┘          └────────────────┘
+```
+
+## The request always names the engine
+
+`DoclingOptions` in `src/aizk/integrations/docling/models.py` sends `ocr_engine`, `ocr_preset` and
+`ocr_lang` on every conversion. The preset field replaced the engine field upstream and both carry
+the same value, so each Docling Serve generation reads the one it knows. `AIZK_DOCLING_OCR_ENGINE`
+defaults to `tesseract`, the command-line engine, and `tesserocr` is the in-process alternative.
+`AIZK_DOCLING_OCR_LANGUAGES` defaults to `["jpn","eng"]` and refuses an empty list, since an empty
+list hands the engine back its own default, which is Chinese for RapidOCR and a European set for
+either Tesseract.
+
+:::danger[The stock image ships no Japanese data]
+`quay.io/docling-project/docling-serve-cpu:v1.26.0` carries `tesseract` and `tesserocr` but only
+`eng.traineddata` and `osd.traineddata` in `/usr/share/tesseract/tessdata/`. Asking it for
+`jpn+eng` loads `eng` alone, with `Failed loading language 'jpn'` in the Docling log and no error
+returned, so Japanese pages are read as English until the data is installed. A deployment that
+reads Japanese must extend the image, for example with `RUN dnf install -y tesseract-langpack-jpn`,
+or mount `jpn.traineddata` into that directory. EasyOCR is not the way out, since it needs roughly
+seventy seconds per image on CPU.
+:::
+
+## Reconverting what OCR already read
+
+Text produced by the wrong engine is only repaired by converting the original again.
+`reconvert_scanned_documents` in `src/aizk/background/jobs/conversion.py` requeues every ready
+original whose media type is a PDF or an image, whatever door it arrived through, oldest
+conversion first.
+
+<Steps>
+
+1. Fix the deployment first, since a sweep run against an image without `jpn` rewrites the text
+   with English OCR and gains nothing.
+2. Run the sweep in bounded passes. Each original commits its move back to `queued` before its
+   task exists, so repeated passes walk forward and a worker finishing mid-sweep is never
+   overwritten.
+3. The conversion job rewrites the stored Markdown and the ingest pass rechunks it, since the
+   document digest changes with the text. Facts already extracted from the wrong text are
+   retracted by the ordinary source-changed path.
+
+</Steps>
+
+`ArtifactReconversion` takes a `ReconversionSweep`, which is a set of media-type prefixes and an
+optional source prefix, so the web-page sweep and this one are the same code with different
+targets.
+
+## Next
+
+<div class="not-content">
+
+- [Artifacts](/docs/dev/write/artifacts/) covers the pipeline this step sits inside.
+- [Web boilerplate](/docs/dev/write/boilerplate/) covers the other conversion-policy pass.
+
+</div>

@@ -412,6 +412,17 @@ async def apply_auth() -> None:
     print(report.model_dump_json(indent=2))
 
 
+@auth_app.command(name="roles")
+async def list_auth_roles() -> None:
+    """List the Logto roles under the managed prefix and the accounts assigned to them."""
+    client = LogtoClient(settings)
+    try:
+        report = await LogtoPolicy(client).roles()
+    finally:
+        await client.close()
+    print(report.model_dump_json(indent=2))
+
+
 @auth_app.command(name="check-public")
 def check_public_auth() -> None:
     """Confirm that public MCP authentication is fully configured."""

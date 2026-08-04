@@ -6,6 +6,10 @@ class ScopeNotFoundError(ValueError):
     """The requested write destination is unknown or outside the caller's authority."""
 
 
+class QuotaExceededError(RuntimeError):
+    """The caller or deployment exhausted one monthly cost safety limit."""
+
+
 class NotVisibleError(ValueError):
     """A row exists but sits outside the acting user's row level security visibility."""
 

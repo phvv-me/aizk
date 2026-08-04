@@ -105,14 +105,22 @@ making them. Everything after those two lines is identical.
 ## Policy lives in a file
 
 `src/deploy/logto.conf` is the committed, nonsecret authorization policy. It names the API
-resource, the required scope `control`, the managed role prefix `aizk-`, the three organization
-roles admin, editor and viewer, and the permissions each one carries.
+resource, the required scope `control`, the managed role prefix `aizk-`, the two global roles
+`aizk-user` and `aizk-admin`, the three organization roles admin, editor and viewer, and the
+permissions each one carries.
+
+The two global roles differ in one flag. `aizk-user` is default, so Logto gives it to every new
+account. `aizk-admin` is granted by hand and is what the operator console requires. Both carry the
+same `control` API permission, so a token minted for either verifies against the AIZK resource.
+`aizk admin auth roles` prints both with the accounts assigned to them.
 
 `aizk admin auth audit` reports drift between that file and the live tenant, and exits 1 when the
 report is not clean. `aizk admin auth apply` reconciles, replanning after each batch for up to
 eight passes before it gives up, and evicting every cached snapshot afterward. `LogtoPolicy` only
 touches the configured resource, its scopes, global roles under the managed prefix, and the named
-organization roles and permissions. Anything else in the tenant is left alone.
+organization roles and permissions. Anything else in the tenant is left alone. A managed-prefix
+role the configuration does not name is deleted, which is why `aizk-admin` is configuration rather
+than something an operator creates by hand.
 
 ## Next
 

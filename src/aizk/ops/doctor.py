@@ -7,16 +7,17 @@ from uuid import UUID
 import asyncpg
 from patos import FrozenModel
 from pydantic import UUID7, ValidationError
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlmodel import select
 
+from ..background.enum import QueueStatus
 from ..background.jobs.conversion import DoclingConversionJob
 from ..background.jobs.models import ArtifactConversionJob
 from ..background.queue import Queue
-from ..config import settings
+from ..config import DatabaseBackend, settings
 from ..store import Artifact
 from ..store.identity import User
-from ..store.models.tables import ArtifactContent
+from ..store.models.tables import ArtifactContent, QueueEvent, QueueTask
 
 type QueueIssueKind = Literal["stale_picked", "long_running_picked"]
 type ConversionState = Literal[
@@ -41,7 +42,7 @@ class ErrorIdentity(FrozenModel):
 class QueueIssue(FrozenModel):
     """One current retained failure or unhealthy picked queue job."""
 
-    id: int
+    id: int | UUID7
     entrypoint: str
     kind: QueueIssueKind
     updated_at: datetime
@@ -79,7 +80,7 @@ class ExceptionHistoryGroup(FrozenModel):
 class ConversionQueueFailure(FrozenModel):
     """The retained terminal PgQueuer job that owns one artifact conversion."""
 
-    job_id: int
+    job_id: int | UUID7
     attempts: int
     error: ErrorIdentity | None
 
@@ -466,6 +467,225 @@ class QueueDiagnostics:
         return failures, activity
 
 
+class PortableQueueDiagnostics:
+    """Read current and historical portable queue state through mapped tables."""
+
+    def __init__(
+        self,
+        stale_after: timedelta,
+        long_running_after: timedelta,
+        history: timedelta,
+        limit: int,
+        include_messages: bool,
+    ) -> None:
+        self.stale_after = stale_after
+        self.long_running_after = long_running_after
+        self.history = history
+        self.limit = limit
+        self.include_messages = include_messages
+
+    async def load(
+        self,
+        now: datetime,
+    ) -> tuple[
+        DoctorSummary,
+        tuple[QueueFailureGroup, ...],
+        tuple[QueueIssue, ...],
+        tuple[ExceptionHistoryGroup, ...],
+        dict[UUID, ConversionQueueFailure],
+        dict[UUID, ConversionQueueActivity],
+    ]:
+        """Load complete counts and bounded details from the portable queue."""
+        stale_before = now - self.stale_after
+        long_running_before = now - self.long_running_after
+        history_since = now - self.history
+        async with User.system().owner as session:
+            failed_tasks = list(
+                await session.exec(
+                    select(QueueTask)
+                    .where(QueueTask.status == QueueStatus.failed.value)
+                    .order_by(QueueTask.updated_at, QueueTask.id)
+                )
+            )
+            stale_picked = (
+                await session.exec(
+                    select(func.count(QueueTask.id)).where(
+                        QueueTask.status == QueueStatus.picked.value,
+                        QueueTask.heartbeat_at < stale_before,
+                    )
+                )
+            ).one()
+            long_running = (
+                await session.exec(
+                    select(func.count(QueueTask.id)).where(
+                        QueueTask.status == QueueStatus.picked.value,
+                        QueueTask.heartbeat_at >= stale_before,
+                        QueueTask.updated_at < long_running_before,
+                    )
+                )
+            ).one()
+            recent_events = list(
+                await session.exec(
+                    select(QueueEvent)
+                    .where(
+                        QueueEvent.status == QueueStatus.failed.value,
+                        QueueEvent.created_at >= history_since,
+                    )
+                    .order_by(QueueEvent.created_at, QueueEvent.id)
+                )
+            )
+            issue_tasks = list(
+                await session.exec(
+                    select(QueueTask)
+                    .where(
+                        QueueTask.status == QueueStatus.picked.value,
+                        or_(
+                            QueueTask.heartbeat_at < stale_before,
+                            QueueTask.updated_at < long_running_before,
+                        ),
+                    )
+                    .order_by(QueueTask.updated_at, QueueTask.id)
+                    .limit(self.limit)
+                )
+            )
+            conversion_tasks = list(
+                await session.exec(
+                    select(QueueTask)
+                    .where(
+                        QueueTask.entrypoint == DoclingConversionJob.entrypoint,
+                        QueueTask.status.in_(
+                            (
+                                QueueStatus.queued.value,
+                                QueueStatus.picked.value,
+                                QueueStatus.failed.value,
+                            )
+                        ),
+                    )
+                    .order_by(QueueTask.updated_at, QueueTask.id)
+                )
+            )
+        summary = DoctorSummary(
+            current_failed_jobs=len(failed_tasks),
+            stale_picked_jobs=stale_picked,
+            long_running_picked_jobs=long_running,
+            recent_exception_events=len(recent_events),
+        )
+        return (
+            summary,
+            self.failure_groups(failed_tasks),
+            tuple(self.issue(task, now, stale_before) for task in issue_tasks),
+            self.exception_groups(recent_events),
+            *self.conversion_jobs(conversion_tasks),
+        )
+
+    def issue(self, task: QueueTask, now: datetime, stale_before: datetime) -> QueueIssue:
+        """Translate one portable queue lease problem into safe operator guidance."""
+        heartbeat = task.heartbeat_at or task.updated_at
+        stale = heartbeat < stale_before
+        return QueueIssue(
+            id=task.id,
+            entrypoint=task.entrypoint,
+            kind="stale_picked" if stale else "long_running_picked",
+            updated_at=task.updated_at,
+            heartbeat_at=heartbeat,
+            age_seconds=max(
+                0,
+                int((now - (heartbeat if stale else task.updated_at)).total_seconds()),
+            ),
+            attempts=task.attempts,
+            latest_error=error_identity(
+                task.error_type,
+                task.error_message,
+                self.include_messages,
+            ),
+            retry_guidance=(
+                "Confirm its worker is gone before requeueing this abandoned lease."
+                if stale
+                else (
+                    "Inspect downstream latency and worker logs before interrupting this live "
+                    "lease."
+                )
+            ),
+        )
+
+    def failure_groups(self, tasks: list[QueueTask]) -> tuple[QueueFailureGroup, ...]:
+        """Group current portable failures into bounded privacy-safe details."""
+        grouped: dict[tuple[str, str | None, str | None], list[QueueTask]] = {}
+        for task in tasks:
+            grouped.setdefault((task.entrypoint, task.error_type, task.error_message), []).append(
+                task
+            )
+        ordered = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0][0]))
+        return tuple(
+            QueueFailureGroup(
+                entrypoint=entrypoint,
+                error=error_identity(error_type, error_message, self.include_messages),
+                count=len(rows),
+                attempts_min=min(row.attempts for row in rows),
+                attempts_max=max(row.attempts for row in rows),
+                oldest_at=min(row.updated_at for row in rows),
+                newest_at=max(row.updated_at for row in rows),
+                remediation=(
+                    "Fix this error group, then run `aizk admin queue retry conversion`."
+                    if entrypoint == DoclingConversionJob.entrypoint
+                    else "Fix this error group before requeueing its retained jobs."
+                ),
+            )
+            for (entrypoint, error_type, error_message), rows in ordered[: self.limit]
+        )
+
+    def exception_groups(self, events: list[QueueEvent]) -> tuple[ExceptionHistoryGroup, ...]:
+        """Group recent portable failure events into bounded historical details."""
+        grouped: dict[tuple[str, str | None, str | None], list[QueueEvent]] = {}
+        for event in events:
+            grouped.setdefault(
+                (event.entrypoint, event.error_type, event.error_message), []
+            ).append(event)
+        ordered = sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0][0]))
+        return tuple(
+            ExceptionHistoryGroup(
+                entrypoint=entrypoint,
+                status="failed",
+                error=error_identity(error_type, error_message, self.include_messages),
+                count=len(rows),
+                oldest_at=min(row.created_at for row in rows),
+                newest_at=max(row.created_at for row in rows),
+            )
+            for (entrypoint, error_type, error_message), rows in ordered[: self.limit]
+        )
+
+    def conversion_jobs(
+        self,
+        tasks: list[QueueTask],
+    ) -> tuple[
+        dict[UUID, ConversionQueueFailure],
+        dict[UUID, ConversionQueueActivity],
+    ]:
+        """Index portable conversion tasks by their durable content ID."""
+        failures: dict[UUID, ConversionQueueFailure] = {}
+        activity: dict[UUID, ConversionQueueActivity] = {}
+        for task in tasks:
+            try:
+                content_id = ArtifactConversionJob.decode(task.payload).artifact_content_id
+            except TypeError, ValueError, ValidationError:
+                continue
+            if task.status == QueueStatus.failed.value:
+                failures[content_id] = ConversionQueueFailure(
+                    job_id=task.id,
+                    attempts=task.attempts,
+                    error=error_identity(
+                        task.error_type,
+                        task.error_message,
+                        self.include_messages,
+                    ),
+                )
+            elif task.status == QueueStatus.queued.value:
+                activity[content_id] = "queued"
+            elif task.status == QueueStatus.picked.value:
+                activity[content_id] = "picked"
+        return failures, activity
+
+
 class ConversionDiagnostics:
     """Read failed and active artifact conversions through the owner maintenance role."""
 
@@ -659,6 +879,23 @@ class AizkDoctor:
     async def diagnose(self, now: datetime | None = None) -> DoctorReport:
         """Build one deterministic report without changing queue or conversion state."""
         generated_at = now or datetime.now(UTC)
+        diagnostics = (
+            PortableQueueDiagnostics(
+                self.stale_after,
+                self.long_running_after,
+                self.history,
+                self.limit,
+                self.include_messages,
+            )
+            if settings.database_backend is DatabaseBackend.cockroachdb
+            else QueueDiagnostics(
+                self.stale_after,
+                self.long_running_after,
+                self.history,
+                self.limit,
+                self.include_messages,
+            )
+        )
         (
             queue_summary,
             queue_failure_groups,
@@ -666,13 +903,7 @@ class AizkDoctor:
             recent_exception_groups,
             conversion_failures,
             conversion_activity,
-        ) = await QueueDiagnostics(
-            self.stale_after,
-            self.long_running_after,
-            self.history,
-            self.limit,
-            self.include_messages,
-        ).load(generated_at)
+        ) = await diagnostics.load(generated_at)
         conversion_summary, conversions = await ConversionDiagnostics(
             self.long_running_after,
             self.limit,

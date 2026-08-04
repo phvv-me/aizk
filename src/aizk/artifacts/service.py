@@ -35,6 +35,7 @@ from ..store.identity import User
 from ..store.models.tables import ArtifactContent
 from ..types import ScopeNames, Scopes
 from ..usage import annotate_operation
+from .boilerplate import WebBoilerplateCleaner
 from .models import (
     ArtifactDocument,
     ArtifactReceipt,
@@ -193,11 +194,13 @@ class ArtifactProcessor:
         storage: ByteStore,
         repository: ArtifactRepository,
         visual: ArtifactVisualEnricher | None = None,
+        cleaner: WebBoilerplateCleaner | None = None,
     ) -> None:
         self.converter = converter
         self.storage = storage
         self.repository = repository
         self.visual = visual
+        self.cleaner = cleaner
 
     async def process(self, content_id: UUID7, scopes: Scopes) -> None:
         """Convert one original and make its text recallable before marking it ready."""
@@ -241,7 +244,7 @@ class ArtifactProcessor:
                     str(error),
                 )
                 return
-            markdown = _resolve_markdown_links(output.markdown, original.source_uri)
+            markdown = self.declutter(output.markdown, original)
             await self.repository.store_conversion(
                 user,
                 original,
@@ -279,6 +282,17 @@ class ArtifactProcessor:
                 str(error)[:1024],
             )
             raise
+
+    def declutter(self, markdown: str, original: OriginalArtifact) -> str:
+        """Resolve source-relative links and strip web chrome before the text becomes chunks.
+
+        Order matters here, since resolving first lets the cleaner read a menu's own site off
+        destinations the page wrote as relative paths.
+        """
+        resolved = _resolve_markdown_links(markdown, original.source_uri)
+        if self.cleaner is None:
+            return resolved
+        return self.cleaner.clean_page(resolved, original.media_type, original.source_uri)
 
     async def index(
         self,

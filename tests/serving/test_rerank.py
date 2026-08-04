@@ -86,6 +86,15 @@ def test_rerank_short_circuits_on_no_texts(rerank_endpoint: list[dict]) -> None:
     assert rerank_endpoint == []
 
 
+def test_disabled_reranker_preserves_candidate_order_without_a_request(
+    rerank_endpoint: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "rerank_enabled", False)
+
+    assert run(rerank("query", ["first", "second", "third"])) == [1.0, 0.5, 1.0 / 3]
+    assert rerank_endpoint == []
+
+
 @pytest.mark.parametrize(
     ("results", "message"),
     [

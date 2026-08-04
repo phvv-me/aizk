@@ -8,6 +8,76 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Added
 
+- An operator console at `admin.phvv.me`, gated by one Logto role. `aizk-admin` joins `aizk-user`
+  as a second managed global role, carrying the same `control` API permission but never default,
+  and `admin auth apply` now reconciles it instead of deleting it as an obsolete managed role. A
+  new `admin auth roles` command prints every role under the managed prefix with the accounts
+  assigned to it, and `GET /api/me` reports `admin` so the browser app can show operator pages to
+  the people who hold the role. The console itself is a second Caddy site on 8082 in the existing
+  container, with `oauth2-proxy` authorizing every path against that role, Grafana under
+  `/grafana`, `/traces` reserved for a later tracing service, and the operator pages under
+  `/app/admin`. It is one hostname carrying paths rather than a name per tool because Cloudflare's
+  free certificate covers only first-level subdomains. Logto's own console moves to
+  `console.phvv.me`, since it cannot be served under a path.
+
+- `share` can select documents by question and can move instead of copy, so an agent no longer
+  needs a document ID it had no way to obtain. Recall now prints the source document's ID and
+  capture day under evidence grounded in a stored source, which makes the ordinary flow recall,
+  read the IDs, share. The result names every document it carried with its title and its copy in
+  the destination. `move` copies into the destination and then retires the private original, so
+  ordinary recall returns only the destination copy while the original's rows, bytes, and
+  `promoted_from` chain stay in place.
+
+  Only an explicit `documents` list ever writes. A `query` answers which of the caller's own
+  private documents it would select and writes nothing whatever else is passed with it, because a
+  question matches on ranked similarity rather than on intent and must not be able to hand a dozen
+  private notes to an organization in one call. Sharing a topic is therefore two steps, a query to
+  read the candidates and a second call naming the approved IDs. `move` alongside a query is
+  refused rather than quietly ignored, so a refusal can never read as a move that happened, and
+  `dry_run` previews an explicit list, which is worth doing before any move.
+
+  Both halves of a move commit in one transaction, so a failure can never leave a copy standing
+  without retiring what it copied. A share whose source was revised since an earlier share
+  refreshes that copy rather than reusing stale text, which is what keeps a move from retiring a
+  source whose destination still holds the previous draft. A query selection and a move both
+  require an organization destination and skip documents already standing there, since carrying a
+  scope onto itself would add one generation per repeat. A move only ever touches the caller's own
+  private documents, and repeating any of these calls is a no-op.
+
+### Changed
+
+- One source now stands for at most one promoted copy per destination scope set, enforced by the
+  new `uq_document_promotion_scope` partial unique index and a transaction lock, so two concurrent
+  shares can no longer both insert a destination. Migration `0006_document_promotion_identity`
+  installs it on PostgreSQL and `0002_document_promotion_identity` does the same on the separate
+  CockroachDB branch, both sorting existing scope arrays first so the index means set identity,
+  and both refusing to run while duplicate copies stand rather than leaving the build to fail
+  without naming them. The index also covers the `promoted_from` lookup every share performs.
+  Sharing now batches its source, standing-copy and fact loads into one statement each and claims
+  entities and facts through the batch APIs rather than one statement per row.
+- Revising a document and sharing it now queue on one lock named for the document, so a move can
+  no longer copy spans that a concurrent re-ingest has already replaced and then retire the source
+  holding the newer text. A batch also claims every stored original it will reach in one sorted
+  call before it starts, so two batches touching the same originals in opposite order cannot
+  deadlock. Refreshing a copy never inherits a retired source's expiry onto a live destination,
+  which would otherwise have retired the very copy the refresh brought up to date.
+- Recall packing prices the annotation lines it renders, so the document and resource lines an
+  evidence item carries are charged against the caller's token budget instead of overrunning it.
+- Recall packing fills the budget greedily in merit order instead of taking the longest prefix.
+  One oversized excerpt used to end the walk and discard everything ranked behind it, so a few
+  long source spans could spend a whole budget while short, well-ranked evidence was never
+  considered. Such an item is now stepped over and the walk continues, still in rank order and
+  still deterministic. A budget too small for even the best item returns that item trimmed with
+  a visible marker rather than returning nothing, its annotations being the floor it cannot go
+  under.
+- Recall drops a source excerpt whose span better-ranked evidence already speaks for, so an excerpt
+  and a fact distilled from it no longer both spend the budget saying one thing twice. Only the
+  excerpt side is ever dropped. A fact is one distinct statement and a span commonly yields several,
+  so every fact stands and an excerpt that outranks the facts from its span is kept along with them,
+  mild redundancy being the cheaper mistake than discarding statements. Nothing is weighed against a
+  different document, and a community or overview summary names no span and so is never dropped,
+  which keeps the mix of source excerpts and derived memories in a packed result intact.
+
 - A SvelteKit browser dashboard under `src/web` replaces the planned Reflex Python UI, served by
   a separate browser API service. `AizkAPI` verifies the same Logto bearer tokens as MCP and
   exposes profile, overview, recall, remember, upload, and organization management routes while
@@ -181,6 +251,42 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Fixed
 
+- Every conversion now names its OCR engine and languages, because the default read Chinese. aizk
+  sent `do_ocr=true` and nothing else, so Docling chose RapidOCR, whose bundled recognition model
+  set is Chinese and which maps requested languages onto only english, latin and chinese with no
+  Japanese set at all. Every scanned or image-region Japanese page therefore came back as
+  plausible but wrong CJK, and chunking, embedding and extraction all accepted it. `DoclingOptions`
+  now sends `ocr_engine`, `ocr_preset` and `ocr_lang` on every request, defaulting to `tesseract`
+  with `["jpn","eng"]` through `AIZK_DOCLING_OCR_ENGINE` and `AIZK_DOCLING_OCR_LANGUAGES`, and it
+  refuses an empty language list because an empty list restores the engine's own default.
+  `reconvert_scanned_documents` requeues every ready PDF and image so a corrected engine rewrites
+  what the wrong one read, and it shares one `ReconversionSweep` with the web-page sweep.
+
+  **Deploy requirement.** `quay.io/docling-project/docling-serve-cpu:v1.26.0` ships the tesseract
+  binary and `tesserocr` but only `eng.traineddata` and `osd.traineddata`. Asking it for `jpn+eng`
+  loads `eng` alone, logging `Failed loading language 'jpn'` while returning no error, so a
+  deployment that reads Japanese must extend the image, `RUN dnf install -y
+  tesseract-langpack-jpn`, or mount `jpn.traineddata` into `/usr/share/tesseract/tessdata/`. Until
+  then Japanese scans are read as English, which is wrong but visibly wrong instead of plausibly
+  wrong. EasyOCR is not an alternative at roughly seventy seconds per image on CPU. Run the
+  reconversion sweep only after the image carries the language data.
+
+- A preserved web page no longer floods recall with its own navigation. Converting an HTML page
+  kept the site header, menus, dialogs, and footer beside the article, and a GitHub project page
+  answered a question about a project plan with three chunks of sign-in links and pricing menus.
+  `WebBoilerplateCleaner` now runs inside `ArtifactProcessor.declutter`, after source-relative
+  links resolve and before the Markdown is stored or chunked, and only for an HTML original
+  fetched from an HTTP source URI. It measures every blank-line separated block by the characters
+  a reader actually reads and drops one only when prose value, link density, destination site,
+  block size and the page's own layout all say chrome, so a paper's reference list, a curated row
+  of external links and a documentation index of internal links all survive while a menu, a badge
+  row, a repeated link block or anything under a `Footer` heading goes. A chrome heading discards
+  its section only until the first block that reads like content, one sentence being enough, so a
+  short article introduction under a menu is never eaten.
+  `AIZK_ARTIFACT_BOILERPLATE_REMOVAL_ENABLED=false` restores the raw conversion, and
+  `reconvert_web_pages` requeues pages converted before this landed so their stored text and
+  chunks are rewritten, committing each page's move back to `queued` before its task exists so a
+  worker that finishes mid-sweep is never overwritten.
 - Blank recall reads the caller's whole visible union while blank writes still choose the personal
   singleton scope.
 - Entity profiles rank by profile-summary embedding rather than entity-name embedding.

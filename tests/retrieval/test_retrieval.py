@@ -12,7 +12,6 @@ from id_factory import uuid5, uuid5s, uuid7, uuid8
 from pydantic import UUID5, UUID7
 from sqlalchemy import Row, update
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.dialects.postgresql import Range
 from sqlmodel import select
 from sqlmodel.sql.expression import Select
 
@@ -567,7 +566,7 @@ def test_fresh_and_frequent_claims_outrank_stale_twins_at_equal_distance(
                     last_accessed=accessed,
                     access_count=count,
                 )
-                claim.recorded = Range(recorded, None, bounds="[)")
+                claim.recorded_from = recorded
                 opened.add(claim)
         rows = await retrieve(user, basis())
         return [row._mapping["line"] for row in rows if "fact" in row._mapping["line"]]
@@ -644,6 +643,22 @@ def test_mention_matching_compiles_trigram_fuzz_only_when_enabled(fuzzy: bool) -
 
     assert ("similarity(" in sql) is fuzzy
     assert "mention_entity" in sql
+
+
+@pytest.mark.parametrize("owned", [True, False], ids=["owned", "everything-visible"])
+def test_an_owned_query_narrows_every_source_ranking_before_it_cuts(owned: bool) -> None:
+    context = QueryContext(dimensions=settings.embed_dim, fuzzy=False, owned=owned)
+    sql = str(
+        build_recall_statement(context, Plan.maximal()).compile(dialect=postgresql.dialect())
+    )
+    dense, lexical, titled = (
+        sql[sql.index(cte) :] for cte in ("dense_ranked", "lexical_ranked", "title_chunk")
+    )
+
+    # the predicate sits inside each ranking, so its own LIMIT is already spent on eligible
+    # documents rather than being filtered once the cut has happened
+    assert (sql.count("qscopes") == 3) is owned
+    assert all(("qscopes" in ranking) is owned for ranking in (dense, lexical, titled))
 
 
 def test_recall_reranks_evidence_between_the_candidate_and_packing_phases(

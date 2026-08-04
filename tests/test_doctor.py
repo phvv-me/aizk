@@ -7,22 +7,26 @@ import dbutil
 import pytest
 from factories import seed_artifact
 from id_factory import uuid7
+from pydantic import UUID7
+from sqlmodel import delete
 
 from aizk.background.jobs.conversion import DoclingConversionJob
 from aizk.background.jobs.models import ArtifactConversionJob
 from aizk.background.queue import Queue
-from aizk.config import settings
+from aizk.config import DatabaseBackend, settings
 from aizk.ops.doctor import (
     AizkDoctor,
     ConversionDiagnostics,
     ConversionQueueFailure,
     DoctorSummary,
+    PortableQueueDiagnostics,
     QueueDiagnostics,
     doctor,
     error_identity,
 )
 from aizk.store import Artifact
 from aizk.store.identity import User
+from aizk.store.models.tables.queue import QueueEvent, QueueTask
 
 NOW = datetime(2026, 7, 20, 1, 0, tzinfo=UTC)
 
@@ -571,3 +575,130 @@ def test_conversion_diagnostic_classifies_all_durable_states() -> None:
     assert failed.age_seconds == 0
     assert failed.error is not None
     assert "secret" not in failed.model_dump_json()
+
+
+def test_portable_queue_diagnostics_group_leases_failures_and_conversion_jobs(
+    migrated_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+    owner = settings.system_user_id
+    failed_content, queued_content, picked_content = uuid7(), uuid7(), uuid7()
+
+    def conversion_payload(content_id: UUID7) -> bytes:
+        return ArtifactConversionJob(
+            artifact_content_id=content_id,
+            scopes=frozenset({owner}),
+        ).encode()
+
+    async def run() -> None:
+        async with User.system().owner as session:
+            await session.exec(delete(QueueEvent))
+            await session.exec(delete(QueueTask))
+            tasks = (
+                QueueTask(
+                    entrypoint=DoclingConversionJob.entrypoint,
+                    payload=conversion_payload(failed_content),
+                    status="failed",
+                    attempts=5,
+                    available_at=NOW,
+                    updated_at=NOW - timedelta(minutes=20),
+                    error_type="ValueError",
+                    error_message="private conversion text",
+                ),
+                QueueTask(
+                    entrypoint=DoclingConversionJob.entrypoint,
+                    payload=conversion_payload(queued_content),
+                    status="queued",
+                    available_at=NOW,
+                ),
+                QueueTask(
+                    entrypoint=DoclingConversionJob.entrypoint,
+                    payload=conversion_payload(picked_content),
+                    status="picked",
+                    available_at=NOW,
+                    heartbeat_at=NOW - timedelta(minutes=1),
+                    updated_at=NOW - timedelta(minutes=2),
+                ),
+                QueueTask(
+                    entrypoint=DoclingConversionJob.entrypoint,
+                    payload=b"invalid",
+                    status="failed",
+                    attempts=2,
+                    available_at=NOW,
+                    error_type="ValueError",
+                    error_message="private conversion text",
+                ),
+                QueueTask(
+                    entrypoint="stale_work",
+                    payload=b"{}",
+                    status="picked",
+                    attempts=2,
+                    available_at=NOW,
+                    heartbeat_at=NOW - timedelta(hours=2),
+                    updated_at=NOW - timedelta(hours=2),
+                ),
+                QueueTask(
+                    entrypoint="long_work",
+                    payload=b"{}",
+                    status="picked",
+                    attempts=1,
+                    available_at=NOW,
+                    heartbeat_at=NOW - timedelta(minutes=1),
+                    updated_at=NOW - timedelta(hours=2),
+                ),
+            )
+            session.add_all(tasks)
+            await session.flush()
+            session.add(
+                QueueEvent(
+                    task_id=tasks[0].id,
+                    entrypoint=DoclingConversionJob.entrypoint,
+                    status="failed",
+                    attempts=5,
+                    error_type="ValueError",
+                    error_message="private conversion text",
+                    created_at=NOW - timedelta(minutes=10),
+                )
+            )
+
+        diagnostics = PortableQueueDiagnostics(
+            timedelta(minutes=15),
+            timedelta(hours=1),
+            timedelta(hours=24),
+            20,
+            False,
+        )
+        summary, failures, issues, history, conversion_failures, activity = await diagnostics.load(
+            NOW
+        )
+        assert summary.current_failed_jobs == 2
+        assert summary.stale_picked_jobs == 1
+        assert summary.long_running_picked_jobs == 1
+        assert summary.recent_exception_events == 1
+        assert {issue.kind for issue in issues} == {"stale_picked", "long_running_picked"}
+        assert {group.entrypoint for group in failures} == {DoclingConversionJob.entrypoint}
+        assert failures[0].count == 2
+        assert "admin queue retry conversion" in failures[0].remediation
+        assert history[0].count == 1
+        assert set(conversion_failures) == {UUID(str(failed_content))}
+        assert activity == {
+            UUID(str(queued_content)): "queued",
+            UUID(str(picked_content)): "picked",
+        }
+        successful = tasks[1].model_copy(update={"status": "successful"})
+        _, picked_then_successful = diagnostics.conversion_jobs([tasks[2], successful])
+        assert picked_then_successful == {UUID(str(picked_content)): "picked"}
+        serialized = str((failures, issues, history, conversion_failures))
+        assert "private conversion text" not in serialized
+
+        report = await AizkDoctor(
+            timedelta(minutes=15),
+            timedelta(hours=1),
+            timedelta(hours=24),
+            20,
+        ).diagnose(NOW)
+        assert report.healthy is False
+        assert report.summary.current_failed_jobs == 2
+
+    dbutil.run(run())

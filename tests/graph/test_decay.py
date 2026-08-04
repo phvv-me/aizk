@@ -8,7 +8,6 @@ from hypothesis import strategies as st
 from id_factory import uuid5
 from pydantic import UUID5, UUID7
 from sqlalchemy import text
-from sqlalchemy.dialects.postgresql import Range
 
 from aizk.config import settings
 from aizk.graph.decay import decay
@@ -27,7 +26,7 @@ def aged_claim(now: datetime, age_days: float, access_count: int) -> Fact.Claim:
         content_id=uuid5(),
         created_by=uuid5(),
         last_accessed=now - timedelta(days=age_days),
-        recorded=Range(now - timedelta(days=age_days), None),
+        recorded_from=now - timedelta(days=age_days),
         access_count=access_count,
     )
 
@@ -59,7 +58,7 @@ async def claim_state(owner: UUID5 | UUID7, claim: UUID5 | UUID7) -> tuple[bool,
     async with dbutil.actor(owner) as session:
         row = await session.exec(
             text(
-                "SELECT upper_inf(recorded), attributes::text ILIKE '%decay%' "
+                "SELECT recorded_to IS NULL, attributes::text ILIKE '%decay%' "
                 "FROM fact_claim WHERE id = :id"
             ),
             params={"id": claim},
@@ -89,7 +88,7 @@ async def plant_aged(
             content_id=content,
             created_by=owner,
             scopes=[owner],
-            recorded=Range(now - timedelta(days=age_days), None),
+            recorded_from=now - timedelta(days=age_days),
             last_accessed=now if accessed else None,
             access_count=count,
         )

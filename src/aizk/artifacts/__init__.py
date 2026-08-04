@@ -1,3 +1,4 @@
+from .boilerplate import MarkdownBlock, WebBoilerplateCleaner
 from .models import (
     ArtifactDocument,
     ArtifactReceipt,
@@ -20,7 +21,9 @@ __all__ = [
     "DirectImageEnricher",
     "IntegrityReport",
     "ArtifactRepository",
+    "MarkdownBlock",
     "OriginalArtifact",
     "OriginalDescription",
     "VisualModality",
+    "WebBoilerplateCleaner",
 ]

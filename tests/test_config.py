@@ -3,7 +3,7 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from aizk.config import Settings, configure_logging
+from aizk.config import DatabaseBackend, Settings, configure_logging
 
 type PolicyValue = str | set[str] | dict[str, str] | dict[str, set[str]]
 
@@ -29,10 +29,45 @@ _WEB_DEPENDENCIES = tuple(_COMPLETE_WEB)
 
 def test_default_dsns_are_built_from_host_port_db_and_passwords() -> None:
     cfg = Settings(
-        db_host="h", db_port=6000, db_name="mem", app_password="ap", admin_password="op"
+        db_host="h",
+        db_port=6000,
+        db_name="mem",
+        app_user="runtime",
+        app_password="ap%word",
+        admin_user="migration",
+        admin_password="op@word",
+        db_ssl_mode="verify-full",
+        db_ssl_root_certificate_path="/certs/root.crt",
     )
-    assert cfg.database_url == "postgresql+asyncpg://aizk_app:ap@h:6000/mem"
-    assert cfg.admin_database_url == "postgresql+asyncpg://aizk_admin:op@h:6000/mem"
+    assert cfg.database_url == (
+        "postgresql+asyncpg://runtime:ap%25word@h:6000/mem"
+        "?sslmode=verify-full&sslrootcert=%2Fcerts%2Froot.crt"
+    )
+    assert cfg.admin_database_url == (
+        "postgresql+asyncpg://migration:op%40word@h:6000/mem"
+        "?sslmode=verify-full&sslrootcert=%2Fcerts%2Froot.crt"
+    )
+
+
+def test_cockroach_defaults_and_driver_dsns_use_the_compatible_schemes() -> None:
+    cfg = Settings(
+        database_backend=DatabaseBackend.cockroachdb,
+        db_host="roach",
+        db_port=26257,
+        db_name="memory",
+    )
+
+    assert cfg.database_url.startswith("cockroachdb+asyncpg://")
+    assert cfg.admin_database_url.startswith("cockroachdb+asyncpg://")
+    assert cfg.asyncpg_dsn.startswith("postgresql://")
+    assert cfg.admin_asyncpg_dsn.startswith("postgresql://")
+    assert cfg.vector_index_backend == "cspann"
+    assert DatabaseBackend.cockroachdb.sqlalchemy_scheme == "cockroachdb+asyncpg"
+
+
+def test_portable_queue_rejects_a_heartbeat_outside_its_lease() -> None:
+    with pytest.raises(ValidationError, match="heartbeat"):
+        Settings(queue_heartbeat_seconds=30, queue_lease_seconds=30)
 
 
 @pytest.mark.parametrize("minimum_savings", [-0.01, 1.0])
@@ -153,6 +188,13 @@ def test_public_deployment_requires_an_https_api_origin() -> None:
         Settings.model_validate(_COMPLETE_LOGTO | {"api_public_url": "http://api.test"})
 
 
+def test_text_only_public_deployment_does_not_require_an_upload_api() -> None:
+    configuration = _COMPLETE_LOGTO | {"artifact_ingest_enabled": False}
+    configuration.pop("api_public_url")
+
+    assert Settings.model_validate(configuration).api_public_url is None
+
+
 def test_complete_web_configuration_derives_the_exact_callback() -> None:
     cfg = Settings(**_COMPLETE_WEB)
     assert cfg.web_callback_url == "https://memory.test/auth/sign-in-callback"
@@ -211,6 +253,14 @@ def test_web_auth_fails_closed_when_any_dependency_is_missing(missing: set[str])
             "at least 1 character",
         ),
         (
+            {"logto_managed_role_prefix": "aizk-", "logto_admin_role": "operator"},
+            "logto_admin_role must use",
+        ),
+        (
+            {"logto_admin_role": "aizk-user"},
+            "must differ from logto_user_role",
+        ),
+        (
             {
                 "logto_organization_roles": {
                     "admin": "Manage",
@@ -253,6 +303,8 @@ def test_web_auth_fails_closed_when_any_dependency_is_missing(missing: set[str])
         "empty-prefix",
         "blank-prefix",
         "blank-user-role",
+        "unmanaged-admin-role",
+        "admin-role-equals-user-role",
         "role-without-permissions",
         "missing-scope-description",
         "unknown-role",

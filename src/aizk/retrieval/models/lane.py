@@ -1,16 +1,18 @@
 import abc
 from collections.abc import Callable
+from datetime import datetime
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING, cast
 
 from patos import FrozenModel, sql
-from pgvector.sqlalchemy import HALFVEC
 from pydantic import UUID5, UUID7
-from sqlalchemy import ColumnElement, Float, Integer, Text, bindparam, literal
+from sqlalchemy import ColumnElement, Float, Integer, Text, Uuid, bindparam, literal
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.selectable import Select
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlmodel import select
+
+from ...store.vector import CosineVector, cosine_distance
 
 if TYPE_CHECKING:
     from patos.sql import Expr
@@ -28,12 +30,15 @@ type LaneRow = tuple[
     str | None,
     UUID7 | None,
     UUID7 | None,
+    UUID7 | None,
+    datetime | None,
     UUID5 | None,
     bool,
 ]
 type LaneSelect = Select[LaneRow]
 type OptionalUUID7Column = ColumnElement[UUID7] | ColumnElement[UUID7 | None] | None
 type OptionalStrColumn = ColumnElement[str] | ColumnElement[str | None] | None
+type OptionalDatetimeColumn = ColumnElement[datetime] | ColumnElement[datetime | None] | None
 
 _provided_uuid7 = cast(
     "Callable[[OptionalUUID7Column], ColumnElement[UUID7 | None]]",
@@ -43,12 +48,16 @@ _provided_str = cast(
     "Callable[[OptionalStrColumn], ColumnElement[str | None]]",
     sql.provided,
 )
+_provided_datetime = cast(
+    "Callable[[OptionalDatetimeColumn], ColumnElement[datetime | None]]",
+    sql.provided,
+)
 
 
 class QueryContext(FrozenModel):
     """One query's statement-shaping knobs and the named binds every lane draws from.
 
-    Only the two fields shape the SQL tree, which makes the frozen context half of the
+    Only the fields shape the SQL tree, which makes the frozen context half of the
     statement cache key beside the plan. The bind properties mint fresh `bindparam`
     objects on each read; SQLAlchemy unifies them by name at compile time, so every
     lane reading the same property lands on one execution parameter.
@@ -56,11 +65,12 @@ class QueryContext(FrozenModel):
 
     dimensions: int
     fuzzy: bool
+    owned: bool = False
 
     @property
     def vector(self) -> ColumnElement[list[float]]:
         """The query embedding bind, typed to this context's vector width."""
-        return bindparam("qvec", type_=HALFVEC(self.dimensions))
+        return bindparam("qvec", type_=CosineVector(self.dimensions))
 
     @property
     def k(self) -> ColumnElement[int]:
@@ -81,6 +91,20 @@ class QueryContext(FrozenModel):
     def entities(self) -> ColumnElement[list[str]]:
         """The lowered entity names bind the graph expansion seeds from."""
         return bindparam("qentities", type_=cast("TypeEngine[list[str]]", ARRAY(Text)))
+
+    @property
+    def scope_set(self) -> ColumnElement[list[UUID5]]:
+        """The exact scope set an `owned` query restricts its sources to.
+
+        The bind travels as text and casts in the statement because the parameter type the
+        caller may pass is the portable one every other array bind already uses.
+        """
+        return cast(
+            "ColumnElement[list[UUID5]]",
+            bindparam("qscopes", type_=cast("TypeEngine[list[str]]", ARRAY(Text))).cast(
+                ARRAY(Uuid())
+            ),
+        )
 
 
 class Lane(FrozenModel, abc.ABC):
@@ -122,6 +146,8 @@ class Lane(FrozenModel, abc.ABC):
         source_uri: ColumnElement[str | None] | None = None,
         artifact_id: ColumnElement[UUID7 | None] | None = None,
         artifact_content_id: ColumnElement[UUID7 | None] | None = None,
+        document_id: ColumnElement[UUID7] | ColumnElement[UUID7 | None] | None = None,
+        document_created_at: OptionalDatetimeColumn = None,
         created_by: ColumnElement[UUID5] | None = None,
         direct: ColumnElement[bool] | None = None,
     ) -> LaneSelect:
@@ -142,6 +168,8 @@ class Lane(FrozenModel, abc.ABC):
                 _provided_str(source_uri).label("source_uri"),
                 _provided_uuid7(artifact_id).label("artifact_id"),
                 _provided_uuid7(artifact_content_id).label("artifact_content_id"),
+                _provided_uuid7(document_id).label("document_id"),
+                _provided_datetime(document_created_at).label("document_created_at"),
                 sql.provided(created_by).label("created_by"),
                 (literal(False) if direct is None else direct).label("direct"),
             ),
@@ -160,7 +188,7 @@ class Lane(FrozenModel, abc.ABC):
         floor: ColumnElement[float],
     ) -> LaneSelect:
         """This lane ranked by embedding distance, floored, ordered, and limited."""
-        distance = embedding @ vector
+        distance = cosine_distance(embedding, vector)
         return (
             self.row(
                 evidence_id=evidence_id,

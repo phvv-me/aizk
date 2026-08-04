@@ -29,9 +29,9 @@ async def seed_live_claim(owner: UUID5 | UUID7, statement: str, days_old: float)
         {"i": content, "s": subject, "st": statement},
     )
     await dbutil.admin_exec(
-        "INSERT INTO fact_claim (id, content_id, created_by, scopes, recorded) "
+        "INSERT INTO fact_claim (id, content_id, created_by, scopes, recorded_from) "
         "VALUES (:i, :c, :o, CAST(:scopes AS uuid[]), "
-        "tstzrange(now() - make_interval(days => :d), NULL))",
+        "now() - make_interval(days => :d))",
         {"i": claim, "c": content, "o": owner, "scopes": [str(owner)], "d": int(days_old)},
     )
     return claim
