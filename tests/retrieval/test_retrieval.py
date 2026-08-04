@@ -645,6 +645,22 @@ def test_mention_matching_compiles_trigram_fuzz_only_when_enabled(fuzzy: bool) -
     assert "mention_entity" in sql
 
 
+@pytest.mark.parametrize("owned", [True, False], ids=["owned", "everything-visible"])
+def test_an_owned_query_narrows_every_source_ranking_before_it_cuts(owned: bool) -> None:
+    context = QueryContext(dimensions=settings.embed_dim, fuzzy=False, owned=owned)
+    sql = str(
+        build_recall_statement(context, Plan.maximal()).compile(dialect=postgresql.dialect())
+    )
+    dense, lexical, titled = (
+        sql[sql.index(cte) :] for cte in ("dense_ranked", "lexical_ranked", "title_chunk")
+    )
+
+    # the predicate sits inside each ranking, so its own LIMIT is already spent on eligible
+    # documents rather than being filtered once the cut has happened
+    assert (sql.count("qscopes") == 3) is owned
+    assert all(("qscopes" in ranking) is owned for ranking in (dense, lexical, titled))
+
+
 def test_recall_reranks_evidence_between_the_candidate_and_packing_phases(
     owner: UUID5 | UUID7,
     fake_embedder: RecordingEmbedder,

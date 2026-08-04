@@ -15,6 +15,10 @@
 - **{{ labels[item.provenance.value] }}**{{ " from scope `" ~ (item.scopes | map(attribute="name") | join(" ∩ ")) ~ "`" if item.scopes else "" }}
 
     {{ item.text | replace("\n", "\n    ") }}
+{% if item.document_note %}
+
+    Document `{{ item.document_note }}`
+{% endif %}
 {% if item.resource_uri %}
 
     Resource `{{ item.resource_uri }}`

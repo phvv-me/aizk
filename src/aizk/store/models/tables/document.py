@@ -1,9 +1,10 @@
+from collections.abc import Collection
 from datetime import datetime
 from typing import ClassVar, Self
 
 from patos import sql
 from patos.sql import Column as C
-from pydantic import UUID7, UUID8
+from pydantic import UUID5, UUID7, UUID8
 from sqlalchemy import Column as SAColumn
 from sqlalchemy import (
     DateTime,
@@ -16,12 +17,14 @@ from sqlalchemy import (
     column,
     func,
     or_,
+    update,
 )
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import ScalarSelect
 from sqlmodel import Field, Relationship, select
-from sqlmodel.sql.expression import SelectOfScalar
+from sqlmodel.sql.expression import Select, SelectOfScalar
 
+from ...engine import Session
 from ...mixins import Id, Scoped, TableBase, Timestamped
 from .artifact import Artifact
 from .chunk import Chunk
@@ -44,6 +47,16 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
             postgresql_where=(column("subject_type").is_not(None) & column("title").is_not(None)),
         ),
         UniqueConstraint("source_uri", "scopes", name="uq_document_source_scope"),
+        # One source may stand for at most one copy per destination. The database owns that
+        # rule because two concurrent shares would otherwise both find no standing copy and
+        # both insert one. It also indexes the `promoted_from` lookup every share performs.
+        Index(
+            "uq_document_promotion_scope",
+            "promoted_from",
+            "scopes",
+            unique=True,
+            postgresql_where=column("promoted_from").is_not(None),
+        ),
         ForeignKeyConstraint(
             ("artifact_id", "artifact_content_id"),
             ("artifact_content.artifact_id", "artifact_content.id"),
@@ -115,6 +128,49 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
     def is_active(cls) -> ColumnElement[bool]:
         """Whether a source has no expiry or remains valid at database time."""
         return or_(cls.expires_at.is_(None), cls.expires_at > func.now())
+
+    @classmethod
+    def shareable(
+        cls, document_ids: Collection[UUID7], owner: UUID5 | None = None
+    ) -> Select[tuple[UUID7, str | None, list[UUID5]]]:
+        """The named documents a share may carry, with the title and scope set it judges by.
+
+        Row security already hides what the caller cannot read, so an unrestricted selection
+        is every visible named document. `owner` narrows it to the caller's own private
+        documents, the guard a query-driven or moving share needs: a broad question must not
+        sweep an organization's documents somewhere else, and a move must never pull evidence
+        out from under the other members of a shared scope. An already retired original stays
+        selectable, which is what lets a repeated move settle on the copy it already made.
+        The scope set travels back so the caller can drop a document that already stands in
+        the destination, since promoting one into its own scope would only breed generations.
+        """
+        statement = select(cls.id, cls.title, cls.scopes).where(cls.id.in_(document_ids))
+        if owner is None:
+            return statement
+        return statement.where(cls.scopes == [owner])
+
+    def active_at(self, moment: datetime) -> bool:
+        """Whether this source still holds at `moment`, the Python twin of `is_active`."""
+        return self.expires_at is None or self.expires_at > moment
+
+    @classmethod
+    async def retire(cls, session: Session, document_ids: Collection[UUID7]) -> list[UUID7]:
+        """Expire moved originals now so ordinary recall stops returning them.
+
+        Expiry is the engine's one erasure for a source: every chunk ranking joins through
+        `is_active`, so an expired document leaves recall in the same statement that keeps
+        its rows, its bytes, and the `promoted_from` chain intact for provenance and for a
+        move back. The guard leaves an already-expired original alone, which is what makes
+        repeating a move a no-op.
+        """
+        retired = await session.exec(
+            update(cls)
+            .where(cls.id.in_(document_ids), cls.is_active())
+            .values(expires_at=func.now())
+            .returning(cls.id)
+            .execution_options(synchronize_session=False)
+        )
+        return [row[0] for row in retired]
 
     @classmethod
     def named_in_query(cls) -> ColumnElement[bool]:

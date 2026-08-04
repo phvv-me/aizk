@@ -29,6 +29,12 @@ class Scoped(sql.Model):
     read_through: ClassVar[str | None] = None
 
     created_by = sql.Field(UUID5, index=True)
+    # A scope set is stored as an ordered array, so equality and any unique index over it
+    # only mean set identity while every writer sorts. Every writer does: the scope set
+    # always arrives from `User.write_scope` or a `sorted(...)` at the call site, and
+    # migration `0006_document_promotion_identity` sorts the rows written before that
+    # invariant was relied upon. A row inserted around the ORM would break it, which is why
+    # raw inserts into scoped tables belong in tests and migrations alone.
     scopes = sql.Field(
         list[UUID5],
         min_length=1,

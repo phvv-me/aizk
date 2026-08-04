@@ -129,7 +129,8 @@ async def promote(document: str, to_scopes: str, user_id: UUID5 | None = None) -
     target = settings.scope_ids(to_scopes)
     authority = frozenset((actor, *target))
     user = User.authorized(actor, read=authority, write=authority)
-    return await graph.promote([TypeAdapter(UUID7).validate_python(document)], target, user)
+    promoted = await graph.promote([TypeAdapter(UUID7).validate_python(document)], target, user)
+    return sum(promotion.changed for promotion in promoted)
 
 
 async def ingest(path: str, scopes: str | None = None, user_id: UUID5 | None = None) -> int:

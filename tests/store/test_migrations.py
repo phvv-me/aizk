@@ -163,7 +163,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                 }
                 assert all(forced.values())
                 assert "(document_id, scopes) IN" in chunk_check
-                assert revision == "0005_monthly_quota"
+                assert revision == "0006_document_promotion_identity"
             finally:
                 await engine.dispose()
         finally:

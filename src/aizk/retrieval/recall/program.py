@@ -1,3 +1,4 @@
+from datetime import datetime
 from functools import cache
 from typing import cast
 
@@ -20,6 +21,8 @@ type RecallRow = tuple[
     str | None,
     UUID7 | None,
     UUID7 | None,
+    UUID7 | None,
+    datetime | None,
     UUID5 | None,
     bool,
 ]
@@ -78,6 +81,8 @@ def ordered(lanes: list[LaneSelect]) -> RecallSelect:
             candidates.c.source_uri,
             candidates.c.artifact_id,
             candidates.c.artifact_content_id,
+            candidates.c.document_id,
+            candidates.c.document_created_at,
             candidates.c.created_by,
             candidates.c.direct,
         )

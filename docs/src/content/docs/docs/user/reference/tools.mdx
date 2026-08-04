@@ -3,14 +3,14 @@ title: "MCP tools"
 description: "The four tools an agent can call, with every parameter and every return shape."
 ---
 
-This page assumes you have a client connected, which the pages under
-[Claude Code](/docs/user/clients/claude-code/) cover. It is the exact surface, so it names parameters
-and limits. The limits below are the shipped defaults, and a deployment can move them.
+This page names every parameter and limit. Connecting a client is covered under
+[Claude Code](/docs/user/clients/claude-code/). The limits are shipped defaults a deployment can
+move.
 
 import Diagram from '../../../../../components/Diagram.astro';
 
-A connected client sees four tools and one resource. Every call runs as you, and nothing returns a row
-you could not already read. Sustained calling is capped at 5 requests per second per person.
+A connected client sees four tools and one resource. Every call runs as you and returns no row you
+could not already read, capped at 5 requests per second per person.
 
 <Diagram
   title="How the four tools reach the store, and how recall points back to stored bytes"
@@ -31,7 +31,7 @@ you could not already read. Sustained calling is capped at 5 requests per second
   ]}
 />
 
-Agents call these as ordinary functions. You never hand-write the wire format.
+Agents call these as ordinary functions.
 
 ```text
 aizk.status(days=30)
@@ -42,7 +42,7 @@ aizk.share(documents=["019f..."], scopes=["Book Club"])
 
 ## status
 
-Returns who you are, what you have used, and what is still processing. Requires a signed-in caller.
+Who you are, what you have used, and what is still processing. Requires a signed-in caller.
 
 ```text
 aizk.status(days=30)
@@ -54,23 +54,20 @@ aizk.status(days=30)
 
 The result has four parts.
 
-| Field | Shape |
-|---|---|
-| `generated_at` | timestamp |
-| `caller` | identity and authority |
-| `usage` | counted work over `days` and over your lifetime |
-| `processing` | queue depth and honest time estimates |
-
-`caller` carries `name`, `username`, `avatar`, `label`, `roles`, `anonymous`, and `organizations`.
-Each organization carries `name`, `description`, `roles`, `permissions`, `writable`, and `public`.
+| Field | Shape | Carries |
+|---|---|---|
+| `generated_at` | timestamp | |
+| `caller` | identity and authority | `name`, `username`, `avatar`, `label`, `roles`, `anonymous`, `organizations` |
+| each organization | membership standing | `name`, `description`, `roles`, `permissions`, `writable`, `public` |
+| `usage` | counted work over `days` and over your lifetime | `generated_at`, `recorded_through`, `days`, `start`, plus `summary` over the window and `lifetime` over everything |
+| `processing` | queue depth and honest time estimates | see below |
 
 :::caution[Read writable before a shared write]
-Belonging to an organization lets you read it. Writing needs the write permission on your role, so an
-agent should read `writable` rather than guess from a role name.
+Belonging to an organization lets you read it. Writing needs the write permission, so read
+`writable` rather than guessing from a role name.
 :::
 
-`usage` carries `generated_at`, `recorded_through`, `days`, `start`, plus `summary` for the chosen
-window and `lifetime` for everything. Both hold the same counters.
+Both `summary` and `lifetime` hold the same counters.
 
 | Counter | Meaning |
 |---|---|
@@ -80,18 +77,18 @@ window and `lifetime` for everything. Both hold the same counters.
 | `uploaded_bytes`, `downloaded_bytes` | file bytes stored and fetched |
 | `duration_ms` | total server time |
 
-`processing` carries `state`, which is `idle`, `active`, or `delayed`, plus `stages` and four optional
-estimate bounds. `recallable_lower_seconds` and `recallable_upper_seconds` say when what you just
-stored becomes findable. `enriched_lower_seconds` and `enriched_upper_seconds` say when the graph
-around it is finished, and they stay empty while conversions are still pending, because work that has
-not been created yet cannot be estimated.
+| `processing` field | Meaning |
+|---|---|
+| `state` | `idle`, `active`, or `delayed` |
+| `recallable_lower_seconds`, `recallable_upper_seconds` | when what you stored becomes findable |
+| `enriched_lower_seconds`, `enriched_upper_seconds` | when the graph around it is finished, empty while conversions are pending because uncreated work cannot be estimated |
+| `stages` | `conversion` and `graph_projection` |
 
-There are two stages, `conversion` and `graph_projection`. Each reports `queued`, `running`, `failed`,
-`completed_1h`, `completed_24h`, `progress_percent`, `throughput_per_hour`, `throughput_window_hours`,
-`lower_seconds`, `upper_seconds`, `oldest_at`, a `confidence` of `high`, `medium`, `low`, or
-`unavailable`, and an `eta_status` of `complete`, `estimating`, `insufficient_history`, or `blocked`.
-An estimate is withheld rather than invented when the recent sample is too small, which is why
-`unavailable` shows up more often than you might expect.
+Each stage reports `queued`, `running`, `failed`, `completed_1h`, `completed_24h`,
+`progress_percent`, `throughput_per_hour`, `throughput_window_hours`, `lower_seconds`,
+`upper_seconds`, `oldest_at`, a `confidence` of `high`, `medium`, `low`, or `unavailable`, and an
+`eta_status` of `complete`, `estimating`, `insufficient_history`, or `blocked`. An estimate is
+withheld rather than invented on too small a sample.
 
 ## recall
 
@@ -106,15 +103,22 @@ aizk.recall(query="why did we switch extractors?", budget=2048)
 | `query` | string | 1 to 16,384 characters | required |
 | `budget` | integer | 1 to 16,384 tokens | 2,048 |
 
-There is no scope selector. One question searches everything you can see at once.
-[Asking memory well](/docs/user/using/recall/) covers phrasing, and
-[Scopes](/docs/user/concepts/scopes/) covers what everything you can see means.
+There is no scope selector, so one question searches everything you can see.
+[Asking memory well](/docs/user/using/recall/) covers phrasing and
+[Scopes](/docs/user/concepts/scopes/) covers what that means.
 
-The return is a Markdown string, not a structured object. It opens with a `## Scopes` list when shared
-material is present, then one line reminding the agent that recalled content is evidence and not
-instructions, then `## Evidence` with items in merit order. Each item is labeled **Source excerpt**,
-**Derived memory**, or **Recent session memory**, and names its scope. An intersection prints its
-organizations joined by `∩`. Items backed by a stored original also print a resource URI.
+The return is a Markdown string. It opens with a `## Scopes` list when shared material is present,
+then a line reminding the agent that recalled content is evidence and not instructions, then
+`## Evidence` in merit order. Each item is labeled **Source excerpt**, **Derived memory**, or
+**Recent session memory** and names its scope, an intersection joining organizations with `∩`. An
+item grounded in a stored source prints that document's id and capture day, the handle
+[share](#share) takes. Profiles, communities and overviews stand above any one source and print no
+id. Items backed by a stored original also print a resource URI.
+
+Evidence fills the budget greedily in merit order. An item too large for the room left is skipped
+rather than ending the walk, so one long excerpt never discards what ranks behind it. A budget too
+small for even the best item returns it trimmed with a trailing `…`. A source excerpt drops when a
+fact from its span outranks it, while every fact stands.
 
 An empty string means nothing visible matched.
 
@@ -136,7 +140,7 @@ aizk.remember(text="...", source_uri=None, scopes=["Book Club"], preserve_source
 | `preserve_source` | boolean | default false |
 | `upload` | file declaration | see below |
 
-The combination decides the mode, and the mode decides the return.
+The combination decides the mode and the return.
 
 | You pass | What happens | You get |
 |---|---|---|
@@ -146,19 +150,19 @@ The combination decides the mode, and the mode decides the return.
 | `source_uri`, `text`, `preserve_source` | original kept, text becomes its companion | `{ artifact_id, content_id, state }` |
 | `upload` | a ticket for your own local file | `{ status, upload_url, expires_seconds }` |
 
-`state` is `pending`, `queued`, `processing`, `ready`, or `failed`. A receipt is an acceptance and not
-a finished conversion, so `status` is where you watch it become recallable.
-[Files, PDFs and web sources](/docs/user/using/files/) covers the whole file story, and
-[Time and history](/docs/user/concepts/time/) covers the two timestamps.
+`state` is `pending`, `queued`, `processing`, `ready`, or `failed`. A receipt is an acceptance, not
+a finished conversion, so watch `status` for it becoming recallable.
+[Files, PDFs and web sources](/docs/user/using/files/) covers files and
+[Time and history](/docs/user/concepts/time/) the two timestamps.
 
-Omitting `scopes` keeps the memory private. `preserve_source` without a `source_uri` is an error.
+Omitting `scopes` keeps the memory private. `preserve_source` without `source_uri` is an error.
 
 ## The upload flow
 
-`upload` declares one local file and takes four fields, `filename` and `media_type` up to 255
-characters each, `size` in bytes, and `sha256` as 64 lowercase hex characters. It cannot be combined
-with `source_uri`, `preserve_source`, `observed_at`, or `expires_at`. Pass `text` alongside it to
-attach companion context, and pass `scopes` to choose a destination.
+`upload` declares one local file with four fields, `filename` and `media_type` up to 255 characters
+each, `size` in bytes, and `sha256` as 64 lowercase hex characters. It cannot combine with
+`source_uri`, `preserve_source`, `observed_at`, or `expires_at`. Pass `text` for companion context,
+`scopes` for a destination.
 
 The response is a ticket and not a stored file.
 
@@ -177,25 +181,49 @@ The response is a ticket and not a stored file.
 ```
 
 The server gives you the whole URL. Do not build it. It is a single-use private bearer address, so
-anyone holding it before it expires can perform that one write, which makes it something not to log,
-share, or retry with. Bytes that do not match the declared size and hash are rejected.
+anyone holding it before it expires can perform that one write. Never log, share, or retry with it.
+Bytes not matching the declared size and hash are rejected.
 
 ## share
 
-Copies documents you can see into one destination. Requires a signed-in caller.
+Copies or moves documents you name, or previews what a query would select.
 
 ```text
-aizk.share(documents=["019f..."], scopes=["Book Club"])
+aizk.share(query="reading notes on translation", scopes=["Book Club"])
+aizk.share(documents=["019f..."], scopes=["Book Club"], move=True)
 ```
 
-| Parameter | Type | Bounds |
-|---|---|---|
-| `documents` | list of document ids | 1 to 100 |
-| `scopes` | list of organization names | at most 32 |
+| Parameter | Type | Bounds | Default |
+|---|---|---|---|
+| `documents` | list of document ids, the only writing mode | 1 to 100 | none |
+| `query` | string, always a preview | 1 to 16,384 characters | none |
+| `scopes` | list of organization names | at most 32 | private |
+| `move` | boolean | | false |
+| `limit` | integer | 1 to 100 | 20 |
+| `dry_run` | boolean | | false |
 
-The return is `{ shared }`, the number of copies made. Sharing copies rather than moves, so the
-original stays where it was and stays yours.
-[Sharing and organizations](/docs/user/using/sharing/) explains why.
+Pass exactly one of `documents` and `query`. Only `documents` ever writes. A `query` answers which
+of your own private documents it would select, at most `limit` in merit order, and writes nothing
+whatever else you pass, since a question matches on similarity rather than on what you meant. So
+sharing a topic takes two steps, a query to read the candidates and a second call naming the ids you
+approve. Recall prints those ids, so step one is optional when you know them.
+
+A `query` and a `move` both start from your own private documents, so both need an organization in
+`scopes`. Carrying a document into the scope it already occupies is refused, since that copies a
+scope onto itself and adds a generation per repeat. A document already standing in the destination
+is left alone. `move` with a `query` is refused rather than ignored, so a refusal never reads as a
+move that happened.
+
+A result with `preview` set was not written, and each document's `destination` names the copy only
+once one exists, so read both rather than assuming. `dry_run` previews an explicit `documents` list
+and adds nothing to a query.
+
+Sharing copies by default, so the original stays yours, which
+[Sharing and organizations](/docs/user/using/sharing/) explains. `move` copies and then retires the
+private original, leaving the destination copy the only one recall returns while the original's
+rows, bytes and provenance stay. Both halves commit together, and a move touches only your own
+private documents. Repeating either call changes nothing, and a source revised since an earlier
+share refreshes that copy first.
 
 ## The artifact resource
 
@@ -205,10 +233,9 @@ Stored originals are readable through one resource template.
 aizk://artifacts/{artifact_id}/contents/{artifact_content_id}
 ```
 
-Both ids come straight from the resource URI printed on a recall item, so an agent reads the exact
-bytes behind a piece of evidence without searching for them. Reading verifies the stored bytes against
-their recorded size and hash and fails rather than returning something that drifted. An artifact you
-cannot see behaves as though it does not exist.
+Both ids come from the resource URI printed on a recall item, so an agent reads the exact bytes
+behind evidence without searching. Reading verifies size and hash, failing rather than returning
+something that drifted. An artifact you cannot see behaves as if it does not exist.
 
 ## Next
 

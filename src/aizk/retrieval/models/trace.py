@@ -39,7 +39,7 @@ class RecallTrace(FrozenModel):
     ) -> RecallTrace:
         """Build the trace from the three explicit retrieval phases."""
         merit_positions = {id(candidate): rank for rank, candidate in enumerate(ranked, 1)}
-        selected = {id(candidate) for candidate in kept}
+        selected = cls.packed_identities(ranked, kept)
         return cls(
             query=query,
             budget=budget,
@@ -57,6 +57,26 @@ class RecallTrace(FrozenModel):
                 for rank, candidate in enumerate(statement, 1)
             ),
         )
+
+    @staticmethod
+    def packed_identities(ranked: Sequence[Candidate], kept: Sequence[Candidate]) -> set[int]:
+        """Which ranked candidates the pack returned, told apart by object identity.
+
+        Identity is the only key that separates two rows carrying one evidence id, which
+        overview claims of a single summary held in different scope sets genuinely do. Any
+        key built from the values would mark every one of those rows selected the moment one
+        of them was, leaving the row flags disagreeing with the selected count.
+
+        Packing hands back the very objects it received, with one exception. An item trimmed
+        to fit a budget too small to hold it whole is a fresh value that no ranked identity
+        matches, and only the best-ranked item is ever trimmed, so a kept item nothing
+        recognises belongs to the head of the ranking and nowhere else.
+        """
+        returned = {id(candidate) for candidate in kept}
+        recognised = {id(candidate) for candidate in ranked if id(candidate) in returned}
+        if len(recognised) < len(kept) and ranked:
+            recognised.add(id(ranked[0]))
+        return recognised
 
     def render(self) -> str:
         """Render a compact table followed by each full evidence line."""

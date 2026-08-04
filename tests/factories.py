@@ -25,6 +25,7 @@ class CandidateFactory(AizkModelFactory[Candidate]):
     fact_id = Use(uuid7)
     source_chunk_id = Use(uuid7)
     evidence_id = Use(uuid7)
+    document_id = Use(uuid7)
     artifact_id = None
     artifact_content_id = None
     created_by = Use(uuid5)

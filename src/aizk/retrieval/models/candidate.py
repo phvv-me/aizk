@@ -1,4 +1,6 @@
-from math import ceil
+from datetime import datetime
+from math import ceil, floor
+from typing import Self
 
 from patos import FrozenModel
 from pydantic import UUID5, UUID7, Field
@@ -6,6 +8,11 @@ from pydantic import UUID5, UUID7, Field
 from ...config import settings
 from ...types import Scopes
 from .lane import Lane
+
+# Each annotation renders on its own indented, labelled and backticked line.
+_ANNOTATION_MARKUP = len("\n\n    Document ``")
+# What a trimmed line ends with, so a reader can tell a cut excerpt from a short one.
+_TRIM_MARKER = "…"
 
 
 class Candidate(FrozenModel):
@@ -37,6 +44,12 @@ class Candidate(FrozenModel):
         default=None,
         description="exact stored original revision that grounded this evidence",
     )
+    document_id: UUID7 | None = Field(
+        default=None, description="source document this evidence belongs to, the share handle"
+    )
+    document_created_at: datetime | None = Field(
+        default=None, description="when the source document entered memory"
+    )
     created_by: UUID5 | None = Field(
         default=None, description="Logto-derived creator identity retained as provenance"
     )
@@ -49,9 +62,50 @@ class Candidate(FrozenModel):
     )
 
     @property
+    def document_note(self) -> str | None:
+        """The source document's share handle and capture day, rendered as one terse line."""
+        if self.document_id is None or self.document_created_at is None:
+            return None
+        return f"{self.document_id} remembered {self.document_created_at:%Y-%m-%d}"
+
+    @property
+    def resource_uri(self) -> str | None:
+        """The MCP resource naming the exact stored original that grounded this evidence."""
+        if self.artifact_id is None or self.artifact_content_id is None:
+            return None
+        return f"aizk://artifacts/{self.artifact_id}/contents/{self.artifact_content_id}"
+
+    @property
+    def annotations(self) -> tuple[str, ...]:
+        """Every trailing line this evidence renders beside its text.
+
+        Packing reads these because a budget that counted only the evidence text would let
+        the rendered answer overrun the caller's request by one annotation per item.
+        """
+        return tuple(note for note in (self.document_note, self.resource_uri) if note is not None)
+
+    @property
+    def annotation_chars(self) -> int:
+        """The characters this evidence's trailing lines occupy once rendered."""
+        return sum(len(note) + _ANNOTATION_MARKUP for note in self.annotations)
+
+    @property
     def token_count(self) -> int:
-        """Estimate the line's tokens with the configured packing heuristic."""
-        return ceil(len(self.line) / settings.recall_chars_per_token)
+        """Estimate this evidence's rendered tokens with the configured packing heuristic."""
+        return ceil((len(self.line) + self.annotation_chars) / settings.recall_chars_per_token)
+
+    def trimmed(self, budget: int) -> Self:
+        """This evidence cut to one token budget, marked so a reader sees the text was cut.
+
+        Only the excerpt shortens. The annotations name the document and the stored original
+        behind the evidence, and a reader handed a shortened excerpt needs those handles more
+        than usual, so they keep their room and the excerpt takes what is left. They are also
+        this evidence's floor: a budget too small to hold the handles alone cannot be met, and
+        the marker then stands by itself rather than the evidence disappearing entirely.
+        """
+        room = floor((budget - 1) * settings.recall_chars_per_token)
+        keep = max(0, room - self.annotation_chars - len(_TRIM_MARKER))
+        return self.model_copy(update={"line": self.line[:keep] + _TRIM_MARKER})
 
     @property
     def direct_title(self) -> str | None:

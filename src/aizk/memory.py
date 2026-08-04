@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import cast
 
 from patos import FrozenModel
-from pydantic import UUID7
+from pydantic import UUID7, Field
 
 from . import graph, retrieval
 from .artifacts import ArtifactIntake, ArtifactReceipt
@@ -11,9 +11,9 @@ from .background.wake import NoopWorkerWake, WorkerWake
 from .extract import ingest as extract_ingest
 from .provenance import CaptureContext
 from .retrieval import RecallResult
-from .store import Usage
+from .store import Document, Usage
 from .store.identity import User
-from .types import ScopeNames
+from .types import ScopeNames, Scopes
 from .usage import annotate_operation, quota
 
 
@@ -23,10 +23,30 @@ class WriteResult(FrozenModel):
     id: UUID7
 
 
-class ShareResult(FrozenModel):
-    """Report how many provenance-linked document copies `share` created."""
+class SelectedDocument(FrozenModel):
+    """One candidate source with the scope set that decides whether a share may carry it."""
 
-    shared: int
+    id: UUID7
+    title: str | None = None
+    scopes: Scopes = frozenset()
+
+
+class SharedDocument(FrozenModel):
+    """One document a share carried, named so the caller can verify what happened."""
+
+    id: UUID7
+    title: str | None = None
+    destination: UUID7 | None = Field(
+        default=None, description="the copy standing in the target scope, absent in a preview"
+    )
+
+
+class ShareResult(FrozenModel):
+    """Exactly which documents one share carried, how, and whether it only looked."""
+
+    documents: tuple[SharedDocument, ...] = ()
+    moved: bool = False
+    preview: bool = False
 
 
 class Memory:
@@ -127,10 +147,119 @@ class Memory:
         await self.wake.wake()
         return WriteResult(id=document_id)
 
-    async def share(self, documents: list[UUID7], scopes: ScopeNames | None = None) -> ShareResult:
-        """Copy visible documents into one authorized destination without moving sources."""
+    async def share(
+        self,
+        documents: list[UUID7] | None = None,
+        query: str | None = None,
+        scopes: ScopeNames | None = None,
+        move: bool = False,
+        limit: int = 20,
+        preview: bool = False,
+    ) -> ShareResult:
+        """Copy or move named documents into one authorized destination, or preview a query.
+
+            query -> selection -> preview, always
+                                     |
+                    the caller reads it and approves ids
+                                     |
+            documents -> selection -> provenance-linked copies
+                                     |
+                          retire the originals on a move
+
+        Either explicit `documents` or one `query` names the sources, never both, and only
+        explicit documents are ever written. A query answers what it would select and stops
+        there, because a question matches on ranked similarity rather than on the caller's
+        intent, and a phrase that happens to reach a dozen private notes must not be able to
+        hand them to an organization on one call. Sharing therefore takes two steps, a query
+        to see the candidates and a second call naming the ids the caller approved.
+
+        `preview` is what the caller asks for in the second step, since previewing an exact
+        list is a real question. Alongside a query it is redundant and simply agrees with
+        what already happens. A move alongside a query is refused rather than quietly
+        ignored, because dropping a stated intent to write would leave the caller believing
+        documents had moved when nothing did.
+
+        A query selection and a move both read only the caller's own private documents, so
+        both demand an organization destination. Carrying private documents into the private
+        scope they already occupy would copy a scope onto itself and breed one generation per
+        repeat, which is a mistake worth naming rather than a no-op worth allowing.
+        """
+        if (documents is None) == (query is None):
+            raise ValueError("share takes either explicit documents or one selection query")
+        if query is not None and move:
+            raise ValueError(
+                "a selection query only ever previews, so it cannot move. Read the query's "
+                "candidates, then call again with the document IDs you approve and move those"
+            )
         await quota.consume(self.user.id, Usage.Event.Operation.share)
         target = self.user.write_scope(scopes)
-        shared = await graph.promote(documents, target, self.user)
-        annotate_operation(Usage.Event.Operation.share, target, shared)
-        return ShareResult(shared=shared)
+        personal = documents is None or move
+        if personal and target == frozenset({self.user.id}):
+            raise ValueError(
+                "a selection query and a move both carry your own private documents, "
+                "so both need an organization destination"
+            )
+        previewing = preview or query is not None
+        selected = await self.selection(documents, query, personal, target, limit)
+        if previewing or not selected:
+            return ShareResult(documents=selected, moved=move, preview=previewing)
+        promotions = {
+            promotion.source: promotion.destination
+            for promotion in await graph.transfer(
+                [item.id for item in selected], target, self.user, move
+            )
+        }
+        annotate_operation(Usage.Event.Operation.share, target, len(promotions))
+        return ShareResult(
+            documents=tuple(
+                item.model_copy(update={"destination": promotions[item.id]}) for item in selected
+            ),
+            moved=move,
+        )
+
+    async def selection(
+        self,
+        documents: list[UUID7] | None,
+        query: str | None,
+        personal: bool,
+        target: Scopes,
+        limit: int,
+    ) -> tuple[SharedDocument, ...]:
+        """The documents one share will carry, ordered as the caller named or recalled them.
+
+        A document already standing in the destination is dropped rather than carried, since
+        the end state the caller asked for already holds and promoting a document into its
+        own scope would only breed generations. Explicit IDs are otherwise answered exactly:
+        an ID the selection cannot reach is reported, since a caller naming a document it
+        cannot share deserves the reason instead of a silent zero. That report names the
+        guard that refused and never whether the document exists.
+        """
+        # A document named twice is still one document and the transfer carries it once, so
+        # the selection settles on first-seen order before anything downstream counts it.
+        named = list(
+            dict.fromkeys(
+                documents
+                if documents is not None
+                else await retrieval.documents(
+                    cast("str", query).strip(), self.user, limit, scopes=frozenset({self.user.id})
+                )
+            )
+        )
+        rows = await self.user.exec[SelectedDocument](
+            Document.shareable(named, self.user.id if personal else None)
+        )
+        found = {row.id: row for row in rows}
+        if documents is not None and (missing := [item for item in named if item not in found]):
+            # One message covers a document that does not exist and one this caller cannot
+            # reach, deliberately. Telling those apart would answer "does this ID exist" for
+            # anyone willing to ask, which is a lookup no caller is entitled to.
+            refused = "among your own private documents" if personal else "visible to you"
+            raise ValueError(
+                f"{len(missing)} named documents are not {refused}: "
+                f"{', '.join(str(item) for item in missing)}"
+            )
+        return tuple(
+            SharedDocument(id=row.id, title=row.title)
+            for item in named
+            if (row := found.get(item)) is not None and row.scopes != target
+        )
