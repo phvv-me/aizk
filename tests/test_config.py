@@ -253,6 +253,14 @@ def test_web_auth_fails_closed_when_any_dependency_is_missing(missing: set[str])
             "at least 1 character",
         ),
         (
+            {"logto_managed_role_prefix": "aizk-", "logto_admin_role": "operator"},
+            "logto_admin_role must use",
+        ),
+        (
+            {"logto_admin_role": "aizk-user"},
+            "must differ from logto_user_role",
+        ),
+        (
             {
                 "logto_organization_roles": {
                     "admin": "Manage",
@@ -295,6 +303,8 @@ def test_web_auth_fails_closed_when_any_dependency_is_missing(missing: set[str])
         "empty-prefix",
         "blank-prefix",
         "blank-user-role",
+        "unmanaged-admin-role",
+        "admin-role-equals-user-role",
         "role-without-permissions",
         "missing-scope-description",
         "unknown-role",

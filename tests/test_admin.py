@@ -231,10 +231,17 @@ def test_promote_resolves_the_target_and_passes_complete_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     first, second = (admin.settings.scope_id(name) for name in ("team", "vault"))
-    recorder = Recorder(ret=5)
+    # one copy this call wrote beside one an earlier share left current: only the write counts
+    outcome = admin.graph.Promotion.Outcome
+    recorder = Recorder(
+        ret=[
+            admin.graph.Promotion(source=DOC_A, destination=DOC_B, outcome=outcome.created),
+            admin.graph.Promotion(source=DOC_B, destination=DOC_A, outcome=outcome.current),
+        ]
+    )
     monkeypatch.setattr(admin.graph, "promote", recorder)
 
-    assert dbutil.run(admin.promote(str(DOC_A), "team,vault")) == 5
+    assert dbutil.run(admin.promote(str(DOC_A), "team,vault")) == 1
     assert recorder.args[:2] == ([DOC_A], frozenset({first, second}))
     user = recorder.args[2]
     assert isinstance(user, admin.User)

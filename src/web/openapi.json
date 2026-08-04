@@ -1361,6 +1361,10 @@
             ],
             "title": "Label"
           },
+          "admin": {
+            "type": "boolean",
+            "title": "Admin"
+          },
           "organizations": {
             "items": {
               "$ref": "#/components/schemas/OrganizationProfile"
@@ -1372,10 +1376,11 @@
         "type": "object",
         "required": [
           "label",
+          "admin",
           "organizations"
         ],
         "title": "Me",
-        "description": "The signed-in caller's label and current organization standing from Logto."
+        "description": "The signed-in caller's label, operator standing, and organizations from Logto."
       },
       "Operation": {
         "type": "string",

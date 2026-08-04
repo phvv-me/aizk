@@ -256,6 +256,7 @@ def test_me_returns_the_label_and_exact_organization_standing(
     assert response.status_code == 200, response.text
     assert response.json() == {
         "label": "Pedro Valois",
+        "admin": False,
         "organizations": [
             {
                 "name": "Lab",
@@ -267,6 +268,18 @@ def test_me_returns_the_label_and_exact_organization_standing(
             }
         ],
     }
+
+
+def test_me_marks_the_caller_an_operator_from_the_managed_admin_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = uuid5()
+    user = User.authorized(owner, read=(owner,), roles=(settings.logto_admin_role,))
+
+    response = call(service_as(monkeypatch, verified(user)), "GET", "/api/me")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"label": None, "admin": True, "organizations": []}
 
 
 def test_status_returns_combined_caller_usage_and_processing(

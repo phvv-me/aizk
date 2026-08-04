@@ -54,7 +54,7 @@ explicitly. Follow the steps in order.
    downloads and loads weights. `setup` runs the migrations once and exits. Nothing is exposed to
    the network yet.
 
-3. **Create the three Logto applications.** The public profile needs Logto to already know about
+3. **Create the four Logto applications.** The public profile needs Logto to already know about
    aizk, so make these in the Logto console and paste their credentials into `.env`.
 
    | Application | Kind | Setting pair |
@@ -62,6 +62,12 @@ explicitly. Follow the steps in order.
    | Management API client | machine to machine, role carrying the Management API `all` permission | `AIZK_LOGTO_CLIENT_ID`, `AIZK_LOGTO_CLIENT_SECRET` |
    | MCP OAuth upstream | traditional web, redirect is the aizk server callback | `AIZK_OAUTH_CLIENT_ID`, `AIZK_OAUTH_CLIENT_SECRET` |
    | Browser app | traditional web, redirect is exactly `${AIZK_WEB_PUBLIC_URL}/auth/sign-in-callback` | `AIZK_WEB_CLIENT_ID`, `AIZK_WEB_CLIENT_SECRET` |
+   | AIZK Admin | traditional web, redirect is exactly `${AIZK_ADMIN_PUBLIC_URL}/oauth2/callback` | `AIZK_ADMIN_CLIENT_ID`, `AIZK_ADMIN_CLIENT_SECRET` |
+
+   Set the AIZK Admin application's Mandatory MFA to passkey. That setting is per application, so
+   it asks operators for a second factor without changing how anyone signs in to the memory
+   itself. Add `AIZK_ADMIN_COOKIE_SECRET` as its own fresh 32 bytes, since oauth2-proxy signs the
+   console session cookie with it.
 
    Then set the URLs. `AIZK_LOGTO_URL` is where Logto answers, and `AIZK_MCP_PUBLIC_URL`,
    `AIZK_WEB_PUBLIC_URL` and `AIZK_API_PUBLIC_URL` are the one public origin the tunnel serves.
@@ -81,7 +87,25 @@ explicitly. Follow the steps in order.
    it and leaves unrelated roles and permissions alone. Both are idempotent, and
    [The Logto boundary](/docs/dev/identity/logto/) explains what aizk does and does not own here.
 
-5. **Start the public profile**, which adds everything internet-facing.
+   `apply` creates two global roles, `aizk-user` for everyone and `aizk-admin` for operators.
+   Assign `aizk-admin` to yourself, then confirm it with `aizk admin auth roles`, because that
+   role is the only thing the operator console admits.
+
+5. **Move the Logto console to its own hostname**, on its own, before anything else changes.
+
+   Logto's console must own an origin, so it cannot live under a path on the operator console
+   host. Add a Cloudflare public hostname `console.phvv.me` pointing at `logto:3002`, set
+   `AIZK_LOGTO_ADMIN_ENDPOINT=https://console.phvv.me`, and recreate the `logto` service. Logto
+   bakes that endpoint into the console's own redirect URIs, so a half-finished move locks the
+   console out and the only fast repair is putting the old line back.
+
+6. **Add the two remaining Cloudflare hostnames**, `aizk.phvv.me` to `web:8081` and
+   `admin.phvv.me` to `web:8082`. Every public name is a first-level subdomain, which is what
+   keeps them inside the free Universal SSL certificate.
+   [Deployment topology](/docs/dev/run/topology/) has the full routing table and explains the
+   optional Cloudflare Access layer in front of the console.
+
+7. **Start the public profile**, which adds everything internet-facing.
 
    ```sh
    docker compose --profile public --env-file .env -f src/deploy/docker-compose.yml up -d
@@ -93,7 +117,7 @@ explicitly. Follow the steps in order.
    the Logto URL, the public URLs or either OAuth client is missing or half filled. `web-check`
    does the same for the browser settings, and the MCP server waits until both gates pass.
 
-6. **Check it works** with the health command, run inside the private worker.
+8. **Check it works** with the health command, run inside the private worker.
 
    ```sh
    docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker aizk admin health

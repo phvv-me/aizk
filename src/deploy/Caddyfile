@@ -38,3 +38,70 @@
 		reverse_proxy docs:8082
 	}
 }
+
+# The operator console, a second site in the same container that Cloudflare reaches at web:8082.
+# It is one hostname with paths rather than a name per tool because Cloudflare's free Universal
+# SSL certificate covers only first-level subdomains, so `observability.admin.phvv.me` would need
+# a paid certificate while `admin.phvv.me/grafana` costs nothing. The port collides with nothing,
+# since the 8082 the last rule above dials belongs to the separate `docs` container.
+:8082 {
+	encode zstd gzip
+
+	# Identity arrives only from the gate below, so any inbound claim of one is stripped first.
+	request_header -X-Auth-Request-User
+	request_header -X-Auth-Request-Email
+	request_header -X-Auth-Request-Groups
+
+	header {
+		Referrer-Policy same-origin
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+	}
+
+	# Logto's console cannot be served under a subpath, so it keeps its own first-level hostname
+	# and this is only a convenience for an operator who reaches for it on the console host. The
+	# path is `/console` and never `/auth`, because the SvelteKit app owns `/auth/*` for its own
+	# Logto sign-in and sends every unauthenticated `/app/*` request there. Redirecting `/auth`
+	# away would swallow that flow and leave the operator pages permanently unreachable.
+	redir /console {$AIZK_LOGTO_ADMIN_ENDPOINT:https://console.phvv.me} 302
+	redir /console/* {$AIZK_LOGTO_ADMIN_ENDPOINT:https://console.phvv.me} 302
+
+	# The sign-in redirect, the Logto callback, and the sign-out endpoint belong to the proxy.
+	handle /oauth2/* {
+		reverse_proxy oauth2-proxy:4180
+	}
+
+	handle {
+		# Every remaining path is authorized first. oauth2-proxy answers 202 for a session that
+		# carries the operator role and 401 for anything else, which starts the Logto sign-in and
+		# returns to the page that was asked for.
+		forward_auth oauth2-proxy:4180 {
+			uri /oauth2/auth
+			copy_headers X-Auth-Request-User X-Auth-Request-Email X-Auth-Request-Groups
+
+			# The return address is spelled https by hand. This site only ever hears plain HTTP,
+			# since TLS terminates at Cloudflare, so `{scheme}` would build an http return that
+			# the Secure session cookie is not sent on, and the sign-in would loop forever.
+			@unauthorized status 401
+			handle_response @unauthorized {
+				redir * /oauth2/sign_in?rd=https://{host}{uri}
+			}
+		}
+
+		# Grafana serves the subpath itself, so the prefix is forwarded rather than stripped.
+		handle /grafana/* {
+			reverse_proxy grafana:3000
+		}
+
+		# Reserved for the Phoenix tracing UI, which lands in a later phase. Until that service
+		# exists this path answers 502, which is the honest answer for a tool that is not here.
+		handle_path /traces/* {
+			reverse_proxy phoenix:6006
+		}
+
+		# SvelteKit owns the operator pages under /app/admin.
+		handle {
+			reverse_proxy frontend:3000
+		}
+	}
+}

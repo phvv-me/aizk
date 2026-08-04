@@ -1,7 +1,7 @@
 from .client import LogtoAccessError, LogtoClient
 from .models import Account, Claims, Discovery, Member, Org, OrganizationScope, Role, Token
 from .organizations import OrganizationChange, OrganizationManager
-from .policy import LogtoPolicy, PolicyReport
+from .policy import LogtoPolicy, PolicyReport, RoleAssignment, RoleReport
 
 __all__ = [
     "Account",
@@ -17,5 +17,7 @@ __all__ = [
     "OrganizationManager",
     "PolicyReport",
     "Role",
+    "RoleAssignment",
+    "RoleReport",
     "Token",
 ]

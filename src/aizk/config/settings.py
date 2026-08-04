@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     api_upload_ttl_seconds: PositiveInt = 600
     app_password: str = ""
     app_user: str = "aizk_app"
+    artifact_boilerplate_removal_enabled: bool = True
     artifact_dispatch_batch_size: PositiveInt = 100
     artifact_dispatch_cron: str = "* * * * *"
     artifact_dispatch_enabled: bool = True
@@ -169,6 +170,8 @@ class Settings(BaseSettings):
     docling_do_ocr: bool = True
     docling_force_ocr: bool = False
     docling_formula_enrichment: bool = False
+    docling_ocr_engine: str = "tesseract"
+    docling_ocr_languages: tuple[str, ...] = ("jpn", "eng")
     docling_picture_classification: bool = False
     docling_picture_description: bool = False
     docling_picture_description_preset: str = "default"
@@ -266,6 +269,8 @@ class Settings(BaseSettings):
     logto_managed_role_prefix: RoleText = "aizk-"
     logto_user_role: RoleText = "aizk-user"
     logto_user_role_description: str = "Access AIZK"
+    logto_admin_role: RoleText = "aizk-admin"
+    logto_admin_role_description: str = "Operate AIZK"
     logto_required_scopes: frozenset[str] = frozenset({"control"})
     logto_scope_descriptions: dict[str, str] = {
         "control": "Use AIZK memory through MCP",
@@ -521,8 +526,11 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def valid_logto_policy(self) -> Self:
         """Reject role and permission policy that cannot be reconciled safely."""
-        if not self.logto_user_role.startswith(self.logto_managed_role_prefix):
-            raise ValueError("logto_user_role must use logto_managed_role_prefix")
+        for field in ("logto_user_role", "logto_admin_role"):
+            if not getattr(self, field).startswith(self.logto_managed_role_prefix):
+                raise ValueError(f"{field} must use logto_managed_role_prefix")
+        if self.logto_admin_role == self.logto_user_role:
+            raise ValueError("logto_admin_role must differ from logto_user_role")
         reject(
             self.logto_required_scopes - self.logto_scope_descriptions.keys(),
             "logto_scope_descriptions is missing",

@@ -102,9 +102,10 @@ class OrganizationProfile(FrozenModel):
 
 
 class Me(FrozenModel):
-    """The signed-in caller's label and current organization standing from Logto."""
+    """The signed-in caller's label, operator standing, and organizations from Logto."""
 
     label: str | None
+    admin: bool
     organizations: tuple[OrganizationProfile, ...]
 
     @classmethod
@@ -112,6 +113,7 @@ class Me(FrozenModel):
         """Present the verified caller without exposing identifiers or scope internals."""
         return cls(
             label=user.label,
+            admin=settings.logto_admin_role in user.roles,
             organizations=tuple(
                 OrganizationProfile.model_validate(organization, from_attributes=True)
                 for organization in user.organizations

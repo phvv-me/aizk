@@ -83,6 +83,28 @@ def test_docling_client_sends_bounded_file_and_preserves_both_outputs(tmp_path: 
     )
 
 
+def test_docling_options_always_declare_the_ocr_engine_and_its_languages() -> None:
+    default = DoclingOptions().form_data()
+
+    # Docling picks RapidOCR on its own, whose bundled model reads Chinese and has no Japanese
+    # model at all, so leaving the engine unsaid is what turned a Japanese scan into wrong CJK.
+    assert default["ocr_engine"] == "tesseract"
+    assert default["ocr_preset"] == "tesseract"
+    assert default["ocr_lang"] == ["jpn", "eng"]
+
+    chosen = DoclingOptions(ocr_engine="tesserocr", ocr_languages=("eng",)).form_data()
+
+    assert chosen["ocr_engine"] == "tesserocr"
+    assert chosen["ocr_preset"] == "tesserocr"
+    assert chosen["ocr_lang"] == ["eng"]
+
+
+def test_docling_options_refuse_an_empty_language_list() -> None:
+    # An empty list would hand the engine back its own default, which is not Japanese anywhere.
+    with pytest.raises(ValidationError):
+        DoclingOptions(ocr_languages=())
+
+
 def test_docling_options_include_the_picture_preset_only_when_enabled() -> None:
     disabled = DoclingOptions().form_data()
     enabled = DoclingOptions(

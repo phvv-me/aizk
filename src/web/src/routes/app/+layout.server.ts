@@ -27,7 +27,12 @@ export const load: LayoutServerLoad = async ({ locals }) => {
     // Only an unreachable or failing API degrades into the offline shell below.
     if (authBroken(cause)) redirect(302, '/auth/sign-in');
     if (cause instanceof ApiError && cause.status < 500) error(cause.status, cause.message);
-    const fallback: Me = { label: user.name ?? user.email ?? user.sub, organizations: [] };
+    // The offline shell cannot read the caller's roles, so it never claims operator standing.
+    const fallback: Me = {
+      label: user.name ?? user.email ?? user.sub,
+      admin: false,
+      organizations: []
+    };
     return { me: fallback, apiOnline: false, accountUrl };
   }
 };

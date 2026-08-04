@@ -285,13 +285,17 @@ export type KnowledgeTotals = {
 /**
  * Me
  *
- * The signed-in caller's label and current organization standing from Logto.
+ * The signed-in caller's label, operator standing, and organizations from Logto.
  */
 export type Me = {
     /**
      * Label
      */
     label: string | null;
+    /**
+     * Admin
+     */
+    admin: boolean;
     /**
      * Organizations
      */
