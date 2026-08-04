@@ -257,6 +257,18 @@ def test_alembic_config_and_head_read_the_packaged_migrations() -> None:
     assert "CREATE POLICY scope_read" in script
 
 
+def test_alembic_config_preserves_percent_encoded_cloud_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cloud_url = (
+        "cockroachdb+asyncpg://owner:p%25word@managed:26257/aizk"
+        "?sslmode=verify-full&sslrootcert=%2Fcerts%2Froot.crt"
+    )
+    monkeypatch.setattr(settings, "admin_database_url", cloud_url)
+
+    assert ops.alembic_config().get_main_option("sqlalchemy.url") == cloud_url
+
+
 def test_run_alembic_forwards_args_and_returns_off_thread() -> None:
     result = ops.run_alembic(lambda config, revision: (config, revision), "cfg", "head")
 

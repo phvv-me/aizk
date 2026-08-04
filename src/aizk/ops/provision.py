@@ -28,7 +28,9 @@ def alembic_config() -> Config:
     config.set_main_option(
         "script_location", str(Path(__file__).parent.parent / "store" / "migrations")
     )
-    config.set_main_option("sqlalchemy.url", settings.admin_database_url)
+    # ConfigParser treats percent escapes in encoded passwords and TLS paths as
+    # interpolation. Doubling preserves the URL when Alembic reads it back.
+    config.set_main_option("sqlalchemy.url", settings.admin_database_url.replace("%", "%%"))
     if settings.database_backend is DatabaseBackend.cockroachdb:
         config.set_main_option(
             "version_locations",
