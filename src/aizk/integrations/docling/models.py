@@ -86,11 +86,19 @@ class DoclingOptions(FrozenModel):
 
     Image export and output formats remain architectural invariants. Docling may use images while
     converting, but AIZK receives placeholders and stores only JSON and Markdown derivatives.
+
+    The OCR engine and its languages are always declared. Docling's automatic choice is RapidOCR,
+    whose bundled recognition model is Chinese and which has no Japanese model set at all, so a
+    scanned Japanese page came back as plausible but wrong CJK that nothing downstream could
+    detect. Tesseract reads the languages it is given, which makes the request the only place
+    that decides what a page is read as.
     """
 
     pipeline: Literal["standard", "vlm"] = "standard"
     do_ocr: bool = True
     force_ocr: bool = False
+    ocr_engine: str = "tesseract"
+    ocr_languages: Annotated[tuple[str, ...], Field(min_length=1)] = ("jpn", "eng")
     table_mode: Literal["fast", "accurate"] = "accurate"
     code_enrichment: bool = False
     formula_enrichment: bool = False
@@ -108,6 +116,12 @@ class DoclingOptions(FrozenModel):
             "pipeline": self.pipeline,
             "do_ocr": str(self.do_ocr).lower(),
             "force_ocr": str(self.force_ocr).lower(),
+            # `ocr_preset` is the current field and `ocr_engine` the deprecated twin it replaced,
+            # so both carry the same value and every Docling Serve generation reads the one it
+            # knows. Sending neither is what let the Chinese default model read Japanese pages.
+            "ocr_engine": self.ocr_engine,
+            "ocr_preset": self.ocr_engine,
+            "ocr_lang": list(self.ocr_languages),
             "table_mode": self.table_mode,
             "do_code_enrichment": str(self.code_enrichment).lower(),
             "do_formula_enrichment": str(self.formula_enrichment).lower(),

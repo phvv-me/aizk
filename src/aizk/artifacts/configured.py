@@ -11,6 +11,7 @@ from ..integrations.clamav import ClamAVClient
 from ..integrations.docling import ArtifactReader, DoclingOptions, docling_client
 from ..serving.embed import EmbedClient
 from ..storage import ByteStore, s3_backend
+from .boilerplate import WebBoilerplateCleaner
 from .repository import ArtifactRepository
 from .service import ArtifactIntake, ArtifactIntegrity, ArtifactProcessor
 from .visual import DirectImageEnricher
@@ -64,6 +65,8 @@ def build_artifact_services(config: Settings, storage: ByteStore) -> ArtifactSer
                 pipeline=config.docling_pipeline,
                 do_ocr=config.docling_do_ocr,
                 force_ocr=config.docling_force_ocr,
+                ocr_engine=config.docling_ocr_engine,
+                ocr_languages=config.docling_ocr_languages,
                 table_mode=config.docling_table_mode,
                 code_enrichment=config.docling_code_enrichment,
                 formula_enrichment=config.docling_formula_enrichment,
@@ -80,6 +83,7 @@ def build_artifact_services(config: Settings, storage: ByteStore) -> ArtifactSer
         storage,
         repository,
         DirectImageEnricher(EmbedClient.from_settings(config)),
+        WebBoilerplateCleaner() if config.artifact_boilerplate_removal_enabled else None,
     )
     conversion = DoclingConversionJob(processor)
     reader = ArtifactReader(

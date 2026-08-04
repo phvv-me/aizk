@@ -112,6 +112,11 @@ rendered at the top of the document. `ArtifactDocument.semantic` is true only wh
 companion text or Markdown, and only a semantic document is enqueued for graph projection, so a
 metadata-only shell is recallable but never becomes facts.
 
+## Two policies ride on every conversion
+
+[Web boilerplate](/docs/dev/write/boilerplate/) drops the menus an HTML page carries, and
+[OCR and languages](/docs/dev/write/ocr/) names the engine that reads a scan.
+
 ## The upload capability
 
 `UploadBox` in `src/aizk/artifacts/uploads.py` never lets an agent stream bytes into the MCP server.

@@ -21,6 +21,7 @@ from aizk.artifacts import (
     OriginalArtifact,
     OriginalDescription,
     VisualModality,
+    WebBoilerplateCleaner,
 )
 from aizk.artifacts.service import _resolve_markdown_links
 from aizk.extract.ingest import TextIngestor, TextSource
@@ -545,6 +546,55 @@ def test_processor_stores_postgres_derivatives_and_makes_one_file_document_recal
         Artifact.Content.State.processing,
         Artifact.Content.State.ready,
     ]
+
+
+def test_processor_strips_web_chrome_only_when_a_cleaner_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = original().model_copy(
+        update={
+            "filename": "datahub",
+            "media_type": "text/html",
+            "source_uri": "https://github.com/datahub-project/datahub",
+        }
+    )
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+    page = (
+        "## Navigation Menu\n\n[ Sign in ](/login)\n\n"
+        "# DataHub\n\nThe hackathon plan starts from the metadata graph.\n"
+    )
+    ingested: list[str] = []
+
+    async def ingest(ingestor: TextIngestor, submitted: TextSource) -> tuple[UUID7, bool]:
+        del ingestor
+        ingested.append(submitted.text)
+        return uuid7(), True
+
+    async def enqueue(document_id: UUID7, scopes: Scopes) -> int:
+        del document_id, scopes
+        return 1
+
+    monkeypatch.setattr("aizk.artifacts.service.TextIngestor.ingest", ingest)
+    monkeypatch.setattr("aizk.artifacts.service.enqueue_document", enqueue)
+    processor = ArtifactProcessor(
+        cast(DoclingClient, Converter(docling_response(page))),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+        None,
+        WebBoilerplateCleaner(),
+    )
+
+    asyncio.run(processor.process(source.content_id, source.scopes))
+
+    stored = repository.conversions[0][1]
+    assert stored == "# DataHub\n\nThe hackathon plan starts from the metadata graph.\n"
+    assert "Sign in" not in ingested[0]
+
+    processor.cleaner = None
+    asyncio.run(processor.process(source.content_id, source.scopes))
+
+    assert "[ Sign in ](https://github.com/login)" in repository.conversions[1][1]
 
 
 def test_processor_keeps_metadata_recallable_and_marks_conversion_failures(

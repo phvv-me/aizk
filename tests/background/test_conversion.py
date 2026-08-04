@@ -11,8 +11,12 @@ from pydantic import UUID7
 import aizk.background.jobs.conversion as conversion_module
 from aizk.background.jobs.conversion import (
     ArtifactQueue,
+    ArtifactReconversion,
     ArtifactRecovery,
     DoclingConversionJob,
+    ReconversionSweep,
+    reconvert_scanned_documents,
+    reconvert_web_pages,
     retry_failed_artifacts,
 )
 from aizk.background.jobs.models import ArtifactConversionJob
@@ -266,5 +270,191 @@ def test_artifact_recovery_enqueues_only_orphaned_durable_failures(
             protected_row = await session.get(Artifact.Content, protected.content.id)
             assert protected_row is not None
             assert protected_row.state == Artifact.Content.State.failed
+
+    dbutil.run(run())
+
+
+def test_web_page_reconversion_requeues_converted_pages_and_nothing_else(
+    migrated_db: None,
+) -> None:
+    async def run() -> None:
+        await dbutil.reset_db()
+        owner = settings.system_user_id
+        page = await seed_artifact(
+            owner,
+            [owner],
+            name="datahub",
+            media_type="text/html",
+            source_uri="https://github.com/datahub-project/datahub",
+            state=Artifact.Content.State.ready,
+        )
+        paper = await seed_artifact(
+            owner,
+            [owner],
+            name="paper.pdf",
+            media_type="application/pdf",
+            source_uri="https://files.example/paper.pdf",
+            state=Artifact.Content.State.ready,
+        )
+        uploaded = await seed_artifact(
+            owner,
+            [owner],
+            name="page.html",
+            media_type="text/html",
+            state=Artifact.Content.State.ready,
+        )
+        converting = await seed_artifact(
+            owner,
+            [owner],
+            name="pending.html",
+            media_type="text/html",
+            source_uri="https://example.org/pending",
+            state=Artifact.Content.State.processing,
+        )
+
+        async with ProductionQueue(dsn=settings.asyncpg_dsn) as queue:
+            names = queue.queries.qbe.settings
+            await queue.connection.execute(f"DELETE FROM {names.queue_table_log}")
+            await queue.connection.execute(f"DELETE FROM {names.queue_table}")
+
+        assert await reconvert_web_pages(limit=10) == 1
+        assert await reconvert_web_pages(limit=10) == 0
+
+        # A page still held by the queue is claimed again and its enqueue refused, which is not
+        # counted as new work while the state stays honest about the task that already exists.
+        async with User.system().owner as session:
+            held = await session.get(Artifact.Content, page.content.id)
+            assert held is not None
+            held.state = Artifact.Content.State.ready
+        assert await reconvert_web_pages(limit=10) == 0
+
+        async with User.system().owner as session:
+            states = {
+                stored.content.id: await session.get(Artifact.Content, stored.content.id)
+                for stored in (page, paper, uploaded, converting)
+            }
+        assert states[page.content.id] is not None
+        assert states[page.content.id].state == Artifact.Content.State.queued
+        for untouched, expected in (
+            (paper, Artifact.Content.State.ready),
+            (uploaded, Artifact.Content.State.ready),
+            (converting, Artifact.Content.State.processing),
+        ):
+            row = states[untouched.content.id]
+            assert row is not None and row.state == expected
+
+    dbutil.run(run())
+
+
+def test_reconversion_rejects_an_empty_budget() -> None:
+    sweep = ReconversionSweep(media_prefixes=("application/pdf",))
+    with pytest.raises(ValueError, match="positive"):
+        asyncio.run(ArtifactReconversion(sweep).enqueue(0))
+
+
+def test_a_worker_finishing_mid_sweep_keeps_its_ready_state(
+    migrated_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The sweep commits `queued` before a task exists, so a fast worker is never overwritten."""
+
+    async def run() -> None:
+        await dbutil.reset_db()
+        owner = settings.system_user_id
+        first = await seed_artifact(
+            owner,
+            [owner],
+            name="first",
+            media_type="text/html",
+            source_uri="https://example.org/first",
+            state=Artifact.Content.State.ready,
+        )
+        second = await seed_artifact(
+            owner,
+            [owner],
+            name="second",
+            media_type="text/html",
+            source_uri="https://example.org/second",
+            state=Artifact.Content.State.ready,
+        )
+
+        class CompletingQueue(FakeQueue):
+            """Run the whole worker lifecycle inside the enqueue that hands out the task."""
+
+            async def enqueue(
+                self,
+                job: DoclingConversionJob,
+                payload: ArtifactConversionJob,
+                dedupe_key: str,
+            ) -> bool:
+                admitted = await super().enqueue(job, payload, dedupe_key)
+                if payload.artifact_content_id == first.content.id:
+                    async with User.system().owner as session:
+                        row = await session.get(Artifact.Content, payload.artifact_content_id)
+                        assert row is not None
+                        assert row.state == Artifact.Content.State.queued
+                        row.state = Artifact.Content.State.ready
+                return admitted
+
+        monkeypatch.setattr(conversion_module, "Queue", lambda dsn: CompletingQueue(admitted=True))
+
+        assert await reconvert_web_pages(limit=10) == 2
+
+        async with User.system().owner as session:
+            completed = await session.get(Artifact.Content, first.content.id)
+            queued = await session.get(Artifact.Content, second.content.id)
+        assert completed is not None and completed.state == Artifact.Content.State.ready
+        assert queued is not None and queued.state == Artifact.Content.State.queued
+
+    dbutil.run(run())
+
+
+def test_scanned_reconversion_requeues_everything_ocr_read_whatever_its_source(
+    migrated_db: None,
+) -> None:
+    async def run() -> None:
+        await dbutil.reset_db()
+        owner = settings.system_user_id
+        scan = await seed_artifact(
+            owner,
+            [owner],
+            name="scan.pdf",
+            media_type="application/pdf",
+            state=Artifact.Content.State.ready,
+        )
+        photo = await seed_artifact(
+            owner,
+            [owner],
+            name="whiteboard.png",
+            media_type="image/png",
+            source_uri="https://files.example/whiteboard.png",
+            state=Artifact.Content.State.ready,
+        )
+        page = await seed_artifact(
+            owner,
+            [owner],
+            name="page.html",
+            media_type="text/html",
+            source_uri="https://example.org/page",
+            state=Artifact.Content.State.ready,
+        )
+
+        async with ProductionQueue(dsn=settings.asyncpg_dsn) as queue:
+            names = queue.queries.qbe.settings
+            await queue.connection.execute(f"DELETE FROM {names.queue_table_log}")
+            await queue.connection.execute(f"DELETE FROM {names.queue_table}")
+
+        assert await reconvert_scanned_documents(limit=10) == 2
+
+        async with User.system().owner as session:
+            states = {
+                stored.content.id: await session.get(Artifact.Content, stored.content.id)
+                for stored in (scan, photo, page)
+            }
+        for requeued in (scan, photo):
+            row = states[requeued.content.id]
+            assert row is not None and row.state == Artifact.Content.State.queued
+        untouched = states[page.content.id]
+        assert untouched is not None and untouched.state == Artifact.Content.State.ready
 
     dbutil.run(run())
