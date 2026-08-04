@@ -201,6 +201,7 @@ class GateSession:
 @given(current=st.integers(0, 400), last=st.integers(0, 400), threshold=st.integers(1, 200))
 def test_growth_gated_passes_build_only_past_the_threshold(
     monkeypatch: pytest.MonkeyPatch,
+    queue_seam: Callable[[ModuleType], RecordingQueue],
     job_type: type[ScopedScheduledJob],
     threshold_field: str,
     kind: Watermark.Kind,
@@ -232,6 +233,8 @@ def test_growth_gated_passes_build_only_past_the_threshold(
     async def fake_build(*args: object, scopes: Scopes) -> None:
         builds.append(scopes)
 
+    # The community pass queues RAPTOR when it rebuilds, which the seam keeps in memory.
+    queue_seam(jobs_mod)
     monkeypatch.setattr(User, "app", property(fake_transaction))
     monkeypatch.setattr(jobs_mod.Watermark, "read", fake_read)
     monkeypatch.setattr(jobs_mod.Watermark, "set_value", fake_set_value)
@@ -276,3 +279,31 @@ def test_system_jobs_register_only_the_cron_and_only_when_enabled(
     assert len(pg.schedules) == (1 if enabled else 0)
     if enabled:
         assert pg.schedules[0][:2] == (f"aizk_cron_{job_type.name}", "0 2 * * *")
+
+
+@pytest.mark.parametrize("rebuilt", [True, False], ids=["rebuilt", "skipped"])
+def test_the_community_pass_hands_raptor_the_generation_it_just_wrote(
+    monkeypatch: pytest.MonkeyPatch,
+    queue_seam: Callable[[ModuleType], RecordingQueue],
+    rebuilt: bool,
+) -> None:
+    """A tree built while the generation under it is being replaced describes dead themes."""
+    recorder = queue_seam(jobs_mod)
+    user = uuid5()
+
+    async def fake_run_if_grown(
+        scopes: Scopes,
+        kind: Watermark.Kind,
+        threshold: int,
+        build: Callable[[], object],
+        label: str,
+    ) -> bool:
+        del scopes, kind, threshold, build, label
+        return rebuilt
+
+    monkeypatch.setattr(jobs_mod, "run_if_grown", fake_run_if_grown)
+    asyncio.run(CommunitiesJob().execute(frozenset({user})))
+
+    assert [(call.entrypoint, call.dedupe_key) for call in recorder.enqueues] == (
+        [(RaptorJob.entrypoint, f"raptor:{user}")] if rebuilt else []
+    )

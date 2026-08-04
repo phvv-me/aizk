@@ -426,8 +426,35 @@
     "/api/themes": {
       "get": {
         "summary": "Themes",
-        "description": "Return every visible graph theme and its bounded member preview.",
+        "description": "Return one page of visible graph themes and their bounded member previews.",
         "operationId": "themes",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -438,13 +465,18 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/api/graph": {
@@ -1389,10 +1421,12 @@
           "remember_text",
           "remember_file",
           "share",
-          "artifact_read"
+          "artifact_read",
+          "web_search",
+          "web_fetch"
         ],
         "title": "Operation",
-        "description": "Public AIZK operations whose resource use needs attribution."
+        "description": "Public AIZK operations whose resource use needs attribution.\n\n`recall` is the stored name of what the `find` tool does. The value predates the\nrename and stays, because it is the label every published usage report column, the\nbrowser dashboard, and the generated TypeScript client already key on, and renaming\na stored enum to match a tool name would break all of them for no accounting gain."
       },
       "OrganizationChange": {
         "properties": {
@@ -2224,6 +2258,18 @@
       },
       "ThemePage": {
         "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
           "rows": {
             "items": {
               "$ref": "#/components/schemas/ThemeView"
@@ -2235,10 +2281,13 @@
         },
         "type": "object",
         "required": [
+          "total",
+          "offset",
+          "limit",
           "rows"
         ],
         "title": "ThemePage",
-        "description": "Every visible graph theme ordered by membership size."
+        "description": "One page of visible graph themes, ordered by size because a graph holds thousands."
       },
       "ThemeView": {
         "properties": {

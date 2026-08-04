@@ -115,8 +115,8 @@ export class ApiClient {
     );
   }
 
-  async themes(): Promise<ThemePage> {
-    return unwrap(await sdk.themes({ client: await this.client() }));
+  async themes(limit = 50, offset = 0): Promise<ThemePage> {
+    return unwrap(await sdk.themes({ client: await this.client(), query: { limit, offset } }));
   }
 
   async graph(limit = 40): Promise<GraphSlice> {

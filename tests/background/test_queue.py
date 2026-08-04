@@ -36,7 +36,7 @@ from aizk.background.queue import (
 )
 from aizk.config import settings
 from aizk.graph.build import GraphClients
-from aizk.store import Chunk, Watermark
+from aizk.store import Chunk, Document, Watermark
 from aizk.store.identity import User
 from aizk.types import Scopes
 
@@ -224,20 +224,42 @@ def test_enqueue_document_targets_only_its_pending_chunks(
 
 
 class FakeSession:
-    def __init__(self, chunk: FakeChunk) -> None:
-        self.chunk = chunk
+    """Answer the job's two primary-key reads, the chunk and its parent document."""
 
-    async def get(self, model: type[Chunk], identifier: UUID7) -> FakeChunk:
+    def __init__(self, chunk: FakeChunk, origin: Document.Origin) -> None:
+        self.chunk = chunk
+        self.origin = origin
+
+    async def get(
+        self, model: type[Chunk] | type[Document], identifier: UUID7
+    ) -> FakeChunk | SimpleNamespace:
+        del identifier
+        if model is Document:
+            return SimpleNamespace(origin=self.origin)
         return self.chunk
 
 
+def pending_chunk(scope: UUID5) -> SimpleNamespace:
+    """One unprojected chunk of an ordinary authored document."""
+    return SimpleNamespace(
+        text="some text",
+        scopes=[scope],
+        id=uuid7(),
+        document_id=uuid7(),
+        processed_at=None,
+    )
+
+
 def patch_chunk_pipeline(
-    monkeypatch: pytest.MonkeyPatch, chunk: FakeChunk, touched: set[UUID5]
+    monkeypatch: pytest.MonkeyPatch,
+    chunk: FakeChunk,
+    touched: set[UUID5],
+    origin: Document.Origin = Document.Origin.authored,
 ) -> list[tuple[Watermark.Kind, str]]:
     bumped: list[tuple[Watermark.Kind, str]] = []
 
     def fake_transaction(user: User) -> AsyncContext[FakeSession]:
-        return AsyncContext(FakeSession(chunk))
+        return AsyncContext(FakeSession(chunk, origin))
 
     async def fake_extract(
         built_chunk: Chunk | SimpleNamespace, clients: GraphClients
@@ -268,7 +290,7 @@ def test_process_chunk_dirties_exactly_the_entities_the_slice_touched(
     monkeypatch: pytest.MonkeyPatch, touched: set[UUID5]
 ) -> None:
     scope = uuid5()
-    chunk = SimpleNamespace(text="some text", scopes=[scope], id=uuid7(), processed_at=None)
+    chunk = pending_chunk(scope)
     bumped = patch_chunk_pipeline(monkeypatch, chunk, touched)
 
     asyncio.run(
@@ -293,9 +315,7 @@ def test_process_chunk_skips_a_chunk_it_cannot_see(monkeypatch: pytest.MonkeyPat
     )
     assert bumped == [] and extracted == []
 
-    wrong_scope = SimpleNamespace(
-        text="some text", scopes=[uuid5()], id=uuid7(), processed_at=None
-    )
+    wrong_scope = pending_chunk(uuid5())
     bumped = patch_chunk_pipeline(monkeypatch, wrong_scope, set())
     asyncio.run(
         chunk_projection_job().handle(
@@ -309,12 +329,8 @@ def test_process_chunk_skips_an_already_projected_chunk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scope = uuid5()
-    chunk = SimpleNamespace(
-        text="some text",
-        scopes=[scope],
-        id=uuid7(),
-        processed_at=datetime.now(UTC),
-    )
+    chunk = pending_chunk(scope)
+    chunk.processed_at = datetime.now(UTC)
     extracted: list[Chunk | SimpleNamespace] = []
     bumped = patch_chunk_pipeline(monkeypatch, chunk, set())
 
@@ -467,3 +483,25 @@ def test_later_replica_skips_the_current_index_while_another_keeps_serving(
             assert await job.enqueue(serving, Payload(value=2), "serving") is False
 
     dbutil.run(body())
+
+
+def test_process_chunk_refuses_a_source_that_became_quarantined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A queued job can outlive the selection that admitted it, so the worker asks again."""
+    scope = uuid5()
+    chunk = pending_chunk(scope)
+    extracted: list[Chunk | SimpleNamespace] = []
+    bumped = patch_chunk_pipeline(monkeypatch, chunk, {uuid5()}, origin=Document.Origin.web_cache)
+
+    async def guard(built_chunk: Chunk | SimpleNamespace, clients: GraphClients) -> set[UUID5]:
+        extracted.append(built_chunk)
+        raise AssertionError("a cached web page must never reach extraction")
+
+    monkeypatch.setattr(projection_mod, "extract_and_consolidate", guard)
+
+    asyncio.run(
+        chunk_projection_job().handle(ChunkJob(chunk_id=chunk.id, scopes=frozenset({scope})))
+    )
+
+    assert bumped == [] and extracted == []

@@ -150,6 +150,89 @@ def test_build_raptor_lifts_communities_into_a_part_of_tree(
     assert all(count >= 2 for count in scoped)
 
 
+def test_two_themes_named_the_same_fold_into_one_leaf_instead_of_aborting(
+    owner: UUID5 | UUID7, fake_llm: FakeLLM, fake_embedder: RecordingEmbedder
+) -> None:
+    """A summary entity is identified by its label, and `entity_id` folds case and spacing."""
+
+    async def probe() -> list[tuple[str, str]]:
+        async with dbutil.actor(owner) as session:
+            session.add_all(
+                (
+                    Community(
+                        id=uuid5(),
+                        created_by=owner,
+                        scopes=[owner],
+                        label="Retrieval Research",
+                        summary="the smaller theme",
+                        embedding=basis(0),
+                        member_ids=[uuid5()],
+                    ),
+                    Community(
+                        id=uuid5(),
+                        created_by=owner,
+                        scopes=[owner],
+                        label="retrieval  research",
+                        summary="the bigger theme",
+                        embedding=basis(1),
+                        member_ids=[uuid5(), uuid5(), uuid5()],
+                    ),
+                    Community(
+                        id=uuid5(),
+                        created_by=owner,
+                        scopes=[owner],
+                        label="Vector Indexes",
+                        summary="a separate theme",
+                        embedding=basis(2),
+                        member_ids=[uuid5(), uuid5()],
+                    ),
+                )
+            )
+        await build_raptor(fake_llm.llm, fake_embedder, scopes=frozenset({owner}))
+        async with dbutil.actor(owner) as session:
+            rows = await session.exec(
+                text(
+                    "SELECT ent.name, ec.attributes->>'summary' AS summary FROM entity_claim ec "
+                    "JOIN entity_content ent ON ent.id = ec.content_id "
+                    "WHERE ec.scopes = CAST(:scopes AS uuid[]) "
+                    "AND ent.type = 'raptor_summary' "
+                    "AND (ec.attributes->>'level')::int = 0"
+                ),
+                params={"scopes": [str(owner)]},
+            )
+            return [(row.name, row.summary) for row in rows]
+
+    leaves = dbutil.run(probe())
+
+    assert len(leaves) == 2
+    assert ("retrieval  research", "the bigger theme") in leaves
+    assert all(summary != "the smaller theme" for _, summary in leaves)
+
+    # The staging itself folds the pair, so the database never sees the second claim and the
+    # `on_conflict_do_nothing` behind it stays the belt rather than the braces.
+    builder = RaptorBuilder(
+        scopes=frozenset({owner}), llm=FakeLLM().llm, embed=RecordingEmbedder()
+    )
+    staged = builder.leaves(
+        [
+            Community(
+                created_by=owner,
+                scopes=[owner],
+                label=label,
+                summary=summary,
+                embedding=basis(0),
+                member_ids=[uuid5() for _ in range(size)],
+            )
+            for label, summary, size in (
+                ("Retrieval Research", "the smaller theme", 1),
+                ("retrieval  research", "the bigger theme", 3),
+            )
+        ]
+    )
+    assert len(staged) == len(builder.claims) == len(builder.contents) == 1
+    assert staged[0].summary == "the bigger theme"
+
+
 @pytest.mark.parametrize(
     ("axes", "expected"),
     [
@@ -200,3 +283,18 @@ def test_build_raptor_bounds_fanout_and_child_text(
     assert len(prompts) == 2
     assert all(prompt.count("\n-") == 2 for prompt in prompts)
     assert all("covers" not in prompt for prompt in prompts)
+
+
+def test_the_tree_never_claims_a_summary_is_part_of_itself_or_claims_a_pair_twice() -> None:
+    """Folded labels can put a parent in its own member list and repeat one part-of pair."""
+    builder = RaptorBuilder(
+        scopes=frozenset({uuid5()}), llm=FakeLLM().llm, embed=RecordingEmbedder()
+    )
+    parent = Node(entity_id=uuid5(), label="Parent", summary="p", embedding=basis(0))
+    child = Node(entity_id=uuid5(), label="Child", summary="c", embedding=basis(1))
+
+    builder.connect([child, parent], parent)
+    builder.connect([child], parent)
+
+    assert [edge.subject_id for edge in builder.edges] == [child.entity_id]
+    assert len(builder.edge_claims) == 1

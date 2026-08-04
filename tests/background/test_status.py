@@ -72,3 +72,27 @@ def test_tasks_overview_reads_bounded_queue_truth_and_pending_chunks(
     ) == expected_counts
     assert status.last_success == (successful.isoformat() if populated else None)
     assert status.oldest_queued == (_STAMP.isoformat() if populated else None)
+
+
+def test_a_quarantined_page_never_enters_the_projection_backlog(migrated_db: None) -> None:
+    """A cached page is never projected, so its chunks would be a queue nobody ever drains."""
+
+    async def body() -> None:
+        await dbutil.reset_db()
+        await clear_queue()
+        owner = uuid5()
+        for origin in ("authored", "web_cache"):
+            document = await dbutil.seed_document(owner, [owner])
+            await dbutil.admin_exec(
+                "UPDATE document SET origin = CAST(:origin AS document_origin) WHERE id = :id",
+                {"origin": origin, "id": document},
+            )
+            await dbutil.admin_exec(
+                "INSERT INTO chunk (id, document_id, created_by, scopes, ord, text) "
+                "VALUES (:id, :document, :owner, ARRAY[:owner]::uuid[], 0, 'pending')",
+                {"id": uuid7(), "document": document, "owner": owner},
+            )
+
+    dbutil.run(body())
+
+    assert dbutil.run(tasks_overview()).projection_pending == 1

@@ -479,3 +479,37 @@ def test_observe_installs_tracing_and_optional_export(
     assert calls["starlette"] is True
     propagate.set_global_textmap(CompositePropagator([]))
     trace.set_tracer_provider(TracerProvider())
+
+
+def test_an_oversized_first_call_of_the_month_never_opens_a_counter(
+    migrated_db: None,
+) -> None:
+    """The opening insert takes the same room check the conflicting update does."""
+    owner = uuid5()
+    quota = MonthlyQuota(
+        Settings(monthly_total_web_limit=100, monthly_user_web_limit=2),
+    )
+
+    async def body() -> list[list[tuple[str, int]]]:
+        await dbutil.reset_db()
+        counted: list[list[tuple[str, int]]] = []
+        with pytest.raises(QuotaExceededError, match="monthly web"):
+            await quota.consume(owner, Usage.Event.Operation.web_search, units=3)
+        counted.append(await stored_counters())
+        await quota.consume(owner, Usage.Event.Operation.web_search, units=2)
+        counted.append(await stored_counters())
+        return counted
+
+    refused, allowed = dbutil.run(body())
+
+    assert refused == []
+    assert allowed == [("web", 2), ("web", 2)]
+
+
+async def stored_counters() -> list[tuple[str, int]]:
+    """Every monthly counter the database currently holds, ordered for comparison."""
+    async with dbutil.admin_engine().connect() as connection:
+        rows = await connection.execute(
+            text("SELECT kind, used FROM monthly_quota_counter ORDER BY subject_id")
+        )
+        return [(kind, used) for kind, used in rows]

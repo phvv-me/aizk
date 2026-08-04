@@ -22,11 +22,12 @@ from aizk.runtime import Runtime
 from aizk.storage import ByteStore
 from aizk.store.identity import User
 from aizk.usage import UsageAccountingJob, UsageCapture, capture_usage
+from aizk.web import WebSearch
 
 # Complete MCP surface available to an authenticated caller
 USER_TOOLS = {
-    "recall",
-    "remember",
+    "find",
+    "keep",
     "share",
     "status",
 }
@@ -41,8 +42,13 @@ def build_server(
     uploads: UploadBox | None = None,
     name: str = "aizk",
     wake: WorkerWake | None = None,
+    web: WebSearch | None = None,
 ) -> AizkMCP:
-    """Construct one MCP server over the probe runtime with optional fake dependencies."""
+    """Construct one MCP server over the probe runtime with optional fake dependencies.
+
+    `web` is left unwired by default, which is exactly how a deployment that has not turned
+    egress on is assembled, so the probe server answers `find` from memory alone.
+    """
     return AizkMCP(
         runtime.auth,
         store if store is not None else runtime.store,
@@ -51,6 +57,7 @@ def build_server(
         settings,
         name=name,
         wake=wake,
+        web=web,
     )
 
 

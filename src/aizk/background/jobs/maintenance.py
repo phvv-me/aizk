@@ -138,17 +138,18 @@ async def run_if_grown(
     threshold: int,
     build: Callable[[], Awaitable[int]],
     label: str,
-) -> None:
-    """Run a graph projection after its fact-growth threshold is reached."""
+) -> bool:
+    """Run a graph projection past its fact-growth threshold, reporting whether it ran."""
     async with User.system(scopes) as session:
         current = await recorded_fact_count(session, scopes)
         last = await Watermark.read(session, scopes, kind)
     if current - last < threshold:
         logger.info("{} pass skipped for {}, {} new facts", label, scopes, current - last)
-        return
+        return False
     await build()
     async with User.system(scopes) as session:
         await Watermark.set_value(session, scopes, kind, counter=current)
+    return True
 
 
 class DecayJob(ScopedScheduledJob):
@@ -227,16 +228,29 @@ class DedupJob(ScopedScheduledJob):
 
 
 class CommunitiesJob(ScopedScheduledJob):
-    """Rebuild communities after enough new facts arrive."""
+    """Rebuild communities after enough new facts arrive, then hand RAPTOR the new generation.
+
+    RAPTOR summarizes the communities this pass writes, so it is queued on completion rather
+    than on a clock. A refined partition takes as long as it takes, and a tree built while the
+    generation beneath it is still being replaced would describe themes that no longer exist.
+    """
 
     async def execute(self, scopes: Scopes) -> None:
-        await run_if_grown(
+        rebuilt = await run_if_grown(
             scopes,
             Watermark.Kind.fact_count,
             settings.communities_every_n_facts,
             partial(build_communities, scopes=scopes),
             "community",
         )
+        if not rebuilt:
+            return
+        async with Queue(dsn=settings.asyncpg_dsn) as queue:
+            await queue.enqueue(
+                RaptorJob,
+                MaintenanceJob(scopes=scopes),
+                f"{RaptorJob.name}:{','.join(str(scope) for scope in sorted(scopes))}",
+            )
 
 
 class ModelBackedJob(ScopedScheduledJob, abc.ABC):

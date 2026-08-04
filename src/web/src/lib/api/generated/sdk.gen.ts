@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddMemberData, AddMemberErrors, AddMemberResponses, CreateOrganizationData, CreateOrganizationResponses, FindingsData, FindingsErrors, FindingsResponses, GraphData, GraphErrors, GraphResponses, HealthData, HealthResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, ProcessingData, ProcessingEventsData, ProcessingEventsResponse, ProcessingEventsResponses, ProcessingResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses, SourcesData, SourcesErrors, SourcesResponses, StatusData, StatusErrors, StatusResponses, SubjectsData, SubjectsErrors, SubjectsResponses, ThemesData, ThemesResponses, UsageData, UsageErrors, UsageResponses } from './types.gen';
+import type { AddMemberData, AddMemberErrors, AddMemberResponses, CreateOrganizationData, CreateOrganizationResponses, FindingsData, FindingsErrors, FindingsResponses, GraphData, GraphErrors, GraphResponses, HealthData, HealthResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, ProcessingData, ProcessingEventsData, ProcessingEventsResponse, ProcessingEventsResponses, ProcessingResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses, SourcesData, SourcesErrors, SourcesResponses, StatusData, StatusErrors, StatusResponses, SubjectsData, SubjectsErrors, SubjectsResponses, ThemesData, ThemesErrors, ThemesResponses, UsageData, UsageErrors, UsageResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -127,9 +127,9 @@ export const subjects = <ThrowOnError extends boolean = false>(options?: Options
 /**
  * Themes
  *
- * Return every visible graph theme and its bounded member preview.
+ * Return one page of visible graph themes and their bounded member previews.
  */
-export const themes = <ThrowOnError extends boolean = false>(options?: Options<ThemesData, ThrowOnError>): RequestResult<ThemesResponses, unknown, ThrowOnError> => (options?.client ?? client).get<ThemesResponses, unknown, ThrowOnError>({
+export const themes = <ThrowOnError extends boolean = false>(options?: Options<ThemesData, ThrowOnError>): RequestResult<ThemesResponses, ThemesErrors, ThrowOnError> => (options?.client ?? client).get<ThemesResponses, ThemesErrors, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/themes',
     ...options

@@ -11,7 +11,8 @@ from networkx.classes import Graph
 from patos import FlexModel, sql
 from pgvector import HalfVector, Vector
 from pydantic import UUID5, Field
-from sqlalchemy import Integer, column, delete, or_
+from sqlalchemy import Integer, column, delete, func, or_
+from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 
 from ..config import settings
@@ -19,6 +20,7 @@ from ..ontology import System
 from ..serving.embed import Embedder
 from ..serving.extract import LLM
 from ..store import Community, Entity, Fact
+from ..store.engine import Session
 from ..store.identity import User
 from ..store.locking import acquire_locks
 from ..store.models.tables import EntityClaim, EntityContent, FactClaim, FactContent
@@ -80,6 +82,8 @@ class RaptorBuilder(FlexModel):
     claims: list[EntityClaim] = Field(default_factory=list)
     edges: list[FactContent] = Field(default_factory=list)
     edge_claims: list[FactClaim] = Field(default_factory=list)
+    staged: set[UUID5] = Field(default_factory=set)
+    staged_edges: set[UUID5] = Field(default_factory=set)
 
     def claim(self, content: EntityContent, level: int, summary: str) -> EntityClaim:
         """Build one exact-scope summary claim."""
@@ -90,20 +94,35 @@ class RaptorBuilder(FlexModel):
             attributes={"level": level, "summary": summary},
         )
 
+    def stage(self, content: EntityContent, level: int, summary: str) -> bool:
+        """Stage one summary entity and its claim once, reporting whether it was new.
+
+        A summary entity's identity is its label, and two labels written by two independent
+        model calls collide often enough to count on, since `entity_id` folds case and
+        whitespace and adjacent themes invite the same short name. A second claim on that one
+        identity would break the one-claim-per-scope index and take the whole generation down
+        with it, so the first staging of an identity wins and later ones reuse it.
+        """
+        if content.id in self.staged:
+            return False
+        self.staged.add(content.id)
+        self.contents.append(content)
+        self.claims.append(self.claim(content, level, summary))
+        return True
+
     def leaves(self, communities: list[Community]) -> list[Node]:
-        """Stage one level-zero summary entity for every community."""
+        """Stage one level-zero summary entity per distinct label, the biggest theme winning."""
         nodes: list[Node] = []
-        for community in communities:
+        for community in sorted(communities, key=lambda row: len(row.member_ids), reverse=True):
             content = _entity_content(
                 id=entity_id(community.label, System.Entity.RAPTOR_SUMMARY),
                 name=community.label,
                 type=System.Entity.RAPTOR_SUMMARY,
                 embedding=community.embedding,
             )
-            claim = self.claim(content, 0, community.summary)
-            claim.attributes["community"] = str(community.id)
-            self.contents.append(content)
-            self.claims.append(claim)
+            if not self.stage(content, 0, community.summary):
+                continue
+            self.claims[-1].attributes["community"] = str(community.id)
             nodes.append(
                 Node(
                     entity_id=content.id,
@@ -115,8 +134,15 @@ class RaptorBuilder(FlexModel):
         return nodes
 
     def connect(self, members: list[Node], parent: Node) -> None:
-        """Stage part-of fact content and claims from each child to one parent."""
+        """Stage part-of fact content and claims from each child to one parent.
+
+        A child whose label already folded into its own parent's identity would otherwise
+        claim that it is part of itself, and a repeated pair would claim it twice against a
+        unique live-claim index, so both are dropped here.
+        """
         for member in members:
+            if member.entity_id == parent.entity_id:
+                continue
             edge = _fact_content(
                 id=fact_id(
                     member.entity_id,
@@ -129,6 +155,9 @@ class RaptorBuilder(FlexModel):
                 predicate=_PART_OF,
                 statement=f"is part of {parent.label}",
             )
+            if edge.id in self.staged_edges:
+                continue
+            self.staged_edges.add(edge.id)
             self.edges.append(edge)
             self.edge_claims.append(
                 Fact.Claim(
@@ -185,7 +214,7 @@ class RaptorBuilder(FlexModel):
         with span("raptor_embedding"):
             [vector] = await self.embed.embed([report.summary], mode="document")
         parent = redundant_parent(parents, vector, settings.raptor_redundancy_threshold)
-        created = parent is None
+        created = False
         if parent is None:
             content = _entity_content(
                 id=entity_id(report.label, System.Entity.RAPTOR_SUMMARY),
@@ -199,8 +228,7 @@ class RaptorBuilder(FlexModel):
                 summary=report.summary,
                 embedding=vector,
             )
-            self.contents.append(content)
-            self.claims.append(self.claim(content, level, report.summary))
+            created = self.stage(content, level, report.summary)
             parents.append((parent, vector))
         self.connect(members, parent)
         return parent, created
@@ -253,6 +281,16 @@ class RaptorBuilder(FlexModel):
             written += count
             level += 1
         return written
+
+    async def claim_all(self, session: Session) -> None:
+        """Insert every staged summary claim, tolerating one another generation left behind."""
+        if not self.claims:
+            return
+        await session.exec(
+            insert(EntityClaim)
+            .values([claim.model_dump() for claim in self.claims])
+            .on_conflict_do_nothing(index_elements=["content_id", "scopes"])
+        )
 
     async def replace(self) -> None:
         """Replace one scope's generation atomically while sharing content across scopes.
@@ -307,8 +345,7 @@ class RaptorBuilder(FlexModel):
                     )
                 )
             await Entity.Content.mint_all(opened, self.contents)
-            opened.add_all(self.claims)
-            await opened.flush()
+            await self.claim_all(opened)
             await Fact.Content.mint_all(opened, self.edges)
             opened.add_all(self.edge_claims)
             await opened.flush()
@@ -341,17 +378,24 @@ async def build_raptor(
     embed: Embedder,
     scopes: Scopes | None = None,
 ) -> int:
-    """Build and atomically replace one exact scope's recursive summary tree."""
+    """Build and atomically replace one exact scope's recursive summary tree.
+
+    The biggest themes come first because the leaf comparison is quadratic, so a refined
+    partition of thousands of communities is climbed from the mass of the graph down.
+    """
     key = frozenset(scopes or (settings.system_user_id,))
     builder = RaptorBuilder(scopes=key, llm=llm, embed=embed)
     with span("raptor_snapshot"):
         async with User.system(key) as session:
             communities = list(
                 await session.exec(
-                    select(Community).where(
+                    select(Community)
+                    .where(
                         Community.embedding.is_not(None),
                         Community.scopes == sorted(key),
                     )
+                    .order_by(func.cardinality(Community.member_ids).desc(), Community.id)
+                    .limit(settings.raptor_leaf_limit)
                 )
             )
     with span("raptor_planning"):

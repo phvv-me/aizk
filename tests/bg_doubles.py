@@ -19,6 +19,8 @@ from aizk.background.queue import QueueJob, QueuePayload
 from aizk.config import settings
 from aizk.extract.extractor import Extractor, LLMExtractor
 from aizk.graph.build import GraphClients
+from aizk.integrations.clamav import ClamAVClient
+from aizk.integrations.docling import ArtifactReader, DoclingClient
 from aizk.integrations.logto import LogtoClient
 from aizk.runtime import Runtime
 from aizk.serving.embed import EmbedClient
@@ -27,6 +29,7 @@ from aizk.serving.gate import GateClient
 from aizk.serving.rerank import RerankClient
 from aizk.storage import ByteStore
 from aizk.store.engine import Database
+from aizk.web import WebSearch
 
 type AsyncCallback = Callable[..., Awaitable[None]]
 
@@ -51,6 +54,9 @@ def fake_artifact_services(
         intake=cast("ArtifactIntake", intake),
         conversion=cast("DoclingConversionJob", conversion or RecordingConversion()),
         integrity=cast("ArtifactIntegrity", integrity),
+        reader=cast("ArtifactReader", None),
+        converter=cast("DoclingClient", None),
+        scanner=cast("ClamAVClient", None),
     )
 
 
@@ -83,6 +89,7 @@ def fake_runtime(
             embed=embedder,
             llm=model,
         ),
+        web=cast("WebSearch", None),
     )
 
 

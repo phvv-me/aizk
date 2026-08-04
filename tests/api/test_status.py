@@ -1,8 +1,9 @@
 import asyncio
 from datetime import UTC, datetime, time
 
+import dbutil
 import pytest
-from id_factory import uuid5
+from id_factory import uuid5, uuid7
 
 from aizk.config import settings
 from aizk.status import (
@@ -131,3 +132,29 @@ def test_status_report_combines_usage_and_processing_concurrently(
         ("usage", user, 7),
         ("processing", user, None),
     ]
+
+
+def test_the_visible_backlog_ignores_the_chunks_of_a_quarantined_page(
+    migrated_db: None,
+) -> None:
+    """A cached page's chunks never reach the graph, so they are not a backlog to drain."""
+
+    async def load() -> ProcessingStatus:
+        await dbutil.reset_db()
+        owner = uuid5()
+        for origin in ("authored", "web_cache"):
+            document = await dbutil.seed_document(owner, [owner])
+            await dbutil.admin_exec(
+                "UPDATE document SET origin = CAST(:origin AS document_origin) WHERE id = :id",
+                {"origin": origin, "id": document},
+            )
+            await dbutil.admin_exec(
+                "INSERT INTO chunk (id, document_id, created_by, scopes, ord, text) "
+                "VALUES (:id, :document, :owner, ARRAY[:owner]::uuid[], 0, 'pending')",
+                {"id": uuid7(), "document": document, "owner": owner},
+            )
+        return await ProcessingStatus.load(User.authorized(owner, read=(owner,), write=(owner,)))
+
+    projection = dbutil.run(load()).stages[1]
+
+    assert (projection.key, projection.queued) == ("graph_projection", 1)

@@ -1,11 +1,9 @@
 from typing import ClassVar
 
 from patos import sql
-from sqlalchemy import Table, func
+from sqlalchemy import Table
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import registry
-from sqlalchemy.sql.selectable import ScalarSelect
-from sqlmodel import select
 
 # SQLModel does not publicly export its config TypedDict even though table models require it.
 from sqlmodel.main import SQLModelConfig
@@ -22,11 +20,6 @@ class MappedBase(sql.Model, registry=_REGISTRY):
     mapper_registry: ClassVar[registry] = _REGISTRY
     record_excluded: ClassVar[frozenset[str]] = frozenset({"embedding"})
     __table__: ClassVar[Table]
-
-    @classmethod
-    def total(cls) -> ScalarSelect[int]:
-        """Count this relation's visible rows as one scalar subquery."""
-        return select(func.count(cls.__table__.c.id)).scalar_subquery()
 
     def record(self) -> dict[str, Json]:
         """Serialize a mapped row with its table identity."""

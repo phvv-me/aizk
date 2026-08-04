@@ -17,7 +17,7 @@ from sqlalchemy import table as sql_table
 from sqlmodel import select
 
 from aizk.config import settings
-from aizk.graph.communities import detect
+from aizk.graph.communities import CommunityDetector
 from aizk.ontology import System
 from aizk.retrieval import Plan, QueryContext, recall
 from aizk.retrieval.recall import build_recall_statement
@@ -482,7 +482,7 @@ async def measure_community_detection(session: Session) -> float:
     """Time batch community detection over the visible graph."""
     facts = list(await session.exec(Fact.Live.embedded()))
     start = time.perf_counter()
-    detect(facts, settings.community_min_size)
+    CommunityDetector.from_settings(settings).detect(facts)
     return (time.perf_counter() - start) * 1000.0
 
 

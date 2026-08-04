@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Protocol, runtime_checkable
 
 from patos import FrozenModel
 
@@ -8,6 +8,17 @@ class CleanScan(FrozenModel):
 
     clean: Literal[True] = True
     bytes_scanned: int
+
+
+@runtime_checkable
+class ContentScanner(Protocol):
+    """The one scan call a consumer of the malware boundary makes.
+
+    Typed as the used surface so a recording double validates in place of the real
+    `ClamAVClient` without weakening field validation.
+    """
+
+    async def scan(self, content: bytes) -> CleanScan: ...
 
 
 class MalwareRejectedError(RuntimeError):

@@ -12,13 +12,16 @@ from sqlalchemy import (
     func,
     literal,
     or_,
+    true,
     union_all,
 )
 from sqlalchemy.orm import aliased
+from sqlalchemy.sql.elements import UnaryExpression
 from sqlalchemy.sql.selectable import CTE
 from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
+from ..mixins import Standing
 from ..vector import cosine_distance
 from .tables import (
     Artifact,
@@ -248,19 +251,30 @@ class Entity:
 
 
 class Knowledge:
-    """Cross-model rollups over the caller-visible knowledge graph."""
+    """Cross-model rollups over the knowledge one caller may call its own."""
 
     @classmethod
     def totals(cls) -> Select[tuple[int, int, int, int, int]]:
-        """Count visible authored documents, files, findings, subjects, and themes."""
+        """Count the caller's own authored documents, files, findings, subjects, and themes.
+
+        Visibility is wider than ownership. Public organizations are readable by everyone,
+        so counting them would greet a brand-new account with tens of thousands of items it
+        never wrote. `Standing.counted` keeps a public scope only where the caller may also
+        write to it, which leaves private and ordinary member scopes counting as before and
+        leaves recall free to read every public row.
+        """
         return cast(
             "Select[tuple[int, int, int, int, int]]",
             select(
-                Document.authored_total().label("documents"),
-                Artifact.total().label("files"),
-                LiveFact.total().label("findings"),
-                EntityClaim.total().label("subjects"),
-            ).add_columns(Community.total().label("themes")),
+                Standing.owned_total(
+                    Document.__table__,
+                    Document.artifact_id.is_(None),
+                    Document.projectable(),
+                ).label("documents"),
+                Standing.owned_total(Artifact.__table__).label("files"),
+                Standing.owned_total(LiveFact.__table__).label("findings"),
+                Standing.owned_total(EntityClaim.__table__).label("subjects"),
+            ).add_columns(Standing.owned_total(Community.__table__).label("themes")),
         )
 
 
@@ -416,20 +430,52 @@ class Explorer:
         return statement
 
     @staticmethod
-    def theme_rows() -> SelectOfScalar[Community]:
-        """Visible themes ordered by membership size then recency."""
-        return select(Community).order_by(
-            func.cardinality(Community.member_ids).desc(), Community.updated_at.desc()
+    def theme_order() -> tuple[
+        UnaryExpression[int], UnaryExpression[datetime], UnaryExpression[UUID7]
+    ]:
+        """The one ordering both theme reads share, biggest first and stable down to the id."""
+        return (
+            func.cardinality(Community.member_ids).desc(),
+            Community.updated_at.desc(),
+            Community.id.desc(),
         )
 
+    @classmethod
+    def theme_rows(cls, limit: int, offset: int) -> SelectOfScalar[Community]:
+        """One page of visible themes, the biggest first."""
+        return select(Community).order_by(*cls.theme_order()).limit(limit).offset(offset)
+
     @staticmethod
-    def member_names(ids: list[UUID5], limit: int = 8) -> SelectOfScalar[str]:
-        """Canonical names for one visible theme's bounded member roster."""
-        return (
-            select(EntityContent.name)
-            .where(EntityContent.id.in_(ids))
-            .order_by(EntityContent.name)
+    def theme_total() -> SelectOfScalar[int]:
+        """Count every visible theme, including the ones past the page bound."""
+        return select(Community.id.count().label("total"))
+
+    @classmethod
+    def theme_members(cls, limit: int, offset: int, preview: int) -> Select[tuple[UUID7, str]]:
+        """The first member names of one page of themes, bounded per theme by a lateral join.
+
+        A theme Louvain could not split holds every spoke of its hub, so flattening a page of
+        rosters into one `IN` list would hand the driver tens of thousands of parameters and
+        eventually cross its ceiling. Each theme is asked for its own alphabetical head
+        instead, which is the same preview at a bounded cost.
+        """
+        page = (
+            select(Community.id, Community.member_ids)
+            .order_by(*cls.theme_order())
             .limit(limit)
+            .offset(offset)
+            .subquery("theme_page")
+        )
+        names = (
+            select(EntityContent.name)
+            .where(EntityContent.id == any_(page.c.member_ids))
+            .order_by(EntityContent.name)
+            .limit(preview)
+            .lateral("theme_member")
+        )
+        return cast(
+            "Select[tuple[UUID7, str]]",
+            select(page.c.id, names.c.name).select_from(page.join(names, true())),
         )
 
     @staticmethod

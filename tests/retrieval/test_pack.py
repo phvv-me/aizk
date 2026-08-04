@@ -10,6 +10,7 @@ from pydantic import UUID7
 from aizk.config import settings
 from aizk.retrieval import Candidate, Lane, RecallResult, RecallTrace
 from aizk.retrieval.packing import deduplicate, pack
+from aizk.store import Document
 
 
 def candidates_strategy() -> st.SearchStrategy[list[Candidate]]:
@@ -124,6 +125,9 @@ def test_recall_result_keeps_structure_and_renders_merit_order() -> None:
                 "document_id": str(document_id),
                 "document_created_at": "2026-08-03T09:30:00Z",
                 "document_note": f"{document_id} remembered 2026-08-03",
+                "provider": None,
+                "retrieved_at": None,
+                "source_url": None,
             },
             {
                 "provenance": "derived",
@@ -136,8 +140,13 @@ def test_recall_result_keeps_structure_and_renders_merit_order() -> None:
                 "document_id": None,
                 "document_created_at": None,
                 "document_note": None,
+                "provider": None,
+                "retrieved_at": None,
+                "source_url": None,
             },
         ],
+        "web": [],
+        "receipt": None,
     }
     assert asyncio.run(result.to_markdown()) == (
         "## Scopes\n\n"
@@ -305,3 +314,30 @@ def test_an_item_trimmed_to_fit_still_traces_as_the_ranked_item_it_came_from() -
 
     assert trimmed[0] is not lone  # packing returned a fresh, shortened value
     assert [row.selected for row in trace.rows] == [True]
+
+
+def test_a_source_without_a_locator_has_no_public_address_to_show() -> None:
+    """Derived evidence carries no URI at all, so there is nothing to strip a namespace from."""
+    assert Document.public_url(None) is None
+    assert Document.public_url("web-cache:https://example.test/a") == "https://example.test/a"
+    assert Document.public_url("https://example.test/a") == "https://example.test/a"
+
+
+def test_web_evidence_renders_in_the_web_section_whichever_lane_found_it() -> None:
+    """A cached page ordinary retrieval surfaced is as untrusted as one fetched just now."""
+    cached = Candidate(
+        lane=Lane.Kind.SOURCES,
+        line="a stranger wrote this",
+        source_uri=Document.cache_locator("https://example.test/cached"),
+        web_cache=True,
+    )
+    remembered = Candidate(lane=Lane.Kind.FACTS, line="a fact the caller stored")
+
+    result = RecallResult.from_candidates([remembered, cached])
+    rendered = asyncio.run(result.to_markdown())
+
+    assert [item.text for item in result.remembered] == ["a fact the caller stored"]
+    assert [item.text for item in result.from_the_web] == ["a stranger wrote this"]
+    assert rendered.index("## Evidence") < rendered.index("## Web")
+    assert "Written by strangers on the public web" in rendered
+    assert "Source URL `https://example.test/cached`" in rendered

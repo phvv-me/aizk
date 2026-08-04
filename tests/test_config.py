@@ -1,11 +1,75 @@
 import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 
 from aizk.config import DatabaseBackend, Settings, configure_logging
+from aizk.config.settings import is_external_llm_endpoint
 
 type PolicyValue = str | set[str] | dict[str, str] | dict[str, set[str]]
+
+
+@pytest.mark.parametrize(
+    ("url", "external"),
+    [
+        ("https://openrouter.ai/api/v1", True),
+        ("http://vllm-llm:8000/v1", False),
+        ("http://localhost:8002/v1", False),
+        ("http://192.168.1.5:8000/v1", False),
+        ("http://8.8.8.8/v1", True),
+    ],
+    ids=["openrouter-https", "compose-service", "localhost", "private-ip", "public-ip"],
+)
+def test_is_external_llm_endpoint_classifies_the_host(url: str, external: bool) -> None:
+    assert is_external_llm_endpoint(url) is external
+
+
+def test_external_llm_endpoint_defaults_the_privacy_and_caching_posture() -> None:
+    config = Settings(_env_file=None, llm_url="https://openrouter.ai/api/v1")
+
+    assert config.llm_is_external
+    assert config.llm_extra_body == {
+        "provider": {"zdr": True},
+        "reasoning": {"enabled": False},
+        "session_id": "aizk-extractor",
+    }
+    assert config.llm_headers["X-OpenRouter-Cache"].get_secret_value() == "true"
+
+
+def test_local_llm_endpoint_keeps_todays_behavior() -> None:
+    config = Settings(_env_file=None, llm_url="http://localhost:8002/v1")
+
+    assert not config.llm_is_external
+    assert config.llm_extra_body == {}
+    assert config.llm_headers == {}
+
+
+def test_explicit_llm_extra_body_wins_over_the_external_default() -> None:
+    config = Settings(
+        _env_file=None,
+        llm_url="https://openrouter.ai/api/v1",
+        llm_extra_body={"custom": True},
+    )
+
+    assert config.llm_extra_body == {"custom": True}
+    assert config.llm_headers["X-OpenRouter-Cache"].get_secret_value() == "true"
+
+
+def test_explicit_llm_headers_win_over_the_external_default() -> None:
+    config = Settings(
+        _env_file=None,
+        llm_url="https://openrouter.ai/api/v1",
+        llm_headers={"X-Custom": "value"},
+    )
+
+    assert config.llm_extra_body == {
+        "provider": {"zdr": True},
+        "reasoning": {"enabled": False},
+        "session_id": "aizk-extractor",
+    }
+    assert config.llm_headers["X-Custom"].get_secret_value() == "value"
+    assert "X-OpenRouter-Cache" not in config.llm_headers
+
 
 _COMPLETE_LOGTO = {
     "logto_url": "https://auth.test",
@@ -356,3 +420,29 @@ def test_extraction_backend_is_closed_to_supported_implementations() -> None:
     assert Settings(_env_file=None).extract_backend == "llm"
     with pytest.raises(ValidationError, match="gliner"):
         Settings.model_validate({"extract_backend": "unknown"})
+
+
+def test_web_egress_refuses_an_extraction_lane_that_could_retain_the_question() -> None:
+    """Planning is egress, so the receipt's zero-retention claim has to be true."""
+    with pytest.raises(ValidationError, match="zero data retention"):
+        Settings(
+            web_search_enabled=True,
+            llm_url="https://openrouter.ai/api/v1",
+            llm_extra_body={"provider": {"zdr": False}},
+        )
+
+
+@pytest.mark.parametrize(
+    ("url", "extra"),
+    [
+        ("http://localhost:8002/v1", {}),
+        ("https://openrouter.ai/api/v1", {"provider": {"zdr": True}}),
+    ],
+    ids=["local lane", "pinned external lane"],
+)
+def test_web_egress_starts_on_a_lane_that_cannot_retain_the_question(
+    url: str, extra: dict[str, JsonValue]
+) -> None:
+    settings = Settings(web_search_enabled=True, llm_url=url, llm_extra_body=extra)
+
+    assert settings.llm_zdr_pinned

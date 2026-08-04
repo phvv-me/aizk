@@ -31,7 +31,12 @@ async def tasks_overview() -> TasksStatus:
         snapshot = await queue.snapshot()
     async with User.system().owner as session:
         projection_pending = (
-            await session.exec(select(Chunk.id.count()).where(Chunk.processed_at.is_(None)))
+            await session.exec(
+                select(Chunk.id.count()).where(
+                    Chunk.processed_at.is_(None),
+                    Chunk.projectable(),
+                )
+            )
         ).one()
     return TasksStatus(
         pending=snapshot.pending,

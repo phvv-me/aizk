@@ -14,6 +14,7 @@
   const sizes = $derived(
     (data.themes?.rows ?? []).map((theme) => ({ label: theme.label, value: theme.member_count }))
   );
+  const paged = $derived(data.themes ? data.themes.total > data.themes.rows.length : false);
 </script>
 
 <PageHeader
@@ -46,6 +47,14 @@
     </Card.Header>
   </Card.Root>
 {:else}
+  {#if paged}
+    <p class="text-muted-foreground mb-4 text-sm">
+      Showing {(data.themes.offset + 1).toLocaleString('en-US')} to {(
+        data.themes.offset + data.themes.rows.length
+      ).toLocaleString('en-US')} of {data.themes.total.toLocaleString('en-US')} themes, biggest first.
+    </p>
+  {/if}
+
   <Card.Root class="mb-6">
     <Card.Content class="pt-6">
       <HorizontalBars
@@ -91,5 +100,22 @@
         </Card.Content>
       </Card.Root>
     {/each}
+  </div>
+
+  <div class="mt-5 flex items-center justify-between">
+    {#if data.themes.offset > 0}
+      <a
+        href={`?offset=${Math.max(0, data.themes.offset - data.themes.limit)}`}
+        class="text-primary text-sm font-medium hover:underline">Previous page</a
+      >
+    {:else}
+      <span></span>
+    {/if}
+    {#if data.themes.offset + data.themes.rows.length < data.themes.total}
+      <a
+        href={`?offset=${data.themes.offset + data.themes.limit}`}
+        class="text-primary text-sm font-medium hover:underline">Next page</a
+      >
+    {/if}
   </div>
 {/if}

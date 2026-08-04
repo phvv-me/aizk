@@ -23,8 +23,10 @@ from aizk.extract.extractor import Extractor
 from aizk.extract.models import ExtractedEntity, Extraction, TimedFact
 from aizk.ontology import Ontology
 from aizk.ops import HealthReport, ResetReport, SetupReport
+from aizk.retrieval import RecallEvidence
 from aizk.store import Relation
 from aizk.store.identity import User
+from aizk.web import MemorySignals, RouterProbe, WebSearch
 
 DOC_A = uuid7()
 DOC_B = uuid7()
@@ -94,6 +96,27 @@ def test_maintenance_op_defaults_to_the_system_user(
 
     assert out == expected
     assert recorder.kwargs["scopes"] == frozenset({user_id or settings.system_user_id})
+
+
+def test_rebuilding_communities_everywhere_walks_the_stored_scope_roster(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The post-deploy path refreshes every corpus, not only the operator's own scope."""
+    keys = [frozenset({ACTOR}), frozenset({ACTOR, SYSTEM})]
+    built: list[frozenset[UUID5 | UUID7]] = []
+
+    async def roster() -> list[frozenset[UUID5 | UUID7]]:
+        return keys
+
+    async def build(scopes: frozenset[UUID5 | UUID7]) -> int:
+        built.append(scopes)
+        return len(scopes)
+
+    monkeypatch.setattr(admin, "scope_roster", roster)
+    monkeypatch.setattr(admin.graph, "build_communities", build)
+
+    assert dbutil.run(admin.communities(everywhere=True)) == 3
+    assert built == keys
 
 
 def test_forget_ranks_documents_by_the_query_then_retracts_their_claims(
@@ -349,3 +372,40 @@ def test_list_ontology_reports_kinds_with_live_use_counts(migrated_db: None) -> 
     assert kinds == sorted(
         kinds, key=lambda kind: kind != "entity"
     )  # all entities, then relations
+
+
+def test_probe_web_reads_real_memory_and_asks_the_real_router(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The operator rehearsal runs the whole decision without calling one provider."""
+    seen: dict[str, object] = {}
+    evidence = RecallEvidence(mentions=("atlas",))
+
+    async def stub_evidence(query: str, user: User) -> RecallEvidence:
+        seen["query"], seen["user"] = query, user
+        return evidence
+
+    monkeypatch.setattr(admin.retrieval, "evidence", stub_evidence)
+
+    class Probing:
+        async def probe(
+            self,
+            user: User,
+            query: str,
+            given: RecallEvidence,
+            fresh: bool,
+            execute: bool,
+        ) -> RouterProbe:
+            seen["given"], seen["fresh"], seen["execute"] = given, fresh, execute
+            del user
+            return RouterProbe(query=query, signals=MemorySignals())
+
+    probe = dbutil.run(
+        admin.probe_web(cast("WebSearch", Probing()), "what changed", fresh=True, execute=False)
+    )
+
+    assert probe.egress_query is None
+    assert seen["query"] == "what changed"
+    assert cast("User", seen["user"]).id == settings.system_user_id
+    assert seen["given"] is evidence
+    assert (seen["fresh"], seen["execute"]) == (True, False)

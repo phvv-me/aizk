@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from rls import Catalog, Command, CompiledPolicy
 from rls.ddl import RLSAction, RLSStatement
 from sqlalchemy import ColumnElement, MetaData, Table
+from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import SessionTransaction
@@ -30,7 +31,7 @@ from aizk.store.backend import (
 from aizk.store.ddl import CreateView, DropView, Grant, GrantTarget, postgresql_sql
 from aizk.store.engine import Database, DatabaseRole, Session
 from aizk.store.identity import User
-from aizk.store.mixins.scoped import Scoped
+from aizk.store.mixins.scoped import Scoped, Standing
 from aizk.store.mixins.view import ViewBase
 from aizk.store.vector import CosineVector, cosine_distance
 
@@ -263,6 +264,21 @@ def test_abstract_store_types_remain_unmapped_and_unregistered() -> None:
         table for table in TableBase.metadata.tables.values() if Catalog.state(table) is not None
     }
     assert after == before
+
+
+def test_ownership_counting_reads_each_backend_carrier_of_the_caller_standing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Counting drops a row held entirely in unwritable public scopes, on either backend."""
+    native = str(Standing.counted(Document.scopes).compile(dialect=postgresql_dialect()))
+    assert "jsonb_array_elements_text" in native
+    assert "NOT (document.scopes <@ array(" in native
+    assert "!= ALL (array(" in native
+
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+    portable = str(Standing.counted(Document.scopes).compile(dialect=CockroachDBDialect_asyncpg()))
+    assert portable.count("split_part(current_setting") == 2
+    assert "NOT (document.scopes <@ array(" in portable
 
 
 @pytest.mark.parametrize("role", list(DatabaseRole))

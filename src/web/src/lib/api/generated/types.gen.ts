@@ -306,8 +306,13 @@ export type Me = {
  * Operation
  *
  * Public AIZK operations whose resource use needs attribution.
+ *
+ * `recall` is the stored name of what the `find` tool does. The value predates the
+ * rename and stays, because it is the label every published usage report column, the
+ * browser dashboard, and the generated TypeScript client already key on, and renaming
+ * a stored enum to match a tool name would break all of them for no accounting gain.
  */
-export type Operation = 'recall' | 'remember_text' | 'remember_file' | 'share' | 'artifact_read';
+export type Operation = 'recall' | 'remember_text' | 'remember_file' | 'share' | 'artifact_read' | 'web_search' | 'web_fetch';
 
 /**
  * OrganizationChange
@@ -781,9 +786,21 @@ export type SubjectView = {
 /**
  * ThemePage
  *
- * Every visible graph theme ordered by membership size.
+ * One page of visible graph themes, ordered by size because a graph holds thousands.
  */
 export type ThemePage = {
+    /**
+     * Total
+     */
+    total: number;
+    /**
+     * Offset
+     */
+    offset: number;
+    /**
+     * Limit
+     */
+    limit: number;
     /**
      * Rows
      */
@@ -1286,9 +1303,27 @@ export type SubjectsResponse = SubjectsResponses[keyof SubjectsResponses];
 export type ThemesData = {
     body?: never;
     path?: never;
-    query?: never;
+    query?: {
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Offset
+         */
+        offset?: number;
+    };
     url: '/api/themes';
 };
+
+export type ThemesErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type ThemesError = ThemesErrors[keyof ThemesErrors];
 
 export type ThemesResponses = {
     /**

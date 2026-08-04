@@ -1,14 +1,19 @@
+from collections import defaultdict
 from datetime import datetime
 from typing import Literal
 
 from patos import FrozenModel
 from pydantic import UUID5, UUID7
 
+from ..config import settings
 from ..store import Community, Document, Explorer
 from ..store.identity import User
 from .dashboard import View
 
 type SourceOrigin = Literal["all", "document", "file"]
+
+# How many member names one theme card previews.
+_PREVIEW = 8
 
 
 class CountRecord(FrozenModel):
@@ -37,7 +42,9 @@ class SourceView(View):
             title=row.title or "Untitled source",
             kind=(row.subject_type or "source").replace("_", " ").title(),
             origin="file" if row.artifact_id is not None else "document",
-            source_uri=row.source_uri or "",
+            # A cached page is stored under its own URI namespace so it cannot compete with an
+            # authored note for the same address, and the browser wants the real address back.
+            source_uri=Document.public_url(row.source_uri) or "",
             observed_at=row.observed_at,
             updated_at=row.updated_at,
             scopes=tuple(dict.fromkeys(user.scope_labels(row.scopes))),
@@ -192,9 +199,10 @@ class SubjectPage(View):
         )
 
 
-class NameRecord(FrozenModel):
-    """One canonical entity name selected by a visible theme."""
+class MemberRecord(FrozenModel):
+    """One theme's identifier paired with one of its member names."""
 
+    id: UUID7
     name: str
 
 
@@ -210,30 +218,47 @@ class ThemeView(View):
     scopes: tuple[str, ...]
 
     @classmethod
-    async def from_row(cls, row: Community, user: User) -> ThemeView:
+    def from_row(cls, row: Community, names: tuple[str, ...], user: User) -> ThemeView:
         """Present one theme with its first member names and scope labels."""
-        names = await user.exec[NameRecord](Explorer.member_names(row.member_ids))
         return cls(
             id=row.id,
             label=row.label,
             summary=row.summary,
             member_count=len(row.member_ids),
-            members=tuple(name.name for name in names),
+            members=names,
             updated_at=row.updated_at,
             scopes=tuple(dict.fromkeys(user.scope_labels(row.scopes))),
         )
 
 
 class ThemePage(View):
-    """Every visible graph theme ordered by membership size."""
+    """One page of visible graph themes, ordered by size because a graph holds thousands."""
 
+    total: int
+    offset: int
+    limit: int
     rows: tuple[ThemeView, ...] = ()
 
     @classmethod
-    async def load(cls, user: User) -> ThemePage:
-        """Load visible themes and bounded member previews."""
-        rows = await user.exec[Community](Explorer.theme_rows())
-        return cls(rows=tuple([await ThemeView.from_row(row, user) for row in rows]))
+    async def load(
+        cls,
+        user: User,
+        limit: int = settings.web_theme_limit,
+        offset: int = 0,
+    ) -> ThemePage:
+        """Load one page of visible themes and every member preview in three reads."""
+        (count,) = await user.exec[CountRecord](Explorer.theme_total())
+        rows = await user.exec[Community](Explorer.theme_rows(limit, offset))
+        members = await user.exec[MemberRecord](Explorer.theme_members(limit, offset, _PREVIEW))
+        preview: dict[UUID7, list[str]] = defaultdict(list)
+        for member in members:
+            preview[member.id].append(member.name)
+        return cls(
+            total=count.total,
+            offset=offset,
+            limit=limit,
+            rows=tuple(ThemeView.from_row(row, tuple(preview[row.id]), user) for row in rows),
+        )
 
 
 class GraphRecord(FrozenModel):
