@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from json import loads
 from types import SimpleNamespace
@@ -138,6 +140,10 @@ class ProcessingUser:
     @property
     def exec(self) -> ProcessingExec:
         return ProcessingExec(self.records)
+
+    @asynccontextmanager
+    async def reading(self) -> AsyncIterator[ProcessingExec]:
+        yield ProcessingExec(self.records)
 
 
 class ProcessingExec:

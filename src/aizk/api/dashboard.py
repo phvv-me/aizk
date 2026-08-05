@@ -72,10 +72,11 @@ class Dashboard(FrozenModel):
         user: User,
         source_limit: int = settings.web_recent_source_limit,
     ) -> Dashboard:
-        """Load visible totals and source metadata through caller-bound `User.exec` reads."""
-        (counts,) = await user.exec[KnowledgeTotals](Knowledge.totals())
-        (usage,) = await user.exec[UsageTotals](Usage.Event.totals())
-        rows = await user.exec[Document](Document.newest_authored(source_limit))
+        """Load visible totals and source metadata in one caller-bound transaction."""
+        async with user.reading() as read:
+            (counts,) = await read[KnowledgeTotals](Knowledge.totals())
+            (usage,) = await read[UsageTotals](Usage.Event.totals())
+            rows = await read[Document](Document.newest_authored(source_limit))
         return cls(
             totals=counts,
             usage=usage,

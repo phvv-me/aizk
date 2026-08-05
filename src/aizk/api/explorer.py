@@ -69,9 +69,10 @@ class SourcePage(View):
         limit: int = 50,
         offset: int = 0,
     ) -> SourcePage:
-        """Load visible source rows and their matching total."""
-        (count,) = await user.exec[CountRecord](Explorer.source_total(search, origin))
-        rows = await user.exec[Document](Explorer.source_rows(search, origin, limit, offset))
+        """Load visible source rows and their matching total in one transaction."""
+        async with user.reading() as read:
+            (count,) = await read[CountRecord](Explorer.source_total(search, origin))
+            rows = await read[Document](Explorer.source_rows(search, origin, limit, offset))
         return cls(
             total=count.total,
             offset=offset,
@@ -133,9 +134,10 @@ class FindingPage(View):
     async def load(
         cls, user: User, search: str = "", limit: int = 50, offset: int = 0
     ) -> FindingPage:
-        """Load visible current findings and their matching total."""
-        (count,) = await user.exec[CountRecord](Explorer.finding_total(search))
-        rows = await user.exec[FindingRecord](Explorer.finding_rows(search, limit, offset))
+        """Load visible current findings and their matching total in one transaction."""
+        async with user.reading() as read:
+            (count,) = await read[CountRecord](Explorer.finding_total(search))
+            rows = await read[FindingRecord](Explorer.finding_rows(search, limit, offset))
         return cls(
             total=count.total,
             offset=offset,
@@ -188,9 +190,10 @@ class SubjectPage(View):
     async def load(
         cls, user: User, search: str = "", limit: int = 50, offset: int = 0
     ) -> SubjectPage:
-        """Load visible subject claims and their matching total."""
-        (count,) = await user.exec[CountRecord](Explorer.subject_total(search))
-        rows = await user.exec[SubjectRecord](Explorer.subject_rows(search, limit, offset))
+        """Load visible subject claims and their matching total in one transaction."""
+        async with user.reading() as read:
+            (count,) = await read[CountRecord](Explorer.subject_total(search))
+            rows = await read[SubjectRecord](Explorer.subject_rows(search, limit, offset))
         return cls(
             total=count.total,
             offset=offset,
@@ -246,10 +249,11 @@ class ThemePage(View):
         limit: int = settings.web_theme_limit,
         offset: int = 0,
     ) -> ThemePage:
-        """Load one page of visible themes and every member preview in three reads."""
-        (count,) = await user.exec[CountRecord](Explorer.theme_total())
-        rows = await user.exec[Community](Explorer.theme_rows(limit, offset))
-        members = await user.exec[MemberRecord](Explorer.theme_members(limit, offset, _PREVIEW))
+        """Load one page of visible themes and every member preview in one transaction."""
+        async with user.reading() as read:
+            (count,) = await read[CountRecord](Explorer.theme_total())
+            rows = await read[Community](Explorer.theme_rows(limit, offset))
+            members = await read[MemberRecord](Explorer.theme_members(limit, offset, _PREVIEW))
         preview: dict[UUID7, list[str]] = defaultdict(list)
         for member in members:
             preview[member.id].append(member.name)

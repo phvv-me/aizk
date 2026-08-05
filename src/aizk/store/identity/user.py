@@ -1,4 +1,5 @@
-from collections.abc import Iterable, Sequence
+from collections.abc import AsyncIterator, Iterable, Sequence
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from functools import cache, cached_property
 from types import TracebackType
@@ -171,6 +172,20 @@ class User(rls.Context, prefix="app"):
         """Typed one-statement execution as this caller, indexed by the row model."""
         return Exec(user=self)
 
+    @asynccontextmanager
+    async def reading(self) -> AsyncIterator[Exec]:
+        """Open one transaction every statement inside it shares.
+
+        A view answered by several statements otherwise pays its own `BEGIN`, authority
+        bind, and `COMMIT` for each one, which is three round trips of pure ceremony per
+        statement. Reading them together spends that ceremony once, so a three-statement
+        page costs six round trips instead of twelve. Use it wherever the statements are
+        already sequential; statements a caller runs concurrently stay on `exec`, since
+        one transaction would serialize them.
+        """
+        async with self as session:
+            yield Exec(user=self, session=session)
+
     def is_anonymous(self) -> bool:
         """Return whether this is the read-only fallback identity used by public mode."""
         return self.id == settings.anonymous_user_id
@@ -228,26 +243,41 @@ class User(rls.Context, prefix="app"):
         return target
 
 
-class Exec(FrozenModel):
+class Exec:
     """Index by a row model to run one statement as one caller transaction.
 
     `await user.exec[Candidate](statement, qvec=vector, k=8)` opens a short transaction
     as `user`, executes the statement with the keyword binds layered over the settings
-    values it names, and validates every returned row into a `Candidate` tuple.
+    values it names, and validates every returned row into a `Candidate` tuple. The
+    transaction `User.reading` hands down instead runs every statement of a view inside
+    the one it already opened.
     """
 
-    user: User
+    __slots__ = ("session", "user")
+
+    def __init__(self, user: User, session: Session | None = None) -> None:
+        self.user = user
+        self.session = session
 
     def __getitem__[RowT: BaseModel](self, model: type[RowT]) -> RowStatement[RowT]:
         """Bind one row model, yielding the awaitable statement runner."""
-        return RowStatement(user=self.user, model=model)
+        return RowStatement(user=self.user, model=model, session=self.session)
 
 
-class RowStatement[RowT: BaseModel](FrozenModel):
+class RowStatement[RowT: BaseModel]:
     """One statement run as one caller transaction and validated into typed rows."""
 
-    user: User
-    model: type[RowT]
+    __slots__ = ("model", "session", "user")
+
+    def __init__(
+        self,
+        user: User,
+        model: type[RowT],
+        session: Session | None = None,
+    ) -> None:
+        self.user = user
+        self.model = model
+        self.session = session
 
     async def __call__(
         self,
@@ -261,8 +291,20 @@ class RowStatement[RowT: BaseModel](FrozenModel):
         binds: named bind parameters, overriding any settings value of the same name.
         """
         parameters = {**settings.for_statement(statement), **binds}
+        if (open_session := self.session) is not None:
+            return self.shaped(
+                statement, (await open_session.exec(statement, params=parameters)).all()
+            )
         async with self.user as session:
             rows = (await session.exec(statement, params=parameters)).all()
+        return self.shaped(statement, rows)
+
+    def shaped(
+        self,
+        statement: Select[Any] | SelectOfScalar[Any],
+        rows: Sequence[Row[Any]],
+    ) -> tuple[RowT, ...]:
+        """Validate returned rows, reading a single-column statement as that one field."""
         if isinstance(statement, SelectOfScalar):
             field = next(iter(statement.selected_columns)).key
             if len(self.model.model_fields) == 1 and field in self.model.model_fields:

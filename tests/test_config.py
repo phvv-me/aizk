@@ -24,16 +24,16 @@ def test_is_external_llm_endpoint_classifies_the_host(url: str, external: bool) 
     assert is_external_llm_endpoint(url) is external
 
 
-def test_external_llm_endpoint_defaults_the_privacy_and_caching_posture() -> None:
+def test_external_llm_endpoint_defaults_the_privacy_posture() -> None:
     config = Settings(_env_file=None, llm_url="https://openrouter.ai/api/v1")
 
     assert config.llm_is_external
     assert config.llm_extra_body == {
-        "provider": {"zdr": True},
+        "provider": {"zdr": True, "only": ["deepinfra"]},
         "reasoning": {"enabled": False},
         "session_id": "aizk-extractor",
     }
-    assert config.llm_headers["X-OpenRouter-Cache"].get_secret_value() == "true"
+    assert config.llm_headers == {}
 
 
 def test_local_llm_endpoint_keeps_todays_behavior() -> None:
@@ -52,10 +52,10 @@ def test_explicit_llm_extra_body_wins_over_the_external_default() -> None:
     )
 
     assert config.llm_extra_body == {"custom": True}
-    assert config.llm_headers["X-OpenRouter-Cache"].get_secret_value() == "true"
+    assert config.llm_headers == {}
 
 
-def test_explicit_llm_headers_win_over_the_external_default() -> None:
+def test_explicit_llm_headers_are_kept_alongside_the_extra_body_default() -> None:
     config = Settings(
         _env_file=None,
         llm_url="https://openrouter.ai/api/v1",
@@ -63,12 +63,11 @@ def test_explicit_llm_headers_win_over_the_external_default() -> None:
     )
 
     assert config.llm_extra_body == {
-        "provider": {"zdr": True},
+        "provider": {"zdr": True, "only": ["deepinfra"]},
         "reasoning": {"enabled": False},
         "session_id": "aizk-extractor",
     }
     assert config.llm_headers["X-Custom"].get_secret_value() == "value"
-    assert "X-OpenRouter-Cache" not in config.llm_headers
 
 
 _COMPLETE_LOGTO = {

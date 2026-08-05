@@ -645,23 +645,25 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def default_external_llm_posture(self) -> Self:
-        """Default the external-endpoint privacy and caching posture unless the operator set it.
+        """Default the external-endpoint privacy posture unless the operator set it.
 
-        Applies only when `llm_is_external`, and only to whichever of `llm_extra_body` or
-        `llm_headers` the operator left unset, each field replaced whole rather than merged
-        with an operator value.
+        Applies only when `llm_is_external`, and only to `llm_extra_body` if the operator
+        left it unset, replaced whole rather than merged with an operator value. No default
+        header is applied: OpenRouter's `X-OpenRouter-Cache` stores the full request and
+        response at the edge for the TTL regardless of per-request `zdr`, and extraction
+        never repeats an identical request, so the cache buys nothing while adding a
+        retention surface.
         """
         if not self.llm_is_external:
             return self
         if "llm_extra_body" not in self.model_fields_set:
             self.llm_extra_body = {
-                "provider": {"zdr": True},  # keeps source text off retention on ZDR endpoints
+                # Pin the provider so an outage on the primary never silently reroutes to an
+                # endpoint with a different price, quantization, or retention posture.
+                "provider": {"zdr": True, "only": ["deepinfra"]},
                 "reasoning": {"enabled": False},  # extraction pays nothing for hidden reasoning
                 "session_id": "aizk-extractor",  # sticky routing hits the provider prompt cache
             }
-        if "llm_headers" not in self.model_fields_set:
-            # A retried identical request reads from the response cache instead of billing again.
-            self.llm_headers = {"X-OpenRouter-Cache": SecretStr("true")}
         return self
 
     @model_validator(mode="after")

@@ -67,9 +67,10 @@ class UsageReport(StatusView):
         generated_at = datetime.now(UTC)
         start_date = generated_at.date() - timedelta(days=days - 1)
         start = datetime.combine(start_date, time.min, tzinfo=UTC)
-        (summary,) = await user.exec[UsageSummary](Usage.Event.report_totals(start))
-        (lifetime,) = await user.exec[UsageSummary](Usage.Event.report_totals())
-        points = await user.exec[UsagePoint](Usage.Event.daily_since(start))
+        async with user.reading() as read:
+            (summary,) = await read[UsageSummary](Usage.Event.report_totals(start))
+            (lifetime,) = await read[UsageSummary](Usage.Event.report_totals())
+            points = await read[UsagePoint](Usage.Event.daily_since(start))
         return cls(
             generated_at=generated_at,
             recorded_through=generated_at,
@@ -228,12 +229,13 @@ class ProcessingStatus(StatusView):
         one_hour_ago = now - timedelta(hours=1)
         six_hours_ago = now - timedelta(hours=6)
         day_ago = now - timedelta(days=1)
-        (artifacts,) = await user.exec[ArtifactProcessingRecord](
-            Artifact.Content.processing_counts(one_hour_ago, six_hours_ago, day_ago)
-        )
-        (chunks,) = await user.exec[ChunkProcessingRecord](
-            Chunk.processing_counts(one_hour_ago, six_hours_ago, day_ago)
-        )
+        async with user.reading() as read:
+            (artifacts,) = await read[ArtifactProcessingRecord](
+                Artifact.Content.processing_counts(one_hour_ago, six_hours_ago, day_ago)
+            )
+            (chunks,) = await read[ChunkProcessingRecord](
+                Chunk.processing_counts(one_hour_ago, six_hours_ago, day_ago)
+            )
         conversion = StageEstimate.estimate(
             "conversion",
             artifacts.queued,
