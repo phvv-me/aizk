@@ -7,6 +7,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from loguru import logger
 from obstore.exceptions import BaseError as ObjectStoreError
+from patos import FrozenModel
 from pydantic import UUID7, AnyHttpUrl, JsonValue
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -36,9 +37,11 @@ from ..store.models.tables import ArtifactContent
 from ..types import ScopeNames, Scopes
 from ..usage import annotate_operation
 from .boilerplate import WebBoilerplateCleaner
+from .formats import FormatPolicy
 from .models import (
     ArtifactDocument,
     ArtifactReceipt,
+    CompactionReport,
     IntegrityReport,
     OriginalArtifact,
     OriginalDescription,
@@ -89,12 +92,14 @@ class ArtifactIntake:
         storage: ByteStore,
         repository: ArtifactRepository,
         enqueuer: ArtifactEnqueuer,
+        formats: FormatPolicy | None = None,
     ) -> None:
         self.reader = reader
         self.scanner = scanner
         self.storage = storage
         self.repository = repository
         self.enqueuer = enqueuer
+        self.formats = formats or FormatPolicy()
 
     async def uri(
         self,
@@ -130,13 +135,16 @@ class ArtifactIntake:
         observed_at: datetime | None = None,
         expires_at: datetime | None = None,
     ) -> ArtifactReceipt:
-        """Scan, store, register, and enqueue one bounded artifact without temporary files.
+        """Recognize, scan, store, register, and enqueue one bounded artifact.
 
-        The caller resolves and authorizes `target` before delivery, so intake writes to
-        exactly those scopes under PostgreSQL row security. The whole artifact is held in
-        memory, bounded by the declared upload limit, because malware scanning, content
+        The format check runs first and costs nothing, so an artifact aizk cannot read is
+        refused before it consumes a malware scan or a byte of storage. The caller resolves
+        and authorizes `target` before delivery, so intake writes to exactly those scopes
+        under PostgreSQL row security. The whole artifact is held in memory, bounded by the
+        declared upload limit, because format recognition, malware scanning, content
         hashing, and object storage each need the complete bytes.
         """
+        media_type = self.formats.accept(artifact.media_type, artifact.content)
         annotate_operation(Usage.Event.Operation.remember_file, target)
         await self.scanner.scan(artifact.content)
         stored = await self.storage.put(artifact.content)
@@ -146,7 +154,7 @@ class ArtifactIntake:
                 stored,
                 OriginalDescription(
                     filename=artifact.filename,
-                    media_type=artifact.media_type,
+                    media_type=media_type,
                     source_uri=source_uri,
                     companion_text=companion_text,
                     observed_at=observed_at,
@@ -378,3 +386,83 @@ class ArtifactIntegrity:
             logger.error("artifact integrity failure blob={} error={}", stored.id, message)
             return IntegrityCheck(id=stored.id, error=message)
         return IntegrityCheck(id=stored.id)
+
+
+class CompactionDisabled(RuntimeError):
+    """Compaction was asked to re-lay objects while compression is turned off."""
+
+
+class CompactionOutcome(FrozenModel):
+    """What one object costs the store after the compaction pass looked at it."""
+
+    stored_size: int
+    rewritten: bool = False
+    error: str | None = None
+
+
+class ArtifactCompaction:
+    """Re-lay stored objects under the current compression policy, byte for byte identical.
+
+    Raising `object_store_compression_level` only changes how new objects are written, so
+    everything accepted under a weaker policy, or before compression existed at all, keeps
+    its old layout until this pass walks it. Nothing here is lossy. Every object is restored
+    and matched against the content hash before it is written again, and the hash, the size,
+    and therefore `ArtifactIntegrity` all continue to describe the original bytes.
+    """
+
+    def __init__(self, storage: ByteStore, repository: ArtifactRepository) -> None:
+        self.storage = storage
+        self.repository = repository
+
+    async def compact(self, limit: int) -> CompactionReport:
+        """Re-lay one bounded batch and report the stored bytes it handed back."""
+        if not self.storage.compression_enabled:
+            raise CompactionDisabled(
+                "object store compression is turned off, so there is no policy to compact toward"
+            )
+        level = self.storage.compression_level
+        candidates = await self.repository.compaction_candidates(level, limit)
+        outcomes = [await self.rewrite(stored, level) for stored in candidates]
+        return CompactionReport(
+            examined=len(outcomes),
+            rewritten=sum(outcome.rewritten for outcome in outcomes),
+            failed=sum(outcome.error is not None for outcome in outcomes),
+            stored_bytes_before=sum(stored.stored_size for stored in candidates),
+            stored_bytes_after=sum(outcome.stored_size for outcome in outcomes),
+        )
+
+    async def rewrite(self, stored: StoredObject, level: int) -> CompactionOutcome:
+        """Restore, re-encode, and repoint one object, keeping whichever layout is denser.
+
+        The replacement lands under a fresh key and PostgreSQL is repointed before the old
+        key is dropped, so an interruption leaks an unreferenced object rather than leaving
+        a blob row pointing at bytes that are gone. A failure is left unstamped and reported,
+        which keeps the object a candidate and lets the integrity pass raise it separately.
+        """
+        try:
+            data = await self.storage.get(
+                stored.key,
+                encoding=stored.encoding,
+                expected_size=stored.size,
+                expected_hash=stored.content_hash,
+                version=stored.version,
+            )
+            replacement = await self.storage.put(data)
+        except (
+            ByteLimitExceeded,
+            IntegrityMismatch,
+            ObjectStoreError,
+            OSError,
+            zstd.ZstdError,
+        ) as error:
+            message = f"{type(error).__name__}: {error}"[:1024]
+            logger.error("artifact compaction failure blob={} error={}", stored.id, message)
+            return CompactionOutcome(stored_size=stored.stored_size, error=message)
+        verified_at = datetime.now(UTC)
+        if replacement.stored_size >= stored.stored_size:
+            await self.storage.delete(replacement.key)
+            await self.repository.record_compaction(stored.id, level, verified_at)
+            return CompactionOutcome(stored_size=stored.stored_size)
+        await self.repository.record_compaction(stored.id, level, verified_at, replacement)
+        await self.storage.delete(stored.key)
+        return CompactionOutcome(stored_size=replacement.stored_size, rewritten=True)

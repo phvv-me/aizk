@@ -21,6 +21,7 @@ from ..store import UploadCapability
 from ..store.identity import User
 from ..store.locking import acquire_locks
 from ..types import ScopeNames, Scopes
+from .formats import FormatPolicy
 from .models import ArtifactReceipt
 
 Sha256Hex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -89,6 +90,17 @@ class UploadRequest(FrozenModel):
     def safe_identity(self) -> Self:
         """Reject unsafe names now with the exact validation the conversion service applies."""
         ArtifactBytes(content=b"", filename=self.filename, media_type=self.media_type)
+        return self
+
+    @model_validator(mode="after")
+    def readable_format(self) -> Self:
+        """Refuse an unreadable declared format before the caller spends an upload on it.
+
+        Intake still checks the delivered bytes, since a declaration is only a claim. This
+        earlier refusal exists so the common honest mistake costs a round trip rather than a
+        whole upload.
+        """
+        FormatPolicy().accept_declaration(self.media_type)
         return self
 
 

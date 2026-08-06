@@ -1,10 +1,17 @@
+from contextlib import nullcontext
+from typing import TYPE_CHECKING, cast
+
 import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
+from opentelemetry.sdk.trace import TracerProvider
 from pydantic import JsonValue, ValidationError
 
-from aizk.config import DatabaseBackend, Settings, configure_logging
+from aizk.config import DatabaseBackend, Settings, configure_logging, correlate_trace
 from aizk.config.settings import is_external_llm_endpoint
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 type PolicyValue = str | set[str] | dict[str, str] | dict[str, set[str]]
 
@@ -414,6 +421,31 @@ def test_configure_logging_enables_and_disables_without_raising(settings: Settin
         configure_logging("")
     finally:
         configure_logging(settings.log_level)
+
+
+@pytest.mark.parametrize("recorded", [False, True], ids=["untraced", "traced"])
+def test_correlate_trace_carries_the_active_trace_into_the_log_record(recorded: bool) -> None:
+    """A serialized log line names its trace, which is what lets Grafana turn a line in Loki
+    into a link to the same request's trace in Tempo."""
+    record = cast("Record", {"extra": {}})
+    provider = TracerProvider()
+    span = (
+        provider.get_tracer(__name__).start_as_current_span("request")
+        if recorded
+        else nullcontext()
+    )
+
+    with span:
+        correlate_trace(record)
+
+    identifiers = (record["extra"]["trace_id"], record["extra"]["span_id"])
+    if not recorded:
+        # Empty rather than absent, so the shape of a record never depends on tracing.
+        assert identifiers == ("", "")
+    else:
+        trace_id, span_id = identifiers
+        assert len(trace_id) == 32 and int(trace_id, 16) != 0
+        assert len(span_id) == 16 and int(span_id, 16) != 0
 
 
 def test_extraction_backend_is_closed_to_supported_implementations() -> None:

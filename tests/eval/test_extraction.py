@@ -8,7 +8,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 
 from aizk.extract.extractor import Extractor
 from aizk.extract.models import ExtractedEntity, Extraction, TimedFact
-from aizk.provenance import EpistemicKind
+from aizk.provenance import EpistemicKind, Stance
 from eval.extraction import (
     ExtractionBenchmark,
     ExtractionCase,
@@ -81,6 +81,8 @@ def test_extraction_benchmark_scores_grounding_aliases_and_semantic_metadata() -
     )
 
     assert normalized("  AIZK\nMemory ") == "aizk memory"
+    # a backend that names no model attributes nothing, so its facts stay author-written
+    assert StaticExtractor(extraction=extraction).model_name is None
     assert report.model == "model-a"
     assert report.targets == 2
     assert report.proposed_facts == 2
@@ -118,6 +120,9 @@ def test_extraction_target_reports_wrong_metadata_and_missing_matches() -> None:
     assert expected.metadata(fact) == (2, 0)
     assert expected.model_copy(update={"valid_from": None}).metadata(fact) == (1, 0)
     assert expected.model_copy(update={"kind": None}).metadata(fact) == (1, 0)
+    # settledness is pinned beside the epistemic kind, and a flattened fact fails it
+    assert expected.model_copy(update={"stance": Stance.hedged}).metadata(fact) == (3, 0)
+    assert expected.model_copy(update={"stance": Stance.settled}).metadata(fact) == (3, 1)
     assert ExtractionBenchmark.matches([expected], []) == (0, 0, 0)
     assert ExtractionBenchmark.matches([expected, expected], [fact]) == (1, 2, 0)
 
@@ -191,6 +196,13 @@ def test_committed_extraction_corpus_is_bounded_and_loadable() -> None:
     path = Path(__file__).parent / "data" / "extraction_cases.jsonl"
 
     cases = load_extraction_cases(path)
+    pinned = {case.id: target.stance for case in cases for target in case.targets if target.stance}
 
-    assert len(cases) == 16
+    assert len(cases) == 18
     assert all(case.text and len(case.targets) <= 2 for case in cases)
+    # the reported incident, kept as a corpus case: a hedged sentence whose confident half
+    # is a valid contiguous quote, and the correction that later disproves it
+    assert pinned == {
+        "hedged-comparison": Stance.hedged,
+        "refuted-prior-claim": Stance.refuted,
+    }

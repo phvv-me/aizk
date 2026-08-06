@@ -80,14 +80,23 @@
 			}
 		}
 
+		# `/console` does not say which tool it is, so `/logto` is an alias onto it rather than a
+		# rename. The console's assets are built with the `/console` prefix compiled in, so the
+		# real path cannot move, and `/auth` is unavailable because the SvelteKit app owns it.
+		# `handle_path` rather than `handle` plus `uri strip_prefix`, because Caddy orders `redir`
+		# ahead of `uri`, so the strip would run after the redirect had already read `{uri}` and
+		# the alias would send `/logto/x` to `/console/logto/x`.
+		handle_path /logto* {
+			redir * /console{uri} 302
+		}
+
 		# Logto's console is already a path-based app on its own port, so it joins the console
-		# host rather than taking a second hostname. The path is `/console` and cannot be
-		# renamed to `/logto`, because the console's assets are built with that prefix baked
-		# in. `/api` is the management API the console calls and `/me` is its account app, and
-		# neither collides here, since the browser never calls them. The SvelteKit client that
-		# owns `/api` paths runs server side against the api container instead. Logto already
-		# names this origin as its admin endpoint, so its redirect URIs and CORS need no
-		# change, and reaching it through this block puts it behind the operator gate too.
+		# host rather than taking a second hostname. `/api` is the management API the console
+		# calls and `/me` is its account app, and neither collides here, since the browser never
+		# calls them. The SvelteKit client that owns `/api` paths runs server side against the
+		# api container instead. Logto already names this origin as its admin endpoint, so its
+		# redirect URIs and CORS need no change, and reaching it through this block puts it
+		# behind the operator gate too.
 		handle /console* {
 			reverse_proxy logto:3002
 		}
@@ -105,13 +114,26 @@
 			reverse_proxy grafana:3000
 		}
 
-		# Reserved for the Phoenix tracing UI, which lands in a later phase. Until that service
-		# exists this path answers 502, which is the honest answer for a tool that is not here.
-		handle_path /traces/* {
-			reverse_proxy phoenix:6006
+		# Traces live in Tempo, which ships no UI of its own on purpose, because Grafana is the
+		# single pane. `/traces` therefore stays a readable address that opens Grafana's trace
+		# explorer on the Tempo data source rather than a second tool to sign in to. It is
+		# wrapped in `handle` so it sorts with its siblings and stays behind the gate above,
+		# since a bare `redir` is ordered ahead of `forward_auth` and would answer anonymously.
+		handle /traces {
+			redir * /grafana/explore?schemaVersion=1&orgId=1&panes=%7B%22aizk%22%3A%7B%22datasource%22%3A%22aizk-traces%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22aizk-traces%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22%22%7D%5D%7D%7D 302
 		}
 
-		# SvelteKit owns the operator pages under /app/admin.
+		# This host's root is the operator console. A bare `/` here serves the console itself
+		# rather than redirecting or answering 404, and the product application keeps its own
+		# hostname, so the two faces never compete for a path. Every named tool above is a
+		# more specific matcher, and Caddy sorts `handle` blocks by specificity, so this
+		# catch-all cannot shadow them however it is ordered in the file.
+		#
+		# The operator pages are a separate future build inside this same SvelteKit app. Until
+		# they exist a bare `/` lands on the app's own root. Teaching it which face to present
+		# needs a host hint rather than a routing change here, either passing the console
+		# hostname through as a header the app reads, or giving the app a dedicated base path.
+		# Neither is built yet and neither belongs in this file.
 		handle {
 			reverse_proxy frontend:3000
 		}

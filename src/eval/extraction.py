@@ -12,7 +12,7 @@ from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from aizk.extract.extractor import Extractor
 from aizk.extract.models import TimedFact
 from aizk.graph.grounding import GroundedProjection, ProjectionQuality
-from aizk.provenance import EpistemicKind
+from aizk.provenance import EpistemicKind, Stance
 
 from .metrics import percentile, ratio
 
@@ -29,6 +29,7 @@ class ExtractionTarget(FrozenModel):
     predicate: str
     objects: frozenset[str]
     kind: EpistemicKind | None = None
+    stance: Stance | None = None
     valid_from: date | None = None
 
     def matches(self, fact: TimedFact) -> bool:
@@ -45,6 +46,9 @@ class ExtractionTarget(FrozenModel):
         if self.kind is not None:
             checked += 1
             correct += fact.kind is self.kind
+        if self.stance is not None:
+            checked += 1
+            correct += fact.stance is self.stance
         if self.valid_from is not None:
             checked += 1
             correct += fact.valid_from is not None and fact.valid_from.date() == self.valid_from

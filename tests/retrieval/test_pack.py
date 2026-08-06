@@ -8,6 +8,7 @@ from id_factory import uuid5, uuid7
 from pydantic import UUID7
 
 from aizk.config import settings
+from aizk.provenance import Stance
 from aizk.retrieval import Candidate, Lane, RecallResult, RecallTrace
 from aizk.retrieval.packing import deduplicate, pack
 from aizk.store import Document
@@ -120,6 +121,7 @@ def test_recall_result_keeps_structure_and_renders_merit_order() -> None:
             {
                 "provenance": "source",
                 "text": "Current project brief",
+                "stance": "settled",
                 "scopes": [{"name": "private", "description": None}],
                 "resource_uri": (f"aizk://artifacts/{artifact_id}/contents/{artifact_content_id}"),
                 "document_id": str(document_id),
@@ -132,6 +134,7 @@ def test_recall_result_keeps_structure_and_renders_merit_order() -> None:
             {
                 "provenance": "derived",
                 "text": "- next action is profiling",
+                "stance": "settled",
                 "scopes": [
                     {"name": "Lab", "description": "Lab operations"},
                     {"name": "Research", "description": "Shared research"},
@@ -341,3 +344,66 @@ def test_web_evidence_renders_in_the_web_section_whichever_lane_found_it() -> No
     assert rendered.index("## Evidence") < rendered.index("## Web")
     assert "Written by strangers on the public web" in rendered
     assert "Source URL `https://example.test/cached`" in rendered
+
+
+def test_an_unsettled_fact_never_speaks_for_the_source_that_qualified_it() -> None:
+    # the mechanization of "the source wins": the excerpt carrying the sentence a derived
+    # claim flattened is the correction, not the repetition it looks like
+    chunk = uuid7()
+    hedged = evidence(Lane.Kind.FACTS, "- [hedged] (improves_over) V7 beats the baseline", chunk)
+    span = evidence(Lane.Kind.SOURCES, "V7 beats the baseline, though within variance", chunk)
+
+    assert deduplicate([hedged.model_copy(update={"stance": Stance.hedged}), span]) == [
+        hedged.model_copy(update={"stance": Stance.hedged}),
+        span,
+    ]
+    # a settled fact still speaks for its span, so the excerpt behind it is repetition
+    assert deduplicate([hedged, span]) == [hedged]
+
+
+def test_a_repeated_excerpt_is_still_dropped_beside_an_unsettled_fact() -> None:
+    chunk = uuid7()
+    disputed = evidence(Lane.Kind.FACTS, "- [disputed] (uses) alpha", chunk).model_copy(
+        update={"stance": Stance.disputed}
+    )
+    span = evidence(Lane.Kind.SOURCES, "the note", chunk)
+    repeat = evidence(Lane.Kind.SOURCES, "the note", chunk)
+
+    assert deduplicate([disputed, span, repeat]) == [disputed, span]
+
+
+def test_an_unsettled_derived_memory_changes_what_the_answer_tells_the_reader() -> None:
+    # a stance word beside a claim is easy to read past, so the result carries a standing
+    # instruction naming the excerpt as the authority instead of trusting the label alone
+    chunk = uuid7()
+    result = RecallResult.from_candidates(
+        [
+            Candidate(
+                lane=Lane.Kind.FACTS,
+                line="- [hedged] (improves_over) V7 improves over the baseline on noise",
+                source_chunk_id=chunk,
+                stance=Stance.hedged,
+            ),
+            Candidate(
+                lane=Lane.Kind.SOURCES,
+                line="V7 improves over the baseline on noise, though within run-to-run variance",
+                source_chunk_id=chunk,
+            ),
+        ]
+    )
+
+    rendered = asyncio.run(result.to_markdown())
+
+    assert [item.stance for item in result.unsettled] == [Stance.hedged]
+    assert "marked `hedged` was" in rendered
+    assert "Do not repeat one as settled fact." in rendered
+    assert "though within run-to-run variance" in rendered
+
+
+def test_a_settled_answer_carries_no_unsettled_warning_at_all() -> None:
+    result = RecallResult.from_candidates(
+        [Candidate(lane=Lane.Kind.FACTS, line="- (uses) alpha uses beta")]
+    )
+
+    assert result.unsettled == ()
+    assert "Do not repeat one as settled fact." not in asyncio.run(result.to_markdown())

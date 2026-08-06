@@ -1,7 +1,7 @@
 from patos import FrozenModel
 from pydantic import Field
 
-from ..provenance import EpistemicKind
+from ..provenance import EpistemicKind, Stance
 
 
 class WireEntity(FrozenModel):
@@ -34,11 +34,20 @@ class WireFact(FrozenModel):
         max_length=256,
         description=(
             "one contiguous supporting substring copied character for character from the text, "
-            "with no ellipses or joined passages"
+            "spanning any qualifier, limitation, negation or doubt the sentence puts on the "
+            "claim, with no ellipses or joined passages"
         ),
     )
     date: str | None = Field(default=None, max_length=64)
     k: EpistemicKind = EpistemicKind.world
+    st: Stance = Field(
+        default=Stance.settled,
+        description=(
+            "how settled the claim is: settled for a plain assertion, reported when the source "
+            "credits somebody else, hedged when it qualifies or doubts the claim, disputed when "
+            "sources disagree, refuted when the source says the claim is wrong"
+        ),
+    )
 
 
 class WireExtraction(FrozenModel):

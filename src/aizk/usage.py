@@ -16,11 +16,13 @@ from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.sdk.resources import Resource
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import SpanProcessor, TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace import Span, SpanKind, format_span_id, format_trace_id
 from pydantic import UUID5, NonNegativeFloat, NonNegativeInt
+from pydantic_ai import Agent
+from pydantic_ai.models.instrumented import InstrumentationSettings
 
 from .background.queue import Queue, QueueJob, QueuePayload
 from .config import settings
@@ -89,6 +91,30 @@ def annotate_operation(
             update={"operation": operation, "targets": exact_targets, "items": items}
         )
     )
+
+
+class CallerAnnotator(SpanProcessor):
+    """Copy the request's accounting facts onto every span started while it is active.
+
+    `annotate_caller` and `annotate_operation` reach only the span that is current when the
+    transport identifies its caller. The model call, the query, and the outbound request each
+    open their own child span afterwards, and a trace store filters on the span that carries
+    an attribute rather than on its ancestors. Stamping at start is therefore what makes
+    per-user token spend and per-operation latency answerable over the GenAI spans.
+    """
+
+    def on_start(self, span: Span, parent_context: context.Context | None = None) -> None:
+        """Stamp the active caller, operation, and touched scopes onto one starting span."""
+        state = _current.get()
+        if state is None:
+            return
+        if state.user_id is not None:
+            span.set_attribute(_USER, str(state.user_id))
+            span.set_attribute(_ANONYMOUS, "true" if state.anonymous else "false")
+        if state.operation is not None:
+            span.set_attribute(_OPERATION, state.operation.value)
+        if state.targets:
+            span.set_attribute(_TARGETS, ",".join(map(str, state.targets)))
 
 
 def serving_span(name: str) -> AbstractContextManager[Span | None]:
@@ -256,12 +282,17 @@ def observe(database: Database) -> None:
     provider = TracerProvider(
         sampler=ALWAYS_ON, resource=Resource.create({"service.name": "aizk"})
     )
+    provider.add_span_processor(CallerAnnotator())
     if settings.otlp_endpoint is not None:
         provider.add_span_processor(
             BatchSpanProcessor(OTLPSpanExporter(endpoint=str(settings.otlp_endpoint)))
         )
     trace.set_tracer_provider(provider)
     propagate.set_global_textmap(CompositePropagator([]))
+    # Every pydantic-ai agent then emits GenAI semantic convention spans carrying the model,
+    # the token counts, and the latency of each turn. Prompts and completions stay out of the
+    # trace store, because a chunk of somebody's private memory is exactly what they contain.
+    Agent.instrument_all(InstrumentationSettings(tracer_provider=provider, include_content=False))
     # skip_dep_check because the instrumentor's `sqlalchemy<2.1` pin trips on the
     # env's 2.1 beta and BaseInstrumentor would silently skip instrumentation.
     SQLAlchemyInstrumentor().instrument(

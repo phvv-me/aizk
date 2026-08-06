@@ -7,6 +7,7 @@ from pydantic import UUID5
 
 from aizk.config import settings
 
+from .certainty import CERTAINTY_CASES_PATH, measure_certainty
 from .corpus import DEFAULT_PER_STRATUM, FROZEN_CORPUS_PATH
 from .service import Evaluation
 
@@ -108,6 +109,17 @@ class EvaluationCLI:
     ) -> str:
         """Replay the extraction gate on stored chunks."""
         return self.emit(asyncio.run(Evaluation(user_id=user).gate(limit)), out)
+
+    def certainty(
+        self,
+        path: str = str(CERTAINTY_CASES_PATH),
+        out: str | None = None,
+    ) -> str:
+        """Score certainty preservation before and after the grounding gate.
+
+        Needs no model and no database, so the numbers are exactly reproducible anywhere.
+        """
+        return self.emit(measure_certainty(Path(path)), out)
 
     def extraction(
         self,

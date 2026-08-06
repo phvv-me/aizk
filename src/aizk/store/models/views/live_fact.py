@@ -15,6 +15,7 @@ from sqlalchemy import (
     extract,
     func,
     literal,
+    or_,
     type_coerce,
     union,
     union_all,
@@ -24,6 +25,7 @@ from sqlalchemy.sql.selectable import Select as SelectStatement
 from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
+from ....provenance import EpistemicKind, Stance
 from ...mixins import ViewBase
 from ...vector import cosine_distance
 from ..tables.fact import FactClaim, FactContent
@@ -76,21 +78,39 @@ class LiveFact(ViewBase):
     promoted_from: C[UUID7 | None]
 
     @classmethod
+    def settledness(cls) -> ColumnElement[str]:
+        """How settled this claim is, settled whenever nothing ever recorded otherwise."""
+        return func.coalesce(cls.attributes >> "stance", Stance.settled.value)
+
+    @classmethod
     def line(cls) -> ColumnElement[str]:
-        """The fact's prompt-ready evidence line, speaker attribution then the predicate
-        and statement. A world fact with no recorded speaker skips the attribution
-        bracket entirely."""
+        """The fact's prompt-ready evidence line, its marks then the predicate and statement.
+
+        The bracket carries who said it and how settled it is. A derived fact reads as a
+        clean assertion whatever the sentence behind it said, so an unsettled stance is
+        rendered here rather than merely stored: a reader who cannot see that a claim was
+        hedged has no way to know it is one of the claims worth checking the source for. A
+        settled world fact with no recorded speaker has nothing to mark and skips the
+        bracket entirely.
+        """
         speaker_label = cls.attributes >> "speaker_label"
         speaker_name = func.coalesce(speaker_label, "unknown speaker")
         speaker_role = cls.attributes >> "speaker_role"
         speaker_suffix = sql.fragment(t", {speaker_role}")
-        epistemic_kind = func.coalesce(cls.attributes >> "epistemic_kind", "world")
-        attribution = case(
-            (and_(epistemic_kind == "world", speaker_label.is_(None)), ""),
-            else_=sql.concat(t"[{speaker_name}{speaker_suffix}, {epistemic_kind}] "),
+        world = EpistemicKind.world.value
+        epistemic_kind = func.coalesce(cls.attributes >> "epistemic_kind", world)
+        stance = cls.settledness()
+        attributed = or_(epistemic_kind != world, speaker_label.is_not(None))
+        unsettled = stance != Stance.settled.value
+        attribution = sql.concat(t"{speaker_name}{speaker_suffix}, {epistemic_kind}")
+        marks = case(
+            (and_(attributed, unsettled), sql.concat(t"{attribution}, {stance}")),
+            (attributed, attribution),
+            else_=stance,
         )
+        bracket = case((or_(attributed, unsettled), sql.concat(t"[{marks}] ")), else_="")
         predicate, statement = cls.predicate, cls.statement
-        return sql.concat(t"- {attribution}({predicate}) {statement}")
+        return sql.concat(t"- {bracket}({predicate}) {statement}")
 
     @classmethod
     def embedded(cls) -> SelectOfScalar[Self]:

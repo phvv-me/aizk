@@ -55,6 +55,18 @@ async def bound_user(context: Context) -> User | None:
     return user if isinstance(user, User) else None
 
 
+def client_label(context: Context) -> str | None:
+    """The harness on the other end, from the MCP initialize handshake.
+
+    Kept with what the caller wrote so an operator debugging the graph can ask which
+    client produced a class of facts, the way `derived_by` answers which model did.
+    A session that never completed a handshake names nothing.
+    """
+    if (params := context.session.client_params) is None:
+        return None
+    return f"{params.clientInfo.name}/{params.clientInfo.version}"
+
+
 def request_context[ParamsT](context: MiddlewareContext[ParamsT]) -> Context:
     """The FastMCP request context a middleware stashes state on, required to exist."""
     if context.fastmcp_context is None:

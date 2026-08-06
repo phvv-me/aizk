@@ -43,6 +43,7 @@ deterministic rules. `rejection` returns the first reason that applies, in this 
 |---|---|
 | `missing_quote` | the fact carries no quote, or only whitespace |
 | `unsupported_quote` | the quote cannot be located in the chunk text |
+| `stripped_qualifier` | the statement reads as more certain than the sentence it was drawn from |
 | `unresolved_endpoint` | the subject, or a named object, is not one of the extraction's own entities |
 | `self_relation` | subject and object normalize to the same name |
 | `generic_relation` | the predicate is the catch-all `related_to` |
@@ -93,9 +94,9 @@ matches the verdict is `ADD`. A `state` relation with exactly one match on the s
 **Tier four is one batched model call.** Only similarity from 0.75 up to 0.9 leaves the rule verdict
 empty. `GraphWriter.resolve_ambiguous` collects those candidates and `Consolidator.resolve` sends
 each with its own catalog of similar facts in one numbered prompt, validated as
-`BatchConsolidationVerdict` with at most eight verdicts. An `UPDATE` may only supersede a fact from
-that candidate's catalog, and a missing or unknown target becomes `ADD`, keeping the new fact without
-letting the model revise an unrelated claim.
+`BatchConsolidationVerdict` with at most eight verdicts. An `UPDATE` or `REFUTE` may only supersede a
+fact from that candidate's catalog, and a missing or unknown target becomes `ADD`, keeping the new
+fact without letting the model revise an unrelated claim.
 
 ## Dates
 

@@ -20,6 +20,11 @@ class Extractor(FrozenFlexModel, abc.ABC):
         """Whether graph building should run the cheap relevance gate first."""
         return False
 
+    @property
+    def model_name(self) -> str | None:
+        """The model this backend attributes every fact it derives to, if it names one."""
+        return None
+
     @abc.abstractmethod
     async def extract(self, text: str) -> Extraction:
         """Extract entities and dated facts from one source span."""
@@ -40,6 +45,10 @@ class LLMExtractor(Extractor):
     @property
     def requires_gate(self) -> bool:
         return settings.extraction_gate_enabled
+
+    @property
+    def model_name(self) -> str:
+        return self.llm.model.model_name
 
     @staticmethod
     def system_prompt() -> str:
@@ -71,6 +80,8 @@ class LLMExtractor(Extractor):
                     quote=fact.quote,
                     valid_from=resolve_valid_from(fact.date, fact.statement),
                     kind=fact.k,
+                    stance=fact.st,
+                    derived_by=self.model_name,
                 )
                 for wire in extracted
                 for fact in wire.f
@@ -134,6 +145,10 @@ class GLiNERExtractor(Extractor):
     """Build a grounded graph slice from GLiNER entities and relations."""
 
     gliner: GraphBackend
+
+    @property
+    def model_name(self) -> str:
+        return "gliner"
 
     @staticmethod
     def _excerpt(text: str, head: Span, tail: Span) -> str:
@@ -235,6 +250,7 @@ class GLiNERExtractor(Extractor):
                 statement=statement,
                 quote=excerpt or None,
                 valid_from=resolve_valid_from(None, statement),
+                derived_by=self.model_name,
             )
             facts.setdefault(
                 (subject.casefold(), predicate, object_name.casefold(), statement),

@@ -34,6 +34,7 @@ def build_byte_store(config: Settings) -> ByteStore:
         backend=backend,
         signer=backend,
         upload_byte_limit=config.object_store_upload_byte_limit,
+        compression_enabled=config.object_store_compression_enabled,
         compression_level=config.object_store_compression_level,
         compression_min_savings=config.object_store_compression_min_savings,
         internal_download_lifetime=timedelta(

@@ -11,6 +11,7 @@ from id_factory import uuid7
 from pydantic import AnyHttpUrl, SecretStr
 
 import aizk.commands.admin as commands
+from aizk.artifacts import CompactionReport
 from aizk.integrations.logto import Account, PolicyReport, RoleAssignment, RoleReport
 from aizk.integrations.web import Freshness, SearchLane
 from aizk.web import MemorySignals, RouterProbe, SanctionedPlan
@@ -112,6 +113,7 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
         "queue",
         "server",
         "settings",
+        "storage",
         "web",
     }
     assert command_names(commands.server_app) == {"api", "mcp", "worker"}
@@ -310,6 +312,43 @@ def test_retry_commands_use_the_typed_queue_boundaries(
 
     assert recorder.call_args.args == (int(tokens[-1]),)
     assert expected in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("tokens", "expected_limit"),
+    [
+        (["storage", "compact"], commands.settings.object_store_compaction_batch_size),
+        (["storage", "compact", "--limit", "25"], 25),
+    ],
+)
+def test_storage_compact_reports_the_bytes_one_bounded_pass_reclaimed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tokens: list[str],
+    expected_limit: int,
+) -> None:
+    report = CompactionReport(
+        examined=4,
+        rewritten=3,
+        failed=0,
+        stored_bytes_before=1000,
+        stored_bytes_after=400,
+    )
+    compaction = Mock(return_value=SimpleNamespace(compact=AsyncMock(return_value=report)))
+    monkeypatch.setattr(commands, "ArtifactCompaction", compaction)
+    monkeypatch.setattr(commands, "build_byte_store", Mock())
+
+    dispatch(tokens)
+
+    assert compaction.return_value.compact.call_args.args == (expected_limit,)
+    assert json.loads(capsys.readouterr().out) == {
+        "examined": 4,
+        "rewritten": 3,
+        "failed": 0,
+        "stored_bytes_before": 1000,
+        "stored_bytes_after": 400,
+        "reclaimed": 600,
+    }
 
 
 @pytest.mark.parametrize(

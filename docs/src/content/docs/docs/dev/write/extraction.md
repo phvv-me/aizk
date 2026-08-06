@@ -120,6 +120,7 @@ required fields.
 | `f[].quote` | one contiguous supporting substring | 1 to 256 chars |
 | `f[].date` | the fact's own date, when the text gives one | 64 chars |
 | `f[].k` | epistemic kind, default `world` | enum |
+| `f[].st` | settledness, default `settled` | enum |
 
 The keys are terse because grammar-constrained tokens cost, while the descriptions carry the meaning
 the model reads. `quote` has a minimum length of one, so the schema itself refuses a fact with no

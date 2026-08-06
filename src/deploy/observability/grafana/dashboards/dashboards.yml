@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: AIZK
+    type: file
+    disableDeletion: true
+    # The committed JSON beside this file is the authority. An operator may still explore freely,
+    # they simply cannot save over the provisioned copy, which keeps the console reproducible.
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

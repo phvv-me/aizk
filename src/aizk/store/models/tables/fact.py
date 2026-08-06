@@ -1,9 +1,9 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import ClassVar, cast
 
 from patos import sql
-from pydantic import UUID5, UUID7
+from pydantic import UUID5, UUID7, JsonValue
 from sqlalchemy import Column as SAColumn
 from sqlalchemy import (
     ColumnElement,
@@ -29,6 +29,7 @@ from sqlalchemy.orm import declared_attr
 from sqlmodel import select
 
 from ....config import settings
+from ....provenance import Stance
 from ....types import Scopes
 from ...engine import Session
 from ...mixins import ClaimedContent, DeterministicId, Embedded, Id, Scoped, TableBase
@@ -270,6 +271,33 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         )
         return [row[0] for row in result]
 
+    @staticmethod
+    def _stamp(marks: Mapping[str, str]) -> ColumnElement[dict[str, JsonValue]]:
+        """One JSONB object of text marks, ready to merge into a claim's attributes."""
+        return cast(
+            "ColumnElement[dict[str, JsonValue]]",
+            func.jsonb_build_object(
+                *(part for key, value in marks.items() for part in (key, literal(value, Text)))
+            ),
+        )
+
+    @classmethod
+    async def _close(
+        cls, session: Session, selected: ColumnElement[bool], marks: Mapping[str, str]
+    ) -> list[UUID7]:
+        """Close every live claim `selected` names now, stamping why history stops there."""
+        result = await session.exec(
+            update(cls)
+            .where(cls.recorded_to.is_(None), selected)
+            .values(
+                recorded_to=literal(datetime.now(UTC), DateTime(timezone=True)),
+                attributes=cls.attributes.op("||")(cls._stamp(marks)),
+            )
+            .returning(cls.id)
+            .execution_options(synchronize_session=False)
+        )
+        return [row[0] for row in result]
+
     @classmethod
     async def retract_from_documents(
         cls,
@@ -278,26 +306,11 @@ class FactClaim(Id, Scoped, TableBase, table=True):
         reason: str,
     ) -> list[UUID7]:
         """Close live claims derived from documents before their chunks change."""
-        now = datetime.now(UTC)
-        now_ts = literal(now, DateTime(timezone=True))
-        result = await session.exec(
-            update(cls)
-            .where(
-                cls.recorded_to.is_(None),
-                cls.source_chunk_id.in_(
-                    select(Chunk.id).where(Chunk.document_id.in_(document_ids))
-                ),
-            )
-            .values(
-                recorded_to=now_ts,
-                attributes=cls.attributes.op("||")(
-                    func.jsonb_build_object(reason, literal(now.isoformat(), Text))
-                ),
-            )
-            .returning(cls.id)
-            .execution_options(synchronize_session=False)
+        return await cls._close(
+            session,
+            cls.source_chunk_id.in_(select(Chunk.id).where(Chunk.document_id.in_(document_ids))),
+            {reason: datetime.now(UTC).isoformat()},
         )
-        return [row[0] for row in result]
 
     @classmethod
     async def forget_from_documents(
@@ -305,6 +318,57 @@ class FactClaim(Id, Scoped, TableBase, table=True):
     ) -> list[UUID7]:
         """Retract live claims derived from explicitly forgotten documents."""
         return await cls.retract_from_documents(session, document_ids, "forgotten")
+
+    @classmethod
+    async def refute(
+        cls, session: Session, claim_ids: Sequence[UUID7], evidence: UUID7
+    ) -> list[UUID7]:
+        """Close live claims a newly recorded fact disproves, naming what disproved them.
+
+        This is the cross-document retraction. A source replaced in place already closes
+        everything built from its old text, but a later, different document that shows an
+        earlier claim was wrong has nothing to close it, so the claim stays live and keeps
+        answering questions. `evidence` is the chunk the refutation was read from, kept on
+        the closed claim so the retraction can be audited rather than merely trusted.
+        """
+        if not claim_ids:
+            return []
+        return await cls._close(
+            session,
+            cls.id.in_(claim_ids),
+            {
+                "stance": Stance.refuted.value,
+                "refuted_at": datetime.now(UTC).isoformat(),
+                "refuted_by_chunk": str(evidence),
+            },
+        )
+
+    @classmethod
+    async def dispute(cls, session: Session, claim_ids: Sequence[UUID7], evidence: UUID7) -> None:
+        """Mark live claims a new fact contests, so recall can never render them settled.
+
+        The claims stay live and keep answering, because a source that only doubts an
+        earlier one is no grounds to withdraw it. What changes is that both sides now
+        render as disputed, which is the honest reading of a graph holding two.
+        """
+        if not claim_ids:
+            return
+        await session.exec(
+            update(cls)
+            .where(cls.recorded_to.is_(None), cls.id.in_(claim_ids))
+            .values(
+                attributes=cls.attributes.op("||")(
+                    cls._stamp(
+                        {
+                            "stance": Stance.disputed.value,
+                            "disputed_at": datetime.now(UTC).isoformat(),
+                            "disputed_by_chunk": str(evidence),
+                        }
+                    )
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
 
 
 class FactContent(DeterministicId, Embedded, ClaimedContent, TableBase, table=True):

@@ -35,17 +35,19 @@ class StoredBytes(FrozenModel):
     size: int
     stored_size: int
     encoding: Blob.Encoding
+    encoding_level: int | None = None
     etag: str | None = None
     version: str | None = Field(default=None, serialization_alias="storage_version")
 
 
 class StoredObject(FrozenModel):
-    """Materialize one PostgreSQL Blob reference for periodic integrity verification."""
+    """Materialize one PostgreSQL Blob reference for integrity or compaction passes."""
 
     id: UUID7
     key: str
     content_hash: UUID8
     size: int
+    stored_size: int
     encoding: Blob.Encoding
     version: str | None = None
 
@@ -81,7 +83,8 @@ class ByteStore(FrozenFlexModel):
     backend: ObjectStoreMethods
     upload_byte_limit: int
     internal_download_lifetime: timedelta
-    compression_level: int = 3
+    compression_enabled: bool = True
+    compression_level: int = 9
     compression_min_savings: float = 0.05
     signer: S3Store | None = None
 
@@ -97,6 +100,7 @@ class ByteStore(FrozenFlexModel):
             size=len(data),
             stored_size=len(encoded),
             encoding=encoding,
+            encoding_level=self.compression_level if self.compression_enabled else None,
             etag=result["e_tag"],
             version=result["version"],
         )
@@ -130,7 +134,13 @@ class ByteStore(FrozenFlexModel):
         return data
 
     def encode(self, data: bytes) -> tuple[bytes, Blob.Encoding]:
-        """Use Zstandard only when it saves the configured fraction of stored bytes."""
+        """Use Zstandard only when enabled and it saves the configured fraction of stored bytes.
+
+        Compression never touches the content hash, which always describes the original
+        bytes, so disabling this changes how new objects are laid down and nothing else.
+        """
+        if not self.compression_enabled:
+            return data, Blob.Encoding.identity
         compressed = zstd.compress(data, level=self.compression_level)
         if len(compressed) <= len(data) * (1.0 - self.compression_min_savings):
             return compressed, Blob.Encoding.zstd
@@ -151,10 +161,23 @@ class ByteStore(FrozenFlexModel):
                 return restored
         raise ValueError(f"unsupported object encoding {encoding!r}")
 
-    async def download_url(self, key: str) -> str:
-        """Sign one already-authorized key for the configured internal lifetime."""
+    async def download_url(
+        self,
+        key: str,
+        encoding: Blob.Encoding = Blob.Encoding.identity,
+    ) -> str:
+        """Sign one already-authorized key for the configured internal lifetime.
+
+        A signed URL sends the client past this process to the raw stored representation,
+        so only an object written verbatim can be served that way. A compressed object has
+        to come back through `get`, which restores and verifies the original bytes.
+        """
         if self.signer is None:
             raise DownloadUnavailable("the injected byte store cannot sign download URLs")
+        if encoding is not Blob.Encoding.identity:
+            raise DownloadUnavailable(
+                f"a {encoding} object cannot be signed, it must be read through the server"
+            )
         return await sign_async(
             self.signer,
             "GET",

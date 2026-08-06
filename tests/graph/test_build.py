@@ -20,7 +20,7 @@ from sqlmodel import select
 
 import aizk.graph.build as build
 from aizk.config import settings
-from aizk.extract.extractor import LLMExtractor
+from aizk.extract.extractor import GLiNERExtractor, LLMExtractor
 from aizk.extract.models import (
     BatchConsolidationVerdict,
     ConsolidationVerdict,
@@ -42,7 +42,7 @@ from aizk.graph.naming import normalize_name
 from aizk.graph.repair import dedup_entities, redirect_entity
 from aizk.graph.writer import FactCandidate, FactPlan, GraphWriter, PreparedEntity
 from aizk.ontology import Ontology, System, WireEntity, WireExtraction, WireFact
-from aizk.provenance import CaptureContext, EpistemicKind
+from aizk.provenance import CaptureContext, EpistemicKind, Stance
 from aizk.serving.embed import EmbedMode
 from aizk.store import (
     Chunk,
@@ -1384,3 +1384,176 @@ def test_write_graph_slice_retries_a_transient_db_conflict(
     touched = dbutil.run(body())
     assert attempts["n"] == 2  # the first transient conflict retried into a clean write
     assert len(touched) == 1  # the retried attempt resolved and returned the Ada entity
+
+
+def corrected_fact(stance: Stance) -> TimedFact:
+    """The part-three audit's claim about what part one asserted."""
+    return TimedFact(
+        subject="Subject",
+        predicate="improves_over",
+        object="Baseline",
+        statement="The claim that Subject improves over Baseline is refuted by the audit.",
+        stance=stance,
+        correcting=True,
+        derived_by="extractor-under-test",
+    )
+
+
+async def cross_document_correction(stance: Stance) -> tuple[dict[str, object], list[str]]:
+    """Write one claim, then a later, different document's correction of it.
+
+    Returns the original claim's attributes with its recorded end, and the live statements
+    left standing afterwards. Every statement embeds identically, so similarity alone would
+    call the correction a duplicate and no-op it away.
+    """
+    owner = await seedgraph.fresh_owner()
+    part_one = await seedgraph.seed_chunk(owner, LONG_PROSE)
+    part_three = await seedgraph.seed_chunk(owner, LONG_PROSE)
+    async with dbutil.actor(owner) as session:
+        subject = await seedgraph.add_entity(session, owner, "Subject")
+        baseline = await seedgraph.add_entity(session, owner, "Baseline")
+    resolved = {"Subject": subject, "Baseline": baseline}
+    original = TimedFact(
+        subject="Subject",
+        predicate="improves_over",
+        object="Baseline",
+        statement="Subject improves over Baseline on noise.",
+    )
+    async with dbutil.actor(owner) as session:
+        await consolidate(
+            graph_writer(session, owner, frozenset({owner})), [original], resolved, part_one
+        )
+    async with dbutil.actor(owner) as session:
+        [standing] = await session.exec(select(Fact.Claim.id))
+    verdict = FakeLLM()
+    verdict.register(
+        BatchConsolidationVerdict,
+        BatchConsolidationVerdict(
+            verdicts=[ConsolidationVerdict(action="REFUTE", supersedes=standing)]
+        ),
+    )
+    async with dbutil.actor(owner) as session:
+        await consolidate(
+            graph_writer(session, owner, frozenset({owner}), llm=verdict),
+            [corrected_fact(stance)],
+            resolved,
+            part_three,
+        )
+    async with dbutil.actor(owner) as session:
+        [attributes, recorded_to] = (
+            await session.exec(
+                select(Fact.Claim.attributes, Fact.Claim.recorded_to)
+                .where(Fact.Claim.id == standing)
+                .execution_options(**GATE_OFF)
+            )
+        ).one()
+        live = list(await session.exec(select(Fact.Live.statement)))
+    return dict(attributes) | {"recorded_to": recorded_to}, sorted(live)
+
+
+def test_a_later_document_that_disproves_an_earlier_claim_closes_it(
+    fixed_embedder: FixedEmbedder,
+) -> None:
+    # the reported incident's shape: the overclaim came from part one and the audit
+    # disproving it lived in part three, so nothing had ever closed the part-one fact
+    attributes, live = dbutil.run(cross_document_correction(Stance.refuted))
+
+    assert attributes["recorded_to"] is not None
+    assert attributes["stance"] == "refuted"
+    assert attributes["refuted_by_chunk"]
+    assert live == ["The claim that Subject improves over Baseline is refuted by the audit."]
+
+
+def test_a_correction_that_is_not_itself_certain_leaves_both_claims_disputed(
+    fixed_embedder: FixedEmbedder,
+) -> None:
+    # a false retraction silently deletes what somebody committed to memory, so a source
+    # that only reports disagreement marks the standoff instead of resolving it
+    attributes, live = dbutil.run(cross_document_correction(Stance.disputed))
+
+    assert attributes["recorded_to"] is None
+    assert attributes["stance"] == "disputed"
+    assert attributes["disputed_by_chunk"]
+    assert live == [
+        "Subject improves over Baseline on noise.",
+        "The claim that Subject improves over Baseline is refuted by the audit.",
+    ]
+
+
+def test_a_written_claim_records_the_model_and_client_that_produced_it(
+    fixed_embedder: FixedEmbedder,
+) -> None:
+    async def body() -> dict[str, object]:
+        owner = await seedgraph.fresh_owner()
+        chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
+        async with dbutil.actor(owner) as session:
+            subject = await seedgraph.add_entity(session, owner, "Subject")
+            writer = graph_writer(
+                session,
+                owner,
+                frozenset({owner}),
+                capture=CaptureContext(speaker_label="Maya", client="probe/1.2.3"),
+            )
+            await consolidate(
+                writer,
+                [
+                    TimedFact(
+                        subject="Subject",
+                        predicate="uses",
+                        statement="Subject uses the queue, though only in batch runs.",
+                        stance=Stance.hedged,
+                        derived_by="extractor-under-test",
+                    )
+                ],
+                {"Subject": subject},
+                chunk,
+            )
+        async with dbutil.actor(owner) as session:
+            [attributes] = await session.exec(select(Fact.Live.attributes))
+        return dict(attributes)
+
+    attributes = dbutil.run(body())
+
+    # who asked, what harness they used, and which extractor read the source
+    assert attributes["speaker_label"] == "Maya"
+    assert attributes["client"] == "probe/1.2.3"
+    assert attributes["derived_by"] == "extractor-under-test"
+    assert attributes["stance"] == "hedged"
+
+
+def test_an_author_written_fact_names_no_extractor_and_stays_settled(
+    fixed_embedder: FixedEmbedder,
+) -> None:
+    async def body() -> dict[str, object]:
+        owner = await seedgraph.fresh_owner()
+        chunk = await seedgraph.seed_chunk(owner, LONG_PROSE)
+        async with dbutil.actor(owner) as session:
+            subject = await seedgraph.add_entity(session, owner, "Subject")
+            await consolidate(
+                graph_writer(session, owner, frozenset({owner})),
+                [
+                    TimedFact(
+                        subject="Subject", predicate="uses", statement="Subject uses the queue."
+                    )
+                ],
+                {"Subject": subject},
+                chunk,
+            )
+        async with dbutil.actor(owner) as session:
+            [attributes] = await session.exec(select(Fact.Live.attributes))
+        return dict(attributes)
+
+    attributes = dbutil.run(body())
+
+    assert "derived_by" not in attributes
+    assert "stance" not in attributes
+
+
+def test_each_extraction_backend_names_the_model_it_attributes_facts_to() -> None:
+    llm = FakeLLM()
+
+    async def sidecar(text: str) -> NoReturn:
+        raise AssertionError(f"unexpected extraction for {text}")
+
+    assert LLMExtractor(llm=llm.llm).model_name == llm.llm.model.model_name
+    assert GLiNERExtractor(gliner=SimpleNamespace(extract=sidecar)).model_name == "gliner"

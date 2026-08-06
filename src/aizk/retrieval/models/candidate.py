@@ -6,6 +6,7 @@ from patos import FrozenModel
 from pydantic import UUID5, UUID7, Field
 
 from ...config import settings
+from ...provenance import Stance
 from ...types import Scopes
 from .lane import Lane
 
@@ -66,6 +67,9 @@ class Candidate(FrozenModel):
     )
     document_expires_at: datetime | None = Field(
         default=None, description="when the source document stops being allowed to answer"
+    )
+    stance: Stance = Field(
+        default=Stance.settled, description="how settled a derived claim is, see `Stance`"
     )
 
     def current_at(self, moment: datetime) -> bool:

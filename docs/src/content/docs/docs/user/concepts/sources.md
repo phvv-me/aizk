@@ -95,7 +95,9 @@ can you. [Evidence and provenance](/docs/user/concepts/evidence/) covers the lab
 
 The same rule settles a subtler case. A derived fact often reads as more authoritative than it is,
 because it arrives as a clean assertion while the sentence behind it was hedged or conditional.
-When a derived claim really matters, the honest move is to go read the source excerpt under it.
+Extraction now refuses a fact that overstates its own sentence, and a claim it keeps but the source
+qualified says so and brings that source excerpt along.
+[How settled a claim is](/docs/user/concepts/settledness/) covers those marks.
 
 ## What happens when a source changes
 
@@ -103,6 +105,10 @@ Correcting a note does not leave the old derived claims standing. When a source 
 facts built from its previous text stop counting as current and the facts built from the new text
 take over. The old ones are not deleted, they are closed, so the record of what aizk believed
 stays intact.
+
+A later, different note disproving an earlier one closes the old claim the same way, and that is how
+you fix a derived claim that is simply wrong.
+[How settled a claim is](/docs/user/concepts/settledness/) shows how to write one.
 
 That is the same machinery that handles a fact simply going out of date, and
 [Time and history](/docs/user/concepts/time/) owns the explanation.

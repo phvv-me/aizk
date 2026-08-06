@@ -13,6 +13,19 @@ from ..types import Scopes
 from .models import ArtifactReceipt, OriginalArtifact, OriginalDescription
 
 
+def _stored_object(row: Blob) -> StoredObject:
+    """Project one blob row onto the object reference a storage pass consumes."""
+    return StoredObject(
+        id=row.id,
+        key=row.storage_key,
+        content_hash=row.content_hash,
+        size=row.size,
+        stored_size=row.stored_size,
+        encoding=row.encoding,
+        version=row.storage_version,
+    )
+
+
 def _postgres_json(value: JsonValue) -> JsonValue:
     """Replace only NUL code points that PostgreSQL JSONB cannot represent."""
     if isinstance(value, str):
@@ -129,17 +142,56 @@ class ArtifactRepository:
                     .limit(limit)
                 )
             ).all()
-        return tuple(
-            StoredObject(
-                id=row.id,
-                key=row.storage_key,
-                content_hash=row.content_hash,
-                size=row.size,
-                encoding=row.encoding,
-                version=row.storage_version,
-            )
-            for row in rows
-        )
+        return tuple(_stored_object(row) for row in rows)
+
+    async def compaction_candidates(self, level: int, limit: int) -> tuple[StoredObject, ...]:
+        """Load the largest objects still laid out under a weaker compression policy.
+
+        Ordering by size puts the reclaimable bytes first, so an operator who runs a few
+        bounded batches recovers most of the space before touching the long tail.
+        """
+        async with User.system().owner as session:
+            rows = (
+                await session.exec(
+                    select(Blob)
+                    .where(
+                        or_(
+                            Blob.encoding_level.is_(None),
+                            Blob.encoding_level < level,
+                        )
+                    )
+                    .order_by(Blob.size.desc(), Blob.id)
+                    .limit(limit)
+                )
+            ).all()
+        return tuple(_stored_object(row) for row in rows)
+
+    async def record_compaction(
+        self,
+        blob_id: UUID7,
+        level: int,
+        verified_at: datetime,
+        replacement: StoredBytes | None = None,
+    ) -> None:
+        """Stamp one evaluated object, moving it when the pass found a denser layout.
+
+        Reaching this point required restoring the object and matching it against the
+        stored content hash, so the same transaction records that verification.
+        `content_hash` and `size` describe the original bytes and never move.
+        """
+        async with User.system().owner as session:
+            blob = await session.get(Blob, blob_id)
+            if blob is None:
+                raise LookupError("a compaction candidate disappeared before recording")
+            blob.encoding_level = level
+            blob.integrity_checked_at = verified_at
+            blob.integrity_error = None
+            if replacement is not None:
+                blob.storage_key = replacement.key
+                blob.stored_size = replacement.stored_size
+                blob.encoding = replacement.encoding
+                blob.etag = replacement.etag
+                blob.storage_version = replacement.version
 
     async def record_integrity(
         self,

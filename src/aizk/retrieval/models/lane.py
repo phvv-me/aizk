@@ -12,6 +12,7 @@ from sqlalchemy.sql.selectable import Select
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlmodel import select
 
+from ...provenance import Stance
 from ...store.vector import cosine_distance, embedding_vector
 
 if TYPE_CHECKING:
@@ -36,6 +37,7 @@ type LaneRow = tuple[
     bool,
     bool,
     datetime | None,
+    str,
 ]
 type LaneSelect = Select[LaneRow]
 type OptionalUUID7Column = ColumnElement[UUID7] | ColumnElement[UUID7 | None] | None
@@ -154,6 +156,7 @@ class Lane(FrozenModel, abc.ABC):
         direct: ColumnElement[bool] | None = None,
         web_cache: ColumnElement[bool] | None = None,
         document_expires_at: OptionalDatetimeColumn = None,
+        stance: ColumnElement[str] | None = None,
     ) -> LaneSelect:
         """This lane's candidates in the shared column shape every lane unions into."""
         return cast(
@@ -178,6 +181,7 @@ class Lane(FrozenModel, abc.ABC):
                 (literal(False) if direct is None else direct).label("direct"),
                 (literal(False) if web_cache is None else web_cache).label("web_cache"),
                 _provided_datetime(document_expires_at).label("document_expires_at"),
+                (literal(Stance.settled.value) if stance is None else stance).label("stance"),
             ),
         )
 

@@ -60,6 +60,7 @@ see no evidence.
 | `plans` | would any other retrieval plan or the retired router do better | live corpus |
 | `gate` | what does the relevance gate save and what does it cost | live corpus |
 | `extraction` | which model writes the better graph, and how fast | isolated |
+| `certainty` | does grounding keep the certainty a source expressed, and at what cost | offline |
 | `groupmem` | how does aizk score on a published group memory benchmark | isolated |
 | `scale` | at what corpus size does a component cross its latency budget | isolated |
 
@@ -109,6 +110,14 @@ chefe run aizk-eval extraction /path/to/extraction-cases.jsonl \
 endpoint rather than a report label, so one URL and key can compare several hosted models.
 `--concurrency` reproduces production fan-out and `--backlog` projects the completion ETA.
 [Extraction and models](/docs/dev/eval/extraction/) has the metrics and the results.
+
+**`certainty`** reports the flattening rate before and after the grounding rule that catches it,
+the false rejection it costs, and whether an unsettled claim changes what recall returns. It
+reaches no model and no database, so it answers identically every time.
+
+```sh
+chefe run aizk-eval certainty --out /tmp/certainty.json
+```
 
 **`groupmem`** runs the full external benchmark path against a released corpus directory.
 

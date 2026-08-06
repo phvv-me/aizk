@@ -53,6 +53,7 @@ def test_artifact_models_keep_bytes_outside_postgres() -> None:
         "size",
         "stored_size",
         "encoding",
+        "encoding_level",
         "storage_key",
         "storage_version",
         "media_type",
@@ -590,6 +591,65 @@ def test_repository_tracks_bounded_object_integrity_passes() -> None:
 
         with pytest.raises(LookupError, match="disappeared"):
             await repository.record_integrity((IntegrityCheck(id=uuid7()),), checked_at)
+
+    dbutil.run(body())
+
+
+def test_repository_compacts_objects_left_under_a_weaker_compression_policy() -> None:
+    async def body() -> None:
+        await dbutil.reset_db()
+        owner = uuid5()
+        stored = await seed_artifact(owner, [owner], size=4096)
+        repository = ArtifactRepository()
+        verified_at = datetime.now(UTC)
+
+        # Every legacy object records no level, so the first pass sees all of them.
+        candidates = await repository.compaction_candidates(level=9, limit=10)
+        assert [candidate.id for candidate in candidates] == [stored.blob.id]
+        assert candidates[0].stored_size == stored.blob.stored_size
+
+        moved = StoredBytes(
+            key="objects/denser",
+            content_hash=stored.blob.content_hash,
+            size=stored.blob.size,
+            stored_size=stored.blob.size // 4,
+            encoding=Blob.Encoding.zstd,
+            encoding_level=9,
+            etag="moved-etag",
+            version="moved-version",
+        )
+        await repository.record_compaction(stored.blob.id, 9, verified_at, moved)
+
+        async with User.system().owner as session:
+            blob = await session.get(Blob, stored.blob.id)
+            assert blob is not None
+            assert blob.storage_key == "objects/denser"
+            assert blob.encoding is Blob.Encoding.zstd
+            assert blob.encoding_level == 9
+            assert blob.stored_size == stored.blob.size // 4
+            assert blob.etag == "moved-etag"
+            assert blob.storage_version == "moved-version"
+            # What identifies the original never moves with it.
+            assert blob.content_hash == stored.blob.content_hash
+            assert blob.size == stored.blob.size
+            # Reaching a rewrite required verifying the bytes, so the pass records that.
+            assert blob.integrity_checked_at == verified_at
+            assert blob.integrity_error is None
+
+        # A stamped object is done at this level and only reappears when the policy rises.
+        assert await repository.compaction_candidates(level=9, limit=10) == ()
+        assert len(await repository.compaction_candidates(level=12, limit=10)) == 1
+
+        # A pass that finds nothing better still stamps, without moving the object.
+        await repository.record_compaction(stored.blob.id, 12, verified_at)
+        async with User.system().owner as session:
+            blob = await session.get(Blob, stored.blob.id)
+            assert blob is not None
+            assert (blob.encoding_level, blob.storage_key) == (12, "objects/denser")
+        assert await repository.compaction_candidates(level=12, limit=10) == ()
+
+        with pytest.raises(LookupError, match="disappeared"):
+            await repository.record_compaction(uuid7(), 9, verified_at)
 
     dbutil.run(body())
 

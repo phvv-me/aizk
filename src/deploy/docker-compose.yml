@@ -36,6 +36,12 @@ x-aizk-runtime: &aizk-runtime
     AIZK_RERANK_MODEL: ${AIZK_RERANK_MODEL:-qwen3-reranker}
     AIZK_GRAPH_BUILD_CONCURRENCY: ${AIZK_GRAPH_BUILD_CONCURRENCY:-4}
     AIZK_LOG_JSON: ${AIZK_LOG_JSON:-1}
+    # Tracing is on by default here so a deployment never has to be hand edited to become
+    # observable, and `Settings.otlp_endpoint` stays empty by default so a bare local run outside
+    # Compose exports nothing. Alloy is the collector rather than Tempo directly, so a Tempo
+    # restart costs a retry in one place instead of dropped spans in every process. Set
+    # AIZK_OTLP_ENDPOINT empty in `.env` when running without the observability profile.
+    AIZK_OTLP_ENDPOINT: ${AIZK_OTLP_ENDPOINT-http://alloy:4318/v1/traces}
     AIZK_QUEUE_BATCH_SIZE: ${AIZK_QUEUE_BATCH_SIZE:-64}
     AIZK_DISPLAY_TIMEZONE: ${AIZK_DISPLAY_TIMEZONE:-Asia/Tokyo}
     AIZK_OBJECT_STORE_ENDPOINT: http://objects:8333
@@ -202,9 +208,13 @@ services:
   clamav:
     image: clamav/clamav:1.5.3-debian13-slim@sha256:a73435b0fa51886e9e6dd1881656023ba9dce756e055f23981270badbb8ca3d7
     environment:
-      CLAMD_CONF_MaxFileSize: ${AIZK_CLAMAV_MAX_FILE_SIZE:-10M}
-      CLAMD_CONF_MaxScanSize: ${AIZK_CLAMAV_MAX_SCAN_SIZE:-10M}
-      CLAMD_CONF_StreamMaxLength: ${AIZK_CLAMAV_STREAM_MAX_LENGTH:-10M}
+      # These must stay at or above `object_store_upload_byte_limit`, which is 96 MiB. The
+      # scanner refuses whatever it cannot read whole, so a lower ceiling here silently becomes
+      # the real upload limit and reports an oversized file as a malware rejection. MaxScanSize
+      # runs ahead of MaxFileSize because an archive expands while it is being read.
+      CLAMD_CONF_MaxFileSize: ${AIZK_CLAMAV_MAX_FILE_SIZE:-128M}
+      CLAMD_CONF_MaxScanSize: ${AIZK_CLAMAV_MAX_SCAN_SIZE:-256M}
+      CLAMD_CONF_StreamMaxLength: ${AIZK_CLAMAV_STREAM_MAX_LENGTH:-128M}
       FRESHCLAM_CONF_Checks: ${AIZK_CLAMAV_SIGNATURE_CHECKS_PER_DAY:-24}
     volumes:
       - ${AIZK_CLAMAV_DATA_VOLUME:-clamav-data}:/var/lib/clamav
@@ -305,8 +315,12 @@ services:
   # vLLM serves schema-constrained graph extraction. Gemma 4 12B occupies the dedicated second
   # GPU while the embedding, reranking, and GLiNER lanes share the first GPU. Every sizing knob
   # stays in the shared env file. The served alias must match AIZK_LLM_MODEL.
+  # Opt in with `--profile local-llm`. Extraction runs through an external provider by default,
+  # so this lane would otherwise hold a GPU resident for a model nothing calls, and a plain
+  # `up -d` would silently restart it after an operator stopped it.
   vllm-llm:
     image: vllm/vllm-openai:v0.24.0
+    profiles: ["local-llm"]
     environment:
       HF_XET_HIGH_PERFORMANCE: "${AIZK_HF_XET_HIGH_PERFORMANCE:-0}"
       PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
@@ -422,8 +436,11 @@ services:
       GLINER_LONG_CHUNK_SIZE: ${AIZK_GLINER_LONG_CHUNK_SIZE:-384}
       GLINER_LONG_CHUNK_OVERLAP: ${AIZK_GLINER_LONG_CHUNK_OVERLAP:-64}
       GLINER_BATCH_SIZE: ${AIZK_GLINER_BATCH_SIZE:-8}
+    # Serialized behind the reranker, the last lane sharing this GPU, so weight loading never
+    # overlaps. The extractor lane is a poor anchor for that, since it holds a different GPU and
+    # is opt in, so depending on it would both mis-serialize and break the default profile.
     depends_on:
-      vllm-llm:
+      vllm-rerank:
         condition: service_healthy
     healthcheck:
       test:
@@ -815,11 +832,11 @@ services:
       start_period: 60s
     restart: unless-stopped
 
-  # The optional observability profile centralizes every AIZK Compose service log. Alloy reads
-  # the Docker socket without modifying it, Loki retains one bounded month, and only Grafana is
-  # published on loopback. Durable product usage remains in PostgreSQL rather than in these logs.
-  # Traces stay inside each Python process unless AIZK_OTLP_ENDPOINT names an OTLP/HTTP
-  # collector, so span export stays off until a Tempo service joins this profile.
+  # The optional observability profile is the whole operator lane. Alloy collects logs from the
+  # Docker socket and receives OTLP traces from every aizk process, Loki stores the logs, Tempo
+  # stores the traces and derives RED metrics from them, VictoriaMetrics stores those metrics, and
+  # Grafana is the single pane over all three. Durable product usage stays in PostgreSQL rather
+  # than in any of these, because logs, traces and metrics all expire and the ledger does not.
   observability-init:
     image: grafana/alloy:v1.16.1
     profiles: ["observability"]
@@ -830,14 +847,77 @@ services:
         install -d -o 10001 -g 10001 -m 0700 /loki
         && install -d -o 473 -g 473 -m 0700 /alloy
         && install -d -o 472 -g 0 -m 0700 /grafana
+        && install -d -o 10001 -g 10001 -m 0700 /tempo
+        && install -d -o 1000 -g 1000 -m 0700 /victoria
     volumes:
       - ${AIZK_LOKI_VOLUME:-loki-data}:/loki
       - ${AIZK_ALLOY_VOLUME:-alloy-data}:/alloy
       - ${AIZK_GRAFANA_VOLUME:-grafana-data}:/grafana
+      - ${AIZK_TEMPO_VOLUME:-tempo-data}:/tempo
+      - ${AIZK_METRICS_VOLUME:-metrics-data}:/victoria
     cap_drop: ["ALL"]
     cap_add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
     security_opt: ["no-new-privileges:true"]
     restart: "no"
+
+  # Tempo is the trace store. It deliberately ships no UI, which is why it was chosen over a
+  # second console: Grafana already is the pane, and Tempo correlates with the Loki data source
+  # that is already here. Its metrics generator turns the same spans into RED series and a service
+  # graph and remote-writes them to VictoriaMetrics, so the dashboard needs no hand-rolled
+  # counters anywhere in the application.
+  tempo:
+    image: grafana/tempo:2.9.1
+    profiles: ["observability"]
+    user: "10001:10001"
+    command:
+      - -config.file=/etc/tempo/tempo.yml
+      # Retention is the one knob worth turning per host, so the config reads it from the
+      # environment rather than being edited in place.
+      - -config.expand-env=true
+    depends_on:
+      observability-init:
+        condition: service_completed_successfully
+    environment:
+      AIZK_TEMPO_RETENTION: ${AIZK_TEMPO_RETENTION:-336h}
+    volumes:
+      - ./observability/tempo.yml:/etc/tempo/tempo.yml:ro
+      - ${AIZK_TEMPO_VOLUME:-tempo-data}:/var/tempo
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3200/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
+  # VictoriaMetrics single-node is the metrics store, chosen over Prometheus because it is
+  # Apache-2.0, one binary with no sidecars, and holds the same series in a fraction of the
+  # memory, which matters on a host whose RAM is already committed to models. It accepts the
+  # Prometheus remote-write protocol from both Alloy and Tempo's metrics generator.
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.111.0
+    profiles: ["observability"]
+    user: "1000:1000"
+    command:
+      - -storageDataPath=/victoria-metrics-data
+      - -retentionPeriod=${AIZK_METRICS_RETENTION:-6}
+      - -httpListenAddr=:8428
+    depends_on:
+      observability-init:
+        condition: service_completed_successfully
+    volumes:
+      - ${AIZK_METRICS_VOLUME:-metrics-data}:/victoria-metrics-data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8428/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
 
   loki:
     image: grafana/loki:3.7.3
@@ -868,10 +948,20 @@ services:
     depends_on:
       loki:
         condition: service_healthy
+      tempo:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_healthy
     volumes:
       - ./observability/alloy.alloy:/etc/alloy/alloy.alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ${AIZK_ALLOY_VOLUME:-alloy-data}:/var/lib/alloy
+      # Alloy's built-in unix exporter reports host utilization rather than its own namespace only
+      # when it reads the host's own pseudo-filesystems. All three are read-only, and they are why
+      # host metrics cost no separate node_exporter container.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
@@ -881,6 +971,10 @@ services:
     profiles: ["observability"]
     depends_on:
       loki:
+        condition: service_healthy
+      tempo:
+        condition: service_healthy
+      victoriametrics:
         condition: service_healthy
     # Grafana answers under `/grafana` on the operator console, so it must build its own links
     # with that prefix and keep serving the prefix Caddy forwards unchanged. Its own account
@@ -960,6 +1054,8 @@ volumes:
   db-data:
   grafana-data:
   loki-data:
+  metrics-data:
+  tempo-data:
   object-data:
   clamav-data:
   backups:

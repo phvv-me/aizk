@@ -49,6 +49,21 @@ class IntegrityReport(FrozenModel):
     failed: int
 
 
+class CompactionReport(FrozenModel):
+    """Summarize one bounded object-store compaction pass."""
+
+    examined: int
+    rewritten: int
+    failed: int
+    stored_bytes_before: int
+    stored_bytes_after: int
+
+    @property
+    def reclaimed(self) -> int:
+        """Stored bytes this pass handed back to the object store."""
+        return self.stored_bytes_before - self.stored_bytes_after
+
+
 class OriginalArtifact(FrozenModel):
     """Authorize and materialize the immutable original needed by one conversion job."""
 

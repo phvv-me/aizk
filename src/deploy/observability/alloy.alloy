@@ -37,3 +37,75 @@ loki.write "aizk" {
     url = "http://loki:3100/loki/api/v1/push"
   }
 }
+
+// Traces. Every aizk process exports OTLP over HTTP to this receiver, which is why the runtime
+// AIZK_OTLP_ENDPOINT points at alloy rather than at Tempo directly. One collector in front of the
+// store means a Tempo restart costs a retry here instead of dropped spans in every process.
+otelcol.receiver.otlp "aizk" {
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.aizk.input]
+  }
+}
+
+otelcol.processor.batch "aizk" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+
+    // Plain HTTP on the private Compose network, which never leaves the host.
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// Metrics. VictoriaMetrics is the store and this is the only writer to it.
+prometheus.remote_write "metrics" {
+  endpoint {
+    url = "http://victoriametrics:8428/api/v1/write"
+  }
+}
+
+// Host utilization. The unix exporter is built into Alloy, so it costs no extra container. The
+// three read-only host mounts in the Compose file are what make it report the host rather than
+// Alloy's own namespace.
+prometheus.exporter.unix "host" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/host/root"
+}
+
+prometheus.scrape "host" {
+  targets         = prometheus.exporter.unix.host.targets
+  forward_to      = [prometheus.remote_write.metrics.receiver]
+  scrape_interval = "30s"
+}
+
+// The model lanes publish native vLLM metrics, which is where queue depth, batch size, and
+// token throughput per lane come from. Each address is scraped as its own target, so a lane that
+// is not running is marked down on its own and the others keep reporting. The `llm` lane in
+// particular is absent whenever extraction points at an external provider instead.
+prometheus.scrape "models" {
+  targets = [
+    {"__address__" = "vllm-emb:8000", "service" = "vllm-emb"},
+    {"__address__" = "vllm-rerank:8000", "service" = "vllm-rerank"},
+    {"__address__" = "vllm-llm:8000", "service" = "vllm-llm"},
+  ]
+
+  forward_to      = [prometheus.remote_write.metrics.receiver]
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+}

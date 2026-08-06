@@ -59,7 +59,7 @@ class Memory:
     constructs one per request with the caller and the process artifact intake.
     """
 
-    __slots__ = ("intake", "user", "wake", "web")
+    __slots__ = ("client", "intake", "user", "wake", "web")
 
     def __init__(
         self,
@@ -67,11 +67,13 @@ class Memory:
         intake: ArtifactIntake,
         wake: WorkerWake | None = None,
         web: WebSearch | None = None,
+        client: str | None = None,
     ) -> None:
         self.user = user
         self.intake = intake
         self.wake = wake or NoopWorkerWake()
         self.web = web
+        self.client = client
 
     @property
     def status(self) -> User:
@@ -198,6 +200,7 @@ class Memory:
             scopes=target,
             capture=CaptureContext(
                 speaker_label=self.user.label,
+                client=self.client,
                 observed_at=observed_at,
                 expires_at=expires_at,
             ),

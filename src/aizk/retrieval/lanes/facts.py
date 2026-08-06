@@ -103,6 +103,7 @@ class FactLane(Lane):
                 document_id=fact_document.id,
                 document_created_at=fact_document.created_at,
                 created_by=Fact.Live.created_by,
+                stance=Fact.Live.settledness(),
             )
             .select_from(fact_candidates)
             .join(Fact.Live, Fact.Live.id == fact_candidates.c.id)

@@ -10,6 +10,7 @@ from pydantic import UUID5, UUID7
 from aizk.config import settings
 from aizk.extract.models import BatchConsolidationVerdict, ConsolidationVerdict, TimedFact
 from aizk.graph.consolidation import Consolidator, FactMatch, cosine_similarity
+from aizk.provenance import Stance
 from aizk.store import Relation
 
 
@@ -122,3 +123,74 @@ def test_resolve_batches_and_normalizes_model_verdicts(scenario: str) -> None:
 
     assert asyncio.run(Consolidator(llm=fake.llm).resolve(candidates)) == expected
     assert len(fake.completions.calls) == (0 if scenario == "empty" else 1)
+
+
+@pytest.mark.parametrize(
+    ("correcting", "stance", "contests"),
+    [
+        (False, Stance.settled, False),
+        (True, Stance.settled, True),
+        (False, Stance.hedged, False),
+        (False, Stance.disputed, True),
+        (False, Stance.refuted, True),
+    ],
+)
+def test_a_fact_contests_memory_from_its_source_sentence_or_its_own_stance(
+    correcting: bool, stance: Stance, contests: bool
+) -> None:
+    fact = TimedFact(
+        subject="Subject",
+        predicate="uses",
+        statement="new",
+        correcting=correcting,
+        stance=stance,
+    )
+
+    assert fact.contests is contests
+
+
+def test_a_contesting_candidate_is_never_settled_by_similarity_alone() -> None:
+    # a correction reads almost exactly like the claim it corrects, so the deterministic
+    # tiers would call it a near-duplicate and quietly no-op the correction away
+    rules = Consolidator(llm=FakeLLM().llm)
+    obj = uuid5()
+    identical = [match(settings.consolidation_auto_merge_threshold, obj)]
+
+    assert rules.decide(Relation.Policy.set, obj, identical) == ConsolidationVerdict(action="NOOP")
+    assert rules.decide(Relation.Policy.set, obj, identical, contesting=True) is None
+    # with nothing to contest there is still nothing to ask a model about
+    assert rules.decide(Relation.Policy.set, obj, [], contesting=True) == ConsolidationVerdict(
+        action="ADD"
+    )
+
+
+@pytest.mark.parametrize("known", [True, False])
+def test_the_real_prompt_contract_carries_refute_through_to_a_named_claim(known: bool) -> None:
+    fake = FakeLLM()
+    existing = match(0.8)
+    correction = TimedFact(
+        subject="Subject",
+        predicate="uses",
+        statement="the earlier claim is refuted",
+        stance=Stance.refuted,
+    )
+    fake.register(
+        BatchConsolidationVerdict,
+        BatchConsolidationVerdict(
+            verdicts=[
+                ConsolidationVerdict(action="REFUTE", supersedes=existing.id if known else uuid7())
+            ]
+        ),
+    )
+
+    [verdict] = asyncio.run(Consolidator(llm=fake.llm).resolve([(correction, [existing])]))
+
+    # the action the deployed prompt actually offers, and the claim it may only ever name
+    assert "REFUTE when the new fact says one of its own existing facts is wrong" in (
+        settings.consolidation_prompt
+    )
+    [system, user] = fake.completions.calls[0].messages
+    assert system["content"] == settings.consolidation_prompt
+    assert f"New fact ({Stance.refuted}):" in user["content"]
+    assert verdict.contradicted == (existing.id if known else None)
+    assert verdict.action == ("REFUTE" if known else "ADD")

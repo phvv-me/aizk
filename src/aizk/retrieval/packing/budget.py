@@ -2,16 +2,23 @@ from collections.abc import Sequence
 
 from pydantic import UUID7
 
+from ...provenance import Stance
 from ..models import Candidate, Lane
 
 
 def deduplicate(candidates: Sequence[Candidate]) -> list[Candidate]:
-    """Drop a source excerpt whose span better-ranked evidence already speaks for.
+    """Drop a source excerpt whose span settled, better-ranked evidence already speaks for.
 
     Only the excerpt side is ever dropped, and that asymmetry is the whole rule. A fact is
     one distinct statement, and a span commonly yields several, so dropping facts to remove
     redundancy would discard knowledge rather than repetition. An excerpt is the raw text
     those facts were distilled from, so it genuinely repeats a fact ranked above it.
+
+    An unsettled fact is the exception, and it is the one that matters. A hedged, disputed
+    or refuted claim reads as a clean assertion while the sentence behind it did not, so
+    the excerpt carrying that sentence is not repetition, it is the correction. Such a fact
+    never speaks for its span and the excerpt under it travels with it, which is what makes
+    "the source wins" a property of what recall returns rather than advice to the reader.
 
     An excerpt that ranks above the facts from its span is kept, and so are they. It earned
     its place, and the redundancy it leaves costs a little budget where dropping statements
@@ -30,7 +37,8 @@ def deduplicate(candidates: Sequence[Candidate]) -> list[Candidate]:
             continue
         if candidate.lane is Lane.Kind.SOURCES and chunk in represented:
             continue
-        represented.add(chunk)
+        if candidate.stance is Stance.settled:
+            represented.add(chunk)
         kept.append(candidate)
     return kept
 

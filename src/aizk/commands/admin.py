@@ -16,6 +16,9 @@ from alembic import command
 from .. import admin, ops
 from .. import backup as backup_ops
 from ..api.app import AizkAPI
+from ..artifacts.configured import build_byte_store
+from ..artifacts.repository import ArtifactRepository
+from ..artifacts.service import ArtifactCompaction
 from ..artifacts.uploads import InertIntake, UploadBox
 from ..auth import Auth
 from ..background.jobs.conversion import retry_failed_artifacts
@@ -53,6 +56,7 @@ graph_app = App(name="graph", help="Maintain and inspect the knowledge graph.")
 data_app = App(name="data", help="Ingest, promote, export, and audit memory.")
 ontology_app = App(name="ontology", help="Inspect and maintain the controlled vocabulary.")
 auth_app = App(name="auth", help="Validate and reconcile server authorization policy.")
+storage_app = App(name="storage", help="Compact and inspect the immutable object store.")
 settings_app = App(name="settings", help="Inspect and validate effective server settings.")
 api_app = App(name="api", help="Maintain browser API development artifacts.")
 web_app = App(name="web", help="Rehearse and validate the public web egress lane.")
@@ -66,6 +70,7 @@ for subcommand in (
     data_app,
     ontology_app,
     auth_app,
+    storage_app,
     settings_app,
     api_app,
     web_app,
@@ -456,6 +461,21 @@ def check_web_auth() -> None:
     if settings.web_public_url is None:
         raise RuntimeError("web deployment requires web_public_url")
     print(f"web authentication is complete at {settings.web_callback_url}")
+
+
+@storage_app.command(name="compact")
+async def compact_storage(limit: int | None = None) -> None:
+    """Re-lay stored objects under the current compression policy, losslessly.
+
+    Raising `AIZK_OBJECT_STORE_COMPRESSION_LEVEL` only changes how new objects are written,
+    so run this to bring everything already stored up to the same policy. Each object is
+    restored and matched against its content hash before it is written again, so the pass
+    doubles as an integrity check and can be interrupted at any point. Run it repeatedly
+    until `examined` comes back zero.
+    """
+    compaction = ArtifactCompaction(build_byte_store(settings), ArtifactRepository())
+    report = await compaction.compact(limit or settings.object_store_compaction_batch_size)
+    print(_json({**report.model_dump(mode="json"), "reclaimed": report.reclaimed}))
 
 
 @settings_app.command(name="show")

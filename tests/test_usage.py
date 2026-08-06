@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from time import perf_counter
 from types import SimpleNamespace, TracebackType
@@ -14,7 +14,7 @@ from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.sampling import ALWAYS_ON
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import Span, SpanKind
 from pydantic import UUID5
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -28,6 +28,7 @@ from aizk.store import Usage
 from aizk.store.engine import Database
 from aizk.store.identity import User
 from aizk.usage import (
+    CallerAnnotator,
     MonthlyQuota,
     UsageAccountingJob,
     UsageCapture,
@@ -414,6 +415,68 @@ def test_account_usage_records_only_when_capture_is_billable(
     assert recorded[0].duration_ms >= 0
 
 
+class RecordingSpan:
+    """A span that only remembers what was stamped on it."""
+
+    def __init__(self) -> None:
+        self.attributes: dict[str, object] = {}
+
+    def set_attribute(self, key: str, value: object) -> None:
+        self.attributes[key] = value
+
+
+def annotated(prepare: Callable[[], None]) -> dict[str, object]:
+    """The attributes CallerAnnotator stamps on a span started after `prepare` ran."""
+    span = RecordingSpan()
+    with accounting_context():
+        prepare()
+        CallerAnnotator().on_start(cast("Span", span))
+    return span.attributes
+
+
+def test_caller_annotator_ignores_spans_started_outside_a_transport_call() -> None:
+    """A worker's own spans carry no caller, because no request identified one."""
+    span = RecordingSpan()
+
+    CallerAnnotator().on_start(cast("Span", span))
+
+    assert span.attributes == {}
+
+
+def test_caller_annotator_stamps_nothing_before_the_caller_is_identified() -> None:
+    """An open accounting context with no facts yet leaves the span untouched."""
+    assert annotated(lambda: None) == {}
+
+
+@pytest.mark.parametrize("anonymous", [False, True], ids=["identified", "anonymous"])
+def test_caller_annotator_carries_the_caller_onto_later_spans(anonymous: bool) -> None:
+    """Every span opened under a request gets the caller, which is what makes per-user
+    token spend answerable over the GenAI spans a model call opens much later."""
+    user_id = uuid5()
+    user = cast("User", SimpleNamespace(id=user_id, is_anonymous=lambda: anonymous))
+
+    attributes = annotated(lambda: annotate_caller(user))
+
+    assert attributes == {
+        "aizk.user_id": str(user_id),
+        "aizk.anonymous": "true" if anonymous else "false",
+    }
+
+
+def test_caller_annotator_carries_the_operation_and_touched_scopes() -> None:
+    """The operation and scopes reach the child spans the same way the caller does."""
+    target = uuid5()
+
+    attributes = annotated(
+        lambda: annotate_operation(Usage.Event.Operation.recall, (target,), items=3)
+    )
+
+    assert attributes == {
+        "aizk.operation": Usage.Event.Operation.recall.value,
+        "aizk.scopes": str(target),
+    }
+
+
 @pytest.mark.parametrize("exported", [False, True], ids=["local-only", "otlp"])
 def test_observe_installs_tracing_and_optional_export(
     monkeypatch: pytest.MonkeyPatch, exported: bool
@@ -457,7 +520,13 @@ def test_observe_installs_tracing_and_optional_export(
     )
     monkeypatch.setattr(usage_mod, "OTLPSpanExporter", lambda endpoint: endpoint)
     monkeypatch.setattr(usage_mod, "BatchSpanProcessor", lambda exporter: ("batch", exporter))
-    endpoint = "http://tempo:4318/v1/traces" if exported else None
+    monkeypatch.setattr(usage_mod, "InstrumentationSettings", lambda **options: ("genai", options))
+    monkeypatch.setattr(
+        usage_mod.Agent,
+        "instrument_all",
+        staticmethod(lambda instrument: calls.setdefault("genai", instrument)),
+    )
+    endpoint = "http://alloy:4318/v1/traces" if exported else None
     monkeypatch.setattr(settings, "otlp_endpoint", endpoint)
     database = cast("Database", SimpleNamespace(engine=SimpleNamespace(sync_engine="SYNC")))
 
@@ -466,7 +535,15 @@ def test_observe_installs_tracing_and_optional_export(
     provider = cast("RecordingProvider", calls["provider"])
     assert calls["sampler"] is ALWAYS_ON
     assert cast("Resource", calls["resource"]).attributes["service.name"] == "aizk"
-    assert provider.processors == ([("batch", str(endpoint))] if exported else [])
+    # The annotator is installed unconditionally, because it enriches spans rather than
+    # exporting them, and the exporter only joins when an endpoint is configured.
+    assert isinstance(provider.processors[0], CallerAnnotator)
+    assert provider.processors[1:] == ([("batch", str(endpoint))] if exported else [])
+    # GenAI spans carry the model, token counts, and latency, and never the prompt itself.
+    assert calls["genai"] == (
+        "genai",
+        {"tracer_provider": provider, "include_content": False},
+    )
     propagator = cast("CompositePropagator", calls["propagator"])
     assert isinstance(propagator, CompositePropagator)
     assert propagator.fields == set()

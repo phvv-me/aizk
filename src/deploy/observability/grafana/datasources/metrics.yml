@@ -1,0 +1,20 @@
+apiVersion: 1
+
+# VictoriaMetrics speaks the Prometheus query API, so Grafana talks to it as a Prometheus source.
+# It was chosen over Prometheus itself because it is Apache-2.0, single-binary, and needs a
+# fraction of the memory for the same series, which matters on a host that is also running models.
+datasources:
+  - name: AIZK metrics
+    type: prometheus
+    uid: aizk-metrics
+    access: proxy
+    url: http://victoriametrics:8428
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches the tightest scrape interval in `alloy.alloy`, so a rate over a short range
+      # never silently returns nothing.
+      timeInterval: 15s
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: aizk-traces

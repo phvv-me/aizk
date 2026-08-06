@@ -32,6 +32,53 @@ class EpistemicKind(StrEnum):
         return f"speaker:{created_by}" if self.speaker_bound else "world"
 
 
+class Stance(StrEnum):
+    """How settled a claim is, the axis `EpistemicKind` deliberately does not cover.
+
+    `EpistemicKind` answers whose claim this is. This answers how much weight it carries.
+    The two are independent: a speaker's own observation can be hedged and a plain world
+    statement can be refuted, so folding settledness into the speaker axis would make
+    every combination a new member. Members are declared from most to least settled and
+    `at_least` only ever moves down that ladder, because evidence about a claim may lower
+    confidence in it and never raise it.
+    """
+
+    settled = auto()
+    reported = auto()
+    hedged = auto()
+    disputed = auto()
+    refuted = auto()
+
+    @property
+    def rank(self) -> int:
+        """Position on the settled-to-refuted ladder."""
+        return list(type(self)).index(self)
+
+    @property
+    def distorting(self) -> bool:
+        """Whether reading a claim held this way as settled would change what it says.
+
+        An attribution dropped from a claim leaves the claim itself intact, and the stance
+        beside it names what was dropped. Doubt, disagreement or a withdrawal dropped from
+        one turns it into an assertion the source never made.
+        """
+        return self.rank >= Stance.hedged.rank
+
+    @property
+    def decisive(self) -> bool:
+        """Whether a claim held this way is definite enough to close one it contradicts.
+
+        A plain assertion and an explicit refutation both state something outright. Every
+        other stance is the source hedging, relaying, or disagreeing, which is never
+        grounds to retract a claim that somebody committed to memory.
+        """
+        return self in {Stance.settled, Stance.refuted}
+
+    def at_least(self, floor: Stance) -> Stance:
+        """The less settled of this stance and `floor`."""
+        return max(self, floor, key=lambda stance: stance.rank)
+
+
 class CaptureContext(FrozenModel):
     """Portable speaker and conversation context captured with one source span."""
 
@@ -41,6 +88,7 @@ class CaptureContext(FrozenModel):
     reply_to: str | None = None
     phase: str | None = None
     topic: str | None = None
+    client: str | None = None
     observed_at: datetime | None = None
     expires_at: datetime | None = None
 

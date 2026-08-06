@@ -183,8 +183,13 @@ class Settings(BaseSettings):
         "ADD when the new fact states something none of its own existing facts cover.\n"
         "UPDATE when the new fact supersedes one of its own existing facts, such as a changed"
         " value\nor status, and name that fact's id in supersedes.\n"
+        "REFUTE when the new fact says one of its own existing facts is wrong rather than"
+        " merely\nout of date, correcting, disproving or withdrawing it, and name that fact's id"
+        " in supersedes.\nRequire the new fact to contradict that exact claim; a fact that is"
+        " only different is an ADD.\n"
         "NOOP when one of its own existing facts already states the same thing.\n"
-        "Return exactly one verdict per numbered item shown, in the same order."
+        "Each new fact is shown with how settled its own source is. Return exactly one verdict"
+        " per\nnumbered item shown, in the same order."
     )
     context_token_budget: int = 2048
     contextual_bm25: bool = False
@@ -246,14 +251,24 @@ class Settings(BaseSettings):
         "Write English plain noun phrases, never slugs, file names, or code identifiers. Choose"
         " the\nmost specific entity type and use Concept only as the fallback. Name the author"
         " or their role\nin first-person claims, never I.\n"
-        "Each fact must be valid subject-predicate-object, stand alone, and carry one"
-        " contiguous\nsupporting quote copied character for character. Never insert ellipses or"
-        " join separate\npassages. Return only the highest-value claims and never pad a string"
-        " or list.\n"
-        "Use world for objective state, experience for events, observation for perceptions,"
-        " opinion\nfor judgments, preference for durable choices, procedure for reusable steps,"
-        " and\nnegative_result for failed attempts. Keep the speaker in every non-world"
-        " statement."
+        "Each fact must be valid subject-predicate-object and carry one contiguous supporting"
+        " quote\ncopied character for character. Never insert ellipses or join separate"
+        " passages.\n"
+        "A fact stands alone only together with whatever the source used to limit it. When the"
+        " sentence\nbehind a claim carries a qualifier, a limitation, a contrast, a negation or"
+        " any word of doubt,\nthat qualification is part of the claim: write it into the"
+        " statement and let the quote span it.\nNever quote the confident half of a sentence the"
+        " source went on to qualify, and never state\nflatly what the source stated tentatively."
+        " Drop the fact rather than flatten it. Return only the\nhighest-value claims and never"
+        " pad a string or list.\n"
+        "Whose claim it is and how settled it is are independent, so set k and st separately."
+        " Use world\nfor objective state, experience for events, observation for perceptions,"
+        " opinion for judgments,\npreference for durable choices, procedure for reusable steps,"
+        " and negative_result for failed\nattempts, and keep the speaker in every non-world"
+        " statement. Set st to settled for a plain\nassertion, reported when the source credits"
+        " the claim to somebody else, hedged when the source\nqualifies or doubts it, disputed"
+        " when the source reports disagreement, and refuted when the\nsource says the claim is"
+        " wrong."
     )
     # Stored prose chunks are bounded to 2,048 characters. Matching that boundary keeps the
     # ordinary graph projection to one structured model turn rather than repeating the ontology
@@ -365,7 +380,14 @@ class Settings(BaseSettings):
     object_store_access_key: SecretStr = SecretStr("")
     object_store_bucket: str = "aizk"
     object_store_endpoint: AnyHttpUrl = AnyHttpUrl("http://localhost:8333")
-    object_store_compression_level: int = 3
+    object_store_compaction_batch_size: PositiveInt = 100
+    # Zstandard levels run from the fastest, 1, to the densest, 22. Level 9 is the measured
+    # knee on real artifacts, where the last large ratio gain still costs a fraction of the
+    # write budget, and decompression stays flat at roughly 1.7 GB/s whatever the level.
+    object_store_compression_level: int = Field(9, ge=1, le=22)
+    # Turning this off stops new objects from being compressed. Reads stay transparent
+    # because every object records the encoding it was written with.
+    object_store_compression_enabled: bool = True
     # An adaptive-compression threshold below one can only ever reduce stored bytes.
     object_store_compression_min_savings: float = Field(0.05, ge=0.0, lt=1.0)
     object_store_internal_download_lifetime_seconds: PositiveInt = 300

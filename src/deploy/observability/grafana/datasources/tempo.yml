@@ -1,0 +1,38 @@
+apiVersion: 1
+
+datasources:
+  - name: AIZK traces
+    type: tempo
+    uid: aizk-traces
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      # Tempo to Loki. Opening a span offers its logs directly, matched on the trace id that
+      # `correlate_trace` in `src/aizk/config/__init__.py` stamps into every serialized record.
+      tracesToLogsV2:
+        datasourceUid: aizk-logs
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        filterByTraceID: false
+        customQuery: true
+        query: '{service=~".+"} |= "$${__trace.traceId}"'
+      # Tempo to metrics. A span offers the RED series its own operation contributes to.
+      tracesToMetrics:
+        datasourceUid: aizk-metrics
+        spanStartTimeShift: -5m
+        spanEndTimeShift: 5m
+        queries:
+          - name: Request rate for this operation
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags}[5m]))'
+        tags:
+          - key: service.name
+            value: service
+          - key: aizk.operation
+            value: aizk_operation
+      # The service graph and the RED series both come from Tempo's own metrics generator, so
+      # Grafana reads them back out of VictoriaMetrics rather than recomputing anything.
+      serviceMap:
+        datasourceUid: aizk-metrics
+      nodeGraph:
+        enabled: true

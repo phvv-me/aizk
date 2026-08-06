@@ -41,10 +41,20 @@ class Consolidator(FrozenModel):
         policy: RelationPolicy,
         object_id: UUID5 | None,
         matches: Sequence[FactMatch],
+        contesting: bool = False,
     ) -> ConsolidationVerdict | None:
-        """Apply the relation's coexistence policy when similarity is conclusive."""
+        """Apply the relation's coexistence policy when similarity is conclusive.
+
+        contesting: the candidate's own source challenges what memory holds. Similarity
+            can never settle one of those, because a correction reads almost exactly like
+            the claim it corrects, so the nearest live fact is precisely the one at stake.
+            The deterministic tiers would call that a near-duplicate and quietly no-op the
+            correction away, so it always reaches the model batch, which can retract.
+        """
         if not matches:
             return ConsolidationVerdict(action="ADD")
+        if contesting:
+            return None
         if policy == Relation.Policy.state:
             if len(matches) == 1 and matches[0].object_id == object_id:
                 return ConsolidationVerdict(action="NOOP")
@@ -86,7 +96,7 @@ class Consolidator(FrozenModel):
             "\n".join(f"  id={claim.id} statement={claim.statement}" for claim in existing)
             or "  (none)"
         )
-        return f"{index}. New fact: {fact.statement}\nExisting facts.\n{catalog}"
+        return f"{index}. New fact ({fact.stance}): {fact.statement}\nExisting facts.\n{catalog}"
 
     @staticmethod
     def _resolved_verdict(
@@ -100,7 +110,7 @@ class Consolidator(FrozenModel):
             if index < len(resolution.verdicts)
             else ConsolidationVerdict(action="ADD")
         )
-        if verdict.action != "UPDATE":
+        if verdict.action not in {"UPDATE", "REFUTE"}:
             return ConsolidationVerdict(action=verdict.action)
         if verdict.supersedes not in known:
             return ConsolidationVerdict(action="ADD")

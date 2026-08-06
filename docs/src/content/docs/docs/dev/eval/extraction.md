@@ -12,8 +12,8 @@ page assumes you know how [extraction and the gate](/docs/dev/write/extraction/)
 
 `chefe run aizk-eval extraction` takes a JSONL file of human-verified cases. Each line is one source
 span and the facts a correct extraction would produce, where a target names the acceptable subject
-names, the predicate, the acceptable object names, and optionally the epistemic kind and the
-valid-from date.
+names, the predicate, the acceptable object names, and optionally the epistemic kind, the
+settledness, and the valid-from date.
 
 ```text
   case text + targets

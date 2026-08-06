@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import dbutil
+import mcp.types as mt
 from fastmcp.server.context import Context
 from fastmcp.tools import FunctionTool
 from id_factory import uuid5
@@ -71,9 +72,22 @@ def tools_of(application: AizkMCP) -> dict[str, FunctionTool]:
 server = build_server()
 
 
-def context_for(user: User | None = None) -> Context:
-    """A request context carrying an already resolved caller, as the middleware leaves it."""
-    session = SimpleNamespace(_fastmcp_state_prefix=f"test-{uuid5()}")
+def context_for(user: User | None = None, client: mt.Implementation | None = None) -> Context:
+    """A request context carrying an already resolved caller, as the middleware leaves it.
+
+    `client` stands for the initialize handshake a real session completed, which is where
+    the harness name and version recorded with a write come from.
+    """
+    session = SimpleNamespace(
+        _fastmcp_state_prefix=f"test-{uuid5()}",
+        client_params=None
+        if client is None
+        else mt.InitializeRequestParams(
+            protocolVersion=mt.LATEST_PROTOCOL_VERSION,
+            capabilities=mt.ClientCapabilities(),
+            clientInfo=client,
+        ),
+    )
     context = Context(fastmcp=server, session=cast("ServerSession", session))
     if user is not None:
         asyncio.run(bind_user(context, user))

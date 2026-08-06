@@ -284,7 +284,9 @@ def test_accept_scans_stores_and_queues_exact_authorized_scopes() -> None:
     owner, organization = uuid5(), uuid5()
     user = User.authorized(owner, write=(owner, organization))
     scanner, storage, repository, enqueuer = Scanner(), Storage(), Repository(), Enqueuer()
-    artifact = ArtifactBytes(content=b"paper", filename="paper.pdf", media_type="application/pdf")
+    artifact = ArtifactBytes(
+        content=b"%PDF-1.7 paper", filename="paper.pdf", media_type="application/pdf"
+    )
 
     receipt = asyncio.run(
         intake(scanner, storage, repository, enqueuer).accept(
@@ -295,7 +297,7 @@ def test_accept_scans_stores_and_queues_exact_authorized_scopes() -> None:
         )
     )
 
-    assert scanner.scanned == [b"paper"]
+    assert scanner.scanned == [b"%PDF-1.7 paper"]
     assert repository.created[0]["scopes"] == frozenset({owner})
     assert repository.created[0]["observed_at"] == datetime(2026, 7, 1, tzinfo=UTC)
     assert enqueuer.queued == [(receipt.content_id, frozenset({owner}))]
@@ -315,7 +317,7 @@ def test_uri_is_fetched_once_and_keeps_the_requested_provenance() -> None:
             transport=httpx.MockTransport(
                 lambda request: httpx.Response(
                     200,
-                    content=b"pdf",
+                    content=b"%PDF-1.7 pdf",
                     headers={"content-type": "application/pdf"},
                 )
             )
@@ -349,7 +351,7 @@ def test_failed_metadata_transaction_compensates_the_stored_object() -> None:
             intake(Scanner(), storage, repository, Enqueuer()).accept(
                 user,
                 ArtifactBytes(
-                    content=b"paper", filename="paper.pdf", media_type="application/pdf"
+                    content=b"%PDF-1.7 paper", filename="paper.pdf", media_type="application/pdf"
                 ),
                 target=user.write_scope(None),
             )
@@ -406,6 +408,7 @@ def test_integrity_pass_records_valid_and_failed_objects_without_exposing_keys()
             key="objects/valid",
             content_hash=sql.uuid8(valid),
             size=len(valid),
+            stored_size=len(valid),
             encoding=Blob.Encoding.identity,
         ),
         StoredObject(
@@ -413,6 +416,7 @@ def test_integrity_pass_records_valid_and_failed_objects_without_exposing_keys()
             key="objects/missing",
             content_hash=sql.uuid8(b"different"),
             size=1,
+            stored_size=1,
             encoding=Blob.Encoding.identity,
         ),
     )

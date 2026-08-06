@@ -26,7 +26,7 @@ from ..store.identity import User
 from ..types import UUID7, ScopeNames
 from ..usage import annotate_operation
 from ..web import WebMode, WebSearch
-from .middleware import CallerRateLimit, IdentityMiddleware, bound_user
+from .middleware import CallerRateLimit, IdentityMiddleware, bound_user, client_label
 from .models import KeepResult, UploadDeclaration, UploadTicketAccepted
 
 
@@ -97,9 +97,15 @@ class AizkMCP(FastMCP):
             raise ToolError("anonymous callers are read-only, authenticate to write")
         return user
 
-    def memory(self, user: User) -> Memory:
-        """Build the shared memory service bound to one resolved caller."""
-        return Memory(user=user, intake=self.intake, wake=self.wake, web=self.websearch)
+    def memory(self, user: User, client: str | None = None) -> Memory:
+        """Build the shared memory service bound to one resolved caller and its harness."""
+        return Memory(
+            user=user,
+            intake=self.intake,
+            wake=self.wake,
+            web=self.websearch,
+            client=client,
+        )
 
     def status_tool(self) -> Callable[..., Coroutine[None, None, StatusReport]]:
         """Build the `status` tool over this server's dependencies."""
@@ -222,8 +228,18 @@ class AizkMCP(FastMCP):
             can carry, so keep what will still be worth knowing later rather than what is
             merely true right now.
 
+            This is also how a wrong memory is fixed. There is no tool that edits or deletes
+            a derived claim, because derived claims are read out of sources and any hand
+            edit would be overwritten the next time they are. Keep a note that says plainly
+            what is wrong and why, naming the claim in the words a `find` returned it in and
+            saying that it is refuted, corrected, or no longer holds. Consolidation reads
+            that note against what memory already holds and closes the claim it disproves,
+            recording the note as the evidence that closed it. A note that only casts doubt
+            leaves both standing and marks them disputed instead, which is the honest
+            outcome when the correction is not itself certain.
+
             text: self-describing Markdown, plain text, or companion information for a
-                preserved URI or uploaded file.
+                preserved URI or uploaded file. Also the correction above.
             source_uri: original website or file URL. Omission keeps text mode local.
             observed_at: optional time when the statement became applicable. Normally omitted.
             expires_at: known time after which the statement stops being true. It is not a
@@ -280,7 +296,7 @@ class AizkMCP(FastMCP):
                 raise ToolError("this deployment accepts text memories only")
             user = await self.user(context, identified=True)
             try:
-                return await self.memory(user).remember(
+                return await self.memory(user, client_label(context)).remember(
                     text,
                     source_uri=source_uri,
                     observed_at=observed_at,

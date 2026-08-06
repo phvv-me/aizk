@@ -45,8 +45,10 @@ def test_settings_define_the_bounded_object_store_contract() -> None:
     assert configured.object_store_access_key.get_secret_value() == "access"
     assert configured.object_store_secret_key.get_secret_value() == "secret"
     assert configured.object_store_upload_byte_limit == 17
-    assert configured.object_store_compression_level == 3
+    assert configured.object_store_compression_enabled is True
+    assert configured.object_store_compression_level == 9
     assert configured.object_store_compression_min_savings == 0.05
+    assert configured.object_store_compaction_batch_size == 100
     assert configured.object_store_internal_download_lifetime_seconds == 23
 
 
@@ -63,6 +65,7 @@ def test_memory_store_round_trips_immutable_randomly_keyed_bytes() -> None:
             size=len(payload),
             stored_size=len(payload),
             encoding=Blob.Encoding.identity,
+            encoding_level=9,
             etag="0",
         )
         assert first.key.startswith("objects/")
@@ -81,6 +84,7 @@ def test_stored_bytes_serializes_directly_to_blob_columns() -> None:
         size=5,
         stored_size=4,
         encoding=Blob.Encoding.zstd,
+        encoding_level=9,
         etag="etag",
         version="version",
     )
@@ -91,6 +95,7 @@ def test_stored_bytes_serializes_directly_to_blob_columns() -> None:
         "size": stored.size,
         "stored_size": stored.stored_size,
         "encoding": stored.encoding,
+        "encoding_level": stored.encoding_level,
         "etag": stored.etag,
         "storage_version": stored.version,
     }
@@ -193,11 +198,60 @@ def test_compressible_original_is_transparently_restored_and_bounded() -> None:
     dbutil.run(body())
 
 
+def test_disabling_compression_stores_verbatim_and_still_reads_older_objects() -> None:
+    async def body() -> None:
+        backend = MemoryStore()
+        compressing = ByteStore(
+            backend=backend,
+            upload_byte_limit=4096,
+            internal_download_lifetime=timedelta(minutes=5),
+        )
+        payload = b"repeat " * 100
+        compressed = await compressing.put(payload)
+        assert compressed.encoding is Blob.Encoding.zstd
+        assert compressed.encoding_level == 9
+
+        plain = compressing.model_copy(update={"compression_enabled": False})
+        verbatim = await plain.put(payload)
+
+        assert verbatim.encoding is Blob.Encoding.identity
+        assert verbatim.stored_size == verbatim.size
+        # A store told not to compress records no level, so compaction can revisit the
+        # object once the policy comes back on.
+        assert verbatim.encoding_level is None
+        # Turning compression off never strands what was already written.
+        assert await plain.get(compressed.key, encoding=compressed.encoding) == payload
+
+    dbutil.run(body())
+
+
 def test_memory_store_cannot_mint_an_external_download_capability() -> None:
     async def body() -> None:
         store = memory_store()
         with pytest.raises(DownloadUnavailable, match="cannot sign"):
             await store.download_url("objects/private")
+
+    dbutil.run(body())
+
+
+def test_a_compressed_object_is_never_signed_for_direct_download() -> None:
+    async def body() -> None:
+        signer = s3_backend(
+            endpoint="https://objects.internal",
+            bucket="aizk",
+            access_key="access",
+            secret_key="secret",
+        )
+        store = ByteStore(
+            backend=signer,
+            signer=signer,
+            upload_byte_limit=1024,
+            internal_download_lifetime=timedelta(minutes=5),
+        )
+        # A signed URL sends the client straight to the stored representation, so handing
+        # one out for a compressed object would deliver a zstd frame as if it were the file.
+        with pytest.raises(DownloadUnavailable, match="must be read through the server"):
+            await store.download_url("objects/compressed", Blob.Encoding.zstd)
 
     dbutil.run(body())
 

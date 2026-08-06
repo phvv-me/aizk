@@ -8,6 +8,7 @@ from polyfactory.factories.pydantic_factory import ModelFactory
 from pydantic import UUID5, UUID7, BaseModel
 
 from aizk.config import settings
+from aizk.provenance import Stance
 from aizk.retrieval import Candidate
 from aizk.storage import StoredBytes
 from aizk.store import Artifact, Blob, Fact
@@ -33,6 +34,9 @@ class CandidateFactory(AizkModelFactory[Candidate]):
     # a deliberate, rare shape whose tests build it explicitly, and letting the factory roll
     # one at random would swap the provenance label under every eval and benchmark arm.
     web_cache = False
+    # Settledness is the same kind of deliberate shape: an unsettled claim adds a standing
+    # warning to the rendered answer, so a random draw would rewrite what every arm scores.
+    stance = Stance.settled
 
 
 class LiveFactFactory(AizkModelFactory[Fact.Live]):

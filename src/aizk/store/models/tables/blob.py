@@ -33,8 +33,13 @@ class Blob(Id, CreatedAt, TableBase, table=True):
         CheckConstraint("stored_size >= 0", name="ck_blob_stored_size_nonnegative"),
         CheckConstraint("stored_size <= size", name="ck_blob_stored_size_bounded"),
         CheckConstraint("storage_key <> ''", name="ck_blob_storage_key_nonempty"),
+        CheckConstraint(
+            "encoding_level IS NULL OR encoding_level BETWEEN 1 AND 22",
+            name="ck_blob_encoding_level_range",
+        ),
         Index("ix_blob_content_hash_size", "content_hash", "size"),
         Index("ix_blob_integrity_checked_at", "integrity_checked_at"),
+        Index("ix_blob_encoding_level", "encoding_level"),
     )
 
     content_hash: C[UUID8]
@@ -44,6 +49,11 @@ class Blob(Id, CreatedAt, TableBase, table=True):
         Encoding,
         default=Encoding.identity,
     )
+    # The Zstandard level this object's layout was last evaluated under, whatever the
+    # outcome, so raising the configured level is enough to tell the compaction pass
+    # which objects are still laid out under a weaker policy. An object written before
+    # the store recorded a level, or written with compression turned off, stays null.
+    encoding_level = sql.Nullable(int)
     storage_key = sql.Field(
         NonEmptyString,
         max_length=512,

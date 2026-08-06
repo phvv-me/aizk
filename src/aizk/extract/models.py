@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 from patos import FrozenModel
 from pydantic import UUID7, Field, JsonValue, WithJsonSchema
 
-from ..provenance import EpistemicKind
+from ..provenance import EpistemicKind, Stance
 
 
 class ExtractedEntity(FrozenModel):
@@ -27,6 +27,24 @@ class TimedFact(FrozenModel):
     valid_from: datetime | None = None
     valid_to: datetime | None = None
     kind: EpistemicKind = EpistemicKind.world
+    stance: Stance = Stance.settled
+    correcting: bool = Field(
+        default=False, description="the supporting sentence announces a correction"
+    )
+    derived_by: str | None = Field(
+        default=None, description="extractor that produced this fact, absent when the author did"
+    )
+
+    @property
+    def contests(self) -> bool:
+        """Whether this fact challenges something memory may already hold.
+
+        Either the source sentence behind it announces a correction, which grounding reads
+        deterministically, or extraction itself found the source disputing or refuting the
+        claim. A contesting fact is never settled by similarity, because the live claim
+        nearest to it is exactly the one it may be disproving.
+        """
+        return self.correcting or self.stance in {Stance.disputed, Stance.refuted}
 
 
 class Extraction(FrozenModel):
@@ -39,8 +57,13 @@ class Extraction(FrozenModel):
 class ConsolidationVerdict(FrozenModel):
     """How one new fact relates to the current matching facts."""
 
-    action: Literal["ADD", "UPDATE", "NOOP"]
+    action: Literal["ADD", "UPDATE", "NOOP", "REFUTE"]
     supersedes: Annotated[UUID7, WithJsonSchema({"type": "string"})] | None = None
+
+    @property
+    def contradicted(self) -> UUID7 | None:
+        """The live claim this verdict disproves, absent for every other action."""
+        return self.supersedes if self.action == "REFUTE" else None
 
 
 class BatchConsolidationVerdict(FrozenModel):

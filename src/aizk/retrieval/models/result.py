@@ -7,6 +7,7 @@ from typing import ClassVar, Self
 from patos import FrozenModel
 from pydantic import UUID5, UUID7, Field
 
+from ...provenance import Stance
 from ...store import Document
 from ..templates import environment
 from .candidate import Candidate
@@ -36,6 +37,10 @@ class _Evidence(FrozenModel):
 
     provenance: _Provenance
     text: str
+    stance: Stance = Field(
+        default=Stance.settled,
+        description="how settled a derived claim is, settled for everything else",
+    )
     scopes: tuple[_Scope, ...] = ()
     resource_uri: str | None = None
     document_id: UUID7 | None = None
@@ -105,6 +110,7 @@ class RecallResult(FrozenModel):
                         Document.public_url(candidate.source_uri) if candidate.web_cache else None
                     ),
                     text=candidate.line,
+                    stance=candidate.stance,
                     resource_uri=candidate.resource_uri,
                     document_id=candidate.document_id,
                     document_created_at=candidate.document_created_at,
@@ -142,6 +148,17 @@ class RecallResult(FrozenModel):
         return (
             tuple(item for item in self.evidence if item.provenance is _Provenance.WEB) + self.web
         )
+
+    @cached_property
+    def unsettled(self) -> tuple[_Evidence, ...]:
+        """Every remembered item whose source did not state it outright.
+
+        The template turns this into a standing instruction rather than a label, because a
+        word beside a claim is easy to read past while a sentence naming the excerpt as the
+        authority is not. A derived claim arrives as a clean assertion whatever the sentence
+        behind it said, so this is the only place the reader is told which ones those are.
+        """
+        return tuple(item for item in self.remembered if item.stance is not Stance.settled)
 
     @cached_property
     def shared_scopes(self) -> tuple[_Scope, ...]:

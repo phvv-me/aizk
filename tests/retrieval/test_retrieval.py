@@ -18,6 +18,7 @@ from sqlmodel.sql.expression import Select
 from aizk.config import settings
 from aizk.config.settings import Settings
 from aizk.ontology import Ontology, System
+from aizk.provenance import Stance
 from aizk.retrieval import (
     Candidate,
     Lane,
@@ -912,3 +913,69 @@ def test_recall_embeds_before_its_single_context_query(
     assert any("the remembered answer" in candidate.line for candidate in candidates)
     assert fake_embedder.calls == [([search_query], "query")]
     assert fake_reranker, "the cross-encoder scores every recall"
+
+
+async def seed_marked_fact(
+    user: User, statement: str, attributes: dict[str, object]
+) -> UUID5 | UUID7:
+    """One live fact whose claim carries the speaker and settledness marks recall renders."""
+    claim_id = await seed_fact(user, statement, basis())
+    async with User.system().owner as session:
+        await session.exec(
+            update(Fact.Claim).where(Fact.Claim.id == claim_id).values(attributes=attributes)
+        )
+    return claim_id
+
+
+@pytest.mark.parametrize(
+    ("attributes", "expected"),
+    [
+        ({}, "- (related_to) a claim"),
+        ({"stance": "settled"}, "- (related_to) a claim"),
+        ({"stance": "hedged"}, "- [hedged] (related_to) a claim"),
+        (
+            {"epistemic_kind": "opinion", "speaker_label": "Maya"},
+            "- [Maya, opinion] (related_to) a claim",
+        ),
+        (
+            {"epistemic_kind": "opinion", "speaker_label": "Maya", "stance": "disputed"},
+            "- [Maya, opinion, disputed] (related_to) a claim",
+        ),
+        (
+            {"epistemic_kind": "observation", "stance": "refuted"},
+            "- [unknown speaker, observation, refuted] (related_to) a claim",
+        ),
+    ],
+)
+def test_an_unsettled_claim_can_never_render_as_a_settled_one(
+    owner: UUID5 | UUID7, attributes: dict[str, object], expected: str
+) -> None:
+    user = User.private(owner)
+
+    async def probe() -> list[str]:
+        await seed_marked_fact(user, "a claim", attributes)
+        return [row._mapping["line"] for row in await retrieve(user, basis())]
+
+    assert dbutil.run(probe()) == [expected]
+
+
+def test_the_fact_lane_carries_settledness_out_to_the_candidate(
+    owner: UUID5 | UUID7,
+) -> None:
+    user = User.private(owner)
+
+    async def probe() -> list[Candidate]:
+        await seed_marked_fact(user, "a hedged claim", {"stance": "hedged"})
+        await seed_fact(user, "a settled claim", basis())
+        return [
+            Candidate.model_validate(row._mapping, from_attributes=True)
+            for row in await retrieve(user, basis())
+        ]
+
+    stances = {candidate.line: candidate.stance for candidate in dbutil.run(probe())}
+
+    # the lane projects it per row, so packing and rendering both read one value
+    assert stances == {
+        "- [hedged] (related_to) a hedged claim": Stance.hedged,
+        "- (related_to) a settled claim": Stance.settled,
+    }

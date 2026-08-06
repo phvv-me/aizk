@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 import dbutil
 import httpx
+import mcp.types as mt
 import mcp_probe
 import pytest
 from fastmcp import Client
@@ -985,3 +986,38 @@ def test_share_resolves_the_exact_destination_scope(
     assert captured_scopes == [organizations if scope_names else frozenset({owner})]
     assert captured_users == [caller]
     assert captured_moves == [False]
+
+
+@pytest.mark.parametrize(
+    ("client", "expected"),
+    [(None, None), (mt.Implementation(name="claude-code", version="2.1.0"), "claude-code/2.1.0")],
+)
+def test_a_write_records_the_harness_that_made_it(
+    monkeypatch: pytest.MonkeyPatch,
+    as_caller: User,
+    tools: dict[str, FunctionTool],
+    client: mt.Implementation | None,
+    expected: str | None,
+) -> None:
+    captured: list[CaptureContext] = []
+
+    async def stub(
+        user: User,
+        text: str,
+        title: str | None = None,
+        source_uri: str | None = None,
+        created_by: UUID5 | None = None,
+        scopes: frozenset[UUID5] = frozenset(),
+        capture: CaptureContext | None = None,
+    ) -> UUID7:
+        assert capture is not None
+        captured.append(capture)
+        return uuid7()
+
+    monkeypatch.setattr(memory_module.extract_ingest, "ingest_text", stub)
+    monkeypatch.setattr(memory_module, "enqueue_document", AsyncMock(return_value=1))
+
+    dbutil.run(tools["keep"].fn(text="Durable knowledge.", context=context_for(as_caller, client)))
+
+    # which client produced a class of facts, beside which model derived them
+    assert [capture.client for capture in captured] == [expected]

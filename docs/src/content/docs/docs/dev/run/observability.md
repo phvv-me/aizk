@@ -3,32 +3,25 @@ title: "Observability"
 description: "Logs, durable usage, the health overview, and diagnosing a stuck queue."
 ---
 
-Two separate things answer two separate questions here. Logs explain why something failed and
-they expire. The `usage_event` ledger records what work was done and it does not. This page
-covers both, plus the commands you actually run when something is stuck. It assumes the service
-list from [Deployment topology](/docs/dev/run/topology/).
+Two separate things answer two separate questions here. Telemetry explains what happened and why,
+and it expires. The `usage_event` ledger records what work was done and it does not. This page
+covers the ledger and the commands you actually run when something is stuck.
+[Telemetry](/docs/dev/run/telemetry/) covers the traces, metrics and logs. Both assume the
+service list from [Deployment topology](/docs/dev/run/topology/).
 
 ```text
-  logs ──▶ containers ─▶ alloy ─▶ loki (720h, 30-day retention) ─▶ grafana
+  signals ─▶ containers ─▶ alloy ─▶ loki, tempo, victoriametrics ─▶ grafana (expires)
                 │
   usage ────────┴─▶ PostgreSQL ─▶ usage_event (durable, never expires)
 ```
 
-## The logging stack
+## Starting the stack
 
-`--profile observability` starts four services. `observability-init` runs first and once, as
-root with only `CHOWN`, `DAC_OVERRIDE` and `FOWNER`, to create `/loki` for UID 10001, `/alloy`
-for UID 473 and `/grafana` for UID 472. This step is needed even for named volumes, because
-dropping all capabilities leaves those unprivileged users unable to fix a root-owned directory.
-
-`alloy` discovers containers through `discovery.docker` filtered on the label
-`com.docker.compose.project=aizk`, relabels each target with its container name and Compose
-service, and pushes to Loki. It runs as `473:473` with the Docker socket mounted read-only, and
-`AIZK_DOCKER_GID` adds only the supplemental host group it needs to open that socket.
-
-`loki` uses a TSDB index on the local filesystem with the `aizk_logs_` prefix and a compactor
-with `retention_period: 720h`, which is 30 days. `grafana` has one provisioned, noneditable Loki
-data source named "AIZK logs", anonymous access off and sign-up off.
+`--profile observability` starts the collector, the three stores and Grafana.
+`observability-init` runs first and once, as root with only `CHOWN`, `DAC_OVERRIDE` and `FOWNER`,
+to create each store's directory for the unprivileged user that owns it. This step is needed even
+for named volumes, because dropping all capabilities leaves those users unable to fix a
+root-owned directory.
 
 ```sh
 AIZK_GRAFANA_ADMIN_PASSWORD=
@@ -37,16 +30,13 @@ docker compose --profile observability --env-file .env -f src/deploy/docker-comp
 ```
 
 Grafana on `127.0.0.1:3003` is the only host port anything in the Compose file publishes. Reach
-it locally or forward it over SSH.
+it locally, forward it over SSH, or use the gated console at `admin.phvv.me/grafana`.
 
 :::caution[Keep the observability stack off the network]
-Never expose Grafana, Loki, Alloy or the Docker socket. Alloy reads the socket read-only, which
-still means broad visibility into every container's metadata and logs, so treat it as host
-infrastructure rather than an application.
+Never expose Grafana, Loki, Tempo, VictoriaMetrics, Alloy or the Docker socket. Alloy reads the
+socket read-only, which still means broad visibility into every container's metadata and logs, so
+treat it as host infrastructure rather than an application.
 :::
-
-Traces stay inside each Python process unless `AIZK_OTLP_ENDPOINT` names an OTLP over HTTP
-collector, so span export is off until something like Tempo joins this profile.
 
 ## Durable usage
 
@@ -138,6 +128,7 @@ evidence failures rather than transport errors, and
 
 <div class="not-content">
 
+- [Telemetry](/docs/dev/run/telemetry/) follows one query across every service it touched.
 - [The job system](/docs/dev/passes/jobs/) explains what the queue is running.
 - [Grounding and consolidation](/docs/dev/write/consolidation/) decodes the rejection reasons.
 - [Upgrades](/docs/dev/run/upgrades/) covers the health check's place in a deployment.

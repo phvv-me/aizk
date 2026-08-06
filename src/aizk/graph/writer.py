@@ -4,7 +4,7 @@ from typing import cast
 
 from loguru import logger
 from patos import FlexModel, FrozenModel, sql
-from pydantic import UUID5, UUID7, Field, field_validator
+from pydantic import UUID5, UUID7, Field, JsonValue, field_validator
 from sqlalchemy import (
     Integer,
     Text,
@@ -20,7 +20,7 @@ from sqlmodel.sql.expression import Select
 from ..config import settings
 from ..extract.models import ConsolidationVerdict, TimedFact
 from ..ontology import Ontology
-from ..provenance import CaptureContext
+from ..provenance import CaptureContext, Stance
 from ..store import Entity, Fact, Relation
 from ..store.engine import Session
 from ..store.locking import acquire_locks
@@ -218,6 +218,7 @@ class GraphWriter(FlexModel):
                     Ontology.current().relation_policies[candidate.fact.predicate],
                     candidate.object_id,
                     ranked,
+                    candidate.fact.contests,
                 ),
             )
             for candidate, vector, ranked in zip(candidates, vectors, matches, strict=True)
@@ -345,7 +346,8 @@ class GraphWriter(FlexModel):
             self.session,
             self._revisions(writes),
         )
-        rows = self._write_rows(writes, valid_ends, source_chunk_id)
+        contested = await self._settle_contradictions(writes, source_chunk_id)
+        rows = self._write_rows(writes, valid_ends, source_chunk_id, contested)
         contents = [content for content, _ in rows]
         claims = [claim for _, claim in rows]
         await Fact.Content.mint_all(self.session, contents)
@@ -398,11 +400,42 @@ class GraphWriter(FlexModel):
             )
         return revisions
 
+    async def _settle_contradictions(
+        self, writes: list[_Write], source_chunk_id: UUID7
+    ) -> set[int]:
+        """Close or contest every live claim a refuting write disproves, return the standoffs.
+
+        A refutation that is itself definite closes the claim it disproves, keeping the
+        closed row and stamping the chunk that closed it. Anything less certain leaves both
+        claims live and marks them disputed instead, since a false retraction silently
+        deletes something a person committed to memory while an unresolved disagreement is
+        merely visible. The returned ordinals are the writes whose own claim joins that
+        standoff.
+        """
+        retracted: list[UUID7] = []
+        contested: dict[UUID7, int] = {}
+        for ordinal, plan, verdict in writes:
+            if (contradicted := verdict.contradicted) is None:
+                continue
+            if plan.candidate.fact.stance.decisive:
+                retracted.append(contradicted)
+            else:
+                contested[contradicted] = ordinal
+        closed = await Fact.Claim.refute(self.session, retracted, source_chunk_id)
+        await Fact.Claim.dispute(self.session, list(contested), source_chunk_id)
+        logger.info(
+            "consolidation closed {} contradicted claims and left {} disputed",
+            len(closed),
+            len(contested),
+        )
+        return set(contested.values())
+
     def _write_rows(
         self,
         writes: list[_Write],
         valid_ends: dict[int, datetime | None],
         source_chunk_id: UUID7,
+        contested: set[int],
     ) -> list[tuple[FactContent, dict[str, ClaimField]]]:
         """Render decided writes using the temporal ends returned by PostgreSQL."""
         return [
@@ -412,6 +445,7 @@ class GraphWriter(FlexModel):
                 valid_ends[ordinal]
                 if verdict.action == "UPDATE" and verdict.supersedes is not None
                 else plan.candidate.fact.valid_to,
+                Stance.disputed if ordinal in contested else plan.candidate.fact.stance,
             )
             for ordinal, plan, verdict in writes
         ]
@@ -421,6 +455,7 @@ class GraphWriter(FlexModel):
         plan: FactPlan,
         source_chunk_id: UUID7,
         valid_to: datetime | None,
+        stance: Stance,
     ) -> tuple[FactContent, dict[str, ClaimField]]:
         """Render one decided fact as immutable content and its scoped temporal claim."""
         candidate = plan.candidate
@@ -442,10 +477,24 @@ class GraphWriter(FlexModel):
                 "valid_to": valid_to,
                 "source_chunk_id": source_chunk_id,
                 "attributes": self.capture.claim_attributes(fact.kind, self.created_by)
-                | self.grounding(fact),
+                | self.grounding(fact)
+                | authorship(fact, stance),
                 "perspective_key": fact.kind.perspective_key(self.created_by),
             },
         )
+
+
+def authorship(fact: TimedFact, stance: Stance) -> dict[str, JsonValue]:
+    """The settledness and origin one decided fact stamps on its stored claim.
+
+    A settled stance and an author-written fact are the silent defaults, so only an
+    unsettled reading and a model-derived origin are written. `derived_by` is what lets an
+    operator ask which extractor produced a class of bad facts.
+    """
+    settledness: dict[str, JsonValue] = (
+        {"stance": stance.value} if stance is not Stance.settled else {}
+    )
+    return settledness | ({"derived_by": fact.derived_by} if fact.derived_by else {})
 
 
 def merged_verdicts(
