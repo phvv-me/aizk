@@ -16,24 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.14"
-      # chefe owns dependencies, environments, and tasks. It installs pixi (the solver it compiles
-      # to) on first use, so `uv tool install` is the whole bootstrap; nothing else is set up here.
-      - name: install chefe
-        run: |
-          uv tool install "chefe>=0.0.25"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: cache the pixi binary and solved packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.pixi
-            ~/.cache/rattler
-            .chefe/.pixi
-          key: chefe-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-      - run: chefe install
+      # chefe owns dependencies, environments and tasks, and this action owns the bootstrap so
+      # the uv version, the cache paths and the cache key live in one repository rather than in
+      # each of ours. It installs the environment, so what follows is only the gates.
+      - uses: phvv-me/chefe/.github/actions/setup@main
       - run: chefe run lint
       - run: chefe run lint-imports
       - run: chefe run typecheck
@@ -67,21 +53,7 @@ jobs:
           --health-retries 12
     steps:
       - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-        with:
-          python-version: "3.14"
-      - name: install chefe
-        run: |
-          uv tool install "chefe>=0.0.25"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - name: cache the pixi binary and solved packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.pixi
-            ~/.cache/rattler
-            .chefe/.pixi
-          key: chefe-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+      - uses: phvv-me/chefe/.github/actions/setup@main
       # the role bootstrap initdb/roles.sh performs against a compose volume; a service container
       # cannot mount repo files, so the same statements run here over the wire
       - name: bootstrap app role
@@ -94,7 +66,6 @@ jobs:
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT USAGE, SELECT ON SEQUENCES TO aizk_app;
           SQL
-      - run: chefe install
       # `chefe run test` runs the two-pass coverage union: the default sysmon core cannot emit one
       # async-with enter arc (graph/build.py retry loop), so that single test re-runs under the
       # pytrace core and appends before the 100% gate is enforced on the union.
