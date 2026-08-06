@@ -1044,6 +1044,32 @@ services:
       GF_SECURITY_ADMIN_USER: ${AIZK_GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${AIZK_GRAFANA_ADMIN_PASSWORD:-}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # The operator gate in front of this host is the login. Without the header trust below
+      # Grafana ran its own login on top of it, so reaching a dashboard meant signing in twice
+      # and knowing a password that lives only in a volume, which nobody has after the first
+      # boot that set it. `/traces` was unreachable for the same reason, since a redirect into
+      # Grafana simply landed on Grafana's login form.
+      #
+      # This is safe here and would not be if Grafana were exposed. The header is only ever
+      # believed from inside the Compose network, Caddy strips any inbound `X-Auth-Request-*`
+      # before the gate runs so a caller cannot assert an identity, oauth2-proxy sets it only
+      # after checking the operator role, and Grafana publishes no host port. The whitelist is
+      # the belt to that braces, naming the private ranges Compose assigns.
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: X-Auth-Request-Email
+      GF_AUTH_PROXY_HEADER_PROPERTY: email
+      GF_AUTH_PROXY_HEADERS: Email:X-Auth-Request-Email Name:X-Auth-Request-User
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN: "false"
+      GF_AUTH_PROXY_WHITELIST: 172.16.0.0/12,192.168.0.0/16,10.0.0.0/8
+      # Editor, deliberately not Admin. Trusting a header removes the second factor that
+      # Grafana's own password used to be, so what remains behind the gate should be the least
+      # that works. An org Admin can create datasources, which would let anyone through the
+      # gate point Grafana at an arbitrary internal address and read the response back, turning
+      # a dashboard into a request forwarder into this network. Editor opens every provisioned
+      # dashboard and Explore, which is all `/traces` and the overview need, and the three
+      # datasources come from files and are `editable: false` so nobody has cause to add one.
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Editor
       GF_SERVER_ROOT_URL: ${AIZK_ADMIN_PUBLIC_URL:-https://admin.phvv.me}/grafana
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:

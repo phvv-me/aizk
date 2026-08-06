@@ -180,11 +180,21 @@ def test_artifact_recovery_enqueues_only_orphaned_durable_failures(
             name="protected.pdf",
             state=Artifact.Content.State.failed,
         )
+        unreadable = await seed_artifact(
+            owner,
+            [owner],
+            name="archive.zip",
+            media_type="application/zip",
+            state=Artifact.Content.State.unreadable,
+        )
         async with User.system().owner as session:
             for stored in (first, second, protected):
                 row = await session.get(Artifact.Content, stored.content.id)
                 assert row is not None
                 row.error = "old failure"
+            unreadable_row = await session.get(Artifact.Content, unreadable.content.id)
+            assert unreadable_row is not None
+            unreadable_row.error = "Docling conversion ended with skipped"
 
         async with ProductionQueue(dsn=settings.asyncpg_dsn) as queue:
             names = queue.queries.qbe.settings
@@ -222,6 +232,7 @@ def test_artifact_recovery_enqueues_only_orphaned_durable_failures(
                     first.content.id,
                     second.content.id,
                     protected.content.id,
+                    unreadable.content.id,
                 )
             }
             assert rows[retained.content.id] is not None
@@ -236,6 +247,12 @@ def test_artifact_recovery_enqueues_only_orphaned_durable_failures(
             assert protected_row is not None
             assert protected_row.state == Artifact.Content.State.failed
             assert protected_row.error == "old failure"
+            # A permanently unreadable original is never a `failed`-state candidate, so the
+            # retry pass that just requeued three durable failures never touches it.
+            unreadable_row = rows[unreadable.content.id]
+            assert unreadable_row is not None
+            assert unreadable_row.state == Artifact.Content.State.unreadable
+            assert unreadable_row.error == "Docling conversion ended with skipped"
 
         async with ProductionQueue(dsn=settings.asyncpg_dsn) as queue:
             names = queue.queries.qbe.settings

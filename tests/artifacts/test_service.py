@@ -757,6 +757,110 @@ def test_docling_rejection_keeps_a_metadata_document_without_retrying(
     )
 
 
+def test_docling_policy_refusal_is_marked_unreadable_and_never_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for the crimson incident group A (binary and archive originals):
+    Docling's own policy check refuses these deterministically, so a retry only repeats the
+    same verdict, and the processor records a state the retry query stops offering back."""
+    source = original().model_copy(
+        update={"filename": "archive.zip", "media_type": "application/zip"}
+    )
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+    response = DoclingResponse.model_validate(
+        {
+            "document": {},
+            "status": "skipped",
+            "errors": [
+                {"category": "policy", "error_message": "File format not allowed: archive.zip"}
+            ],
+        }
+    )
+    ingested: list[str] = []
+
+    async def ingest(ingestor: TextIngestor, submitted: TextSource) -> tuple[UUID7, bool]:
+        del ingestor
+        ingested.append(submitted.text)
+        return uuid7(), True
+
+    monkeypatch.setattr("aizk.artifacts.service.TextIngestor.ingest", ingest)
+    processor = ArtifactProcessor(
+        cast(DoclingClient, Converter(response)),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+    )
+
+    asyncio.run(processor.process(source.content_id, source.scopes))
+
+    assert "Conversion state unreadable" in ingested[0]
+    assert repository.states[-1][2:] == (
+        Artifact.Content.State.unreadable,
+        "File format not allowed: archive.zip",
+    )
+
+
+def test_group_b_regression_html_originals_convert_once_docling_sees_the_extension(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for the crimson incident group B: an html original stored under a
+    display name with no extension, like the real `artifact` and `35531` rows, came back
+    Docling `skipped` until the real `DoclingClient` renamed the wire copy before sending it.
+
+    The mock transport plays Docling's own real behavior, keyed on the sent filename alone,
+    so this proves the fix through the real client rather than a test double that never saw
+    the bug.
+    """
+
+    async def docling(request: httpx.Request) -> httpx.Response:
+        body = await request.aread()
+        if b'filename="artifact.html"' in body:
+            return httpx.Response(
+                200,
+                json={
+                    "document": {"md_content": "# Real page\n"},
+                    "status": "success",
+                    "errors": [],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "document": {},
+                "status": "skipped",
+                "errors": [
+                    {"category": "policy", "error_message": "File format not allowed: artifact"}
+                ],
+            },
+        )
+
+    converter = DoclingClient(
+        http=httpx.AsyncClient(
+            base_url="http://docling.test/",
+            transport=httpx.MockTransport(docling),
+        )
+    )
+    source = original().model_copy(update={"filename": "artifact", "media_type": "text/html"})
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+
+    async def ingest(ingestor: TextIngestor, submitted: TextSource) -> tuple[UUID7, bool]:
+        del ingestor, submitted
+        return uuid7(), True
+
+    monkeypatch.setattr("aizk.artifacts.service.TextIngestor.ingest", ingest)
+    processor = ArtifactProcessor(
+        converter,
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+    )
+
+    asyncio.run(processor.process(source.content_id, source.scopes))
+
+    assert repository.states[-1][2] is Artifact.Content.State.ready
+    assert repository.conversions[0][1] == "# Real page\n"
+
+
 def test_artifact_document_normalizes_blank_text_and_stays_non_semantic() -> None:
     document = ArtifactDocument(
         filename="notes.txt",

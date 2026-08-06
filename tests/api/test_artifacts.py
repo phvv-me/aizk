@@ -21,6 +21,7 @@ pytestmark = pytest.mark.usefixtures("migrated_db")
         (ArtifactContent.State.processing, "processing", "Converting"),
         (ArtifactContent.State.ready, "ready", "Available"),
         (ArtifactContent.State.failed, "failed", "Processing failed"),
+        (ArtifactContent.State.unreadable, "unreadable", "This format cannot be converted"),
     ],
 )
 def test_artifact_view_describes_each_human_workflow_state(

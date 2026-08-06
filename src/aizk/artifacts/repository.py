@@ -321,6 +321,7 @@ class ArtifactRepository:
                     in (
                         Artifact.Content.State.ready,
                         Artifact.Content.State.failed,
+                        Artifact.Content.State.unreadable,
                     )
                     else None,
                 )

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from re import fullmatch, sub
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 import asyncpg
@@ -9,6 +9,7 @@ from patos import FrozenModel
 from pydantic import UUID7, ValidationError
 from sqlalchemy import and_, func, or_
 from sqlmodel import select
+from sqlmodel.sql.expression import Select
 
 from ..background.enum import QueueStatus
 from ..background.jobs.conversion import DoclingConversionJob
@@ -22,6 +23,7 @@ from ..store.models.tables import ArtifactContent, QueueEvent, QueueTask
 type QueueIssueKind = Literal["stale_picked", "long_running_picked"]
 type ConversionState = Literal[
     "failed",
+    "unreadable",
     "active_terminal_queue",
     "active_queued",
     "active_stale",
@@ -108,6 +110,7 @@ class DoctorSummary(FrozenModel):
     long_running_picked_jobs: int = 0
     recent_exception_events: int = 0
     failed_conversions: int = 0
+    unreadable_conversions: int = 0
     orphaned_active_conversions: int = 0
     queued_active_conversions: int = 0
     fresh_active_conversions: int = 0
@@ -703,6 +706,7 @@ class ConversionDiagnostics:
         """Load complete conversion counts and bounded identifier-only details."""
         stale_before = now - self.stale_after
         failed = ArtifactContent.State.failed
+        unreadable = ArtifactContent.State.unreadable
         processing = ArtifactContent.State.processing
         orphaned_ids = tuple(queue_failures)
         orphaned = ArtifactContent.id.in_(orphaned_ids)
@@ -720,40 +724,47 @@ class ConversionDiagnostics:
         async with User.system().owner as session:
             counts = (
                 await session.exec(
-                    select(
-                        ArtifactContent.id.count()
-                        .filter(
-                            ArtifactContent.state == failed,
-                            no_activity,
-                        )
-                        .label("failed_conversions"),
-                        ArtifactContent.id.count()
-                        .filter(
-                            ArtifactContent.state == processing,
-                            orphaned,
-                        )
-                        .label("orphaned_active_conversions"),
-                        ArtifactContent.id.count()
-                        .filter(
-                            ArtifactContent.state.in_((failed, processing)),
-                            queued,
-                        )
-                        .label("queued_active_conversions"),
-                        ArtifactContent.id.count()
-                        .filter(
-                            or_(
-                                and_(
-                                    ArtifactContent.state.in_((failed, processing)),
-                                    picked,
+                    cast(
+                        "Select[tuple[int, int, int, int, int]]",
+                        select(
+                            ArtifactContent.id.count()
+                            .filter(
+                                ArtifactContent.state == failed,
+                                no_activity,
+                            )
+                            .label("failed_conversions"),
+                            ArtifactContent.id.count()
+                            .filter(
+                                ArtifactContent.state == processing,
+                                orphaned,
+                            )
+                            .label("orphaned_active_conversions"),
+                            ArtifactContent.id.count()
+                            .filter(
+                                ArtifactContent.state.in_((failed, processing)),
+                                queued,
+                            )
+                            .label("queued_active_conversions"),
+                            ArtifactContent.id.count()
+                            .filter(
+                                or_(
+                                    and_(
+                                        ArtifactContent.state.in_((failed, processing)),
+                                        picked,
+                                    ),
+                                    and_(
+                                        ArtifactContent.state == processing,
+                                        unowned,
+                                        ArtifactContent.updated_at >= stale_before,
+                                    ),
                                 ),
-                                and_(
-                                    ArtifactContent.state == processing,
-                                    unowned,
-                                    ArtifactContent.updated_at >= stale_before,
-                                ),
-                            ),
-                        )
-                        .label("fresh_active_conversions"),
+                            )
+                            .label("fresh_active_conversions"),
+                        ).add_columns(
+                            ArtifactContent.id.count()
+                            .filter(ArtifactContent.state == unreadable)
+                            .label("unreadable_conversions"),
+                        ),
                     )
                 )
             ).one()
@@ -777,7 +788,7 @@ class ConversionDiagnostics:
                         ArtifactContent,
                         ArtifactContent.__table__.c.artifact_id == Artifact.__table__.c.id,
                     )
-                    .where(ArtifactContent.__table__.c.state.in_((failed, processing)))
+                    .where(ArtifactContent.__table__.c.state.in_((failed, unreadable, processing)))
                     .order_by(
                         ArtifactContent.__table__.c.state.desc(),
                         ArtifactContent.__table__.c.updated_at,
@@ -786,9 +797,10 @@ class ConversionDiagnostics:
                     .limit(self.limit)
                 )
             ).all()
-        failed_count, orphaned_count, queued_count, fresh_count = counts
+        failed_count, orphaned_count, queued_count, fresh_count, unreadable_count = counts
         summary = DoctorSummary(
             failed_conversions=failed_count,
+            unreadable_conversions=unreadable_count,
             orphaned_active_conversions=orphaned_count,
             queued_active_conversions=queued_count,
             fresh_active_conversions=fresh_count,
@@ -825,6 +837,12 @@ class ConversionDiagnostics:
         elif row.state == ArtifactContent.State.failed:
             state = "failed"
             guidance = "Fix the stored conversion error before retrying this original."
+        elif row.state == ArtifactContent.State.unreadable:
+            state = "unreadable"
+            guidance = (
+                "No action needed. Docling's own policy check permanently refused this "
+                "format, and retrying would repeat the same verdict."
+            )
         elif queue_failure is not None:
             state = "active_terminal_queue"
             guidance = (
@@ -915,6 +933,7 @@ class AizkDoctor:
                 **conversion_summary.model_dump(
                     include={
                         "failed_conversions",
+                        "unreadable_conversions",
                         "orphaned_active_conversions",
                         "queued_active_conversions",
                         "fresh_active_conversions",
@@ -982,6 +1001,21 @@ class AizkDoctor:
                     count=summary.failed_conversions,
                     message="Artifact conversions have durable failed state.",
                     action="Fix their stored errors before retrying the originals.",
+                ),
+            ),
+            (
+                summary.unreadable_conversions,
+                DoctorFinding(
+                    severity="info",
+                    code="conversion_unreadable",
+                    count=summary.unreadable_conversions,
+                    message=(
+                        "Artifact conversions are permanently unreadable and excluded from retry."
+                    ),
+                    action=(
+                        "No action needed. Their stored errors explain what was rejected "
+                        "and why, for whoever asks."
+                    ),
                 ),
             ),
             (

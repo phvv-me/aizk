@@ -156,6 +156,15 @@
 			reverse_proxy logto:3002
 		}
 
+		# The console bundle asks for `/oidc/session/end` and `/oidc/device` as root-relative
+		# paths, read out of the shipped `index-*.js` rather than guessed, so they resolve
+		# against this host and not the `auth.phvv.me` origin Logto is configured with. Without
+		# this route they fall through to the catch-all and the console cannot end a session or
+		# complete a device flow, having otherwise rendered fine.
+		handle /oidc/* {
+			reverse_proxy logto:3002
+		}
+
 		handle /me* {
 			reverse_proxy logto:3002
 		}

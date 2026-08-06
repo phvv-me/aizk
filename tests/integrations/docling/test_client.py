@@ -17,11 +17,13 @@ from aizk.integrations.docling import (
     DoclingOptions,
     DoclingOutput,
     DoclingResponse,
+    DoclingUnreadableFormatError,
     FileSource,
     UnsafeArtifactError,
     URISource,
     docling_client,
 )
+from aizk.integrations.docling.models import docling_filename
 
 
 async def public_resolver(host: str, port: int):
@@ -380,3 +382,109 @@ def test_docling_client_factory_reuses_configured_connection_pools(api_key: str)
     assert client.http.headers.get("X-Api-Key") == (api_key or None)
     asyncio.run(client.http.aclose())
     docling_client.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("filename", "media_type", "expected"),
+    [
+        # The two production incident cases: a stored display name with no extension at all.
+        ("artifact", "text/html", "artifact.html"),
+        ("35531", "text/html", "35531.html"),
+        ("MODEL_LICENSE", "text/plain", "MODEL_LICENSE.txt"),
+        # Case is normalized even when the extension was already right.
+        ("report.PDF", "application/pdf", "report.pdf"),
+        # A different extension for the same Docling format still gets corrected.
+        ("notes.txt", "application/xhtml+xml", "notes.html"),
+        # A media type outside the table passes through unchanged rather than guessing.
+        ("opaque.bin", "application/octet-stream", "opaque.bin"),
+    ],
+)
+def test_docling_filename_renames_to_the_extension_docling_requires(
+    filename: str, media_type: str, expected: str
+) -> None:
+    assert docling_filename(filename, media_type) == expected
+
+
+def test_docling_client_renames_extensionless_html_and_plain_text_before_sending() -> None:
+    """Reproduces the crimson incident: html and plain text stored under a display name with
+    no extension came back Docling `skipped`, until the wire copy carried the right one."""
+    requests: list[httpx.Request] = []
+
+    async def convert(request: httpx.Request) -> httpx.Response:
+        await request.aread()
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"document": {"md_content": "# Page\n"}, "status": "success", "errors": []},
+        )
+
+    converter = httpx.AsyncClient(
+        base_url="http://docling.test/", transport=httpx.MockTransport(convert)
+    )
+    html = (
+        '<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html PUBLIC '
+        '"-//W3C//DTD XHTML 1.0 Transitional//EN">\n<html><body>Real page</body></html>'
+    )
+    plain = "AI PUBS OPEN RAIL-M LICENSE (MODIFIED)\n\nVersion 0.1\n"
+    asyncio.run(
+        DoclingClient(http=converter).convert(
+            ArtifactBytes(content=html.encode(), filename="artifact", media_type="text/html")
+        )
+    )
+    asyncio.run(
+        DoclingClient(http=converter).convert(
+            ArtifactBytes(
+                content=plain.encode(), filename="MODEL_LICENSE", media_type="text/plain"
+            )
+        )
+    )
+
+    assert b'filename="artifact.html"' in requests[0].content
+    assert b'filename="MODEL_LICENSE.txt"' in requests[1].content
+
+
+def test_docling_response_reports_a_policy_rejection_reason_or_nothing() -> None:
+    clean = DoclingResponse.model_validate({"document": {}, "status": "success"})
+    assert clean.policy_rejection is None
+
+    transient = DoclingResponse.model_validate(
+        {
+            "document": {},
+            "status": "failure",
+            "errors": [{"category": "backend_failure", "error_message": "worker crashed"}],
+        }
+    )
+    assert transient.policy_rejection is None
+
+    explained = DoclingResponse.model_validate(
+        {
+            "document": {},
+            "status": "skipped",
+            "errors": [
+                {"category": "policy", "error_message": "File format not allowed: artifact"}
+            ],
+        }
+    )
+    assert explained.policy_rejection == "File format not allowed: artifact"
+
+    unexplained = DoclingResponse.model_validate(
+        {"document": {}, "status": "skipped", "errors": [{"category": "policy"}]}
+    )
+    assert unexplained.policy_rejection == "Docling policy refused this input"
+
+
+def test_docling_output_raises_the_unreadable_subclass_for_a_policy_refusal() -> None:
+    response = DoclingResponse.model_validate(
+        {
+            "document": {},
+            "status": "skipped",
+            "errors": [
+                {"category": "policy", "error_message": "File format not allowed: artifact"}
+            ],
+        }
+    )
+
+    with pytest.raises(DoclingUnreadableFormatError, match="File format not allowed"):
+        DoclingOutput.from_response(response)
+    # It stays a `DoclingConversionError` too, so an existing broad handler still catches it.
+    assert issubclass(DoclingUnreadableFormatError, DoclingConversionError)

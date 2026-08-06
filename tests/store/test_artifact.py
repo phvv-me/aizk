@@ -642,6 +642,38 @@ def test_repository_compacts_objects_left_under_a_weaker_compression_policy() ->
     dbutil.run(body())
 
 
+def test_repository_stamps_processed_at_for_a_permanently_unreadable_original() -> None:
+    async def body() -> None:
+        await dbutil.reset_db()
+        owner = uuid5()
+        scopes = frozenset({owner})
+        user = User.private(owner)
+        repository = ArtifactRepository()
+        receipt = await repository.create_original(
+            user,
+            stored_bytes("objects/archive", uuid8(), 1),
+            OriginalDescription(filename="archive.zip", media_type="application/zip"),
+            scopes,
+        )
+
+        await repository.set_state(
+            user,
+            receipt.content_id,
+            scopes,
+            Artifact.Content.State.unreadable,
+            "Docling policy refused this input",
+        )
+
+        async with user as session:
+            content = await session.get(Artifact.Content, receipt.content_id)
+        assert content is not None
+        assert content.state is Artifact.Content.State.unreadable
+        assert content.error == "Docling policy refused this input"
+        assert content.processed_at is not None
+
+    dbutil.run(body())
+
+
 def test_repository_rejects_mismatched_queue_scopes_and_missing_content() -> None:
     async def body() -> None:
         await dbutil.reset_db()

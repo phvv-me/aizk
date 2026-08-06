@@ -29,13 +29,23 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
     """
 
     class State(sql.PGEnum):
-        """Durable processing state independent from PgQueuer's delivery state."""
+        """Durable processing state independent from PgQueuer's delivery state.
+
+        `failed` and `unreadable` are both terminal-looking but mean different things to a
+        retry. `failed` is what a timeout, a network blip, or a Docling restart leaves behind,
+        so `aizk admin queue retry conversion` keeps offering it back to the queue. `unreadable`
+        is what Docling's own policy check leaves behind when the format itself is the problem,
+        a verdict the exact same bytes would repeat on every retry, so it is excluded from that
+        query and never re-queued. It stays visible with its stored `error` for anyone who asks
+        what was rejected and why.
+        """
 
         pending = auto()
         queued = auto()
         processing = auto()
         ready = auto()
         failed = auto()
+        unreadable = auto()
 
     mutable: ClassVar[bool] = True
     read_through: ClassVar[str | None] = "artifact"

@@ -224,6 +224,7 @@ def test_findings_separate_current_blockers_from_recent_history() -> None:
             long_running_picked_jobs=3,
             recent_exception_events=4,
             failed_conversions=5,
+            unreadable_conversions=8,
             orphaned_active_conversions=6,
             stale_active_conversions=7,
         )
@@ -234,6 +235,7 @@ def test_findings_separate_current_blockers_from_recent_history() -> None:
         "queue_stale",
         "queue_long_running",
         "conversion_failed",
+        "conversion_unreadable",
         "conversion_terminal_queue",
         "conversion_stale",
         "recent_exception_history",
@@ -241,6 +243,9 @@ def test_findings_separate_current_blockers_from_recent_history() -> None:
     assert (
         next(item for item in findings if item.code == "recent_exception_history").severity
         == "info"
+    )
+    assert (
+        next(item for item in findings if item.code == "conversion_unreadable").severity == "info"
     )
     assert AizkDoctor.findings(DoctorSummary()) == ()
 
@@ -287,18 +292,27 @@ def test_doctor_correlates_terminal_queue_jobs_with_durable_conversion_state(
             name="failed.pdf",
             state=Artifact.Content.State.failed,
         )
+        unreadable = await seed_artifact(
+            owner,
+            [owner],
+            name="archive.zip",
+            media_type="application/zip",
+            state=Artifact.Content.State.unreadable,
+        )
         async with User.system().owner as session:
             stale_row = await session.get(Artifact.Content, stale.content.id)
             fresh_row = await session.get(Artifact.Content, fresh.content.id)
             queued_row = await session.get(Artifact.Content, queued.content.id)
             picked_row = await session.get(Artifact.Content, picked.content.id)
             failed_row = await session.get(Artifact.Content, failed.content.id)
+            unreadable_row = await session.get(Artifact.Content, unreadable.content.id)
             assert (
                 stale_row is not None
                 and fresh_row is not None
                 and queued_row is not None
                 and picked_row is not None
                 and failed_row is not None
+                and unreadable_row is not None
             )
             stale_row.updated_at = NOW - timedelta(hours=2)
             fresh_row.updated_at = NOW - timedelta(minutes=2)
@@ -307,6 +321,7 @@ def test_doctor_correlates_terminal_queue_jobs_with_durable_conversion_state(
             queued_row.error = "old queued failure"
             picked_row.error = "old picked failure"
             failed_row.error = "private conversion output"
+            unreadable_row.error = "Docling conversion ended with skipped"
 
         async with Queue(dsn=settings.asyncpg_dsn) as queue:
             names = queue.queries.qbe.settings
@@ -424,6 +439,7 @@ def test_doctor_correlates_terminal_queue_jobs_with_durable_conversion_state(
         assert report.summary.stale_active_conversions == 1
         assert report.summary.fresh_active_conversions == 2
         assert report.summary.failed_conversions == 1
+        assert report.summary.unreadable_conversions == 1
         assert {issue.kind for issue in report.queue_issues} == {
             "stale_picked",
             "long_running_picked",
@@ -449,6 +465,15 @@ def test_doctor_correlates_terminal_queue_jobs_with_durable_conversion_state(
         assert picked_conversion.state == "active_fresh"
         assert picked_conversion.queue_status == "picked"
         assert "No retry" in picked_conversion.retry_guidance
+        unreadable_conversion = next(
+            item for item in report.conversions if item.content_id == unreadable.content.id
+        )
+        assert unreadable_conversion.state == "unreadable"
+        assert "No action needed" in unreadable_conversion.retry_guidance
+        assert (
+            next(item for item in report.findings if item.code == "conversion_unreadable").severity
+            == "info"
+        )
         serialized = report.model_dump_json()
         assert "private source excerpt" not in serialized
         assert "private conversion output" not in serialized
@@ -547,6 +572,15 @@ def test_conversion_diagnostic_classifies_all_durable_states() -> None:
         None,
         "picked",
     )
+    unreadable = diagnostics.diagnostic(
+        content.model_copy(
+            update={"state": Artifact.Content.State.unreadable, "error": "policy refused"}
+        ),
+        "note",
+        NOW,
+        NOW - timedelta(hours=1),
+        None,
+    )
 
     assert [
         fresh.state,
@@ -557,6 +591,7 @@ def test_conversion_diagnostic_classifies_all_durable_states() -> None:
         failed.state,
         failed_queued.state,
         failed_picked.state,
+        unreadable.state,
     ] == [
         "active_fresh",
         "active_stale",
@@ -566,7 +601,9 @@ def test_conversion_diagnostic_classifies_all_durable_states() -> None:
         "failed",
         "active_queued",
         "active_fresh",
+        "unreadable",
     ]
+    assert "No action needed" in unreadable.retry_guidance
     assert terminal.queue_status == "failed"
     assert queued.queue_status == "queued"
     assert picked.queue_status == "picked"

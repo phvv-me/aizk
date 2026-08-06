@@ -9,7 +9,7 @@ from ..store.models.tables import ArtifactContent
 from ..store.models.tables.artifact import RecentArtifact
 from .dashboard import ScopedRow
 
-type ArtifactStatus = Literal["queued", "processing", "ready", "failed"]
+type ArtifactStatus = Literal["queued", "processing", "ready", "failed", "unreadable"]
 
 
 class ArtifactView(ScopedRow):
@@ -51,6 +51,8 @@ class ArtifactView(ScopedRow):
                 return "ready", "Available to recall."
             case ArtifactContent.State.failed:
                 return "failed", "Processing failed. You can try this source again."
+            case ArtifactContent.State.unreadable:
+                return "unreadable", "This format cannot be converted and will not be retried."
         raise ValueError(f"unsupported artifact state {state!r}")
 
 

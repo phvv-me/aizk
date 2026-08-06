@@ -1,5 +1,5 @@
 import unicodedata
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 
 from patos import FrozenModel, FrozenOpenModel
@@ -143,6 +143,21 @@ class DoclingDocument(FrozenOpenModel):
     md_content: str | None = None
 
 
+class DoclingErrorItem(FrozenOpenModel):
+    """One structured error Docling attributes to a category.
+
+    The category is what separates a deterministic policy refusal, `policy`, from a
+    transient processing failure, so it is the signal a caller classifies on rather than
+    the human-readable `error_message` beside it. It stays a plain string rather than a
+    closed enum because Docling documents `unknown` as its own fallback for a category it
+    has not named yet, and a stricter type would fail to parse the exact response this
+    field exists to classify.
+    """
+
+    category: str = "unknown"
+    error_message: str = ""
+
+
 class DoclingResponse(FrozenOpenModel):
     """Typed single-document response returned by Docling Serve's stable v1 API."""
 
@@ -150,7 +165,7 @@ class DoclingResponse(FrozenOpenModel):
     status: Literal["success", "partial_success", "skipped", "failure"]
     processing_time: float = 0.0
     timings: dict[str, JsonValue] = {}
-    errors: list[dict[str, JsonValue]] = []
+    errors: list[DoclingErrorItem] = []
 
     @property
     def markdown(self) -> str:
@@ -160,9 +175,30 @@ class DoclingResponse(FrozenOpenModel):
         normalized = "\n".join(line.rstrip() for line in lines).strip()
         return f"{normalized}\n" if normalized else ""
 
+    @property
+    def policy_rejection(self) -> str | None:
+        """Docling's own policy explanation for refusing this input, or nothing when none applies.
+
+        Every error Docling categorizes `policy` reflects a decision its user-input validation
+        made from the bytes and filename alone, before any conversion was attempted, so the
+        exact same request would reach the exact same verdict on every retry. That determinism
+        is what makes it safe to treat as permanent instead of requeuing it forever.
+        """
+        reasons = [error.error_message for error in self.errors if error.category == "policy"]
+        if not reasons:
+            return None
+        return (
+            "; ".join(reason for reason in reasons if reason)
+            or "Docling policy refused this input"
+        )
+
 
 class DoclingConversionError(RuntimeError):
     """Docling finished without producing a usable lossless conversion."""
+
+
+class DoclingUnreadableFormatError(DoclingConversionError):
+    """Docling's own policy check permanently refused this input, a verdict retrying repeats."""
 
 
 class DoclingOutput(FrozenModel):
@@ -174,8 +210,50 @@ class DoclingOutput(FrozenModel):
     @classmethod
     def from_response(cls, response: DoclingResponse) -> DoclingOutput:
         """Accept complete or partial output and reject skipped, failed, or missing Markdown."""
+        rejection = response.policy_rejection
+        if rejection is not None:
+            raise DoclingUnreadableFormatError(rejection)
         if response.status not in ("success", "partial_success"):
             raise DoclingConversionError(f"Docling conversion ended with {response.status}")
         if response.document.md_content is None:
             raise DoclingConversionError("Docling response omitted Markdown")
         return cls(status=response.status, markdown=response.markdown)
+
+
+# Docling Serve resolves the input format from the filename's extension, never from the
+# declared content type, so a display name without one, or with the wrong one, turns a
+# document Docling can read into a `skipped` policy refusal instead of a conversion. Each
+# entry names the extension Docling's own format router recognizes for one media type AIZK
+# accepts, read directly from the pinned `docling-serve` image's `FormatToExtensions` table.
+_DOCLING_EXTENSIONS: dict[str, str] = {
+    "application/pdf": "pdf",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/tiff": "tiff",
+    "image/bmp": "bmp",
+    "image/webp": "webp",
+    "application/epub+zip": "epub",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "text/html": "html",
+    "application/xhtml+xml": "html",
+    "text/markdown": "md",
+    "text/plain": "txt",
+    "text/asciidoc": "adoc",
+    "text/csv": "csv",
+}
+
+
+def docling_filename(filename: str, media_type: str) -> str:
+    """Rename the copy of `filename` sent to Docling with the extension its router expects.
+
+    Only the wire copy changes, never the artifact's own stored display name. The stem is
+    kept so the sent name still reads as the original, and a media type outside this table
+    passes through unchanged rather than guessing at an extension Docling was never confirmed
+    to recognize.
+    """
+    extension = _DOCLING_EXTENSIONS.get(media_type)
+    if extension is None:
+        return filename
+    return f"{PurePosixPath(filename).stem}.{extension}"

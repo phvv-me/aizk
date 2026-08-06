@@ -17,6 +17,7 @@ from .models import (
     DoclingResponse,
     FileSource,
     URISource,
+    docling_filename,
 )
 
 type IPAddress = IPv4Address | IPv6Address
@@ -139,13 +140,18 @@ class DoclingClient(FrozenFlexModel):
     options: DoclingOptions = Field(default_factory=DoclingOptions)
 
     async def convert(self, artifact: ArtifactBytes) -> DoclingResponse:
-        """Request native Docling JSON and Markdown for one scanned immutable original."""
+        """Request native Docling JSON and Markdown for one scanned immutable original.
+
+        The sent filename is renamed to the extension Docling's own router expects for the
+        declared media type, since Docling resolves the input format from that extension
+        alone and a display name without one turns a readable document into a policy `skipped`.
+        """
         response = await self.http.post(
             "v1/convert/file",
             data=self.options.form_data(),
             files={
                 "files": (
-                    artifact.filename,
+                    docling_filename(artifact.filename, artifact.media_type),
                     artifact.content,
                     artifact.media_type,
                 )

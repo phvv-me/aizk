@@ -21,6 +21,7 @@ from ..integrations.docling import (
     DoclingClient,
     DoclingConversionError,
     DoclingOutput,
+    DoclingUnreadableFormatError,
     URISource,
 )
 from ..provenance import CaptureContext
@@ -237,19 +238,26 @@ class ArtifactProcessor:
             )
             try:
                 output = DoclingOutput.from_response(response)
-            except DoclingConversionError as error:
-                await self.index(
+            except DoclingUnreadableFormatError as error:
+                await self.reject(
                     user,
                     original,
-                    Artifact.Content.State.failed,
-                    content,
-                )
-                await self.repository.set_state(
-                    user,
                     content_id,
                     scopes,
+                    content,
+                    Artifact.Content.State.unreadable,
+                    error,
+                )
+                return
+            except DoclingConversionError as error:
+                await self.reject(
+                    user,
+                    original,
+                    content_id,
+                    scopes,
+                    content,
                     Artifact.Content.State.failed,
-                    str(error),
+                    error,
                 )
                 return
             markdown = self.declutter(output.markdown, original)
@@ -283,6 +291,25 @@ class ArtifactProcessor:
                 str(error)[:1024],
             )
             raise
+
+    async def reject(
+        self,
+        user: User,
+        original: OriginalArtifact,
+        content_id: UUID7,
+        scopes: Scopes,
+        content: bytes,
+        state: ArtifactContent.State,
+        error: DoclingConversionError,
+    ) -> None:
+        """Keep one metadata-only document recallable and stamp Docling's final verdict.
+
+        `state` tells the caller whether this original stays in the retry pool (`failed`) or
+        leaves it for good (`unreadable`), and the stored `error` keeps Docling's own reason
+        visible either way.
+        """
+        await self.index(user, original, state, content)
+        await self.repository.set_state(user, content_id, scopes, state, str(error))
 
     def declutter(self, markdown: str, original: OriginalArtifact) -> str:
         """Resolve source-relative links and strip web chrome before the text becomes chunks.
