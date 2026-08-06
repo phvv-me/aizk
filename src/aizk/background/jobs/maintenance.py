@@ -1,19 +1,21 @@
 import abc
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, ClassVar, Self, cast
 
+import asyncpg
 import inflection
 from loguru import logger
 from patos import FrozenModel, Registry
 from pgqueuer import PgQueuer
 from pgqueuer.models import Schedule
 from pydantic import ConfigDict
-from sqlmodel import select
+from sqlmodel import delete, select
 
 from ...artifacts.configured import ArtifactServices
 from ...backup import scheduled_backup
-from ...config import settings
+from ...config import DatabaseBackend, settings
 from ...graph.communities import build_communities
 from ...graph.decay import decay
 from ...graph.insight import derive_insights
@@ -26,6 +28,7 @@ from ...serving.extract import LLM
 from ...store import Fact, Watermark
 from ...store.engine import Session
 from ...store.identity import User
+from ...store.models.tables.queue import QueueEvent
 from ...types import Scopes
 from ..enum import JobPriority
 from ..queue import Queue, QueueJob, QueuePayload
@@ -225,6 +228,54 @@ class DedupJob(ScopedScheduledJob):
 
     async def execute(self, scopes: Scopes) -> None:
         await dedup_entities(scopes=scopes)
+
+
+class CleanupJob(SystemScheduledJob):
+    """Trim queue history past its retention and vacuum the database each night.
+
+    PgQueuer records every completed job in its log and nothing reads that history for
+    correctness, so leaving it unbounded is pure weight and the single largest table on a
+    busy deployment. The vacuum runs without FULL, which never takes an exclusive lock;
+    handing space back to the operating system after a bulk rebuild stays an operator's
+    deliberate `VACUUM FULL`.
+    """
+
+    async def execute(self) -> None:
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            removed = await self.prune_portable_history()
+        else:
+            async with Queue(dsn=settings.asyncpg_dsn) as queue:
+                removed = await self.prune_pgqueuer_log(queue.connection)
+                await queue.connection.execute("VACUUM (ANALYZE)")
+        logger.info("nightly cleanup removed {} queue history rows", removed)
+
+    async def prune_pgqueuer_log(self, connection: asyncpg.Connection) -> int:
+        """Delete pgqueuer's completed-job log past retention in bounded batches.
+
+        Batches keep one pass from holding a long lock on a table the worker writes
+        constantly.
+        """
+        removed = 0
+        while True:
+            status = await connection.execute(
+                "DELETE FROM pgqueuer_log WHERE id IN ("
+                " SELECT id FROM pgqueuer_log"
+                " WHERE created < now() - make_interval(days => $1)"
+                " LIMIT $2)",
+                settings.cleanup_log_retention_days,
+                settings.cleanup_log_delete_batch,
+            )
+            batch = int(status.split()[-1])
+            removed += batch
+            if batch < settings.cleanup_log_delete_batch:
+                return removed
+
+    async def prune_portable_history(self) -> int:
+        """Delete the portable queue's event history past retention."""
+        cutoff = datetime.now(UTC) - timedelta(days=settings.cleanup_log_retention_days)
+        async with User.system().owner as session:
+            result = await session.exec(delete(QueueEvent).where(QueueEvent.created_at < cutoff))
+        return result.rowcount or 0
 
 
 class CommunitiesJob(ScopedScheduledJob):

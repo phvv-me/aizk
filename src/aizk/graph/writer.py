@@ -25,7 +25,7 @@ from ..store import Entity, Fact, Relation
 from ..store.engine import Session
 from ..store.locking import acquire_locks
 from ..store.models.tables import EntityContent, FactContent
-from ..store.vector import CosineVector, cosine_distance
+from ..store.vector import cosine_distance, embedding_vector
 from ..types import Scopes
 from .consolidation import Consolidator, FactMatch
 from .dedupe import ClaimField
@@ -232,7 +232,7 @@ class GraphWriter(FlexModel):
                 column("subject_id", Uuid),
                 column("predicate", Text),
                 column("perspective_key", Text),
-                column("embedding", CosineVector(settings.embed_dim)),
+                column("embedding", embedding_vector(settings.embed_dim)),
             ),
             [
                 (
@@ -252,7 +252,7 @@ class GraphWriter(FlexModel):
         """Return each input's nearest live facts from one lateral database query."""
         distance = cosine_distance(
             Fact.Content.embedding,
-            inputs.c.embedding.cast(CosineVector(settings.embed_dim)),
+            inputs.c.embedding.cast(embedding_vector(settings.embed_dim)),
         )
         ranked = (
             select(

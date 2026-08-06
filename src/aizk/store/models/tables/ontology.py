@@ -6,7 +6,7 @@ from patos.sql import Column as C
 
 from ....config import settings
 from ...mixins import TableBase, Timestamped
-from ...vector import CosineVector
+from ...vector import embedding_vector
 
 
 class OntologyKind(sql.Model):
@@ -31,7 +31,7 @@ class EntityKind(OntologyKind, Timestamped, TableBase, table=True):
     embedding = sql.Field(
         list[float] | None,
         default=None,
-        sa_type=CosineVector(settings.embed_dim),
+        sa_type=embedding_vector(settings.embed_dim),
     )
 
 

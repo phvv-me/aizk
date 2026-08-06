@@ -3,7 +3,7 @@ from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.orm import declared_attr
 
 from ...config import settings
-from ..vector import CosineVector
+from ..vector import embedding_vector
 
 
 class Embedded(sql.Model):
@@ -11,7 +11,7 @@ class Embedded(sql.Model):
 
     embedding = sql.Field(
         list[float] | None,
-        sa_type=CosineVector(settings.embed_dim),
+        sa_type=embedding_vector(settings.embed_dim),
     )
 
     @declared_attr.directive
@@ -22,6 +22,6 @@ class Embedded(sql.Model):
                 f"ix_{table}_embedding",
                 "embedding",
                 postgresql_using=settings.vector_index_backend,
-                postgresql_ops={"embedding": "vector_cosine_ops"},
+                postgresql_ops={"embedding": settings.vector_opclass},
             ),
         )

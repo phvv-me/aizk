@@ -83,8 +83,8 @@ def test_artifact_resource_template_is_the_only_binary_read_surface() -> None:
         )
     ]
     assert template.parameters["properties"] == {
-        "artifact_id": {"format": "uuid7", "type": "string"},
-        "artifact_content_id": {"format": "uuid7", "type": "string"},
+        "artifact_id": {"format": "uuid", "type": "string"},
+        "artifact_content_id": {"format": "uuid", "type": "string"},
     }
     assert set(template.parameters["required"]) == {
         "artifact_id",

@@ -24,7 +24,7 @@ from ..store.engine import Session
 from ..store.identity import User
 from ..store.locking import acquire_locks
 from ..store.models.tables import EntityClaim, EntityContent, FactClaim, FactContent
-from ..store.vector import CosineVector, cosine_distance
+from ..store.vector import cosine_distance, embedding_vector
 from ..types import Scopes
 from .ids import entity_id, fact_id
 from .models import Node, RaptorReport
@@ -177,7 +177,7 @@ class RaptorBuilder(FlexModel):
             "raptor_vector",
             (
                 column("ordinal", Integer),
-                column("embedding", CosineVector(settings.embed_dim)),
+                column("embedding", embedding_vector(settings.embed_dim)),
             ),
             list(enumerate(embeddings)),
         )

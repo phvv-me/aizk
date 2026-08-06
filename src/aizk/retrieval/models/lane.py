@@ -12,7 +12,7 @@ from sqlalchemy.sql.selectable import Select
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlmodel import select
 
-from ...store.vector import CosineVector, cosine_distance
+from ...store.vector import cosine_distance, embedding_vector
 
 if TYPE_CHECKING:
     from patos.sql import Expr
@@ -72,7 +72,7 @@ class QueryContext(FrozenModel):
     @property
     def vector(self) -> ColumnElement[list[float]]:
         """The query embedding bind, typed to this context's vector width."""
-        return bindparam("qvec", type_=CosineVector(self.dimensions))
+        return bindparam("qvec", type_=embedding_vector(self.dimensions))
 
     @property
     def k(self) -> ColumnElement[int]:

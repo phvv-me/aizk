@@ -21,6 +21,7 @@ from aizk.background.jobs.maintenance import (
     BackupJob,
     ChunkDispatchJob,
     ChunkRecoveryJob,
+    CleanupJob,
     CommunitiesJob,
     DecayJob,
     DedupJob,
@@ -41,7 +42,7 @@ from aizk.types import Scopes
 
 
 @given(
-    flags=st.lists(st.booleans(), min_size=13, max_size=13),
+    flags=st.lists(st.booleans(), min_size=14, max_size=14),
     cron=st.sampled_from(["0 3 * * *", "30 4 * * 0"]),
 )
 def test_job_registry_names_and_settings_are_coherent(
@@ -62,6 +63,7 @@ def test_job_registry_names_and_settings_are_coherent(
         "chunk_dispatch",
         "chunk_recovery",
         "artifact_integrity",
+        "cleanup",
     }
     scoped = [job for job in jobs if isinstance(job, ScopedScheduledJob)]
     queue_names = {job.entrypoint for job in scoped}
@@ -261,7 +263,9 @@ def test_backup_job_fire_cron_runs_the_scheduled_backup(monkeypatch: pytest.Monk
     assert ran == [True]
 
 
-@pytest.mark.parametrize("job_type", [BackupJob, ArtifactIntegrityJob, ChunkRecoveryJob])
+@pytest.mark.parametrize(
+    "job_type", [BackupJob, ArtifactIntegrityJob, ChunkRecoveryJob, CleanupJob]
+)
 @pytest.mark.parametrize("enabled", [True, False])
 def test_system_jobs_register_only_the_cron_and_only_when_enabled(
     monkeypatch: pytest.MonkeyPatch, job_type: type[SystemScheduledJob], enabled: bool
@@ -307,3 +311,80 @@ def test_the_community_pass_hands_raptor_the_generation_it_just_wrote(
     assert [(call.entrypoint, call.dedupe_key) for call in recorder.enqueues] == (
         [(RaptorJob.entrypoint, f"raptor:{user}")] if rebuilt else []
     )
+
+
+class FakeConnection:
+    """An asyncpg-shaped connection double that answers deletes from a scripted drain."""
+
+    def __init__(self, drain: list[int]) -> None:
+        self.drain = drain
+        self.statements: list[str] = []
+        self.arguments: list[tuple[object, ...]] = []
+
+    async def execute(self, statement: str, *args: object) -> str:
+        self.statements.append(statement)
+        self.arguments.append(args)
+        if statement.startswith("DELETE"):
+            return f"DELETE {self.drain.pop(0)}"
+        return ""
+
+
+def test_cleanup_prunes_queue_log_in_batches_then_vacuums(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = FakeConnection([10_000, 42])
+    monkeypatch.setattr(settings, "database_backend", jobs_mod.DatabaseBackend.postgresql)
+    monkeypatch.setattr(settings, "cleanup_log_retention_days", 7)
+    monkeypatch.setattr(settings, "cleanup_log_delete_batch", 10_000)
+    monkeypatch.setattr(
+        jobs_mod, "Queue", lambda dsn: AsyncContext(SimpleNamespace(connection=connection))
+    )
+
+    asyncio.run(CleanupJob().execute())
+
+    deletes = [sql for sql in connection.statements if sql.startswith("DELETE")]
+    assert len(deletes) == 2  # a full batch, then the partial batch that ends the drain
+    assert connection.arguments[0] == (7, 10_000)
+    assert "VACUUM (ANALYZE)" in connection.statements
+
+
+def test_cleanup_on_cockroachdb_prunes_portable_history_without_vacuum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    removed: list[int] = []
+
+    async def fake_prune(self: CleanupJob) -> int:
+        removed.append(5)
+        return 5
+
+    class QueueExplodes:
+        def __init__(self, dsn: str) -> None:
+            raise AssertionError("the portable backend must not open a pgqueuer connection")
+
+    monkeypatch.setattr(settings, "database_backend", jobs_mod.DatabaseBackend.cockroachdb)
+    monkeypatch.setattr(CleanupJob, "prune_portable_history", fake_prune)
+    monkeypatch.setattr(jobs_mod, "Queue", QueueExplodes)
+
+    asyncio.run(CleanupJob().execute())
+    assert removed == [5]
+
+
+def test_cleanup_portable_history_deletes_past_retention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statements: list[object] = []
+
+    class FakeSession:
+        async def exec(self, statement: object) -> SimpleNamespace:
+            statements.append(statement)
+            return SimpleNamespace(rowcount=5)
+
+    monkeypatch.setattr(settings, "cleanup_log_retention_days", 7)
+    monkeypatch.setattr(
+        jobs_mod.User,
+        "system",
+        classmethod(lambda cls: SimpleNamespace(owner=AsyncContext(FakeSession()))),
+    )
+
+    assert asyncio.run(CleanupJob().prune_portable_history()) == 5
+    assert len(statements) == 1

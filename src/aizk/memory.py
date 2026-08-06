@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import cast
 
 from patos import FrozenModel
-from pydantic import UUID7, Field
+from pydantic import Field
 
 from . import graph, retrieval
 from .artifacts import ArtifactIntake, ArtifactReceipt
@@ -13,7 +13,7 @@ from .provenance import CaptureContext
 from .retrieval import Evidence, RecallEvidence, RecallResult
 from .store import Document, Usage
 from .store.identity import User
-from .types import ScopeNames, Scopes
+from .types import UUID7, ScopeNames, Scopes
 from .usage import annotate_operation, quota
 from .web import Refusal, WebFinding, WebMode, WebOutcome, WebSearch
 

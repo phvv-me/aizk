@@ -2,12 +2,12 @@ from datetime import datetime
 from typing import Annotated
 
 from patos import FrozenModel
-from pydantic import UUID5, UUID7, UUID8, AfterValidator, JsonValue
+from pydantic import UUID5, UUID8, AfterValidator, JsonValue
 
 from ..common.templates import markdown_environment
 from ..store import Blob
 from ..store.models.tables import ArtifactContent
-from ..types import Scopes
+from ..types import UUID7, Scopes
 
 _template = markdown_environment("aizk.artifacts").get_template("source.md.j2")
 

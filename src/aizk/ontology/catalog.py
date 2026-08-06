@@ -15,7 +15,7 @@ from ..serving.embed import EmbedClient
 from ..store.engine import Session
 from ..store.models import Entity, Relation
 from ..store.models.tables import RelationPolicy
-from ..store.vector import CosineVector, cosine_distance
+from ..store.vector import cosine_distance, embedding_vector
 from .system import System
 
 
@@ -214,7 +214,7 @@ class Ontology(FrozenModel):
             (
                 column("ordinal", Integer),
                 column("suggestion", Text),
-                column("embedding", CosineVector(settings.embed_dim)),
+                column("embedding", embedding_vector(settings.embed_dim)),
             ),
             [
                 (ordinal, suggestion, embedding)

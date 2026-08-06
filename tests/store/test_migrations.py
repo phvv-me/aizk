@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from aizk import ops
 from aizk.config import settings
 from alembic import command
+from alembic.script import ScriptDirectory
 
 
 def migration_url(database: str) -> URL:
@@ -163,7 +164,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                 }
                 assert all(forced.values())
                 assert "(document_id, scopes) IN" in chunk_check
-                assert revision == "0007_web_egress"
+                assert revision == ScriptDirectory.from_config(config).get_current_head()
             finally:
                 await engine.dispose()
         finally:

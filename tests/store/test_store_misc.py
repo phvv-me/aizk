@@ -6,6 +6,7 @@ from typing import cast
 import dbutil
 import pytest
 from id_factory import uuid5, uuid8
+from patos.sql import CosineHalfvec
 from pydantic import ValidationError
 from rls import Catalog, Command, CompiledPolicy
 from rls.ddl import RLSAction, RLSStatement
@@ -242,7 +243,8 @@ def test_portable_vectors_and_chunk_retrieval_compile_for_cockroach(
     assert rendered.count("<=>") == 2
     assert "plainto_tsquery" in fused
     assert "to_bm25query" not in fused
-    assert isinstance(Chunk.__table__.c.embedding.type, CosineVector)
+    assert isinstance(Chunk.__table__.c.embedding.type, CosineHalfvec)  # import-time postgres
+    assert isinstance(context.vector.type, CosineVector)  # runtime cockroach bind
 
 
 def test_abstract_store_types_remain_unmapped_and_unregistered() -> None:

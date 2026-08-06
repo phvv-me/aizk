@@ -125,6 +125,7 @@ def test_cockroach_defaults_and_driver_dsns_use_the_compatible_schemes() -> None
     assert cfg.asyncpg_dsn.startswith("postgresql://")
     assert cfg.admin_asyncpg_dsn.startswith("postgresql://")
     assert cfg.vector_index_backend == "cspann"
+    assert cfg.vector_opclass == "vector_cosine_ops"
     assert DatabaseBackend.cockroachdb.sqlalchemy_scheme == "cockroachdb+asyncpg"
 
 

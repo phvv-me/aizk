@@ -135,6 +135,10 @@ class Settings(BaseSettings):
         "gitattributes,editorconfig"
     )
     chunk_size: int = 2048
+    cleanup_cron: str = "0 1 * * *"
+    cleanup_enabled: bool = True
+    cleanup_log_delete_batch: PositiveInt = 10_000
+    cleanup_log_retention_days: PositiveInt = 7
     clamav_host: str = "localhost"
     clamav_port: PositiveInt = 3310
     clamav_timeout: PositiveFloat = 30.0
@@ -854,6 +858,13 @@ class Settings(BaseSettings):
         if self.database_backend is DatabaseBackend.cockroachdb:
             return "cspann"
         return self.index_backend
+
+    @property
+    def vector_opclass(self) -> str:
+        """The cosine opclass matching the backend's embedding storage."""
+        if self.database_backend is DatabaseBackend.cockroachdb:
+            return "vector_cosine_ops"
+        return "halfvec_cosine_ops"
 
     @property
     def llm_is_external(self) -> bool:

@@ -9,7 +9,7 @@ from fastmcp.resources import ResourceContent, ResourceResult
 from fastmcp.server.context import Context
 from obstore.exceptions import BaseError as ObjectStoreError
 from patos import FrozenModel
-from pydantic import UUID5, UUID7, UUID8, Field, StringConstraints
+from pydantic import UUID5, UUID8, Field, StringConstraints
 
 from ..artifacts.service import ArtifactIntake
 from ..artifacts.uploads import UploadBox, UploadGrantLimitError, UploadRequest
@@ -23,7 +23,7 @@ from ..status import StatusReport
 from ..storage import ByteStore, IntegrityMismatch
 from ..store import Artifact, Blob, Usage
 from ..store.identity import User
-from ..types import ScopeNames
+from ..types import UUID7, ScopeNames
 from ..usage import annotate_operation
 from ..web import WebMode, WebSearch
 from .middleware import CallerRateLimit, IdentityMiddleware, bound_user
