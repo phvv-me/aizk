@@ -17,7 +17,14 @@ assets/external/
 site/
 
 # generated
-.chefe/
+# The compiled manifest and its lock are the exception, because they are the resolved
+# environment rather than a build artifact. CI runs `chefe install`, which cannot solve, and
+# the cache only carries `.chefe/.pixi`, so an uncommitted lock left the environment to be
+# rebuilt from whatever a cache happened to hold. Committing them beside `uv.lock` is what
+# makes the gates, a remote host and an image resolve the same set.
+.chefe/*
+!.chefe/pixi.toml
+!.chefe/pixi.lock
 dist/
 build/
 
