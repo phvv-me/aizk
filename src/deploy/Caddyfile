@@ -58,14 +58,6 @@
 		X-Frame-Options DENY
 	}
 
-	# Logto's console cannot be served under a subpath, so it keeps its own first-level hostname
-	# and this is only a convenience for an operator who reaches for it on the console host. The
-	# path is `/console` and never `/auth`, because the SvelteKit app owns `/auth/*` for its own
-	# Logto sign-in and sends every unauthenticated `/app/*` request there. Redirecting `/auth`
-	# away would swallow that flow and leave the operator pages permanently unreachable.
-	redir /console {$AIZK_LOGTO_ADMIN_ENDPOINT:https://console.phvv.me} 302
-	redir /console/* {$AIZK_LOGTO_ADMIN_ENDPOINT:https://console.phvv.me} 302
-
 	# The sign-in redirect, the Logto callback, and the sign-out endpoint belong to the proxy.
 	handle /oauth2/* {
 		reverse_proxy oauth2-proxy:4180
@@ -86,6 +78,26 @@
 			handle_response @unauthorized {
 				redir * /oauth2/sign_in?rd=https://{host}{uri}
 			}
+		}
+
+		# Logto's console is already a path-based app on its own port, so it joins the console
+		# host rather than taking a second hostname. The path is `/console` and cannot be
+		# renamed to `/logto`, because the console's assets are built with that prefix baked
+		# in. `/api` is the management API the console calls and `/me` is its account app, and
+		# neither collides here, since the browser never calls them. The SvelteKit client that
+		# owns `/api` paths runs server side against the api container instead. Logto already
+		# names this origin as its admin endpoint, so its redirect URIs and CORS need no
+		# change, and reaching it through this block puts it behind the operator gate too.
+		handle /console* {
+			reverse_proxy logto:3002
+		}
+
+		handle /api/* {
+			reverse_proxy logto:3002
+		}
+
+		handle /me* {
+			reverse_proxy logto:3002
 		}
 
 		# Grafana serves the subpath itself, so the prefix is forwarded rather than stripped.
