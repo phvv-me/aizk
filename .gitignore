@@ -25,6 +25,10 @@ site/
 .chefe/*
 !.chefe/pixi.toml
 !.chefe/pixi.lock
+# The digest of what the lock was solved against. chefe treats a missing one as drift, since
+# nothing on disk can then vouch for the lock beside it, so committing the pair without this
+# leaves a checkout that still refuses to install.
+!.chefe/.resolution-inputs
 dist/
 build/
 
