@@ -1,10 +1,10 @@
 from typing import Annotated
 
-from patos import FrozenModel
+from patos import FrozenOpenModel
 from pydantic import StringConstraints
 
 
-class OrganizationScope(FrozenModel):
+class OrganizationScope(FrozenOpenModel):
     """One organization permission returned directly by Logto."""
 
     id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]

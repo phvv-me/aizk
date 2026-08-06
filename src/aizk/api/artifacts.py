@@ -6,6 +6,7 @@ from ..config import settings
 from ..store import Artifact
 from ..store.identity import User
 from ..store.models.tables import ArtifactContent
+from ..store.models.tables.artifact import RecentArtifact
 from .dashboard import ScopedRow
 
 type ArtifactStatus = Literal["queued", "processing", "ready", "failed"]
@@ -19,22 +20,18 @@ class ArtifactView(ScopedRow):
     detail: str
 
     @classmethod
-    def from_row(
-        cls,
-        artifact: Artifact,
-        content: ArtifactContent,
-        user: User,
-    ) -> ArtifactView:
+    def from_row(cls, row: RecentArtifact, user: User) -> ArtifactView:
         """Present one RLS-visible original using stable user-facing workflow states."""
-        status, detail = cls.describe(content.state)
-        scopes = set(user.scope_labels(content.scopes))
+        name, source_uri, state, scopes, created_at = row
+        status, detail = cls.describe(state)
+        labels = set(user.scope_labels(scopes))
         return cls(
-            name=artifact.name,
-            source_uri=artifact.source_uri or "",
+            name=name,
+            source_uri=source_uri or "",
             status=status,
             detail=detail,
-            date=cls.format_date(content.created_at),
-            scopes=tuple(sorted(scopes, key=cls.scope_order)),
+            date=cls.format_date(created_at),
+            scopes=tuple(sorted(labels, key=cls.scope_order)),
         )
 
     @staticmethod
@@ -71,8 +68,4 @@ class ArtifactDashboard(FrozenModel):
         """Load recent originals visible to the current caller and no storage metadata."""
         async with user as session:
             rows = (await session.exec(Artifact.recent(limit))).all()
-        return cls(
-            artifacts=tuple(
-                ArtifactView.from_row(artifact, content, user) for artifact, content in rows
-            )
-        )
+        return cls(artifacts=tuple(ArtifactView.from_row(row, user) for row in rows))

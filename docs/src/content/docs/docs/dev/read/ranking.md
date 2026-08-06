@@ -28,8 +28,9 @@ assumes you have read [the lanes](/docs/dev/read/lanes/), since the first half i
 
 ## Chunk.fused unions three rankings
 
-Each ranking produces `(id, document_id, rank)` and each is cut at `fusion_depth` before anything
-is joined, which keeps every one of them an index-friendly top-k scan.
+Each ranking produces `(id, document_id, rank)` and each is cut at `fusion_depth` before the lanes
+merge. The dense and lexical rankings reach that cut through `Chunk.ranking`, which is what keeps
+each one an index walk instead of a scan.
 
 **Dense** ranks `embedding @ qvec` ascending, guarded by `embedding IS NOT NULL`,
 `distance < recall_max_distance` and `Document.is_active()`. The floor is what keeps an off-corpus
@@ -50,6 +51,33 @@ padding is what makes it a whole-token match rather than a substring accident. I
 The three are unioned and grouped, and each contributes `1 / (rrf_k + rank)` with `rrf_k`
 defaulting to 60. A chunk found by two rankings collects both votes. Fusing positions rather than
 scores is the point, since a cosine distance and a BM25 score are not comparable numbers.
+
+## Chunk.ranking keeps the chunk indexes in play
+
+Ranking chunks joined to `document` looks harmless and is not. Under row security the planner
+gives up on both chunk indexes, loops over every visible chunk and sorts the lot, which on a
+production snapshot of 22,290 chunks cost 80 ms for the dense ranking and 245 ms for the lexical
+one, and meant the two largest indexes in the database, a 66 MB `vchordrq` and a 343 MB `bm25`,
+were maintained on every write and read by nothing.
+
+So each of the two rankings runs over `chunk` alone inside a `MATERIALIZED` common table
+expression, and joins `document` outside it to drop expired sources. `MATERIALIZED` is load
+bearing, because without it the planner folds the window back into the join and rebuilds the same
+scan.
+Row security hides every chunk whose document the caller cannot read, so the window already sees
+exactly what the join would have, and the only predicate the join still owns is
+`Document.is_active()`. Because that join discards rows after the window is taken, the window
+reaches `fusion_depth * fusion_overfetch` deep and spends the difference as slack. The same
+snapshot carries an expiry on 5 of 1,168 documents with 1 expired, so at three deep the slack is
+never close to spent. Measured on that snapshot the dense ranking fell to 7.5 ms and the lexical
+one to 10 ms, both walking their index, and the fused statement went from 320 ms to 21 ms with
+byte-identical output over nine query and vector combinations.
+
+An `owned` query keeps the join inside the ranking. Its `Document.scopes = :qscopes` predicate is
+selective, so the planner drives from the few matching documents and stays fast on its own, while
+a global window would spend its over-fetch on documents the share could never carry. On a scope
+holding 2 percent of the corpus the windowed shape returned 31 and 10 rows where the joined shape
+returned the full 50 in 4.7 ms and 10.8 ms.
 
 :::note[Where this comes from]
 Fusing ranks instead of raw scores is

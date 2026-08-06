@@ -112,6 +112,15 @@ def test_database_adapters_build_pools_and_bind_cockroach_authority(
     assert null_engine.pool.__class__.__name__ == "NullPool"
     null_engine.sync_engine.dispose()
 
+    monkeypatch.setattr(settings, "vchordrq_prefilter", True)
+    monkeypatch.setattr(settings, "bm25_limit", 210)
+    assert postgresql.server_settings() == {
+        "vchordrq.prefilter": "on",
+        "bm25_catalog.bm25_limit": "210",
+    }
+    monkeypatch.setattr(settings, "vchordrq_prefilter", False)
+    assert postgresql.server_settings()["vchordrq.prefilter"] == "off"
+
     monkeypatch.setattr(settings, "db_null_pool", False)
     owner_engine = postgresql.engine(settings.admin_database_url, app_role=False)
     pooled_engine = cockroach.engine(settings.database_url, app_role=True)

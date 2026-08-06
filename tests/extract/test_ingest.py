@@ -534,3 +534,65 @@ def test_reingesting_a_changed_file_refreshes_its_standing_document(
     assert docs[0][1] == expected_digest(note.read_text(encoding="utf-8"))
     assert all("REWRITTEN" in text for text, _ in chunks)  # old spans fully replaced
     assert all(processed_at is None for _, processed_at in chunks)  # re-extraction pending
+
+
+@pytest.mark.usefixtures("migrated_db", "fake_embedder")
+def test_rechunk_replaces_spans_of_text_that_did_not_change(
+    fake_embedder: RecordingEmbedder,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ingestion skips identical text, so a chunking change reaches it only through rechunk."""
+    text = "# Paper\n\n" + " ".join(f"word{index}" for index in range(400))
+    blob_hash = expected_digest("the immutable original")
+
+    async def body() -> tuple[UUID7 | None, UUID7 | None, int, int, list[str]]:
+        await dbutil.reset_db()
+        source = TextSource(
+            text=text,
+            title="paper.pdf",
+            source_uri="https://files.example/paper.pdf",
+            original_content_hash=blob_hash,
+        )
+        first, _ = await TextIngestor(User.system()).ingest(source)
+        async with User.system() as session:
+            wide = len((await session.exec(select(Chunk))).all())
+        # Stand in for a narrower chunking policy landing in a deploy.
+        monkeypatch.setattr("aizk.extract.ingest.chunk_text", lambda body: body.split("\n\n"))
+        # Ordinary ingestion sees the same content hash and declines to touch the chunks.
+        await TextIngestor(User.system()).ingest(source)
+        async with User.system() as session:
+            still_wide = len((await session.exec(select(Chunk))).all())
+        rechunked = await TextIngestor(User.system()).rechunk(source)
+        async with User.system() as session:
+            spans = list(await session.exec(select(Chunk.text).order_by(Chunk.ord)))
+        return first, rechunked, wide, still_wide, spans
+
+    first, rechunked, wide, still_wide, spans = dbutil.run(body())
+
+    assert still_wide == wide  # re-ingesting identical text really did nothing
+    assert rechunked == first  # the document keeps its identity across the re-split
+    assert [span.split()[-1] for span in spans] == ["Paper", "word399"]  # cut on the new policy
+    assert fake_embedder.calls  # and the new spans were embedded again
+
+
+@pytest.mark.usefixtures("migrated_db", "fake_embedder")
+def test_rechunk_stores_a_source_that_has_no_standing_document_and_skips_blank_text() -> None:
+    async def body() -> tuple[UUID7 | None, UUID7 | None, int]:
+        await dbutil.reset_db()
+        ingestor = TextIngestor(User.system())
+        # No blob hash to inherit, so the text is hashed the way ingestion would hash it.
+        stored = await ingestor.rechunk(
+            TextSource(text="# Orphan\n\nNothing ingested this before.", title="orphan")
+        )
+        blank = await ingestor.rechunk(
+            TextSource(text="   \n", title="blank"),
+        )
+        async with User.system() as session:
+            documents = len((await session.exec(select(Document))).all())
+        return stored, blank, documents
+
+    stored, blank, documents = dbutil.run(body())
+
+    assert stored is not None
+    assert blank is None
+    assert documents == 1

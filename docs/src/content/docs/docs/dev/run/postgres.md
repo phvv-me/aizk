@@ -73,7 +73,8 @@ These are the committed defaults, each overridable through the matching `AIZK_PG
 | `checkpoint_timeout` | 15min | spread checkpoint writes |
 | `max_wal_size` | 8GB | fewer forced checkpoints during graph rebuilds |
 | `min_wal_size` | 2GB | keep segments around for reuse |
-| `wal_compression` | on | less full-page-image WAL, spends CPU |
+| `default_toast_compression` | lz4 | denser and faster than pglz on stored text |
+| `wal_compression` | zstd | less full-page-image WAL, spends CPU |
 | `track_io_timing` | on | make I/O visible in diagnostics |
 | `log_lock_waits` | on | catch lock stalls before they read as queue lag |
 | `log_min_duration_statement` | 1000ms | slow statements only |
@@ -91,6 +92,39 @@ easy to assume rather than verify.
 ```sh
 docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T db \
   psql -U aizk_admin -d aizk -Atc "SHOW data_checksums"
+```
+
+## Two compression settings, two menus
+
+PostgreSQL compresses in two places with different menus. `default_toast_compression` covers
+out-of-line column values and accepts only `pglz` and `lz4`. `wal_compression` covers WAL full page
+images and also accepts `zstd`. Zstd never landed for TOAST, so `lz4` is the only upgrade there.
+
+| Setting | Override | Committed | Effect |
+|---|---|---|---|
+| `default_toast_compression` | `AIZK_PG_TOAST_COMPRESSION` | `lz4` | faster both ways and usually denser on text, which is what every stored derivative is |
+| `wal_compression` | `AIZK_PG_WAL_COMPRESSION` | `zstd` | denser full page images, so less WAL, smaller archives and less future replication bandwidth, and this workload never stops writing through chunk inserts, embeddings and queue churn |
+| CPU cost of that zstd | | | paid only on the first touch of a page after each checkpoint, against fewer bytes written, so it is a trade this write-heavy host wins |
+| where both are applied | the `db` command line in `src/deploy/docker-compose.yml` | | recreate the container, since a reload will not pick a command line up |
+
+Neither rewrites anything. WAL applies to every segment written afterward and TOAST only to new
+values, so old rows keep `pglz` until something rewrites them.
+
+```sh
+psql -U aizk_admin -d aizk -Atc "SELECT name, setting FROM pg_settings
+  WHERE name IN ('default_toast_compression', 'wal_compression')"
+```
+
+## Reclaiming space after a bulk cleanup
+
+Deleting rows and dropping columns leave dead tuples. Autovacuum and the nightly `VACUUM (ANALYZE)`
+make that space reusable inside the existing files without an exclusive lock, which is usually
+enough. Handing the file back is separate, worth doing once after the first `pgqueuer_log` prune or
+the `0008_storage_footprint` migration, and it rewrites TOAST under the current setting.
+
+```sh
+psql -U aizk_admin -d aizk -c "VACUUM FULL VERBOSE pgqueuer_log"   # access exclusive lock
+pg_repack -U aizk_admin -d aizk -t artifact_content               # same result, no long lock
 ```
 
 ## Storage layout

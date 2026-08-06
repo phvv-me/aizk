@@ -1,7 +1,14 @@
 :8081 {
 	encode zstd gzip
 
-	@mcp path /mcp /mcp/* /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource/mcp /authorize /token /register /auth/callback /consent
+	# FastMCP's OIDCProxy mounts the full OAuth authorization server surface here, verified
+	# route by route against the running server container: the two well-known metadata
+	# documents, `/authorize`, `/token`, `/register`, `/revoke`, its own `/auth/callback`
+	# (distinct from the SvelteKit app's `/auth/sign-in-callback` under `@app` below), and
+	# `/consent`. The well-known document itself advertises `revocation_endpoint` at
+	# `/revoke`, so a route table missing it silently 404s the one path a spec-compliant
+	# OAuth client needs to revoke a token, which is exactly what this list used to do.
+	@mcp path /mcp /mcp/* /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource/mcp /authorize /token /register /revoke /auth/callback /consent
 	handle @mcp {
 		reverse_proxy server:8080
 	}
@@ -25,11 +32,27 @@
 		X-Frame-Options DENY
 	}
 
+	# SvelteKit has no leaf page at bare `/app`, only at its named subroutes, confirmed
+	# directly against the frontend container: `GET /app` and `GET /app/` both render
+	# SvelteKit's own formatted 404 rather than the dashboard. `/app/dashboard` is the
+	# landing page the app's own code already treats as canonical, the same path
+	# `hooks.server.ts` sends a freshly completed sign-in to, so a bare `/app` (a natural
+	# URL to bookmark or type) redirects there instead of dead-ending.
+	@app_root path /app /app/
+	redir @app_root /app/dashboard 302
+
 	# SvelteKit owns a closed set of paths: the signed-in application, the browser sign-in flow
 	# that is not the MCP server's own callback above, its event stream, and its build assets.
 	# Everything else, including every documentation page ever added, is the static site, so a
-	# new docs page never needs a routing change here.
-	@app path /app /app/* /auth/* /events/* /_app/*
+	# new docs page never needs a routing change here. `/auth/callback` is excluded even though
+	# it falls inside `/auth/*`, because that exact path belongs to the MCP OAuth flow handled
+	# by `@mcp` above; both matchers currently share this Caddyfile's mutually-exclusive route
+	# group, and `@mcp` being declared first is what lets it win, so this exclusion keeps that
+	# correct however the two blocks ever get reordered.
+	@app {
+		path /app /app/* /auth/* /events/* /_app/*
+		not path /auth/callback
+	}
 	handle @app {
 		reverse_proxy frontend:3000
 	}
@@ -63,6 +86,19 @@
 		reverse_proxy oauth2-proxy:4180
 	}
 
+	# Browsers ask for these unprompted, and Safari asks for three of them on every navigation.
+	# Each one that reaches the gate below is answered 401 and redirected into a sign-in of its
+	# own, so three extra OAuth flows race the real one and overwrite each other's CSRF cookie.
+	# The callbacks then come back `CSRF token mismatch, potential attack` and the console
+	# answers 403 to a user who authenticated correctly, with retrying only losing the race
+	# again. They are answered here, ahead of the gate, so a missing icon stays a missing icon
+	# rather than becoming a failed login. Nothing sensitive sits at these paths.
+	@browser_icons path /favicon.ico /apple-touch-icon.png /apple-touch-icon-precomposed.png /apple-touch-icon*.png
+	handle @browser_icons {
+		header Cache-Control "no-store"
+		respond 404
+	}
+
 	handle {
 		# Every remaining path is authorized first. oauth2-proxy answers 202 for a session that
 		# carries the operator role and 401 for anything else, which starts the Logto sign-in and
@@ -81,11 +117,16 @@
 		}
 
 		# `/console` does not say which tool it is, so `/logto` is an alias onto it rather than a
-		# rename. The console's assets are built with the `/console` prefix compiled in, so the
-		# real path cannot move, and `/auth` is unavailable because the SvelteKit app owns it.
-		# `handle_path` rather than `handle` plus `uri strip_prefix`, because Caddy orders `redir`
-		# ahead of `uri`, so the strip would run after the redirect had already read `{uri}` and
-		# the alias would send `/logto/x` to `/console/logto/x`.
+		# rename. Confirmed directly against the logto container: its server, not its client
+		# bundle, hard-codes the admin console at `/console`, since a bare `/` there 302s to
+		# the separate end-user sign-in flow at `auth.phvv.me/unknown-session` instead of the
+		# console shell. Stripping `/logto` down to `/` the way `handle_path` normally would
+		# therefore lands on the wrong Logto surface, so this alias redirects to `/console`
+		# instead of proxying there directly. `/auth` is unavailable for the same alias role
+		# because the SvelteKit app already owns it. `handle_path` rather than `handle` plus
+		# `uri strip_prefix`, because Caddy orders `redir` ahead of `uri`, so the strip would
+		# run after the redirect had already read `{uri}` and the alias would send `/logto/x`
+		# to `/console/logto/x`.
 		handle_path /logto* {
 			redir * /console{uri} 302
 		}
@@ -101,6 +142,16 @@
 			reverse_proxy logto:3002
 		}
 
+		# The console's own bundle, fetched and inspected directly from the logto container, asks
+		# for `/assets/index-*.js` at the root rather than under `/console`. Without this route the
+		# scripts fall through to the catch-all, arrive at a SvelteKit app that has never heard of
+		# them, and the console renders a blank white page having served a perfectly good 200.
+		# Nothing else on this host owns `/assets`, since the SvelteKit build publishes under
+		# `/_app`, so forwarding the whole prefix is unambiguous.
+		handle /assets/* {
+			reverse_proxy logto:3002
+		}
+
 		handle /api/* {
 			reverse_proxy logto:3002
 		}
@@ -110,7 +161,14 @@
 		}
 
 		# Grafana serves the subpath itself, so the prefix is forwarded rather than stripped.
-		handle /grafana/* {
+		# The matcher lists the bare path alongside the wildcard because a trailing `*` after
+		# a slash never matches the slash-less form, confirmed directly against the running
+		# container: `/grafana/*` alone let a typed or bookmarked `/grafana` fall through to
+		# the operator home page below instead of reaching Grafana, even once signed in.
+		# Grafana's own router already answers the bare path sensibly (redirecting to its
+		# login or its last page), so no extra Caddy-side redirect is needed here.
+		@grafana path /grafana /grafana/*
+		handle @grafana {
 			reverse_proxy grafana:3000
 		}
 
@@ -133,9 +191,57 @@
 		# they exist a bare `/` lands on the app's own root. Teaching it which face to present
 		# needs a host hint rather than a routing change here, either passing the console
 		# hostname through as a header the app reads, or giving the app a dedicated base path.
-		# Neither is built yet and neither belongs in this file.
+		# Neither is built yet, which is why a bare `/` used to reach the SvelteKit app and
+		# answer 404. That app publishes nothing at the root, at `/app`, or at `/app/admin` on
+		# this host, so forwarding here handed an authenticated operator a dead end. Until the
+		# operator pages exist, the root names the tools that are actually reachable, which is
+		# both honest about what is built and the shortest path to the one you came for. Replace
+		# this with a reverse proxy the day the app serves something here.
 		handle {
-			reverse_proxy frontend:3000
+			header Content-Type "text/html; charset=utf-8"
+			respond <<HTML
+				<!doctype html><meta charset="utf-8">
+				<title>AIZK operator console</title>
+				<meta name="viewport" content="width=device-width,initial-scale=1">
+				<style>
+				:root{color-scheme:light dark}
+				body{font:16px/1.6 ui-sans-serif,system-ui,sans-serif;max-width:34rem;margin:14vh auto;padding:0 1.5rem}
+				h1{font-size:1.4rem;font-weight:600;margin:0 0 .25rem}
+				p{color:color-mix(in oklab,currentColor 60%,transparent);margin:0 0 2rem}
+				a{display:block;padding:.85rem 1rem;margin:.5rem 0;border:1px solid color-mix(in oklab,currentColor 20%,transparent);border-radius:.5rem;text-decoration:none;color:inherit}
+				a:hover{border-color:color-mix(in oklab,currentColor 45%,transparent)}
+				b{font-weight:600}small{color:color-mix(in oklab,currentColor 55%,transparent)}
+				</style>
+				<h1>AIZK operator console</h1>
+				<p>Signed in. Everything below sits behind this same gate.</p>
+				<a href="/console"><b>Logto</b><br><small>Identity, users, roles and applications</small></a>
+				<a href="/grafana/"><b>Grafana</b><br><small>Dashboards, logs and metrics</small></a>
+				<a href="/traces"><b>Traces</b><br><small>Request paths in Tempo</small></a>
+				HTML 200
 		}
+	}
+}
+
+# The OTLP ingress OpenRouter pushes its generation traces to, a third site in the same
+# container that Cloudflare reaches at web:8083. It is the only public route no browser ever
+# visits, so it authenticates by bearer token instead of the operator gate above, which can
+# only answer a client capable of following a redirect to a sign-in page.
+#
+# The token is substituted when the Caddyfile is parsed rather than read per request, and
+# Compose refuses to start the container without one. That ordering is the point. A runtime
+# placeholder that resolved to nothing would leave the matcher comparing against a bare
+# `Bearer ` and quietly accept every caller.
+:8083 {
+	@unauthorized not header Authorization "Bearer {$AIZK_OTLP_TOKEN}"
+	handle @unauthorized {
+		respond 401
+	}
+
+	# Alloy already owns `/v1/traces`, `/v1/metrics` and `/v1/logs` on this port and forwards
+	# traces to Tempo, so the path passes through untouched. Alloy carries no `depends_on`
+	# here on purpose, since the observability profile stays independent of the public one and
+	# a stack brought up without it should answer 502 rather than refuse to start.
+	handle {
+		reverse_proxy alloy:4318
 	}
 }

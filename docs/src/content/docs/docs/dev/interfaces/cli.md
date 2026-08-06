@@ -24,7 +24,8 @@ code is `src/aizk/cli.py`, `src/aizk/commands/` and `src/aizk/admin.py`.
         │            check-rls | backup | restore | reset
         ├── graph    rebuild | diagnose-extraction | decay | reembed
         │            communities | raptor | forget
-        ├── data     ingest | promote | export | audit
+        ├── data     ingest | promote | export | audit | rechunk
+        │            reconvert-web-pages | reconvert-scanned-documents
         ├── ontology define-entity | define-relation | list
         ├── auth     audit | apply | roles | check-public | check-web
         ├── settings show | validate
@@ -97,7 +98,7 @@ inspects across tenants, or rewrites rows in place needs it.
 | `admin queue status`, `admin queue doctor` | queue tables sit outside row security |
 | `admin server worker` | `scope_roster()` reads distinct scope arrays past RLS |
 | `admin graph communities --everywhere` | walks that same roster, so it needs the owner DSN too |
-| `admin data reconvert-*` | reads and requeues originals across every scope set |
+| `admin data reconvert-*` and `rechunk` | read and requeue originals across every scope set |
 | `admin graph reembed` and `admin graph raptor` | rewrite stored vectors and summary tiers in place |
 | `admin graph diagnose-extraction` | loads one chunk by ID with no caller |
 
@@ -107,11 +108,17 @@ commands all open `User.system(scopes)` and are filtered by the same policies a 
 They take
 `--user` to act as a specific identity and `--scopes` where a destination is needed.
 
-Two `admin data` sweeps exist for the other half of that problem, text already stored under an
+Three `admin data` sweeps exist for the other half of that problem, text already stored under an
 older policy. `reconvert-web-pages` requeues fetched HTML so the boilerplate cleaner reaches pages
 converted before it existed, `reconvert-scanned-documents` requeues what OCR read so a corrected
 engine or language rewrites it, and both take `--limit`, run oldest conversion first, and are safe
 to repeat until the backlog is gone.
+
+`rechunk` is the cheap third one. Reconversion pays Docling and OCR to rebuild text that did not
+change, so when the chunk size, the lexical prefix or the embedding model moved instead, this
+re-splits and re-embeds from the Markdown already in PostgreSQL and never touches the original
+bytes. It walks least recently indexed first on the `indexed_at` column each finished job stamps,
+so repeating it with `--limit` marches through the corpus rather than circling the same head.
 
 `admin graph communities` is the one to reach for after a deploy that changes how themes are cut.
 Alone it rebuilds a single scope set, the operator's own by default, while `--everywhere` walks the

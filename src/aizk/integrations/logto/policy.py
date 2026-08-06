@@ -1,7 +1,7 @@
 from typing import Annotated, Literal, cast
 from urllib.parse import quote
 
-from patos import FrozenModel
+from patos import FrozenModel, FrozenOpenModel
 from pydantic import AliasChoices, Field, TypeAdapter
 from pydantic.types import JsonValue, PositiveInt, StringConstraints
 
@@ -35,13 +35,13 @@ class RoleReport(FrozenModel):
     roles: tuple[RoleAssignment, ...] = ()
 
 
-class _Scope(FrozenModel):
+class _Scope(FrozenOpenModel):
     id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     description: str | None = None
 
 
-class _Resource(FrozenModel):
+class _Resource(FrozenOpenModel):
     id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     indicator: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -50,7 +50,7 @@ class _Resource(FrozenModel):
     )
 
 
-class _Role(FrozenModel):
+class _Role(FrozenOpenModel):
     id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     description: str | None = None
@@ -61,7 +61,7 @@ class _Role(FrozenModel):
     )
 
 
-class _OrganizationRole(FrozenModel):
+class _OrganizationRole(FrozenOpenModel):
     id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     description: str | None = None

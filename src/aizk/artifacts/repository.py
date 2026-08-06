@@ -1,16 +1,15 @@
 from datetime import UTC, datetime
-from typing import cast
 
-from pydantic import UUID7, JsonValue
+from pydantic import UUID7
 from sqlalchemy import or_
-from sqlmodel import select
+from sqlmodel import select, update
 
 from ..storage import IntegrityCheck, StoredBytes, StoredObject
 from ..store import Artifact, Blob
 from ..store.identity import User
 from ..store.models.tables import ArtifactContent
 from ..types import Scopes
-from .models import ArtifactReceipt, OriginalArtifact, OriginalDescription
+from .models import ArtifactReceipt, ConvertedArtifact, OriginalArtifact, OriginalDescription
 
 
 def _stored_object(row: Blob) -> StoredObject:
@@ -24,17 +23,6 @@ def _stored_object(row: Blob) -> StoredObject:
         encoding=row.encoding,
         version=row.storage_version,
     )
-
-
-def _postgres_json(value: JsonValue) -> JsonValue:
-    """Replace only NUL code points that PostgreSQL JSONB cannot represent."""
-    if isinstance(value, str):
-        return value.replace("\x00", "\ufffd")
-    if isinstance(value, list):
-        return [_postgres_json(item) for item in value]
-    if isinstance(value, dict):
-        return {key.replace("\x00", "\ufffd"): _postgres_json(item) for key, item in value.items()}
-    return value
 
 
 class ArtifactRepository:
@@ -246,6 +234,60 @@ class ArtifactRepository:
                 storage_encoding=blob.encoding,
             )
 
+    async def converted(
+        self,
+        user: User,
+        content_id: UUID7,
+        scopes: Scopes,
+    ) -> ConvertedArtifact:
+        """Load one visible original's stored Markdown and the identity it is indexed under.
+
+        Re-chunking needs the same source text the conversion built, and every ingredient of
+        that text already sits in PostgreSQL, so nothing here reaches the object store or
+        Docling.
+        """
+        async with user as session:
+            content = await session.get(Artifact.Content, content_id)
+            if content is None or frozenset(content.scopes) != scopes:
+                raise LookupError("artifact original is not visible in its indexing scopes")
+            if content.markdown is None:
+                raise LookupError("artifact original carries no stored Markdown to re-chunk")
+            artifact = (
+                await session.exec(select(Artifact).where(Artifact.id == content.artifact_id))
+            ).one()
+            blob = (await session.exec(select(Blob).where(Blob.id == content.blob_id))).one()
+            return ConvertedArtifact(
+                artifact_id=artifact.id,
+                content_id=content.id,
+                created_by=content.created_by,
+                scopes=scopes,
+                filename=artifact.name,
+                media_type=blob.media_type or "application/octet-stream",
+                size=blob.size,
+                source_uri=artifact.source_uri,
+                companion_text=content.companion_text,
+                markdown=content.markdown,
+                observed_at=content.observed_at,
+                expires_at=content.expires_at,
+                storage_hash=blob.content_hash,
+            )
+
+    async def record_indexing(self, user: User, content_id: UUID7, indexed_at: datetime) -> None:
+        """Stamp when one revision's stored Markdown was last split, embedded and indexed.
+
+        The re-chunk sweep orders on this column, so stamping it is what moves the window
+        forward and keeps a repeated pass walking the whole corpus instead of the same head.
+        """
+        async with user as session:
+            written = await session.exec(
+                update(Artifact.Content)
+                .where(Artifact.Content.id == content_id)
+                .values(indexed_at=indexed_at)
+                .execution_options(synchronize_session=False)
+            )
+            if not written.rowcount:
+                raise LookupError("artifact original disappeared before its indexing was recorded")
+
     async def set_state(
         self,
         user: User,
@@ -254,21 +296,35 @@ class ArtifactRepository:
         state: ArtifactContent.State,
         error: str | None = None,
     ) -> None:
-        """Advance one visible original while preserving its exact queued scope set."""
+        """Advance one visible original while preserving its exact queued scope set.
+
+        The authorization read takes the scope array alone and the change is one `UPDATE`,
+        because a state transition three times per conversion has no reason to load and
+        decompress the Markdown sitting in the same row.
+        """
         async with user as session:
-            content = await session.get(Artifact.Content, content_id)
-            if content is None or frozenset(content.scopes) != scopes:
-                raise LookupError("artifact original is not visible in its queued scopes")
-            content.state = state
-            content.error = error
-            content.processed_at = (
-                datetime.now(UTC)
-                if state
-                in (
-                    Artifact.Content.State.ready,
-                    Artifact.Content.State.failed,
+            visible = (
+                await session.exec(
+                    select(Artifact.Content.scopes).where(Artifact.Content.id == content_id)
                 )
-                else None
+            ).first()
+            if visible is None or frozenset(visible) != scopes:
+                raise LookupError("artifact original is not visible in its queued scopes")
+            await session.exec(
+                update(Artifact.Content)
+                .where(Artifact.Content.id == content_id)
+                .values(
+                    state=state,
+                    error=error,
+                    processed_at=datetime.now(UTC)
+                    if state
+                    in (
+                        Artifact.Content.State.ready,
+                        Artifact.Content.State.failed,
+                    )
+                    else None,
+                )
+                .execution_options(synchronize_session=False)
             )
 
     async def store_conversion(
@@ -276,20 +332,27 @@ class ArtifactRepository:
         user: User,
         original: OriginalArtifact,
         markdown: str,
-        docling_json: dict[str, JsonValue],
-        details: dict[str, JsonValue],
+        indexed_at: datetime,
     ) -> None:
-        """Store replaceable textual and structured derivatives on their exact revision."""
+        """Store the replaceable Markdown derivative on its exact revision.
+
+        A reconversion overwrites text that is already there, so the authorization read takes
+        the scope array rather than the row, which keeps the outgoing Markdown in its TOAST
+        pages instead of reading it back to throw it away.
+        """
         async with user as session:
-            content = await session.get(Artifact.Content, original.content_id)
-            if content is None or frozenset(content.scopes) != original.scopes:
+            visible = (
+                await session.exec(
+                    select(Artifact.Content.scopes).where(
+                        Artifact.Content.id == original.content_id
+                    )
+                )
+            ).first()
+            if visible is None or frozenset(visible) != original.scopes:
                 raise LookupError("artifact original is not visible in its conversion scopes")
-            content.markdown = markdown
-            content.docling_json = cast(
-                "dict[str, JsonValue]",
-                _postgres_json(docling_json),
-            )
-            content.details = cast(
-                "dict[str, JsonValue]",
-                _postgres_json(details),
+            await session.exec(
+                update(Artifact.Content)
+                .where(Artifact.Content.id == original.content_id)
+                .values(markdown=markdown, indexed_at=indexed_at)
+                .execution_options(synchronize_session=False)
             )

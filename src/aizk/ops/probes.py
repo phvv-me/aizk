@@ -3,7 +3,7 @@ from time import perf_counter
 
 import httpx
 from openai import OpenAIError
-from patos import FrozenModel
+from patos import FrozenOpenModel
 from pydantic import JsonValue, ValidationError
 from sqlalchemy import func, true
 from sqlalchemy.exc import DBAPIError
@@ -70,7 +70,7 @@ _RECALL_PROBE_QUERY = "What are the current active projects and their next actio
 _RECALL_PROBE_TIMEOUT = 3.5
 
 
-class ServedEntry(FrozenModel):
+class ServedEntry(FrozenOpenModel):
     """One OpenAI-style model listing entry with its optional alias and context length."""
 
     id: str | None = None
@@ -78,7 +78,7 @@ class ServedEntry(FrozenModel):
     max_model_len: int | None = None
 
 
-class ServingIdentity(FrozenModel):
+class ServingIdentity(FrozenOpenModel):
     """The model identity a serving endpoint reports on its metadata path."""
 
     model: str | None = None
@@ -96,8 +96,17 @@ class ServingIdentity(FrozenModel):
     def endpoint_health(
         self, name: str, url: str, reachable: bool, configured_as: str | None
     ) -> EndpointHealth:
-        """Fold the decoded identity and the configured expectation into one report row."""
-        entry = self.data[0] if self.data else None
+        """Fold the decoded identity and the configured expectation into one report row.
+
+        The configured model is looked up by name before falling back to the first entry,
+        because an endpoint may serve many. A single-model lane lists exactly one and both
+        paths agree, while a hosted router lists thousands in no meaningful order, so reading
+        entry zero compared the configured extractor against whichever model happened to sort
+        first and reported a mismatch on a perfectly healthy lane.
+        """
+        entry = next((e for e in self.data if e.id == configured_as), None) or (
+            self.data[0] if self.data else None
+        )
         served_as = entry.id if entry else None
         model = entry.root or served_as if entry else self.model or self.checkpoint
         return EndpointHealth(

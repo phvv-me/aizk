@@ -39,19 +39,14 @@ ENV PATH="/app/.venv/bin:$PATH"
 COPY --from=builder /app/.venv /app/.venv
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-# Migrations and profiling run against the RLS, Patos, and Mainboard APIs from this checkout.
-# These pure Python projects land after the stable dependency layer and need no dependency
-# resolution of their own.
-COPY --from=patos pyproject.toml README.md /tmp/patos/
-COPY --from=patos src /tmp/patos/src
-COPY --from=rls pyproject.toml README.md /tmp/rls/
-COPY --from=rls rls /tmp/rls/rls
-COPY --from=mainboard pyproject.toml README.md LICENSE /tmp/mainboard/
-COPY --from=mainboard src /tmp/mainboard/src
-RUN uv pip install --python .venv --reinstall --no-deps /tmp/patos \
-    && uv pip install --python .venv --reinstall --no-deps /tmp/rls \
-    && uv pip install --python .venv --reinstall --no-deps /tmp/mainboard \
-    && uv pip install --python .venv --reinstall --no-deps . \
+# The house packages are NOT overlaid from sibling checkouts any more. They arrive from PyPI at
+# the exact versions `pyproject.toml` pins, through the locked `uv sync` in the builder stage,
+# which is the whole point. Reinstalling the working tree here meant the image ran different code
+# from the one the test suite resolved, so a green suite said nothing about what shipped, and a
+# base class that started rejecting unknown fields reached production having never once executed
+# in a test. Editing a sibling checkout no longer changes this image, and that is deliberate.
+# Publish the package, bump the pin, then build.
+RUN uv pip install --python .venv --reinstall --no-deps . \
     && .venv/bin/python -c "import aizk.cli"
 # The built environment is immutable at runtime, so the command needs no resolver wrapper.
 USER 10001:10001
@@ -109,9 +104,6 @@ EXPOSE 8082
 FROM runtime AS integration-test
 USER root
 RUN uv sync --frozen --group dev \
-    && uv pip install --python .venv --reinstall --no-deps /tmp/patos \
-    && uv pip install --python .venv --reinstall --no-deps /tmp/rls \
-    && uv pip install --python .venv --reinstall --no-deps /tmp/mainboard \
     && uv pip install --python .venv --reinstall --no-deps .
 COPY --from=tests . ./tests
 USER 10001:10001
@@ -127,16 +119,7 @@ WORKDIR ${LAMBDA_TASK_ROOT}
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
-COPY --from=patos pyproject.toml README.md /tmp/patos/
-COPY --from=patos src /tmp/patos/src
-COPY --from=rls pyproject.toml README.md /tmp/rls/
-COPY --from=rls rls /tmp/rls/rls
-COPY --from=mainboard pyproject.toml README.md LICENSE /tmp/mainboard/
-COPY --from=mainboard src /tmp/mainboard/src
-RUN uv pip install --python .venv --reinstall --no-deps /tmp/patos \
-    && uv pip install --python .venv --reinstall --no-deps /tmp/rls \
-    && uv pip install --python .venv --reinstall --no-deps /tmp/mainboard \
-    && uv pip install --python .venv --reinstall --no-deps .
+RUN uv pip install --python .venv --reinstall --no-deps .
 ENV PYTHONPATH="${LAMBDA_TASK_ROOT}/.venv/lib/python3.14/site-packages:${LAMBDA_TASK_ROOT}/src"
 CMD ["aizk.commands.aws.mcp_handler"]
 

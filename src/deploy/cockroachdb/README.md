@@ -43,10 +43,14 @@ The MCP emulator accepts API Gateway HTTP API version two events at the correspo
 migration head after the normal setup service has run. The Lambda image is about 902 MB locally.
 ECR keeps only the two newest immutable images.
 
-The profile sends embeddings to `qwen/qwen3-embedding-8b` and extraction to
-`deepseek/deepseek-v4-flash`. Both requests require OpenRouter zero data retention and deny
-data collection. Reranking stays disabled because no eligible zero data retention reranking
-endpoint was available during the July 2026 validation.
+The profile sends embeddings to `qwen/qwen3-embedding-8b` and extraction to the dated
+`deepseek/deepseek-v4-flash-0731` slug. Both requests require OpenRouter zero data retention and
+deny data collection. The floating `deepseek/deepseek-v4-flash` alias has no endpoint that
+satisfies zero data retention, so under this posture OpenRouter fails closed with a 404 data
+policy error rather than silently routing to a provider that retains data. Pinning the dated
+slug is what keeps the request on an endpoint that actually honors the guardrail. Reranking
+stays disabled because no eligible zero data retention reranking endpoint was available during
+the July 2026 validation.
 
 ## CockroachDB Cloud
 

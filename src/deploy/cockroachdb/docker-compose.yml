@@ -6,13 +6,13 @@ x-aizk-env: &aizk-env
   AIZK_ADMIN_DATABASE_URL: cockroachdb+asyncpg://aizk_admin@db:26257/aizk?ssl=disable
   AIZK_AUTO_SETUP: "false"
   AIZK_EMBED_URL: https://openrouter.ai/api/v1
-  AIZK_EMBED_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
+  AIZK_EMBED_API_KEY: ${AIZK_OPENROUTER_API_KEY:?set AIZK_OPENROUTER_API_KEY}
   AIZK_EMBED_MODEL: qwen/qwen3-embedding-8b
   AIZK_EMBED_DIM: "1024"
   AIZK_EMBED_EXTRA_BODY: '{"provider":{"zdr":true,"data_collection":"deny"}}'
   AIZK_LLM_URL: https://openrouter.ai/api/v1
-  AIZK_LLM_API_KEY: ${OPENROUTER_API_KEY:?set OPENROUTER_API_KEY}
-  AIZK_LLM_MODEL: deepseek/deepseek-v4-flash
+  AIZK_LLM_API_KEY: ${AIZK_OPENROUTER_API_KEY:?set AIZK_OPENROUTER_API_KEY}
+  AIZK_LLM_MODEL: deepseek/deepseek-v4-flash-0731
   AIZK_LLM_EXTRA_BODY: '{"provider":{"zdr":true,"data_collection":"deny"}}'
   AIZK_RERANK_ENABLED: "false"
   AIZK_EXTRACT_BACKEND: llm
@@ -32,10 +32,6 @@ x-aizk-runtime: &aizk-runtime
     context: ../../..
     dockerfile: src/deploy/Dockerfile
     target: runtime
-    additional_contexts:
-      mainboard: ../../../../mainboard
-      patos: ../../../../patos
-      rls: ../../../../rls
   environment: *aizk-env
   cap_drop: ["ALL"]
   security_opt: ["no-new-privileges:true"]
@@ -105,10 +101,6 @@ services:
       context: ../../..
       dockerfile: src/deploy/Dockerfile
       target: lambda
-      additional_contexts:
-        mainboard: ../../../../mainboard
-        patos: ../../../../patos
-        rls: ../../../../rls
     environment: *aizk-env
     ports:
       - 127.0.0.1:${AIZK_COCKROACH_LAMBDA_MCP_PORT:-9090}:8080

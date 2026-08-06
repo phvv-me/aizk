@@ -1,11 +1,11 @@
 from typing import Annotated
 
-from patos import FrozenModel
+from patos import FrozenOpenModel
 from pydantic.networks import AnyHttpUrl
 from pydantic.types import PositiveInt, StringConstraints
 
 
-class Claims(FrozenModel):
+class Claims(FrozenOpenModel):
     """Verified standard claims from a Logto access or ID token."""
 
     iss: AnyHttpUrl

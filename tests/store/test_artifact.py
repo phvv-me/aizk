@@ -66,7 +66,7 @@ def test_artifact_models_keep_bytes_outside_postgres() -> None:
     assert content.revision == 1
     assert content.companion_text is None
     assert content.markdown is None
-    assert content.docling_json is None
+    assert content.indexed_at is None
     assert artifact.contents == []
     assert artifact.promoted_from is None
 
@@ -396,8 +396,6 @@ def test_share_copies_complete_models_and_canonicalizes_target_scopes() -> None:
             content.state = Artifact.Content.State.ready
             content.companion_text = "Companion context"
             content.markdown = "# Converted\n"
-            content.docling_json = {"schema_name": "DoclingDocument"}
-            content.details = {"status": "success"}
             content.observed_at = observed
             content.expires_at = expires
             content.processed_at = observed
@@ -515,13 +513,8 @@ def test_repository_versions_one_uri_and_persists_derivatives_in_postgres() -> N
         assert current.observed_at is None
         assert await repository.pending(user, scopes, limit=1) == (first.content_id,)
 
-        await repository.store_conversion(
-            user,
-            current,
-            "# Paper\n",
-            {"texts": [{"text": "before\x00after"}]},
-            {"status": "success", "pages": 1, "nul\x00key": "nul\x00value"},
-        )
+        indexed = datetime(2026, 7, 4, tzinfo=UTC)
+        await repository.store_conversion(user, current, "# Paper\n", indexed)
         await repository.set_state(
             user,
             second.content_id,
@@ -541,12 +534,7 @@ def test_repository_versions_one_uri_and_persists_derivatives_in_postgres() -> N
         assert [item.revision for item in contents] == [1, 2]
         original = next(item for item in contents if item.id == second.content_id)
         assert original.markdown == "# Paper\n"
-        assert original.docling_json == {"texts": [{"text": "before\ufffdafter"}]}
-        assert original.details == {
-            "status": "success",
-            "pages": 1,
-            "nul\ufffdkey": "nul\ufffdvalue",
-        }
+        assert original.indexed_at == indexed
         assert original.state is Artifact.Content.State.ready
         assert original.processed_at is not None
         async with User.system().owner as session:
@@ -682,8 +670,7 @@ def test_repository_rejects_mismatched_queue_scopes_and_missing_content() -> Non
                 user,
                 original.model_copy(update={"content_id": uuid7()}),
                 "text",
-                {},
-                {},
+                datetime.now(UTC),
             )
         with pytest.raises(LookupError, match="queued scopes"):
             await repository.set_state(
@@ -693,5 +680,58 @@ def test_repository_rejects_mismatched_queue_scopes_and_missing_content() -> Non
                 Artifact.Content.State.failed,
                 "missing",
             )
+        with pytest.raises(LookupError, match="indexing scopes"):
+            await repository.converted(user, uuid7(), scopes)
+        with pytest.raises(LookupError, match="no stored Markdown"):
+            await repository.converted(user, receipt.content_id, scopes)
+        with pytest.raises(LookupError, match="disappeared"):
+            await repository.record_indexing(user, uuid7(), datetime.now(UTC))
+
+    dbutil.run(body())
+
+
+def test_repository_reads_stored_markdown_with_the_identity_its_document_needs() -> None:
+    """The re-chunk pass rebuilds the same source text, so it reads the same ingredients."""
+
+    async def body() -> None:
+        await dbutil.reset_db()
+        owner = uuid5()
+        scopes = frozenset({owner})
+        user = User.private(owner)
+        repository = ArtifactRepository()
+        observed = datetime(2026, 7, 2, tzinfo=UTC)
+        blob_hash = uuid8()
+        receipt = await repository.create_original(
+            user,
+            stored_bytes("objects/original", blob_hash, 7),
+            OriginalDescription(
+                filename="paper.pdf",
+                media_type="application/pdf",
+                source_uri="https://files.example/paper.pdf",
+                companion_text="Companion context",
+                observed_at=observed,
+            ),
+            scopes,
+        )
+        original = await repository.original(user, receipt.content_id, scopes)
+        indexed = datetime(2026, 7, 3, tzinfo=UTC)
+        await repository.store_conversion(user, original, "# Paper\n", indexed)
+
+        converted = await repository.converted(user, receipt.content_id, scopes)
+        assert converted.markdown == "# Paper\n"
+        assert converted.filename == "paper.pdf"
+        assert converted.media_type == "application/pdf"
+        assert converted.size == 7
+        assert converted.source_uri == "https://files.example/paper.pdf"
+        assert converted.companion_text == "Companion context"
+        assert converted.observed_at == observed
+        assert converted.storage_hash == blob_hash
+        assert converted.created_by == owner
+
+        stamped = datetime(2026, 7, 9, tzinfo=UTC)
+        await repository.record_indexing(user, receipt.content_id, stamped)
+        async with user as session:
+            row = await session.get(Artifact.Content, receipt.content_id)
+        assert row is not None and row.indexed_at == stamped
 
     dbutil.run(body())

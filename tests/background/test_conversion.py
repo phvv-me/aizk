@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from types import TracebackType
 from typing import Self, cast
 
@@ -11,20 +12,25 @@ from pydantic import UUID7
 import aizk.background.jobs.conversion as conversion_module
 from aizk.background.jobs.conversion import (
     ArtifactQueue,
+    ArtifactRechunk,
     ArtifactReconversion,
     ArtifactRecovery,
     DoclingConversionJob,
+    MarkdownReindexJob,
     ReconversionSweep,
+    rechunk_artifacts,
     reconvert_scanned_documents,
     reconvert_web_pages,
     retry_failed_artifacts,
 )
-from aizk.background.jobs.models import ArtifactConversionJob
+from aizk.background.jobs.models import ArtifactConversionJob, ArtifactReindexJob
 from aizk.background.queue import Queue as ProductionQueue
 from aizk.config import settings
 from aizk.store import Artifact
 from aizk.store.identity import User
 from aizk.types import Scopes
+
+READY = Artifact.Content.State.ready
 
 
 class Processor:
@@ -456,5 +462,97 @@ def test_scanned_reconversion_requeues_everything_ocr_read_whatever_its_source(
             assert row is not None and row.state == Artifact.Content.State.queued
         untouched = states[page.content.id]
         assert untouched is not None and untouched.state == Artifact.Content.State.ready
+
+    dbutil.run(run())
+
+
+def test_reindex_job_delegates_the_stored_markdown_to_the_reindexer() -> None:
+    class Reindexer:
+        def __init__(self) -> None:
+            self.calls: list[tuple[UUID7, Scopes]] = []
+
+        async def reindex(self, content_id: UUID7, scopes: Scopes) -> None:
+            self.calls.append((content_id, scopes))
+
+    reindexer = Reindexer()
+    payload = ArtifactReindexJob(artifact_content_id=uuid7(), scopes=frozenset({uuid5()}))
+    job = MarkdownReindexJob(reindexer)
+
+    asyncio.run(job.handle(payload))
+
+    assert reindexer.calls == [(payload.artifact_content_id, payload.scopes)]
+    assert job.entrypoint == "aizk_reindex_artifact"
+    assert job.priority == 75
+    assert job.concurrency_limit == settings.docling_concurrency
+
+
+def test_rechunk_rejects_an_empty_budget() -> None:
+    with pytest.raises(ValueError, match="positive"):
+        asyncio.run(ArtifactRechunk().enqueue(0))
+
+
+def test_rechunk_sweeps_converted_originals_least_recently_indexed_first(
+    migrated_db: None,
+) -> None:
+    """`indexed_at` is the cursor, so a repeated pass walks forward instead of the same head."""
+
+    async def run() -> None:
+        await dbutil.reset_db()
+        owner = settings.system_user_id
+        never = await seed_artifact(owner, [owner], name="never.pdf", state=READY)
+        stale = await seed_artifact(owner, [owner], name="stale.pdf", state=READY)
+        fresh = await seed_artifact(owner, [owner], name="fresh.pdf", state=READY)
+        textless = await seed_artifact(owner, [owner], name="textless.pdf", state=READY)
+        converting = await seed_artifact(
+            owner,
+            [owner],
+            name="converting.pdf",
+            state=Artifact.Content.State.processing,
+        )
+        stamps = {
+            never.content.id: None,
+            stale.content.id: datetime(2026, 1, 1, tzinfo=UTC),
+            fresh.content.id: datetime(2026, 7, 1, tzinfo=UTC),
+            converting.content.id: None,
+        }
+        async with User.system().owner as session:
+            for content_id, indexed_at in stamps.items():
+                row = await session.get(Artifact.Content, content_id)
+                assert row is not None
+                row.markdown = "# Converted\n"
+                row.indexed_at = indexed_at
+
+        assert await ArtifactRechunk().converted(limit=10) == (
+            (never.content.id, frozenset({owner})),
+            (stale.content.id, frozenset({owner})),
+            (fresh.content.id, frozenset({owner})),
+        )
+        assert textless.content.id not in {row for row, _ in await ArtifactRechunk().converted(10)}
+
+        async with ProductionQueue(dsn=settings.asyncpg_dsn) as queue:
+            names = queue.queries.qbe.settings
+            await queue.connection.execute(f"DELETE FROM {names.queue_table_log}")
+            await queue.connection.execute(f"DELETE FROM {names.queue_table}")
+
+        assert await rechunk_artifacts(limit=2) == 2
+        # The two still queued are refused by deduplication rather than queued twice.
+        assert await rechunk_artifacts(limit=2) == 0
+
+        async with ProductionQueue(dsn=settings.asyncpg_dsn) as queue:
+            names = queue.queries.qbe.settings
+            queued = await queue.connection.fetch(
+                f"SELECT dedupe_key FROM {names.queue_table} WHERE entrypoint = $1",
+                MarkdownReindexJob.entrypoint,
+            )
+        assert {row["dedupe_key"] for row in queued} == {
+            str(never.content.id),
+            str(stale.content.id),
+        }
+
+        async with User.system().owner as session:
+            untouched = await session.get(Artifact.Content, never.content.id)
+            assert untouched is not None
+            # The conversion is still current, so the sweep never disturbs the workflow state.
+            assert untouched.state == READY
 
     dbutil.run(run())

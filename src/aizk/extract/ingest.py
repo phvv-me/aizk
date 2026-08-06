@@ -399,6 +399,37 @@ class TextIngestor:
         """Ingest one source through the same batching path used for a corpus."""
         return (await self.ingest_many([source]))[0]
 
+    async def rechunk(self, source: TextSource) -> UUID7 | None:
+        """Re-split and re-embed one already stored source, replacing its chunks.
+
+        Ordinary ingestion skips a source whose stored content hash still matches, which is
+        exactly right when the text is what changed. A chunk size, a lexical prefix or an
+        embedder change leaves the text identical and every chunk beneath it stale, so this
+        path rebuilds them unconditionally and takes the same revision lock a share holds
+        while it reads them. A source with no standing document is simply stored.
+        """
+        async with self.user as opened:
+            await Ontology.ensure(opened)
+            digest = source.original_content_hash
+            if digest is None:
+                [digest] = await DocumentStore(opened).hash_texts([source.text])
+        plan = self.prepare(source, digest)
+        if plan is None:
+            return None
+        embeddings = await EmbedClient.from_settings(settings).embed(
+            list(plan.searchable), mode="document"
+        )
+        replacement = self.document(plan, embeddings)
+        async with self.user as opened:
+            store = DocumentStore(opened)
+            [standing] = await store.find([plan])
+            if standing is None:
+                opened.add(replacement)
+                await opened.flush()
+                return replacement.id
+            await acquire_locks(opened, [document_revision(standing.id)])
+            return await store.refresh(standing, replacement)
+
     @staticmethod
     def document(plan: PreparedText, embeddings: list[list[float]]) -> Document:
         """Build the mapped document and chunk rows for one prepared source."""

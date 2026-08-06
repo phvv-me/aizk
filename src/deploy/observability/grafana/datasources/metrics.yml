@@ -3,6 +3,11 @@ apiVersion: 1
 # VictoriaMetrics speaks the Prometheus query API, so Grafana talks to it as a Prometheus source.
 # It was chosen over Prometheus itself because it is Apache-2.0, single-binary, and needs a
 # fraction of the memory for the same series, which matters on a host that is also running models.
+# Deleted by name before insert so the declared uid always wins, see loki.yml for why.
+deleteDatasources:
+  - name: AIZK metrics
+    orgId: 1
+
 datasources:
   - name: AIZK metrics
     type: prometheus

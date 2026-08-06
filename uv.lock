@@ -211,7 +211,7 @@ requires-dist = [
     { name = "inflection", specifier = ">=0.5.1,<0.6" },
     { name = "jinja2", specifier = ">=3.1.6,<4" },
     { name = "loguru", specifier = ">=0.7.3,<0.8" },
-    { name = "mainboard", specifier = ">=0.0.8,<0.1" },
+    { name = "mainboard", specifier = "==0.0.9" },
     { name = "mangum", specifier = ">=0.19,<1" },
     { name = "networkx", specifier = ">=3.6.1,<4" },
     { name = "obstore", specifier = ">=0.11,<0.12" },
@@ -221,14 +221,14 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-sqlalchemy", specifier = ">=0.65b0,<1" },
     { name = "opentelemetry-instrumentation-starlette", specifier = ">=0.65b0,<1" },
     { name = "opentelemetry-sdk", specifier = ">=1.44,<2" },
-    { name = "patos", extras = ["sql"], specifier = ">=0.0.9,<0.1" },
+    { name = "patos", extras = ["sql"], specifier = "==0.0.12" },
     { name = "pgqueuer", specifier = ">=1.1.1,<2" },
     { name = "pgvector", specifier = ">=0.5,<0.6" },
     { name = "py-key-value-aio", extras = ["keyring"], specifier = ">=0.4.5,<0.5" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.8,<3" },
     { name = "pydantic-settings", specifier = ">=2.14.2,<3" },
     { name = "python-slugify", specifier = ">=8.0.4,<9" },
-    { name = "rlsalchemy", specifier = ">=0.4.1,<0.6" },
+    { name = "rlsalchemy", specifier = "==0.5.1" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.47,<2.1" },
     { name = "sqlalchemy-cockroachdb", specifier = ">=2.0.4,<2.1" },
     { name = "sqlmodel", specifier = ">=0.0.39,<0.1" },
@@ -1844,7 +1844,7 @@ wheels = [
 
 [[package]]
 name = "mainboard"
-version = "0.0.8"
+version = "0.0.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cyclopts" },
@@ -1854,9 +1854,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/90/65220f782f55d6fb13c5905315788d335c6b614bd530b06b57c9607d6a81/mainboard-0.0.8.tar.gz", hash = "sha256:d53a6362b6aeb2cd5db27805f1157a569f1286a55ec16b28af058f5b76ff5d58", size = 144914, upload-time = "2026-07-04T00:49:45.381Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c8/bf/70b3c926a383ba4c8193ccaae34b0249435b211d076c34989f1c4b7715ca/mainboard-0.0.9.tar.gz", hash = "sha256:adac387c1fe9561d9f45bd06a6fe2727c37b7d42d2be6b81d3556d24288f52b8", size = 172313, upload-time = "2026-08-06T10:39:20.278Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/51/2f/b8461836d33f0715033ced86586eaea871c9bfe381288539c00eeecaf88e/mainboard-0.0.8-py3-none-any.whl", hash = "sha256:83160c2118d176baf0a8af3faeba2dde64aee547dcd0d8901c5eaf9f71990ca1", size = 119521, upload-time = "2026-07-04T00:49:43.929Z" },
+    { url = "https://files.pythonhosted.org/packages/d5/6c/1a118b4102ed6664da56e086b03c78cdd1cbcefdccc2390bc906e210268d/mainboard-0.0.9-py3-none-any.whl", hash = "sha256:79f8b0f991c8de40049da3a83df56c08ef702a35b21c51ea6d7d3135d2e494b8", size = 143069, upload-time = "2026-08-06T10:39:18.914Z" },
 ]
 
 [[package]]
@@ -2449,14 +2449,14 @@ wheels = [
 
 [[package]]
 name = "patos"
-version = "0.0.9"
+version = "0.0.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/d0/43ec25469b259ff9bf495fdce657a3b027f6d5c51acacdbdcc229f4f15c6/patos-0.0.9.tar.gz", hash = "sha256:28e851e63963c95a3d596be5fb66f6eb495ccfd3d7aec6ba644742c420c970bc", size = 506997, upload-time = "2026-07-16T06:08:01.001Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/92/dae84fd26bcba8a76aceff945a6455cd5636f4096d19ce5a696874bb26cb/patos-0.0.12.tar.gz", hash = "sha256:186506599d6c29d92d39f070df6d220fd925af55774fa2d6e419cedbf444c902", size = 521999, upload-time = "2026-08-06T09:38:06.588Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/08/7f/2d87a158e5f20bc235b15841323a47d0642c464af589e54186c3356e518d/patos-0.0.9-py3-none-any.whl", hash = "sha256:86367b1a4b1262fce8322d5b252c169a61bb233dfe9497e36a182d4c4bfa8479", size = 33755, upload-time = "2026-07-16T06:07:59.653Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/bc/24d8ea5c40fc208ee7d95129ad2cec8ec743371280b8e1e26ace9359583b/patos-0.0.12-py3-none-any.whl", hash = "sha256:6eda6c6c6f92ae969cb416334f40e6b2d25cc7a48368c596f4353d7ab24954d3", size = 40740, upload-time = "2026-08-06T09:38:05.287Z" },
 ]
 
 [package.optional-dependencies]
@@ -2464,6 +2464,8 @@ sql = [
     { name = "inflection" },
     { name = "pgvector" },
     { name = "sqlalchemy" },
+    { name = "sqlmodel" },
+    { name = "typing-extensions" },
 ]
 
 [[package]]

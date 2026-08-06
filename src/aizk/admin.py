@@ -198,6 +198,17 @@ async def reconvert_scanned_documents(limit: int = 100) -> int:
     return await conversion.reconvert_scanned_documents(limit)
 
 
+async def rechunk_artifacts(limit: int = 100) -> int:
+    """Re-split and re-embed converted originals from stored Markdown, the cheap catch-up.
+
+    Reconversion reads the original bytes again and pays Docling and OCR for text that did not
+    change. When only the chunk size, the lexical prefix or the embedder moved, this pass
+    rebuilds the chunks from the Markdown already in PostgreSQL instead. Least recently indexed
+    first, `limit` at a time, safe to repeat.
+    """
+    return await conversion.rechunk_artifacts(limit)
+
+
 async def export_scope(path: str, user_id: UUID5 | None = None) -> export.ExportReport:
     """Export a user's visible memory to a JSONL file, the scoped portable dump."""
     return await export.export_scope(Path(path), user=User.system({user_id or system()}))

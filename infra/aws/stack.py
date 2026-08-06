@@ -144,7 +144,7 @@ class AizkAwsStack(Stack):
             "AIZK_EMBED_EXTRA_BODY": provider,
             "AIZK_LLM_URL": "https://openrouter.ai/api/v1",
             "AIZK_LLM_API_KEY": self._secret(self.config.openrouter_key_parameter),
-            "AIZK_LLM_MODEL": "deepseek/deepseek-v4-flash",
+            "AIZK_LLM_MODEL": "deepseek/deepseek-v4-flash-0731",
             "AIZK_LLM_EXTRA_BODY": provider,
             "AIZK_LOGTO_URL": self.config.logto_url,
             "AIZK_REQUIRE_AUTH": "true",

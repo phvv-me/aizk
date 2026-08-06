@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated
 
 from patos import FrozenModel
-from pydantic import UUID5, UUID8, AfterValidator, JsonValue
+from pydantic import UUID5, UUID8, AfterValidator
 
 from ..common.templates import markdown_environment
 from ..store import Blob
@@ -85,6 +85,24 @@ class OriginalArtifact(FrozenModel):
     storage_encoding: Blob.Encoding = Blob.Encoding.identity
 
 
+class ConvertedArtifact(FrozenModel):
+    """The stored Markdown of one revision and the identity its document is indexed under."""
+
+    artifact_id: UUID7
+    content_id: UUID7
+    created_by: UUID5
+    scopes: Scopes
+    filename: str
+    media_type: str
+    size: int
+    source_uri: str | None
+    companion_text: Prose = None
+    markdown: str
+    observed_at: datetime | None = None
+    expires_at: datetime | None = None
+    storage_hash: UUID8
+
+
 class ArtifactDocument(FrozenModel):
     """Render one file revision into deterministic source text for recall."""
 
@@ -95,7 +113,6 @@ class ArtifactDocument(FrozenModel):
     companion_text: Prose = None
     markdown: Prose = None
     conversion_state: ArtifactContent.State
-    details: dict[str, JsonValue] = {}
 
     @property
     def semantic(self) -> bool:

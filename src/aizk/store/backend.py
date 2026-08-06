@@ -18,6 +18,8 @@ if TYPE_CHECKING:
 
 _AUTHORITY_INFO = "aizk.cockroach_authority"
 
+type ConnectArgs = dict[str, ssl.SSLContext | bool | str | dict[str, str]]
+
 
 class DatabaseAdapter(abc.ABC):
     """Own the database-specific engine and transaction context behavior."""
@@ -31,13 +33,8 @@ class DatabaseAdapter(abc.ABC):
         """Attach caller authority for every transaction opened by `session`."""
 
     @staticmethod
-    def pooled_engine(
-        url: str | URL,
-        app_role: bool,
-        ssl_config: ssl.SSLContext | bool | str | None = None,
-    ) -> AsyncEngine:
-        """Build the shared pool shape without database-specific connection settings."""
-        connect_args = {} if ssl_config is None else {"ssl": ssl_config}
+    def pooled_engine(url: str | URL, app_role: bool, connect_args: ConnectArgs) -> AsyncEngine:
+        """Build the shared pool shape around one backend's own connection arguments."""
         if settings.db_null_pool:
             return create_async_engine(url, connect_args=connect_args, poolclass=NullPool)
         if not app_role:
@@ -55,15 +52,22 @@ class PostgreSQLAdapter(DatabaseAdapter):
     """Preserve VectorChord and custom-setting behavior for PostgreSQL."""
 
     def engine(self, url: str | URL, app_role: bool) -> AsyncEngine:
-        if not app_role or settings.db_null_pool:
-            return self.pooled_engine(url, app_role)
-        return create_async_engine(
-            url,
-            connect_args={"server_settings": {"vchordrq.prefilter": "on"}},
-            pool_size=settings.db_pool_size,
-            max_overflow=settings.db_pool_max_overflow,
-            pool_pre_ping=False,
-        )
+        pinned: ConnectArgs = {"server_settings": self.server_settings()} if app_role else {}
+        return self.pooled_engine(url, app_role, pinned)
+
+    @staticmethod
+    def server_settings() -> dict[str, str]:
+        """The VectorChord knobs every caller connection states rather than inherits.
+
+        `vchordrq.prefilter` decides whether the ANN walk applies row security inside the
+        index, which is worth its cost only where a caller reads a small share of the rows.
+        `bm25_catalog.bm25_limit` caps how many rows one bm25 index scan returns, so pinning
+        it is what makes the lexical ranking's window a promise the index keeps.
+        """
+        return {
+            "vchordrq.prefilter": "on" if settings.vchordrq_prefilter else "off",
+            "bm25_catalog.bm25_limit": str(settings.bm25_limit),
+        }
 
     def configure_session(self, session: OrmSession, user: User) -> None:
         session.info.update(user.info())
@@ -74,7 +78,8 @@ class CockroachDBAdapter(DatabaseAdapter):
 
     def engine(self, url: str | URL, app_role: bool) -> AsyncEngine:
         normalized, ssl_config = self.cloud_connection(url)
-        return self.pooled_engine(normalized, app_role, ssl_config)
+        connect_args: ConnectArgs = {} if ssl_config is None else {"ssl": ssl_config}
+        return self.pooled_engine(normalized, app_role, connect_args)
 
     @staticmethod
     def cloud_connection(

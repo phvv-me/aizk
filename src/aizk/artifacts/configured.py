@@ -5,7 +5,7 @@ from typing import cast
 
 import httpx
 
-from ..background.jobs.conversion import ArtifactQueue, DoclingConversionJob
+from ..background.jobs.conversion import ArtifactQueue, DoclingConversionJob, MarkdownReindexJob
 from ..config import Settings
 from ..integrations.clamav import ClamAVClient
 from ..integrations.docling import (
@@ -18,7 +18,7 @@ from ..serving.embed import EmbedClient
 from ..storage import ByteStore, s3_backend
 from .boilerplate import WebBoilerplateCleaner
 from .repository import ArtifactRepository
-from .service import ArtifactIntake, ArtifactIntegrity, ArtifactProcessor
+from .service import ArtifactIntake, ArtifactIntegrity, ArtifactProcessor, ArtifactReindexer
 from .visual import DirectImageEnricher
 
 
@@ -49,6 +49,7 @@ class ArtifactServices:
 
     intake: ArtifactIntake
     conversion: DoclingConversionJob
+    reindex: MarkdownReindexJob
     integrity: ArtifactIntegrity
     reader: ArtifactReader
     converter: DoclingClient
@@ -110,6 +111,7 @@ def build_artifact_services(config: Settings, storage: ByteStore) -> ArtifactSer
     return ArtifactServices(
         intake=ArtifactIntake(reader, scanner, storage, repository, ArtifactQueue(conversion)),
         conversion=conversion,
+        reindex=MarkdownReindexJob(ArtifactReindexer(repository)),
         integrity=ArtifactIntegrity(storage, repository),
         reader=reader,
         converter=converter,

@@ -144,6 +144,18 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                             )
                         )
                     ).scalar_one()
+                    derivatives = set(
+                        (
+                            await connection.execute(
+                                text(
+                                    "SELECT column_name FROM information_schema.columns "
+                                    "WHERE table_name = 'artifact_content' "
+                                    "AND column_name = ANY(:names)"
+                                ),
+                                {"names": ["docling_json", "details", "markdown", "indexed_at"]},
+                            )
+                        ).scalars()
+                    )
                     revision = (
                         await connection.execute(text("SELECT version_num FROM alembic_version"))
                     ).scalar_one()
@@ -163,6 +175,9 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                     "monthly_quota_counter",
                 }
                 assert all(forced.values())
+                # The unread derivatives are gone and the re-chunk cursor stands beside the
+                # Markdown that is still load bearing.
+                assert derivatives == {"markdown", "indexed_at"}
                 assert "(document_id, scopes) IN" in chunk_check
                 assert revision == ScriptDirectory.from_config(config).get_current_head()
             finally:

@@ -96,12 +96,13 @@ no live job.
 
 ## Conversion and the fallback document
 
-`ArtifactProcessor` reads the original back and posts it to Docling Serve asking for `json` and `md`
-with `image_export_mode` of `placeholder`. Docling may use images while converting, but aizk stores
-only the JSON and the Markdown.
+`ArtifactProcessor` reads the original back and posts it to Docling Serve asking for `md` alone with
+`image_export_mode` of `placeholder`. Docling can also return its native document tree, which aizk
+stored and never read, so revision `0008_storage_footprint` dropped that column and the
+conversion diagnostics beside it. Both are reproducible by converting the original again.
 
 `DoclingOutput.from_response` accepts `success` and `partial_success` and rejects `skipped`,
-`failure`, and any response missing either format. On rejection the processor still calls `index`
+`failure`, and any response with no Markdown. On rejection the processor still calls `index`
 with the state `failed`, creating a document from the Jinja template
 `src/aizk/artifacts/templates/source.md.j2`. That fallback carries the file's metadata and source
 URI, so an unsupported file stays findable and downloadable through an authorized read.

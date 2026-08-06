@@ -44,6 +44,99 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   scope onto itself would add one generation per repeat. A move only ever touches the caller's own
   private documents, and repeating any of these calls is a no-op.
 
+- Extraction can run on a hosted model instead of the local vLLM lane. Point the container's
+  `AIZK_RUNTIME_LLM_URL` at an OpenAI-compatible endpoint outside the deployment and aizk
+  recognizes that on its own, then applies the external posture unasked, meaning zero data
+  retention, a pin to one provider so an outage on the primary never silently reroutes to an
+  endpoint with a different price, quantization or retention posture, reasoning disabled because
+  extraction pays nothing for hidden thinking, and a sticky `session_id` that keeps the provider
+  prompt cache warm. Setting `AIZK_LLM_EXTRA_BODY` or `AIZK_LLM_HEADERS` yourself replaces that
+  posture whole rather than merging into it. No cache header is sent, because OpenRouter's
+  `X-OpenRouter-Cache` stores the full request and response at the edge for its TTL whatever the
+  per-request retention flag says, while extraction never repeats an identical request and so buys
+  nothing for the retention surface it would add.
+
+  Name the dated slug, `deepseek/deepseek-v4-flash-0731` rather than the floating
+  `deepseek/deepseek-v4-flash`. The alias has no endpoint that satisfies zero data retention, so
+  under this posture OpenRouter fails closed with a 404 data policy error rather than quietly
+  routing to a provider that keeps the text. Compose reads the credential from
+  `AIZK_OPENROUTER_API_KEY` and passes it through as the provider-neutral `AIZK_LLM_API_KEY`, and
+  the new `external_llm_carries_key` validator refuses at startup to run an external endpoint with
+  an empty credential, since otherwise the anonymous request fails 401 inside a background
+  extraction job far from the environment that caused it.
+
+- `aizk admin data rechunk` re-splits and re-embeds converted originals straight from the Markdown
+  already in PostgreSQL, which is the cheap catch-up after a chunk size, lexical prefix or
+  embedding model change. Reconversion pays Docling and OCR to rebuild text that never changed,
+  while this pass never touches the original bytes and costs one embedding batch per original. The
+  work runs through the new `MarkdownReindexJob` at the conversion priority and under
+  `docling_concurrency`, so a corpus-wide sweep cannot point every worker at the embedder at once.
+  A finished job stamps `indexed_at` on the revision and the sweep takes the least recently indexed
+  first, so repeating it with `--limit` marches through the corpus instead of circling the same
+  head, and a revision converted before that column existed reads as null and is swept first.
+
+- A nightly `CleanupJob` at 01:00 trims PgQueuer's completed-job log past
+  `AIZK_CLEANUP_LOG_RETENTION_DAYS`, seven by default, in batches of
+  `AIZK_CLEANUP_LOG_DELETE_BATCH`, ten thousand, looping until a short batch ends the drain, and
+  then runs `VACUUM (ANALYZE)`. Nothing reads that history for correctness and it becomes the
+  single largest table a busy deployment owns, so leaving it unbounded was pure weight. The vacuum
+  never takes an exclusive lock and never hands disk back to the operating system either, so a
+  deployment whose log grew before this job first ran wants one `VACUUM FULL pgqueuer_log` or a
+  `pg_repack` pass, which the PostgreSQL page now spells out.
+
+- Artifact bytes are compressed with Zstandard before they reach the object store and restored on
+  the way back, so nothing above the byte store ever sees a compressed frame. It is adaptive rather
+  than blind, keeping the compressed form only when it saves at least
+  `AIZK_OBJECT_STORE_COMPRESSION_MIN_SAVINGS`, which is what stops JPEG and EPUB from paying for a
+  container that buys nothing. On a copy of the live deployment, 327 objects and 459.8 MB of
+  originals, the whole store came back 42.3 percent smaller, HTML 72.5 percent and PDF 46.5 percent
+  where it compressed at all. The content hash still describes the original bytes rather than the
+  container, so it survives recompression and an integrity pass still proves the object decodes to
+  the file that was accepted. `AIZK_OBJECT_STORE_COMPRESSION_LEVEL` defaults to 9, measured as the
+  knee on a 165 MB corpus of real documents, past which the write cost rises two orders of
+  magnitude to buy about one more point.
+
+  `blob.encoding_level` records the level each object was last evaluated under, and null means the
+  policy is unknown, which is what every object written before that column existed reports. `aizk
+  admin storage compact --limit 200` takes the largest objects still below the configured level,
+  rewrites each one under a fresh key and repoints PostgreSQL before deleting the old key, so an
+  interruption leaves an unreferenced object behind rather than a row pointing at bytes that are
+  gone. Run it until `examined` comes back zero. Because a rewrite has to verify the original
+  first, the pass doubles as an integrity check and records itself as one, and it refuses to run
+  while compression is disabled, since there would be no policy to compact toward.
+
+- Intake refuses a format aizk cannot read, at the door rather than after it is stored. A declared
+  media type is a claim and the leading signature is the evidence, and a file whose two disagree is
+  refused rather than quietly relabelled, because only the caller can settle which of them is
+  wrong. The check runs when an upload capability is minted, so an unreadable format costs one
+  round trip instead of a whole upload, and again on the delivered bytes before anything is scanned
+  or stored. PDF, the image formats PNG, JPEG, GIF, TIFF, BMP and WebP, WAV audio, EPUB, the OOXML
+  documents and the textual family are accepted. Video is refused deliberately, since aizk has no
+  video reader and accepting it would store an opaque object nobody could search.
+
+- `--profile observability` starts Alloy, Loki, Tempo, VictoriaMetrics and Grafana, and the three
+  signals link to one another inside one pane. Every aizk process exports OTLP to Alloy rather than
+  to Tempo directly, so a Tempo restart costs a retry in one place instead of dropped spans in
+  every process, and Tempo's metrics generator turns those same spans into RED series and a service
+  graph without a hand-rolled counter anywhere in the application. `CallerAnnotator` stamps the
+  caller, the operation and the touched scopes onto every span opened under a request rather than
+  only the first, which is what makes per-user cost answerable when a model call opens its own span
+  long after the transport identified who asked. Model turns emit GenAI convention spans carrying
+  the model, the token counts and the latency, while prompts and completions are deliberately
+  excluded, since a chunk of somebody's private memory is exactly what they would contain.
+
+- A third Caddy site on 8083 accepts OpenTelemetry over HTTP from outside the deployment, so a
+  provider that emits its own generation traces, OpenRouter among them, can push them into that
+  same Alloy and Tempo pipeline. It is the only public route no browser ever visits, so it
+  authenticates on a bearer token instead of the operator gate in front of Grafana, which can only
+  answer a client capable of following a redirect to a sign-in page. `AIZK_OTLP_TOKEN` carries no
+  default and Compose refuses to start the `web` container without one, because Caddy substitutes
+  the token when it parses the file rather than reading it per request, and an absent value would
+  leave the matcher comparing against a bare `Bearer ` and admitting every caller. Alloy already
+  owns `/v1/traces`, `/v1/metrics` and `/v1/logs` on that port, so the path passes through
+  untouched, and the site declares no `depends_on`, which keeps a stack brought up without the
+  observability profile answering 502 rather than refusing to start.
+
 ### Changed
 
 - One source now stands for at most one promoted copy per destination scope set, enforced by the
@@ -77,6 +170,102 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   mild redundancy being the cheaper mistake than discarding statements. Nothing is weighed against a
   different document, and a community or overview summary names no span and so is never dropped,
   which keeps the mix of source excerpts and derived memories in a packed result intact.
+- Recall's chunk lanes rank inside a `MATERIALIZED` window over `chunk` alone and join `document`
+  outside it. Ranking chunks joined to their documents looks harmless and is not, because under row
+  security the planner abandons both chunk indexes, loops over every visible chunk and sorts the
+  lot, which on a production snapshot of 22,290 chunks cost 80 ms for the dense ranking and 245 ms
+  for the lexical one and left the two largest indexes in the database, a 66 MB `vchordrq` and a
+  343 MB `bm25`, maintained on every write and read by nothing. That same snapshot now ranks dense
+  in 7.5 ms and lexical in 10 ms, both walking their index, and the whole fused statement went from
+  320 ms to 21 ms with byte-identical output over nine query and vector combinations.
+  `MATERIALIZED` is load bearing, since without it the planner folds the window back into the join
+  and rebuilds the very scan this removes. Row security already hides every chunk whose document
+  the caller cannot read, so the window sees exactly what the join would have seen and the join
+  keeps only `Document.is_active()`, which the window pays for by reaching `fusion_overfetch` times
+  deeper, three by default. Five of the 1,168 documents in that snapshot carry an expiry and one
+  had expired, so three deep never comes close to spending the slack. An `owned` query is the
+  exception and keeps its join inside the ranking, because an exact scope predicate is selective
+  enough to drive the plan on its own while a global window would spend its over-fetch on documents
+  the selection could never carry, which on a scope holding 2 percent of the corpus returned 31 and
+  10 rows where the joined shape returned the full 50 in 4.7 ms and 10.8 ms.
+- Two VectorChord knobs are now stated on every application connection rather than inherited from
+  whatever the server was built with. `bm25_catalog.bm25_limit` follows the new `bm25_limit`
+  setting, 150, which caps how many rows one bm25 index scan returns whatever the query asked for,
+  and that cap is silent, so pinning it is what turns the lexical window into a promise the index
+  keeps. The new `lexical_window_fits_bm25_limit` validator refuses to start when `fusion_depth`
+  times `fusion_overfetch` exceeds it, rather than letting the lane be quietly cut short.
+  `vchordrq.prefilter` follows the new `vchordrq_prefilter` setting and is off, where it used to be
+  hardcoded on. Applying row security inside the ANN walk pays only when a caller reads a small
+  share of the index, and one scope holds 98 percent of the chunks in the deployment measured here,
+  so prefiltering cost 5,271 buffers against 2,465 with it off. Turn it on once many organizations
+  each read their own small slice, and confirm it with `EXPLAIN (ANALYZE, BUFFERS)` on a real
+  caller's dense ranking with the setting both ways.
+- The store keeps less on disk and reads far less to answer a question. Docling is no longer asked
+  for its native document tree at all, since nothing ever read it and a large PDF answers with tens
+  of megabytes of JSON that would be parsed once and dropped, so `artifact_content` loses both
+  `docling_json` and the conversion diagnostics in `details`. Both are reproducible by converting
+  the original again. `markdown` stays because it is now load bearing rather than a derivative
+  nothing consumes, being the text the re-chunk sweep replays. Every remaining site that needed
+  only a scope array or a status stopped loading the whole row beside it, which is what detoasting
+  the Markdown in that row costs. A conversion state transition, the conversion write itself, the
+  reconversion sweep's candidate window and the browser artifact dashboard each select their own
+  handful of columns now, and the dashboard in particular used to decompress megabytes of stored
+  Markdown to render status lines that never show a word of it.
+- PostgreSQL stores embeddings as `halfvec`, halving both embedding bytes and ANN index size, and
+  every lane bind carries the same half precision type, because a bind that does not makes the
+  planner cast the column side of the distance comparison and the index walk degrades to a scan.
+  CockroachDB has no half precision vector type, so that branch keeps the portable full `VECTOR`
+  column and has nothing to convert.
+- The `db` container states two compression settings it used to leave at their defaults.
+  `default_toast_compression` is `lz4`, which is faster both ways and usually denser than pglz on
+  the large text columns this schema is full of, and PostgreSQL admits only those two here so it is
+  the whole of the available choice. `wal_compression` is `zstd`, which that setting does admit,
+  and full page images dominate WAL volume on a store that never stops writing through chunk
+  inserts, embeddings and queue churn. Neither rewrites anything, so WAL applies to every segment
+  written afterward and TOAST only to new values, with old rows keeping pglz until something
+  rewrites them. `wal_buffers` rises to 128 MB after production recorded 216,229 waits on a full
+  WAL buffer, each one a backend stalling to flush before it could continue, and `max_wal_size`
+  rises to 24 GB after 76 percent of checkpoints turned out to be WAL pressure driven rather than
+  timed with 21 percent of WAL records full page images. All of these sit on the command line, so
+  they need the container recreated rather than reloaded.
+- The MCP verbs are `find` and `keep` rather than `recall` and `remember`. `find` answers from
+  memory first, always, and reaches the public web only for what memory could not answer and only
+  after the question has been rewritten so that nothing identifying the asker leaves the machine,
+  with every answer ending in a receipt naming exactly what left. `web` takes `auto`, `off` or
+  `force` and `fresh` bypasses every cache, though neither overrules the stop that keeps a question
+  about the asker's own notes, people, projects or machines from being planned at all. A fetched
+  page is cached as an expiring document inside the caller's scopes, never enters the knowledge
+  graph and always renders under the web label. Planning that rewrite is itself egress, since the
+  question and a memory excerpt go to the configured extraction endpoint, so
+  `AIZK_WEB_SEARCH_ENABLED` refuses to start unless that endpoint sits inside the deployment or is
+  pinned to zero data retention.
+- A derived fact carries how settled its source was, on a ladder running from `settled` through
+  `reported`, `hedged` and `disputed` to `refuted`, and anything other than settled prints in the
+  bracket beside the claim. Extraction proposes the mark and a deterministic check then re-reads
+  the sentence behind the quote and compares it against what the claim says, and that check can
+  only ever move a claim down the ladder, never up. It refuses a fact outright when the fact states
+  more certainly than its own sentence did, so either the qualification survives into the fact or
+  there is no fact. An answer holding an unsettled claim opens with a line telling the reader not
+  to repeat it as fact, and the source excerpt behind such a claim stops counting as a repetition
+  of it, so the sentence actually worth reading arrives beside the claim instead of being dropped
+  as redundant.
+- Container pins move forward, `oauth2-proxy` to v7.15.3, `cloudflared` to 2026.7.3, Grafana to
+  13.1.2, Loki to 3.7.5, Tempo to 2.9.4, and ClamAV to a newer digest of the same
+  `1.5.3-debian13-slim` tag. The three vLLM lanes deliberately stay on v0.24.0, which is the
+  version that wrote every vector currently in the index. v0.26.0 is wanted for the missing device
+  sync in the pooling path, which fixes wrong LAST-pooling scores when a prompt is split across
+  prefill chunks under `torch.compile` and whose regression test drives the very
+  `Qwen3ForSequenceClassification` reranker overrides this deployment already sets. The same span
+  of releases also made Model Runner V2 the default execution path for dense models, so the
+  embedder and the reranker both run through new code even where no numeric change was intended.
+  That is why the move is gated rather than automatic. Starting clean is not the acceptance test,
+  because embeddings written by a runtime that produces different vectors corrupt a 150k vector
+  index silently with no error anywhere, and a redeploy is exactly the moment that would pass
+  unnoticed, so the bump waits on a parity run comparing the two over a fixed probe set and passing
+  only at cosine similarity at or above 0.9999 with unchanged rerank ordering. A failed parity run
+  means re-embedding the corpus, which is a deliberate decision worth making on its own evidence
+  and never a side effect of a redeploy. Holding here also means a redeploy does not recreate these
+  containers at all, so no model reload interrupts serving.
 
 - A SvelteKit browser dashboard under `src/web` replaces the planned Reflex Python UI, served by
   a separate browser API service. `AizkAPI` verifies the same Logto bearer tokens as MCP and
@@ -251,6 +440,16 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Fixed
 
+- The artifact derivative drop would have aborted on any deployment holding data. `details` is
+  `NOT NULL`, and the first draft blanked both derivatives to `NULL` before dropping them, so the
+  blanking `UPDATE` violated that constraint on the very rows it existed to clear and took the
+  whole migration down with it. `0008_storage_footprint` blanks it to an empty `jsonb` instead,
+  which still rewrites each row without the old value and still releases the out of line bytes.
+  That blanking pass is itself the point, because dropping a column is a catalog edit. PostgreSQL
+  marks the attribute dead and stops returning it while every existing row keeps the value on disk
+  and every out of line value keeps its rows in the TOAST relation, so a bare `DROP COLUMN`
+  reclaims nothing at all.
+
 - Every conversion now names its OCR engine and languages, because the default read Chinese. aizk
   sent `do_ocr=true` and nothing else, so Docling chose RapidOCR, whose bundled recognition model
   set is Chinese and which maps requested languages onto only english, latin and chinese with no
@@ -307,6 +506,20 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 - Every pre-release revision is fused into `0001_init`. A pre-release Aizk database is backed up
   and rebuilt from that baseline while the separate Logto database remains intact.
+- The revisions written past `0007_web_egress` and never deployed are squashed into one
+  `0008_storage_footprint`, replacing the separate `0008_halfvec_storage` and
+  `0009_blob_encoding_level`. It retypes every embedding column and rebuilds its ANN index as
+  `halfvec`, adds the `blob.encoding_level` marker with its range check and index, blanks and drops
+  the artifact derivatives, and adds the `indexed_at` re-chunk cursor. The `live_fact` view pins
+  the column types of what it selects, so the revision drops and rebuilds it around the fact
+  embedding retype. `0004_storage_footprint` is the CockroachDB counterpart and is shorter rather
+  than incomplete, since that backend has no `halfvec` to convert to and stores a row's values
+  inline with no TOAST relation, so there is nothing to blank and no `VACUUM FULL` to follow.
+  Existing rows arrive with a null `encoding_level` and a null `indexed_at`, which read as an
+  unknown compression policy and an unknown chunking policy and put them at the front of the first
+  `aizk admin storage compact` and `aizk admin data rechunk` passes. Handing the freed file space
+  back to the operating system is separate and worth one `pg_repack -t artifact_content` after the
+  migration runs, which also rewrites that table's TOAST under the new `lz4` setting.
 
 ## 0.0.1 - 2026-07-04
 

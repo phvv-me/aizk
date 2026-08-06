@@ -30,7 +30,7 @@ async def public_resolver(host: str, port: int):
     return (ip_address("93.184.216.34"),)
 
 
-def test_docling_client_sends_bounded_file_and_preserves_both_outputs(tmp_path: Path) -> None:
+def test_docling_client_sends_bounded_file_and_normalizes_its_markdown(tmp_path: Path) -> None:
     source = tmp_path / "paper.pdf"
     source.write_bytes(b"%PDF-test")
     requests: list[httpx.Request] = []
@@ -41,10 +41,7 @@ def test_docling_client_sends_bounded_file_and_preserves_both_outputs(tmp_path: 
         return httpx.Response(
             200,
             json={
-                "document": {
-                    "md_content": "# Cafe\u0301  \r\n\r\nText\r\n",
-                    "json_content": {"schema_name": "DoclingDocument", "texts": []},
-                },
+                "document": {"md_content": "# Cafe\u0301  \r\n\r\nText\r\n"},
                 "status": "success",
                 "processing_time": 0.25,
                 "timings": {"pipeline": 0.2},
@@ -67,20 +64,14 @@ def test_docling_client_sends_bounded_file_and_preserves_both_outputs(tmp_path: 
     )
 
     assert result.markdown == "# Café\n\nText\n"
-    assert result.native_json == {"schema_name": "DoclingDocument", "texts": []}
-    assert result.details == {
-        "status": "success",
-        "processing_time": 0.25,
-        "timings": {"pipeline": 0.2},
-        "errors": [],
-    }
+    assert result.status == "success"
     assert len(requests) == 1
     request = requests[0]
     assert request.url.path == "/v1/convert/file"
     assert request.headers["content-type"].startswith("multipart/form-data;")
-    assert all(
-        value in request.content for value in (b"renamed.pdf", b"json", b"md", b"%PDF-test")
-    )
+    assert all(value in request.content for value in (b"renamed.pdf", b"md", b"%PDF-test"))
+    # The native document tree is never stored, so it is never requested either.
+    assert b"json" not in request.content
 
 
 def test_docling_options_always_declare_the_ocr_engine_and_its_languages() -> None:
@@ -328,8 +319,8 @@ def test_optional_source_metadata_accepts_explicit_null_values() -> None:
     "payload",
     [
         {"document": {}, "status": "failure"},
-        {"document": {"md_content": "text"}, "status": "success"},
-        {"document": {"json_content": {}}, "status": "success"},
+        {"document": {"md_content": "text"}, "status": "skipped"},
+        {"document": {}, "status": "success"},
     ],
 )
 def test_docling_output_rejects_failures_and_missing_requested_formats(

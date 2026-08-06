@@ -687,7 +687,13 @@ def test_provider_advertises_logto_only_when_configured(
                 if line.strip().startswith("@mcp path ")
             ).split()[2:]
         )
-        assert gateway_routes == routes | {"/mcp", "/mcp/*"}
+        # `/revoke` is served but not enumerated by `get_routes`, so it has to be named here
+        # or this assertion would reject a gateway that is actually correct. The provider's
+        # own authorization server metadata advertises `revocation_endpoint` at that path,
+        # and the running server answers there rather than falling through to the docs site,
+        # both confirmed against the deployment. A spec compliant client reads the metadata,
+        # so a gateway missing the path 404s the one call that revokes a token.
+        assert gateway_routes == routes | {"/mcp", "/mcp/*", "/revoke"}
 
 
 def test_bearer_uses_the_local_identity_when_auth_is_off(

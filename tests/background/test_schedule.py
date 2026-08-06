@@ -14,7 +14,12 @@ from pgqueuer import PgQueuer
 from pydantic import UUID5
 
 import aizk.background.schedule as schedule_mod
-from aizk.background.jobs.conversion import ArtifactProcessor, DoclingConversionJob
+from aizk.background.jobs.conversion import (
+    ArtifactProcessor,
+    ArtifactReindexer,
+    DoclingConversionJob,
+    MarkdownReindexJob,
+)
 from aizk.background.jobs.maintenance import (
     ProfileProjectionJob,
     ScheduledJob,
@@ -156,7 +161,8 @@ def test_run_worker_registers_every_entrypoint(
 def test_portable_worker_assembles_every_enabled_job_and_schedule() -> None:
     runtime = fake_runtime()
     conversion = DoclingConversionJob(cast(ArtifactProcessor, SimpleNamespace()))
-    services = replace(runtime.artifacts, conversion=conversion)
+    reindex = MarkdownReindexJob(cast(ArtifactReindexer, SimpleNamespace()))
+    services = replace(runtime.artifacts, conversion=conversion, reindex=reindex)
     runtime = replace(runtime, artifacts=services)
 
     worker = portable_worker(runtime, batch_size=3)
@@ -166,6 +172,7 @@ def test_portable_worker_assembles_every_enabled_job_and_schedule() -> None:
         ChunkProjectionJob.entrypoint,
         UsageAccountingJob.entrypoint,
         DoclingConversionJob.entrypoint,
+        MarkdownReindexJob.entrypoint,
     } <= set(worker.jobs)
     expected_schedules = {
         job.cron_entrypoint

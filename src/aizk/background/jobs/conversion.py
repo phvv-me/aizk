@@ -13,7 +13,7 @@ from ...store.models.tables import Artifact, ArtifactContent, Blob
 from ...types import Scopes
 from ..enum import JobPriority
 from ..queue import Queue, QueueJob, QueuePayload
-from .models import ArtifactConversionJob
+from .models import ArtifactConversionJob, ArtifactReindexJob
 
 
 class ArtifactProcessor(Protocol):
@@ -21,6 +21,14 @@ class ArtifactProcessor(Protocol):
 
     async def process(self, content_id: UUID7, scopes: Scopes) -> None:
         """Process one original under its exact queued scopes."""
+        ...
+
+
+class ArtifactReindexer(Protocol):
+    """Rebuild one already converted original's chunks from its stored Markdown."""
+
+    async def reindex(self, content_id: UUID7, scopes: Scopes) -> None:
+        """Re-chunk one original under its exact queued scopes."""
         ...
 
 
@@ -38,6 +46,27 @@ class DoclingConversionJob(QueueJob[ArtifactConversionJob]):
     async def handle(self, payload: ArtifactConversionJob) -> None:
         """Resolve and process one original only through its durable PostgreSQL identity."""
         await self.processor.process(payload.artifact_content_id, payload.scopes)
+
+
+class MarkdownReindexJob(QueueJob[ArtifactReindexJob]):
+    """Re-chunk one queued original through the configured reindexer.
+
+    It runs at the same priority as a conversion because it is the tail of the same
+    pipeline, and under the same concurrency limit because a corpus-wide sweep would
+    otherwise point every worker at the embedder at once.
+    """
+
+    entrypoint: ClassVar[str] = "aizk_reindex_artifact"
+    payload_type: ClassVar[type[QueuePayload]] = ArtifactReindexJob
+    priority: ClassVar[int] = JobPriority.artifact
+    concurrency_limit: ClassVar[int] = settings.docling_concurrency
+
+    def __init__(self, reindexer: ArtifactReindexer) -> None:
+        self.reindexer = reindexer
+
+    async def handle(self, payload: ArtifactReindexJob) -> None:
+        """Re-chunk one original only through its durable PostgreSQL identity."""
+        await self.reindexer.reindex(payload.artifact_content_id, payload.scopes)
 
 
 class ArtifactQueue:
@@ -167,11 +196,15 @@ class ArtifactReconversion:
         return admitted
 
     async def originals(self, limit: int) -> tuple[tuple[UUID7, Scopes], ...]:
-        """Read the converted originals still carrying an older conversion, oldest first."""
+        """Read the converted originals still carrying an older conversion, oldest first.
+
+        Only the identity and the scope set are selected, since a candidate whose whole row
+        came back would detoast the very Markdown this sweep is about to replace.
+        """
         async with User.system().owner as session:
             rows = (
                 await session.exec(
-                    select(ArtifactContent)
+                    select(ArtifactContent.id, ArtifactContent.scopes)
                     .join(Artifact, Artifact.id == ArtifactContent.artifact_id)
                     .join(Blob, Blob.id == ArtifactContent.blob_id)
                     .where(
@@ -182,7 +215,7 @@ class ArtifactReconversion:
                     .limit(limit)
                 )
             ).all()
-            return tuple((row.id, frozenset(row.scopes)) for row in rows)
+            return tuple((content_id, frozenset(scopes)) for content_id, scopes in rows)
 
     async def claim(self, content_id: UUID7) -> None:
         """Commit one original's move back to `queued` in its own transaction."""
@@ -193,6 +226,57 @@ class ArtifactReconversion:
                 .values(state=ArtifactContent.State.queued)
                 .execution_options(synchronize_session=False)
             )
+
+
+class ArtifactRechunk:
+    """Offer converted originals to the re-chunk queue, least recently indexed first.
+
+    `indexed_at` is what makes a repeated pass walk forward. A finished job stamps it, so the
+    window rotates instead of returning the same head, and a revision converted before the
+    column existed reads as null and is swept first.
+    """
+
+    async def enqueue(self, limit: int) -> int:
+        """Enqueue at most `limit` converted originals for re-chunking.
+
+        Nothing is claimed here. The original keeps its `ready` state throughout because its
+        conversion is still current, and it is only the chunks beneath it that are rebuilt, so
+        deduplication on the content ID is the whole guard against queueing one twice.
+        """
+        if limit < 1:
+            raise ValueError("re-chunk limit must be positive")
+        admitted = 0
+        async with Queue(dsn=settings.asyncpg_dsn) as queue:
+            for content_id, scopes in await self.converted(limit):
+                admitted += await queue.enqueue(
+                    MarkdownReindexJob,
+                    ArtifactReindexJob(artifact_content_id=content_id, scopes=scopes),
+                    str(content_id),
+                )
+        return admitted
+
+    async def converted(self, limit: int) -> tuple[tuple[UUID7, Scopes], ...]:
+        """Read converted originals that still hold Markdown, least recently indexed first.
+
+        The Markdown itself is tested for presence and never selected, so choosing the window
+        costs no detoasting at all. The worker reads the text for the one row it works on.
+        """
+        async with User.system().owner as session:
+            rows = (
+                await session.exec(
+                    select(ArtifactContent.id, ArtifactContent.scopes)
+                    .where(
+                        ArtifactContent.state == ArtifactContent.State.ready,
+                        ArtifactContent.markdown.is_not(None),
+                    )
+                    .order_by(
+                        ArtifactContent.indexed_at.asc().nulls_first(),
+                        ArtifactContent.id,
+                    )
+                    .limit(limit)
+                )
+            ).all()
+            return tuple((content_id, frozenset(scopes)) for content_id, scopes in rows)
 
 
 # Fetched HTML is where site chrome lives, and the boilerplate cleaner only runs on those.
@@ -217,3 +301,8 @@ async def reconvert_web_pages(limit: int = 100) -> int:
 async def reconvert_scanned_documents(limit: int = 100) -> int:
     """Requeue what OCR read, so a corrected engine and language rewrite their text."""
     return await ArtifactReconversion(_SCANNED_DOCUMENTS).enqueue(limit)
+
+
+async def rechunk_artifacts(limit: int = 100) -> int:
+    """Requeue converted originals so a new chunk, lexical or embedding policy reaches them."""
+    return await ArtifactRechunk().enqueue(limit)

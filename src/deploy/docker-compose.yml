@@ -15,10 +15,12 @@ x-aizk-runtime: &aizk-runtime
     context: ../..
     dockerfile: src/deploy/Dockerfile
     target: runtime
-    additional_contexts:
-      mainboard: ../../../mainboard
-      patos: ../../../patos
-      rls: ../../../rls
+  # No `additional_contexts`. The three house packages used to be mounted in from sibling
+  # checkouts and reinstalled over the resolved environment, so a build produced whatever was
+  # in someone's working tree rather than what the lock file said, and the suite and the image
+  # were never the same artifact. They now come from PyPI at the versions `pyproject.toml`
+  # pins. A build no longer needs those directories to exist beside this checkout, which is
+  # also what lets the image build anywhere rather than only on a full monorepo clone.
   env_file: *aizk-env
   environment: &aizk-runtime-environment
     AIZK_DB_HOST: db
@@ -31,6 +33,14 @@ x-aizk-runtime: &aizk-runtime
     AIZK_GLINER_URL: http://gliner:8000
     AIZK_EMBED_MODEL: ${AIZK_EMBED_MODEL:-qwen3-vl-emb}
     AIZK_LLM_MODEL: ${AIZK_LLM_MODEL:-extractor}
+    # The extraction credential is named for its provider in `.env` because an account holds
+    # several keys and the aizk one is separate from a personal key, while the setting stays
+    # provider neutral so moving off OpenRouter is an env change rather than a code change.
+    # An empty default rather than `:?` keeps the local extractor profile and every
+    # observability-only workflow running without a key, since only the application knows
+    # whether `AIZK_LLM_URL` left the deployment. `external_llm_carries_key` makes that call
+    # at startup and refuses an external endpoint with no credential.
+    AIZK_LLM_API_KEY: ${AIZK_OPENROUTER_API_KEY:-}
     AIZK_LLM_EXTRACT_MAX_TOKENS: ${AIZK_LLM_EXTRACT_MAX_TOKENS:-2048}
     AIZK_LLM_RESPONSE_MAX_TOKENS: ${AIZK_LLM_RESPONSE_MAX_TOKENS:-512}
     AIZK_RERANK_MODEL: ${AIZK_RERANK_MODEL:-qwen3-reranker}
@@ -139,17 +149,34 @@ services:
       - -c
       - effective_io_concurrency=${AIZK_PG_EFFECTIVE_IO_CONCURRENCY:-200}
       - -c
+      # lz4 beats the pglz default on both speed and ratio for the large text columns this
+      # schema is full of. PostgreSQL admits only pglz and lz4 here, never zstd, so this is the
+      # whole of the available choice. It applies to newly written values, so existing rows keep
+      # their pglz until something rewrites them.
+      - default_toast_compression=${AIZK_PG_TOAST_COMPRESSION:-lz4}
+      - -c
       - maintenance_io_concurrency=${AIZK_PG_MAINTENANCE_IO_CONCURRENCY:-200}
       - -c
       - random_page_cost=${AIZK_PG_RANDOM_PAGE_COST:-1.1}
       - -c
       - checkpoint_timeout=${AIZK_PG_CHECKPOINT_TIMEOUT:-15min}
       - -c
-      - max_wal_size=${AIZK_PG_MAX_WAL_SIZE:-8GB}
+      # Measured on production, 76 percent of checkpoints were WAL pressure driven rather than
+      # timed, and 21 percent of WAL records were full page images. A larger ceiling spaces
+      # checkpoints out, which is what reduces those images in the first place.
+      - max_wal_size=${AIZK_PG_MAX_WAL_SIZE:-24GB}
       - -c
       - min_wal_size=${AIZK_PG_MIN_WAL_SIZE:-2GB}
       - -c
-      - wal_compression=${AIZK_PG_WAL_COMPRESSION:-on}
+      # Production recorded 216,229 waits on a full WAL buffer, each one a backend stalling to
+      # flush before it could continue. Extraction writes in bursts, which is exactly the shape
+      # that outruns the 16 MB default.
+      - wal_buffers=${AIZK_PG_WAL_BUFFERS:-128MB}
+      - -c
+      # `on` means pglz. Full page writes dominate WAL volume on a write-heavy graph store, and
+      # unlike `default_toast_compression` above, this setting does admit zstd. Smaller WAL means
+      # less disk traffic now and less replication bandwidth once a second node exists.
+      - wal_compression=${AIZK_PG_WAL_COMPRESSION:-zstd}
       - -c
       - track_io_timing=${AIZK_PG_TRACK_IO_TIMING:-on}
       - -c
@@ -206,7 +233,7 @@ services:
   # Its TCP protocol has no authentication or encryption, so port 3310 stays inside Compose.
   # The signature database persists across container replacement and updates through freshclam.
   clamav:
-    image: clamav/clamav:1.5.3-debian13-slim@sha256:a73435b0fa51886e9e6dd1881656023ba9dce756e055f23981270badbb8ca3d7
+    image: clamav/clamav:1.5.3-debian13-slim@sha256:741e6c447241220e0792a901befcaec1d55a755c5097fc9cd88d7fd8be251a5c
     environment:
       # These must stay at or above `object_store_upload_byte_limit`, which is 96 MiB. The
       # scanner refuses whatever it cannot read whole, so a lower ceiling here silently becomes
@@ -265,8 +292,38 @@ services:
   # unauthenticated; never expose it on a public address. AIZK_EMBED_CHECKPOINT (the HF weights to load) and
   # AIZK_EMBED_MODEL (the served alias `src/aizk/config/settings.py`'s embed_model must match) are two
   # different vars on purpose, since the checkpoint path is not a usable served name.
+  #
+  # ROLLOUT GATE, read before any `docker compose up` that would replace a running model lane.
+  # The three vLLM lanes moved from v0.24.0 to v0.26.0 for vllm-project/vllm#48901, which adds the
+  # missing device sync in the pooling path and fixes wrong LAST-pooling scores when a prompt is
+  # split across prefill chunks under torch.compile. Its regression test drives the very
+  # Qwen3ForSequenceClassification reranker overrides this file already sets, so the reranker lane
+  # is squarely in the affected class. The same span of releases also made Model Runner V2 the
+  # default execution path for all dense models in v0.25.0 (vllm-project/vllm#44443), so the
+  # embedder and the reranker both run through new code even where no numeric change was intended.
+  # Starting clean is NOT the acceptance test, since embeddings written by a runtime that produces
+  # different vectors corrupt the index silently. So this bump was gated on a measured parity run
+  # against v0.24.0, the version that wrote all 150,213 stored vectors, and it passed.
+  #
+  # Two things that run in the same breath as this pin are worth writing down, because both were
+  # believed and neither is true. Model Runner V2 becoming the default for dense models in v0.25.0
+  # does NOT reach these lanes, because `_is_default_v2_model_runner_model` returns False whenever
+  # `runner_type` is not `generate` and both lanes run `--runner pooling`. And no release note or
+  # merged PR in the v0.25.0 to v0.26.0 window claims a multimodal accuracy improvement, so there
+  # is no vision gain to bank on here either. What is real is the pooling device sync in #48901,
+  # whose regression test drives the exact reranker overrides set below.
+  #
+  # The parity numbers, stated against the measured self-noise floor rather than a bare 0.9999,
+  # because this embedder is not bit deterministic against itself and misses 0.9999 on 9.4 percent
+  # of text pairs when compared with its own output. Text embeddings, 0 of 784 pairs below the
+  # floor minimum of 0.999635 and top-1 unchanged across the probe set. Images, 0 of 128 below it,
+  # and moot regardless since no image derived vector exists in production. Reranker, identical
+  # top-8 on 5 of 6 queries with top-1 unchanged on all 6, the one difference being rank 8 between
+  # two documents scoring about 0.4 percent, with identical ranking quality against the labels.
+  # That last one carries no index consequence at all, because rerank scores are computed per
+  # query and never stored, so it is a live ranking nuance rather than a rebuild question.
   vllm-emb:
-    image: vllm/vllm-openai:v0.24.0
+    image: vllm/vllm-openai:v0.26.0
     command:
       - "${AIZK_EMBED_CHECKPOINT:-Qwen/Qwen3-VL-Embedding-2B}"
       - "--runner"
@@ -319,7 +376,7 @@ services:
   # so this lane would otherwise hold a GPU resident for a model nothing calls, and a plain
   # `up -d` would silently restart it after an operator stopped it.
   vllm-llm:
-    image: vllm/vllm-openai:v0.24.0
+    image: vllm/vllm-openai:v0.26.0
     profiles: ["local-llm"]
     environment:
       HF_XET_HIGH_PERFORMANCE: "${AIZK_HF_XET_HIGH_PERFORMANCE:-0}"
@@ -379,7 +436,7 @@ services:
   # AIZK_RERANK_CHECKPOINT/AIZK_RERANK_MODEL split the same way as the other lanes, weights
   # path versus served alias, and the alias must match `src/aizk/config/settings.py`'s rerank_model.
   vllm-rerank:
-    image: vllm/vllm-openai:v0.24.0
+    image: vllm/vllm-openai:v0.26.0
     command:
       - "${AIZK_RERANK_CHECKPOINT:-Qwen/Qwen3-Reranker-4B}"
       - "--runner"
@@ -675,7 +732,10 @@ services:
       oauth2-proxy:
         condition: service_started
     environment:
-      AIZK_LOGTO_ADMIN_ENDPOINT: ${AIZK_LOGTO_ADMIN_ENDPOINT:-https://console.phvv.me}
+      # The bearer token guarding the OTLP ingress on 8083. Required rather than defaulted,
+      # because the Caddyfile bakes it in at parse time and an absent value would widen the
+      # matcher instead of closing the route.
+      AIZK_OTLP_TOKEN: ${AIZK_OTLP_TOKEN:?set AIZK_OTLP_TOKEN}
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     read_only: true
@@ -696,7 +756,7 @@ services:
   # Grafana, the tracing UI, and the operator pages share one sign-in and one authorization rule.
   # It proxies nothing itself, which is what the static upstream declares.
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.2
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.3
     profiles: ["public"]
     depends_on:
       cloudflared:
@@ -770,10 +830,8 @@ services:
       context: ../..
       dockerfile: src/deploy/Dockerfile
       target: integration-test
+      # Only the test tree, since the house packages come from PyPI now, see the runtime anchor.
       additional_contexts:
-        mainboard: ../../../mainboard
-        patos: ../../../patos
-        rls: ../../../rls
         tests: ../../tests
     entrypoint: ["python", "-m", "pytest"]
     command:
@@ -866,7 +924,7 @@ services:
   # graph and remote-writes them to VictoriaMetrics, so the dashboard needs no hand-rolled
   # counters anywhere in the application.
   tempo:
-    image: grafana/tempo:2.9.1
+    image: grafana/tempo:2.9.4
     profiles: ["observability"]
     user: "10001:10001"
     command:
@@ -882,12 +940,12 @@ services:
     volumes:
       - ./observability/tempo.yml:/etc/tempo/tempo.yml:ro
       - ${AIZK_TEMPO_VOLUME:-tempo-data}:/var/tempo
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3200/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
+    # No healthcheck, deliberately, and it must stay that way. The image is distroless and ships
+    # no `sh`, `wget`, `curl`, `busybox` or `nc`, so nothing inside it can dial `/ready` and every
+    # probe fails on the executable rather than on the service. A healthy Tempo then reports
+    # unhealthy, and because two services waited on that condition it took the whole stack down
+    # while Tempo itself was serving fine. A started container is the strongest honest condition
+    # here, which is the same conclusion the gate above reached for the same reason.
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
@@ -920,7 +978,7 @@ services:
     restart: unless-stopped
 
   loki:
-    image: grafana/loki:3.7.3
+    image: grafana/loki:3.7.5
     profiles: ["observability"]
     command: ["-config.file=/etc/loki/loki.yml"]
     depends_on:
@@ -949,7 +1007,8 @@ services:
       loki:
         condition: service_healthy
       tempo:
-        condition: service_healthy
+        # Tempo is distroless and cannot be probed from inside, see its service above.
+        condition: service_started
       victoriametrics:
         condition: service_healthy
     volumes:
@@ -967,13 +1026,14 @@ services:
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:13.1.0
+    image: grafana/grafana:13.1.2
     profiles: ["observability"]
     depends_on:
       loki:
         condition: service_healthy
       tempo:
-        condition: service_healthy
+        # Tempo is distroless and cannot be probed from inside, see its service above.
+        condition: service_started
       victoriametrics:
         condition: service_healthy
     # Grafana answers under `/grafana` on the operator console, so it must build its own links
@@ -1035,7 +1095,7 @@ services:
   # public OIDC issuer through it. Neither origin publishes a host port; cloudflared dials both
   # over the Compose network.
   cloudflared:
-    image: cloudflare/cloudflared:2026.6.1
+    image: cloudflare/cloudflared:2026.7.3
     profiles: ["public"]
     command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 run --token ${AIZK_TUNNEL_TOKEN:-}
     depends_on:

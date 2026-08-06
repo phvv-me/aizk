@@ -92,6 +92,15 @@ class QueryContext(FrozenModel):
         return bindparam("fusion_depth", type_=Integer)
 
     @property
+    def fusion_window(self) -> ColumnElement[int]:
+        """The over-fetched cut a chunk ranking takes before its sources are joined back.
+
+        A ranking that runs over chunks alone still holds chunks of expired sources when it
+        is cut, so it reaches this many times deeper and lets the join spend the difference.
+        """
+        return self.fusion_depth * bindparam("fusion_overfetch", type_=Integer)
+
+    @property
     def entities(self) -> ColumnElement[list[str]]:
         """The lowered entity names bind the graph expansion seeds from."""
         return bindparam("qentities", type_=cast("TypeEngine[list[str]]", ARRAY(Text)))

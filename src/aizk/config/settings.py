@@ -129,6 +129,11 @@ class Settings(BaseSettings):
     backup_dir: str = ""
     backup_enabled: bool = False
     backup_keep_days: int = 14
+    # VectorChord returns at most this many rows from one bm25 index scan, whatever the query
+    # asked for, and the cap is silent. Every app connection pins the server setting to this
+    # value so the lexical ranking's window is a promise the index keeps rather than a request
+    # it may trim, and `lexical_window_fits_bm25_limit` rejects a window above it.
+    bm25_limit: PositiveInt = 150
     chunk_denylist: str = (
         "markdown,rst,asciidoc,tex,bib,plain-text,pofile,html,xml,dtd,css,scss,less,json,"
         "json5,jsonnet,yaml,toml,ini,java-properties,csv,tsv,cue,gitconfig,gitignore,"
@@ -275,6 +280,13 @@ class Settings(BaseSettings):
     # prompt for two half-chunks.
     extract_window_size: int = 2048
     fusion_depth: int = 50
+    # How much deeper than `fusion_depth` a chunk ranking reaches before its sources are
+    # joined back. The ranking runs over `chunk` alone so the planner keeps walking the ANN
+    # and bm25 indexes, which means expired sources are still in the window when it is cut,
+    # and this factor is the slack that covers them. Expiry is rare, 5 of 1,168 production
+    # documents carry one and a single document had expired, so three deep is far more than
+    # the discard rate asks for.
+    fusion_overfetch: PositiveInt = 3
     llm_api_key: str = ""
     llm_chat_template_kwargs: dict[str, bool] = {}
     llm_extra_body: dict[str, JsonValue] = {}
@@ -514,6 +526,12 @@ class Settings(BaseSettings):
     similar_facts: int = 5
     skip_live_gate: str = "aizk_skip_live_gate"
     system_user_id: UUID5 = _SYSTEM_USER_ID
+    # Whether the ANN walk applies row security inside the index instead of filtering the
+    # rows it hands back. It pays for itself only when a caller reads a small share of the
+    # index, and one scope holds 98 percent of the chunks today, so the filter is not
+    # selective and prefiltering only costs buffers. Turn it on once many callers each read
+    # their own small slice, which is what a deployment with many organizations becomes.
+    vchordrq_prefilter: bool = False
     web_client_id: str = ""
     web_client_secret: SecretStr = SecretStr("")
     web_public_url: AnyHttpUrl | None = None
@@ -690,6 +708,35 @@ class Settings(BaseSettings):
                 "reasoning": {"enabled": False},  # extraction pays nothing for hidden reasoning
                 "session_id": "aizk-extractor",  # sticky routing hits the provider prompt cache
             }
+        return self
+
+    @model_validator(mode="after")
+    def external_llm_carries_key(self) -> Self:
+        """Refuse an extraction endpoint outside the deployment that was given no credential.
+
+        A local lane authenticates nothing, so this binds only once `llm_url` leaves. Without
+        it an empty key reaches the provider as an anonymous request and fails 401 inside a
+        background extraction job, far from the env that caused it.
+        """
+        if self.llm_is_external and not self.llm_api_key:
+            raise ValueError(
+                f"`llm_url` {self.llm_url} is outside this deployment but `llm_api_key` is"
+                " empty. Set `AIZK_OPENROUTER_API_KEY`, which Compose passes through as"
+                " `AIZK_LLM_API_KEY`, or point `AIZK_LLM_URL` back at the local extractor"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def lexical_window_fits_bm25_limit(self) -> Self:
+        """Reject a lexical window the bm25 index would quietly cut short."""
+        window = self.fusion_depth * self.fusion_overfetch
+        if window > self.bm25_limit:
+            raise ValueError(
+                f"fusion_depth {self.fusion_depth} times fusion_overfetch"
+                f" {self.fusion_overfetch} asks the lexical ranking for {window} rows, more"
+                f" than the bm25_limit of {self.bm25_limit} a bm25 index scan returns."
+                " Raise bm25_limit or take a shallower window"
+            )
         return self
 
     @model_validator(mode="after")

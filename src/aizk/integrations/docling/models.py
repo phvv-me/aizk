@@ -1,8 +1,8 @@
 import unicodedata
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal
 
-from patos import FrozenModel
+from patos import FrozenModel, FrozenOpenModel
 from pydantic import (
     AfterValidator,
     AnyHttpUrl,
@@ -85,7 +85,9 @@ class DoclingOptions(FrozenModel):
     """Declare the bounded conversion policy sent to Docling Serve.
 
     Image export and output formats remain architectural invariants. Docling may use images while
-    converting, but AIZK receives placeholders and stores only JSON and Markdown derivatives.
+    converting, but AIZK receives placeholders and stores only the Markdown derivative. The native
+    document tree is not requested at all, because nothing ever read it and a large PDF answers
+    with tens of megabytes of JSON that would be parsed once and dropped.
 
     The OCR engine and its languages are always declared. Docling's automatic choice is RapidOCR,
     whose bundled recognition model is Chinese and which has no Japanese model set at all, so a
@@ -111,7 +113,7 @@ class DoclingOptions(FrozenModel):
     def form_data(self) -> dict[str, str | list[str]]:
         """Serialize the supported stable v1 options as multipart form values."""
         values: dict[str, str | list[str]] = {
-            "to_formats": ["json", "md"],
+            "to_formats": ["md"],
             "image_export_mode": "placeholder",
             "pipeline": self.pipeline,
             "do_ocr": str(self.do_ocr).lower(),
@@ -135,14 +137,13 @@ class DoclingOptions(FrozenModel):
         return values
 
 
-class DoclingDocument(FrozenModel):
-    """The lossless structure and normalized text requested from Docling Serve."""
+class DoclingDocument(FrozenOpenModel):
+    """The normalized text requested from Docling Serve."""
 
     md_content: str | None = None
-    json_content: dict[str, JsonValue] | None = None
 
 
-class DoclingResponse(FrozenModel):
+class DoclingResponse(FrozenOpenModel):
     """Typed single-document response returned by Docling Serve's stable v1 API."""
 
     document: DoclingDocument
@@ -159,42 +160,22 @@ class DoclingResponse(FrozenModel):
         normalized = "\n".join(line.rstrip() for line in lines).strip()
         return f"{normalized}\n" if normalized else ""
 
-    @property
-    def native_json(self) -> dict[str, JsonValue]:
-        """Return Docling's complete native document tree."""
-        return self.document.json_content or {}
-
-    @property
-    def details(self) -> dict[str, JsonValue]:
-        """Return conversion diagnostics separately from the native document tree."""
-        return cast(
-            dict[str, JsonValue],
-            self.model_dump(mode="json", exclude={"document"}),
-        )
-
 
 class DoclingConversionError(RuntimeError):
     """Docling finished without producing a usable lossless conversion."""
 
 
 class DoclingOutput(FrozenModel):
-    """Lossless native JSON and normalized Markdown ready for an artifact byte sink."""
+    """Normalized Markdown ready for an artifact byte sink."""
 
     status: Literal["success", "partial_success"]
-    docling_json: dict[str, JsonValue]
     markdown: str
-    details: dict[str, JsonValue]
 
     @classmethod
     def from_response(cls, response: DoclingResponse) -> DoclingOutput:
-        """Accept complete or partial output and reject skipped, failed, or missing formats."""
+        """Accept complete or partial output and reject skipped, failed, or missing Markdown."""
         if response.status not in ("success", "partial_success"):
             raise DoclingConversionError(f"Docling conversion ended with {response.status}")
-        if response.document.json_content is None or response.document.md_content is None:
-            raise DoclingConversionError("Docling response omitted JSON or Markdown")
-        return cls(
-            status=response.status,
-            docling_json=response.native_json,
-            markdown=response.markdown,
-            details=response.details,
-        )
+        if response.document.md_content is None:
+            raise DoclingConversionError("Docling response omitted Markdown")
+        return cls(status=response.status, markdown=response.markdown)

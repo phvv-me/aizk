@@ -54,7 +54,7 @@ content: "artifact_content" {
   state: artifact_content_state
   markdown: "text, nullable"
   companion_text: "text, nullable"
-  docling_json: jsonb
+  indexed_at: "timestamptz, nullable"
 }
 
 blob: "blob" {

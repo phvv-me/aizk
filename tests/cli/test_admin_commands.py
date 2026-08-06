@@ -144,6 +144,7 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
         "ingest",
         "promote",
         "reconvert-scanned-documents",
+        "rechunk",
         "reconvert-web-pages",
     }
     assert command_names(commands.ontology_app) == {
@@ -220,6 +221,12 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
             "requeued 7 scanned documents",
         ),
         (
+            ["data", "rechunk", "--limit", "3"],
+            "rechunk_artifacts",
+            9,
+            "requeued 9 originals for re-chunking",
+        ),
+        (
             ["data", "promote", str(_DOCUMENT_ID), "team"],
             "promote",
             5,
@@ -260,6 +267,7 @@ def test_operator_tree_has_one_explicit_admin_boundary() -> None:
         "data-ingest",
         "data-reconvert-web",
         "data-reconvert-scanned",
+        "data-rechunk",
         "data-promote",
         "data-export",
         "ontology-entity",

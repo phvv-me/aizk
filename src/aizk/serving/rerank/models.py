@@ -1,6 +1,6 @@
 from typing import Literal
 
-from patos import FrozenModel
+from patos import FrozenModel, FrozenOpenModel
 
 
 class RerankRequest(FrozenModel):
@@ -15,14 +15,14 @@ class RerankRequest(FrozenModel):
     truncation_side: Literal["left", "right"] | None = None
 
 
-class RerankResult(FrozenModel):
+class RerankResult(FrozenOpenModel):
     """One document score returned by the cross-encoder."""
 
     index: int
     relevance_score: float
 
 
-class RerankResponse(FrozenModel):
+class RerankResponse(FrozenOpenModel):
     """The scored rows returned by the cross-encoder."""
 
     results: list[RerankResult]

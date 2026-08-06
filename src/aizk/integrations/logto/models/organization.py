@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from patos import FrozenModel
+from patos import FrozenOpenModel
 from pydantic import AliasChoices, Field
 from pydantic.types import JsonValue, StringConstraints
 
@@ -9,7 +9,7 @@ from .role import Role
 from .scope import OrganizationScope
 
 
-class Org(FrozenModel):
+class Org(FrozenOpenModel):
     """Organization and current member roles returned by Logto."""
 
     id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]

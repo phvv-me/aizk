@@ -8,7 +8,7 @@ import httpx
 import pytest
 from id_factory import uuid5, uuid7
 from patos import sql
-from pydantic import UUID7, UUID8, JsonValue
+from pydantic import UUID7, UUID8
 from sqlalchemy.exc import SQLAlchemyError
 
 from aizk.artifacts import (
@@ -23,7 +23,8 @@ from aizk.artifacts import (
     VisualModality,
     WebBoilerplateCleaner,
 )
-from aizk.artifacts.service import _resolve_markdown_links
+from aizk.artifacts.models import ConvertedArtifact
+from aizk.artifacts.service import ArtifactReindexer, _resolve_markdown_links
 from aizk.extract.ingest import TextIngestor, TextSource
 from aizk.integrations.clamav import ClamAVClient, CleanScan
 from aizk.integrations.docling import (
@@ -105,9 +106,9 @@ class Repository:
         self.original_value = original
         self.created: list[dict] = []
         self.states: list[tuple[UUID7, Scopes, Artifact.Content.State, str | None]] = []
-        self.conversions: list[
-            tuple[OriginalArtifact, str, dict[str, JsonValue], dict[str, JsonValue]]
-        ] = []
+        self.conversions: list[tuple[OriginalArtifact, str, datetime]] = []
+        self.converted_value: ConvertedArtifact | None = None
+        self.indexings: list[tuple[UUID7, datetime]] = []
         self.fail_create = False
         self.pending_ids: tuple[UUID7, ...] = ()
         self.integrity_objects: tuple[StoredObject, ...] = ()
@@ -177,11 +178,24 @@ class Repository:
         user: User,
         original: OriginalArtifact,
         markdown: str,
-        docling_json: dict[str, JsonValue],
-        details: dict[str, JsonValue],
+        indexed_at: datetime,
     ) -> None:
         del user
-        self.conversions.append((original, markdown, docling_json, details))
+        self.conversions.append((original, markdown, indexed_at))
+
+    async def converted(
+        self,
+        user: User,
+        content_id: UUID7,
+        scopes: Scopes,
+    ) -> ConvertedArtifact:
+        del user, content_id, scopes
+        assert self.converted_value is not None
+        return self.converted_value
+
+    async def record_indexing(self, user: User, content_id: UUID7, indexed_at: datetime) -> None:
+        del user
+        self.indexings.append((content_id, indexed_at))
 
 
 class Enqueuer:
@@ -230,7 +244,7 @@ class Visual:
 def docling_response(markdown: str = "# Paper") -> DoclingResponse:
     return DoclingResponse.model_validate(
         {
-            "document": {"md_content": markdown, "json_content": {"texts": []}},
+            "document": {"md_content": markdown},
             "status": "success",
             "processing_time": 1.0,
         }
@@ -532,11 +546,11 @@ def test_processor_stores_postgres_derivatives_and_makes_one_file_document_recal
     asyncio.run(processor.process(source.content_id, source.scopes))
 
     assert converter.artifacts[0].content == b"original"
-    assert repository.conversions[0][1:3] == (
+    assert repository.conversions[0][1] == (
         "# Paper\n\n[Local rule](https://files.example/py-clean-code) and "
-        "[external](https://example.org/rule).\n",
-        {"texts": []},
+        "[external](https://example.org/rule).\n"
     )
+    assert repository.conversions[0][2].tzinfo is UTC
     assert storage.values == {source.storage_key: b"original"}
     assert "# paper.pdf" in ingested[0].text
     assert "## Extracted content" in ingested[0].text
@@ -686,17 +700,16 @@ def test_processor_persists_conversion_database_errors_as_a_failed_state() -> No
     storage, repository = Storage(), Repository(source)
     storage.values[source.storage_key] = b"original"
 
-    async def reject_json(
+    async def reject_markdown(
         user: User,
         original: OriginalArtifact,
         markdown: str,
-        docling_json: dict[str, JsonValue],
-        details: dict[str, JsonValue],
+        indexed_at: datetime,
     ) -> None:
-        del user, original, markdown, docling_json, details
+        del user, original, markdown, indexed_at
         raise SQLAlchemyError("unsupported Unicode escape sequence")
 
-    repository.store_conversion = reject_json
+    repository.store_conversion = reject_markdown
     processor = ArtifactProcessor(
         cast(DoclingClient, Converter(docling_response())),
         cast(ByteStore, storage),
@@ -760,3 +773,86 @@ def test_artifact_document_normalizes_blank_text_and_stays_non_semantic() -> Non
     rendered = asyncio.run(document.to_markdown())
     assert "## Extracted content" not in rendered
     assert rendered.startswith("# notes.txt\n\n## Source file")
+
+
+def converted(markdown: str = "# Paper\n\nThe converted body.\n") -> ConvertedArtifact:
+    source = original()
+    return ConvertedArtifact(
+        **source.model_dump(
+            include={
+                "artifact_id",
+                "content_id",
+                "created_by",
+                "scopes",
+                "filename",
+                "media_type",
+                "size",
+                "source_uri",
+                "companion_text",
+                "observed_at",
+                "expires_at",
+                "storage_hash",
+            }
+        ),
+        markdown=markdown,
+    )
+
+
+def test_reindexer_rebuilds_chunks_from_stored_markdown_without_calling_docling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Conversion is the expensive half, so a chunking change replays only the cheap one."""
+    stored = converted()
+    repository = Repository()
+    repository.converted_value = stored
+    document_id = uuid7()
+    rechunked: list[TextSource] = []
+    enqueued: list[tuple[UUID7, Scopes]] = []
+
+    async def rechunk(ingestor: TextIngestor, source: TextSource) -> UUID7:
+        del ingestor
+        rechunked.append(source)
+        return document_id
+
+    async def enqueue(resolved: UUID7, scopes: Scopes) -> int:
+        enqueued.append((resolved, scopes))
+        return 3
+
+    monkeypatch.setattr("aizk.artifacts.service.TextIngestor.rechunk", rechunk)
+    monkeypatch.setattr("aizk.artifacts.service.enqueue_document", enqueue)
+
+    asyncio.run(
+        ArtifactReindexer(cast(ArtifactRepository, repository)).reindex(
+            stored.content_id, stored.scopes
+        )
+    )
+
+    [submitted] = rechunked
+    assert "## Extracted content" in submitted.text
+    assert "The converted body." in submitted.text
+    assert submitted.artifact_content_id == stored.content_id
+    assert submitted.original_content_hash == stored.storage_hash
+    assert submitted.capture is not None
+    assert submitted.capture.observed_at == stored.observed_at
+    assert enqueued == [(document_id, stored.scopes)]
+    [(stamped_id, stamped_at)] = repository.indexings
+    assert stamped_id == stored.content_id
+    assert stamped_at.tzinfo is UTC
+
+
+def test_reindexer_refuses_markdown_that_re_chunks_into_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = Repository()
+    repository.converted_value = converted()
+
+    async def no_document(ingestor: TextIngestor, source: TextSource) -> None:
+        del ingestor, source
+        return None
+
+    monkeypatch.setattr("aizk.artifacts.service.TextIngestor.rechunk", no_document)
+    reindexer = ArtifactReindexer(cast(ArtifactRepository, repository))
+
+    with pytest.raises(DoclingConversionError, match="no document"):
+        asyncio.run(reindexer.reindex(uuid7(), frozenset({uuid5()})))
+    assert repository.indexings == []

@@ -18,6 +18,13 @@ class ArtifactConversionJob(QueuePayload):
     scopes: Scopes
 
 
+class ArtifactReindexJob(QueuePayload):
+    """Re-chunk request for one already converted original, from its stored Markdown."""
+
+    artifact_content_id: UUID7
+    scopes: Scopes
+
+
 class MaintenanceJob(QueuePayload):
     """Scheduled maintenance request for one exact scope set."""
 

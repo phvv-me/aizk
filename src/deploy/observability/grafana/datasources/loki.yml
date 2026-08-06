@@ -1,5 +1,18 @@
 apiVersion: 1
 
+# Provisioning matches an existing datasource by name and then updates it in place, which fails
+# when the stored row carries a different uid from the one declared below. A deployment that
+# created this datasource before the uid was pinned holds an auto-generated uid such as
+# `P44FB859FCA2E8E13`, and from Grafana 13.1.2 that update path answers `Datasource provisioning
+# error: data source not found`, aborts the whole datasource pass so the other files never load,
+# and crash loops the process rather than degrading. Deleting by name first turns the update into
+# a clean insert, so the declared uid always wins. It is idempotent and costs nothing when the
+# stored row already matches, and these datasources are `editable: false` and defined entirely
+# here, so nothing is lost by recreating them. Dashboards bind to the uid, never to the row id.
+deleteDatasources:
+  - name: AIZK logs
+    orgId: 1
+
 datasources:
   - name: AIZK logs
     type: loki

@@ -25,7 +25,7 @@ from sqlalchemy import (
     union_all,
 )
 from sqlalchemy.orm import declared_attr
-from sqlalchemy.sql.selectable import CTE
+from sqlalchemy.sql.selectable import CTE, Subquery
 from sqlmodel import Field, select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
@@ -104,6 +104,65 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
         )
 
     @classmethod
+    def ranking(
+        cls,
+        context: QueryContext,
+        ordering: ColumnElement[float],
+        *guards: ColumnElement[bool],
+        name: str,
+        sources: ColumnElement[bool],
+    ) -> Subquery:
+        """One chunk ranking cut at `fusion_depth`, ordered by `ordering` under `guards`.
+
+        Ranking chunks joined to their documents costs the planner both chunk indexes, since
+        under row security it abandons the ANN and bm25 walks, loops over every visible chunk
+        and sorts the lot, which on a 22,000-chunk snapshot was 300 of the 320 ms the fused
+        statement took and left the two largest indexes in the database written on every
+        ingest and read by nothing. So the ranking runs over `chunk` alone inside a
+        materialized window the planner cannot fold back into the join, and `document` joins
+        outside it to admit only live sources. Row security already hides every chunk whose
+        document the caller cannot read, so the window sees exactly what the join would have
+        seen, and it reaches `fusion_window` deep so the rows that later join discards are
+        paid for out of slack rather than out of the lane.
+
+        An `owned` query is the exception. Its exact scope set is selective, so the planner
+        drives the ranking from the few matching documents on its own and a global window
+        would spend its over-fetch on documents the selection can never carry and hand back a
+        short lane, which is the very thing the scope predicate sits inside the ranking to
+        prevent.
+        """
+        # The runtime import breaks the cycle with Document, which imports Chunk for
+        # its ordered-chunks relationship.
+        from .document import Document
+
+        if context.owned:
+            return (
+                select(cls.id, cls.document_id, ordering.label("ordering"))
+                .join(Document, Document.id == cls.document_id)
+                .where(sources, *guards)
+                .order_by(ordering)
+                .limit(context.fusion_depth)
+                .subquery(f"{name}_ranked")
+            )
+        window = (
+            select(cls.id, cls.document_id, ordering.label("ordering"))
+            .where(*guards)
+            .order_by(ordering)
+            .limit(context.fusion_window)
+            .cte(f"{name}_window")
+            # prefix_with is SQLAlchemy's supported spelling for a MATERIALIZED CTE.
+            .prefix_with("MATERIALIZED")
+        )
+        return (
+            select(window.c.id, window.c.document_id, window.c.ordering)
+            .join(Document, Document.id == window.c.document_id)
+            .where(sources)
+            .order_by(window.c.ordering)
+            .limit(context.fusion_depth)
+            .subquery(f"{name}_ranked")
+        )
+
+    @classmethod
     def fused(cls, context: QueryContext) -> CTE:
         """Fuse dense, lexical, and exact document-title chunk rankings.
 
@@ -121,18 +180,18 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
         active = Document.is_active()
         if context.owned:
             active = and_(active, Document.scopes == context.scope_set)
-        dense_ranked = (
-            select(cls.id, cls.document_id, chunk_distance.label("distance"))
-            .join(Document, Document.id == cls.document_id)
-            .where(cls.embedding.is_not(None), chunk_distance < context.floor, active)
-            .order_by(chunk_distance)
-            .limit(context.fusion_depth)
-            .subquery("dense_ranked")
+        dense_ranked = cls.ranking(
+            context,
+            chunk_distance,
+            cls.embedding.is_not(None),
+            chunk_distance < context.floor,
+            name="dense",
+            sources=active,
         )
         dense_chunks = select(
             dense_ranked.c.id,
             dense_ranked.c.document_id,
-            func.row_number().over(order_by=dense_ranked.c.distance).label("rank"),
+            func.row_number().over(order_by=dense_ranked.c.ordering).label("rank"),
         ).cte("dense_chunk")
 
         text_rank: ColumnElement[float]
@@ -150,21 +209,16 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
             )
             text_rank = column("bm25").op("<&>")(text_query)
             text_guard = true()
-        lexical_ranked = (
-            select(cls.id, cls.document_id, text_rank.label("raw_rank"))
-            .join(Document, Document.id == cls.document_id)
-            .where(active, text_guard)
-            .order_by(text_rank)
-            .limit(context.fusion_depth)
-            .subquery("lexical_ranked")
+        lexical_ranked = cls.ranking(
+            context, text_rank, text_guard, name="lexical", sources=active
         )
         lexical_chunks = (
             select(
                 lexical_ranked.c.id,
                 lexical_ranked.c.document_id,
-                func.row_number().over(order_by=lexical_ranked.c.raw_rank).label("rank"),
+                func.row_number().over(order_by=lexical_ranked.c.ordering).label("rank"),
             )
-            .where(lexical_ranked.c.raw_rank < 0)
+            .where(lexical_ranked.c.ordering < 0)
             .cte("lexical_chunk")
         )
 

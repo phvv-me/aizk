@@ -369,6 +369,19 @@ async def reconvert_scanned_documents(limit: int = 100) -> None:
     print(f"requeued {count} scanned documents")
 
 
+@data_app.command(name="rechunk")
+async def rechunk_artifacts(limit: int = 100) -> None:
+    """Re-split and re-embed converted originals from their stored Markdown.
+
+    Reach for this after changing `AIZK_CHUNK_SIZE`, the contextual lexical prefix, or the
+    embedding model. It skips Docling entirely, so it costs one embedding batch per original
+    rather than a full conversion. Least recently indexed first, safe to repeat until it
+    comes back zero.
+    """
+    count = await admin.rechunk_artifacts(limit=limit)
+    print(f"requeued {count} originals for re-chunking")
+
+
 @data_app.command(name="export")
 async def export_data(path: str, user: UUID5 | None = None) -> None:
     """Export visible memory to a scoped JSONL file."""

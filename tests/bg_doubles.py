@@ -14,7 +14,7 @@ from aizk.artifacts.configured import ArtifactServices
 from aizk.artifacts.service import ArtifactIntake, ArtifactIntegrity
 from aizk.artifacts.uploads import UploadBox
 from aizk.auth import Auth
-from aizk.background.jobs.conversion import DoclingConversionJob
+from aizk.background.jobs.conversion import DoclingConversionJob, MarkdownReindexJob
 from aizk.background.queue import QueueJob, QueuePayload
 from aizk.config import settings
 from aizk.extract.extractor import Extractor, LLMExtractor
@@ -48,11 +48,13 @@ def fake_artifact_services(
     intake: ArtifactIntake | None = None,
     conversion: RecordingConversion | None = None,
     integrity: ArtifactIntegrity | None = None,
+    reindex: RecordingConversion | None = None,
 ) -> ArtifactServices:
     """Build an artifact service container around whatever fakes a test provides."""
     return ArtifactServices(
         intake=cast("ArtifactIntake", intake),
         conversion=cast("DoclingConversionJob", conversion or RecordingConversion()),
+        reindex=cast("MarkdownReindexJob", reindex or RecordingConversion()),
         integrity=cast("ArtifactIntegrity", integrity),
         reader=cast("ArtifactReader", None),
         converter=cast("DoclingClient", None),

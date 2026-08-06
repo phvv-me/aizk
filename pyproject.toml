@@ -44,9 +44,16 @@ dependencies = [
     "identify>=2.6.19,<3",
     "python-slugify>=8.0.4,<9",
     "inflection>=0.5.1,<0.6",
-    "patos[sql]>=0.0.9,<0.1",
-    "rlsalchemy>=0.4.1,<0.6",
-    "mainboard>=0.0.8,<0.1",
+    # The house packages are pinned exactly rather than given ranges, and they resolve from PyPI
+    # like every other dependency. A range plus a git source meant the test environment and the
+    # built image could resolve different code from the same declaration, and they did. The gates
+    # ran patos 0.0.9 from a cached build while the image installed the working tree, so a base
+    # class that began forbidding unknown fields never executed in a single test and first ran in
+    # production, where it rejected every real identity token and demoted authenticated callers
+    # to anonymous. An exact pin costs a publish before a bump, which is the point.
+    "patos[sql]==0.0.12",
+    "rlsalchemy==0.5.1",
+    "mainboard==0.0.9",
     "pgqueuer>=1.1.1,<2",
     "croniter>=6.2.4,<7",
     "mangum>=0.19,<1",
@@ -302,10 +309,11 @@ aws-cdk = ">=2.200, <3"
 [tool.chefe.python.dependency-overrides]
 sqlalchemy = ">=2.0.47,<2.1"
 
-[tool.chefe.sources]
-patos = { provider = "git", git = "https://github.com/phvv-me/patos", branch = "main" }
-rlsalchemy = { provider = "git", git = "https://github.com/phvv-me/rls", branch = "main" }
-mainboard = { provider = "git", git = "https://github.com/phvv-me/mainboard", branch = "main" }
+# No `[tool.chefe.sources]`. The three house packages used to resolve from git main here while
+# the built image installed the working tree over the top, so the environment the gates ran and
+# the environment production ran were never the same artifact and nothing said so. They now come
+# from PyPI at the exact versions pinned above, like every other dependency, which is the only
+# arrangement where a green suite is evidence about the code that ships.
 
 [tool.chefe.tasks]
 lint = { run = "ruff check . && ruff format --check ." }

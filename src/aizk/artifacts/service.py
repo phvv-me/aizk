@@ -8,7 +8,7 @@ import httpx
 from loguru import logger
 from obstore.exceptions import BaseError as ObjectStoreError
 from patos import FrozenModel
-from pydantic import UUID7, AnyHttpUrl, JsonValue
+from pydantic import UUID7, AnyHttpUrl
 from sqlalchemy.exc import SQLAlchemyError
 
 from ..background.jobs.projection import enqueue_document
@@ -253,20 +253,13 @@ class ArtifactProcessor:
                 )
                 return
             markdown = self.declutter(output.markdown, original)
-            await self.repository.store_conversion(
-                user,
-                original,
-                markdown,
-                output.docling_json,
-                output.details,
-            )
+            await self.repository.store_conversion(user, original, markdown, datetime.now(UTC))
             await self.index(
                 user,
                 original,
                 Artifact.Content.State.ready,
                 content,
                 markdown,
-                output.details,
             )
             await self.repository.set_state(
                 user,
@@ -309,7 +302,6 @@ class ArtifactProcessor:
         state: ArtifactContent.State,
         content: bytes,
         markdown: str | None = None,
-        details: dict[str, JsonValue] | None = None,
     ) -> None:
         """Make a converted or metadata-only original recallable as one stable document."""
         source = ArtifactDocument(
@@ -320,7 +312,6 @@ class ArtifactProcessor:
             companion_text=original.companion_text,
             markdown=markdown,
             conversion_state=state,
-            details=details or {},
         )
         document_id, _ = await TextIngestor(user).ingest(
             TextSource(
@@ -344,6 +335,55 @@ class ArtifactProcessor:
             await self.visual.enrich(user, document_id, original, content)
         if source.semantic:
             await enqueue_document(document_id, original.scopes)
+
+
+class ArtifactReindexer:
+    """Re-split and re-embed one converted original from the Markdown already in PostgreSQL.
+
+    Conversion has two halves and only the first one is expensive. Docling reads the bytes,
+    runs OCR and writes Markdown, then chunking, embedding and graph projection turn that
+    Markdown into something recallable. A chunk size change, a lexical prefix change or a new
+    embedder invalidates the second half alone, so this pass replays it from the stored text
+    and never asks Docling to read the original again. That is what keeps `markdown` a load
+    bearing column rather than a derivative nothing consumes.
+    """
+
+    def __init__(self, repository: ArtifactRepository) -> None:
+        self.repository = repository
+
+    async def reindex(self, content_id: UUID7, scopes: Scopes) -> None:
+        """Rebuild one revision's chunks, queue their projection, and stamp the pass."""
+        user = User.system(scopes)
+        converted = await self.repository.converted(user, content_id, scopes)
+        source = ArtifactDocument(
+            filename=converted.filename,
+            media_type=converted.media_type,
+            size=converted.size,
+            source_uri=converted.source_uri,
+            companion_text=converted.companion_text,
+            markdown=converted.markdown,
+            conversion_state=Artifact.Content.State.ready,
+        )
+        document_id = await TextIngestor(user).rechunk(
+            TextSource(
+                text=await source.to_markdown(),
+                title=converted.filename,
+                source_uri=converted.source_uri,
+                artifact_id=converted.artifact_id,
+                artifact_content_id=converted.content_id,
+                original_content_hash=converted.storage_hash,
+                created_by=converted.created_by,
+                scopes=scopes,
+                capture=CaptureContext(
+                    observed_at=converted.observed_at,
+                    expires_at=converted.expires_at,
+                ),
+            )
+        )
+        if document_id is None:
+            raise DoclingConversionError("stored Markdown re-chunked into no document")
+        await self.repository.record_indexing(user, content_id, datetime.now(UTC))
+        await enqueue_document(document_id, scopes)
 
 
 class ArtifactIntegrity:

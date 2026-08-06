@@ -121,7 +121,11 @@ def test_rebuilding_communities_everywhere_walks_the_stored_scope_roster(
 
 @pytest.mark.parametrize(
     ("name", "budget", "expected"),
-    [("reconvert_web_pages", 9, 3), ("reconvert_scanned_documents", 4, 5)],
+    [
+        ("reconvert_web_pages", 9, 3),
+        ("reconvert_scanned_documents", 4, 5),
+        ("rechunk_artifacts", 7, 2),
+    ],
 )
 def test_reconversion_sweeps_hand_their_budget_to_the_conversion_queue(
     monkeypatch: pytest.MonkeyPatch, name: str, budget: int, expected: int

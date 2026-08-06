@@ -51,12 +51,14 @@ two and nobody is waiting on a nightly rebuild.
 
 ## The inventory
 
-Three jobs are enqueued by application code as work arrives.
+Four jobs are enqueued by application code as work arrives. `MarkdownReindexJob` replays chunking
+and embedding from stored Markdown without Docling, so it shares the conversion priority and limit.
 
 | Job | Entrypoint | Priority | Concurrency |
 |---|---|---|---|
 | `ChunkProjectionJob` | `aizk_build_graph_chunk` | 50 | `graph_build_concurrency`, 4 |
 | `DoclingConversionJob` | `aizk_convert_artifact` | 75 | `docling_concurrency`, 4 |
+| `MarkdownReindexJob` | `aizk_reindex_artifact` | 75 | `docling_concurrency`, 4 |
 | `UsageAccountingJob` | `aizk_usage_event` | 0 | unbounded |
 
 The rest are scheduled. A `ScopedScheduledJob` fans out into one queue item per scope set, and all
@@ -81,7 +83,20 @@ A `SystemScheduledJob` runs once with no scope fan-out, because its work is not 
 |---|---|---|
 | `ChunkRecoveryJob` | `* * * * *` | requeue 512 held chunk failures, max 3 cycles each |
 | `ArtifactIntegrityJob` | `0 6 * * *` | re-verify 100 originals older than 30 days |
+| `CleanupJob` | `0 1 * * *` | trim queue history past 7 days, then `VACUUM (ANALYZE)` |
 | `BackupJob` | `0 2 * * *` | `scheduled_backup`, off unless `AIZK_BACKUP_ENABLED` |
+
+## Queue history is the largest table until it is trimmed
+
+PgQueuer writes one `pgqueuer_log` row per finished job and nothing reads it for correctness, so a
+busy deployment turns it into the biggest table it owns. `CleanupJob.prune_pgqueuer_log` deletes
+past `cleanup_log_retention_days`, 7, in batches of `cleanup_log_delete_batch`, 10,000, looping
+until a short batch ends the drain. One nightly pass clears the whole backlog, and PgQueuer indexes
+`created`, so every batch is an index scan.
+
+The `VACUUM (ANALYZE)` that follows never takes an exclusive lock and never hands disk back either.
+[PostgreSQL and storage](/docs/dev/run/postgres/) has the one time recovery for a table that grew
+before the job first ran.
 
 ## Names are derived, not typed twice
 

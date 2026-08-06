@@ -36,9 +36,14 @@ docker compose --env-file .env -f src/deploy/docker-compose.yml up -d
 `up -d` recreates only what actually changed, so this is safe to run on the whole project. The
 same applies to `frontend` and `docs`, which are separate build targets in the same Dockerfile.
 
-Note that `aizk-runtime` builds with three additional contexts, `mainboard`, `patos` and `rls`,
-which are sibling checkouts of the house packages. A build fails if those directories are not
-beside the aizk checkout.
+The house packages `patos`, `rlsalchemy` and `mainboard` arrive from PyPI at the exact versions
+`pyproject.toml` pins, like every other dependency, so a build needs nothing beside this checkout
+and can run anywhere. That is deliberate and was not always true. The image used to reinstall
+those three from sibling working trees over whatever the lock had resolved, which meant the test
+suite and the shipped image ran different code from the same declaration. A base class that began
+rejecting unknown fields therefore reached production having never executed in a single test, and
+it rejected every real identity token. Changing a house package now takes a publish and a pin
+bump before it can reach an image, which is the cost of a green suite meaning something.
 
 ## Image pinning
 
@@ -46,9 +51,9 @@ External images fall into two groups. `db`, `objects`, `clamav` and `docling` ca
 release tag plus a tested digest, so the exact bytes are fixed. VectorChord Suite only publishes
 a floating `pg18-latest` suite tag, which is precisely why its digest is pinned.
 
-The rest carry a version tag alone, which are `vllm/vllm-openai:v0.24.0`, `svhd/logto:1.41.0`,
-`cloudflare/cloudflared:2026.6.1`, `grafana/loki:3.7.3`, `grafana/alloy:v1.16.1`,
-`grafana/grafana:13.1.0` and `caddy:2.10.2-alpine`.
+The rest carry a version tag alone, which are `vllm/vllm-openai:v0.26.0`, `svhd/logto:1.41.0`,
+`cloudflare/cloudflared:2026.7.3`, `grafana/loki:3.7.5`, `grafana/tempo:2.9.4`,
+`grafana/alloy:v1.16.1`, `grafana/grafana:13.1.2` and `caddy:2.10.2-alpine`.
 
 Moving any of them is a deliberate change. Read the upstream release notes, take both database
 archives and an object-store copy, pull, rebuild, and finish with the full health probe.
@@ -60,8 +65,8 @@ installs the PgQueuer schema. It holds the owner credential and exits. `server`,
 `worker` all declare `service_completed_successfully` on it, so no request path ever starts
 against an older schema than the one it was built for.
 
-There are two revisions in `src/aizk/store/migrations/versions/`, `0001_init` and
-`0002_durable_usage`. [Migrations and DDL](/docs/dev/store/migrations/) explains why the initial
+There are eight revisions in `src/aizk/store/migrations/versions/`, running from `0001_init` to
+`0008_storage_footprint`. [Migrations and DDL](/docs/dev/store/migrations/) explains why the initial
 one is fused rather than a long chain.
 
 :::danger[Never `down -v` during an upgrade]

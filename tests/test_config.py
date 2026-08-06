@@ -32,7 +32,7 @@ def test_is_external_llm_endpoint_classifies_the_host(url: str, external: bool) 
 
 
 def test_external_llm_endpoint_defaults_the_privacy_posture() -> None:
-    config = Settings(_env_file=None, llm_url="https://openrouter.ai/api/v1")
+    config = Settings(_env_file=None, llm_url="https://openrouter.ai/api/v1", llm_api_key="k")
 
     assert config.llm_is_external
     assert config.llm_extra_body == {
@@ -55,6 +55,7 @@ def test_explicit_llm_extra_body_wins_over_the_external_default() -> None:
     config = Settings(
         _env_file=None,
         llm_url="https://openrouter.ai/api/v1",
+        llm_api_key="k",
         llm_extra_body={"custom": True},
     )
 
@@ -66,6 +67,7 @@ def test_explicit_llm_headers_are_kept_alongside_the_extra_body_default() -> Non
     config = Settings(
         _env_file=None,
         llm_url="https://openrouter.ai/api/v1",
+        llm_api_key="k",
         llm_headers={"X-Custom": "value"},
     )
 
@@ -139,6 +141,19 @@ def test_cockroach_defaults_and_driver_dsns_use_the_compatible_schemes() -> None
 def test_portable_queue_rejects_a_heartbeat_outside_its_lease() -> None:
     with pytest.raises(ValidationError, match="heartbeat"):
         Settings(queue_heartbeat_seconds=30, queue_lease_seconds=30)
+
+
+def test_lexical_window_may_not_outrun_the_bm25_scan_limit() -> None:
+    with pytest.raises(ValidationError, match="bm25_limit"):
+        Settings(fusion_depth=100, fusion_overfetch=3, bm25_limit=150)
+    assert Settings(fusion_depth=100, fusion_overfetch=3, bm25_limit=300).bm25_limit == 300
+
+
+def test_an_external_extraction_endpoint_must_carry_a_credential() -> None:
+    with pytest.raises(ValidationError, match="llm_api_key"):
+        Settings(llm_url="https://openrouter.ai/api/v1", llm_api_key="")
+    assert Settings(llm_url="https://openrouter.ai/api/v1", llm_api_key="sk-or-v1-x").llm_api_key
+    assert Settings(llm_url="http://vllm-llm:8000/v1", llm_api_key="").llm_url
 
 
 @pytest.mark.parametrize("minimum_savings", [-0.01, 1.0])
@@ -460,6 +475,7 @@ def test_web_egress_refuses_an_extraction_lane_that_could_retain_the_question() 
         Settings(
             web_search_enabled=True,
             llm_url="https://openrouter.ai/api/v1",
+            llm_api_key="k",
             llm_extra_body={"provider": {"zdr": False}},
         )
 
@@ -475,6 +491,8 @@ def test_web_egress_refuses_an_extraction_lane_that_could_retain_the_question() 
 def test_web_egress_starts_on_a_lane_that_cannot_retain_the_question(
     url: str, extra: dict[str, JsonValue]
 ) -> None:
-    settings = Settings(web_search_enabled=True, llm_url=url, llm_extra_body=extra)
+    settings = Settings(
+        web_search_enabled=True, llm_url=url, llm_api_key="k", llm_extra_body=extra
+    )
 
     assert settings.llm_zdr_pinned

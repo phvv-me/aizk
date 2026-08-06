@@ -32,6 +32,8 @@ argument defaulting to 8, so a caller changes it per request rather than per dep
 | Setting | Default | Read in | Trades away |
 |---|---|---|---|
 | `fusion_depth` | 50 | `Chunk.fused`, `LiveFact.dense` | deeper pools find more, but every ranking pays the scan and fusion cost |
+| `fusion_overfetch` | 3 | `Chunk.ranking` | how much deeper a chunk ranking reaches so live sources still fill the cut; lower risks a short lane on a corpus full of expiring documents, higher costs index walk |
+| `bm25_limit` | 150 | pinned on every app connection | the ceiling on rows one bm25 index scan returns; it must stay at or above `fusion_depth * fusion_overfetch` or the lexical ranking is cut short, which is why settings validation rejects the pair rather than letting it happen quietly |
 | `recall_max_distance` | 0.65 | `QueryContext.floor`, every dense ranking | lower is stricter and returns nothing off-corpus, higher lets weak matches through |
 | `fact_candidate_factor` | 2 | `FactLane.merged` | multiplies `k` for facts, so the reranker sees more graph evidence at more scoring cost |
 | `recall_per_document` | 3 | `Chunk.hybrid` | higher lets one document dominate the source lane |
@@ -42,6 +44,24 @@ argument defaulting to 8, so a caller changes it per request rather than per dep
 | `recall_recency_weight` | 0.1 | `LiveFact.dense` | how far a recently used fact climbs over a semantically closer one |
 | `recall_recency_half_life_days` | 30.0 | `LiveFact.dense` | how fast that boost decays |
 | `recall_frequency_weight` | 0.02 | `LiveFact.dense` | rewards often-used facts, and too high entrenches whatever was popular |
+
+### What the connection pins
+
+Two of those values are not binds at all. `PostgreSQLAdapter.server_settings` states them on every
+caller connection, so the deployment declares them rather than inheriting whatever the server was
+built with.
+
+| Setting | Default | Server setting | Trades away |
+|---|---|---|---|
+| `bm25_limit` | 150 | `bm25_catalog.bm25_limit` | how many rows one bm25 index scan may return; too low silently truncates the lexical ranking, too high makes every lexical scan carry rows nothing reads |
+| `vchordrq_prefilter` | false | `vchordrq.prefilter` | whether the ANN walk applies row security inside the index instead of filtering what it returns |
+
+Leave `vchordrq_prefilter` off while a few scopes hold most of the corpus. Filtering inside the
+walk only pays when the caller reads a small share of the index, and one scope holds 98 percent of
+the chunks in the deployment measured here, so prefiltering cost 5,271 buffers against 2,465 with
+it off. The trigger to turn it on is a deployment where many organizations each read their own
+small slice, and the way to confirm it is `EXPLAIN (ANALYZE, BUFFERS)` on a real caller's dense
+ranking with the setting both ways.
 
 The `recall_max_distance` default is calibrated, not guessed. The comment in the settings file
 records that on real Qwen3-VL query and document embeddings, relevant chunks land at cosine

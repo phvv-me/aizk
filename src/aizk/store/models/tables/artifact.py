@@ -1,9 +1,9 @@
 from datetime import datetime
 from enum import auto
-from typing import TYPE_CHECKING, ClassVar, Self, cast
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from patos import sql
-from pydantic import UUID5, UUID7, UUID8, JsonValue
+from pydantic import UUID5, UUID7, UUID8
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint, false, or_
 from sqlmodel import Relationship, select
 from sqlmodel.sql.expression import Select
@@ -23,8 +23,9 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
 
     `state` records the durable business outcome around PgQueuer delivery. PgQueuer
     remains the source of truth for queue leases and retries. The `Blob` contains only
-    the losslessly encoded original. Companion text, normalized Markdown, Docling JSON,
-    and conversion diagnostics stay queryable in PostgreSQL.
+    the losslessly encoded original. Companion text and normalized Markdown stay
+    queryable in PostgreSQL, and `indexed_at` records when that Markdown was last split,
+    embedded and made recallable, which is what the re-chunk sweep walks.
     """
 
     class State(sql.PGEnum):
@@ -74,16 +75,7 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
     )
     companion_text = sql.Nullable(str)
     markdown = sql.Nullable(str)
-    docling_json = sql.Field(
-        dict[str, JsonValue] | None,
-        default=None,
-        sa_type=sql.TypedJSONB,
-    )
-    details = sql.Field(
-        dict[str, JsonValue],
-        default_factory=dict,
-        sa_type=sql.TypedJSONB,
-    )
+    indexed_at = sql.Nullable(datetime)
     observed_at = sql.Nullable(datetime)
     expires_at = sql.Nullable(datetime)
     error = sql.Nullable(str)
@@ -146,6 +138,10 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
         )
 
 
+# One dashboard line, as name, source, state, scope set and acceptance time.
+type RecentArtifact = tuple[str, str | None, ArtifactContent.State, list[UUID5], datetime]
+
+
 class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
     """Scoped logical file whose immutable bytes live in versioned content rows."""
 
@@ -178,13 +174,20 @@ class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
     )
 
     @classmethod
-    def recent(cls, limit: int) -> Select[tuple[Self, ArtifactContent]]:
+    def recent(cls, limit: int) -> Select[RecentArtifact]:
         """Visible originals joined to their revisions, newest accepted first.
+
+        The dashboard shows a name, a source, a state, a date and a scope list, so those
+        five columns are exactly what this selects. Selecting the two whole rows instead
+        detoasts every stored Markdown derivative on the page, which is megabytes read and
+        decompressed to render status lines that never show a word of it.
 
         limit: how many revisions to keep.
         """
-        return (
-            select(cls, ArtifactContent)
+        return cast(
+            "Select[RecentArtifact]",
+            select(cls.name, cls.source_uri, ArtifactContent.state)
+            .add_columns(ArtifactContent.scopes, ArtifactContent.created_at)
             .join(
                 ArtifactContent,
                 ArtifactContent.artifact_id == cls.id,
@@ -193,7 +196,7 @@ class Artifact(Id, Scoped, Timestamped, TableBase, table=True):
                 ArtifactContent.__table__.c.created_at.desc(),
                 ArtifactContent.__table__.c.id.desc(),
             )
-            .limit(limit)
+            .limit(limit),
         )
 
     @classmethod

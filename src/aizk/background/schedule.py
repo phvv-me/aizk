@@ -58,6 +58,7 @@ def portable_worker(runtime: Runtime, batch_size: int | None = None) -> Portable
         ChunkProjectionJob(runtime.graph),
         UsageAccountingJob(),
         runtime.artifacts.conversion,
+        runtime.artifacts.reindex,
         *(job for job in scheduled if isinstance(job, ScopedScheduledJob)),
     ]
     schedules = {
@@ -97,6 +98,7 @@ async def run_worker(runtime: Runtime, batch_size: int | None = None) -> None:
         ChunkProjectionJob(runtime.graph).bind(pg)
         UsageAccountingJob().bind(pg)
         runtime.artifacts.conversion.bind(pg)
+        runtime.artifacts.reindex.bind(pg)
         for job_type in ScheduledJob.implementations():
             job_type.assemble(runtime).register(pg, fan_out)
         logger.info("autonomous worker listening on the queue and the scheduler")
