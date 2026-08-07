@@ -16,10 +16,10 @@ from sqlalchemy import text as sql
 
 import aizk.memory as memory_module
 from aizk.config import settings
-from aizk.retrieval import RecallEvidence
-from aizk.retrieval.models import Candidate, Lane
 from aizk.memory import WriteResult
 from aizk.provenance import CaptureContext
+from aizk.retrieval import RecallEvidence
+from aizk.retrieval.models import Candidate, Lane
 from aizk.store.identity import User
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
@@ -232,7 +232,9 @@ def test_recall_names_the_report_scope_for_an_operator_reading_one_back(
 
     monkeypatch.setattr(memory_module.retrieval, "evidence", stub)
 
-    out = dbutil.run(tools["find"].fn(query="what did agents report", context=context_for(operator)))
+    out = dbutil.run(
+        tools["find"].fn(query="what did agents report", context=context_for(operator))
+    )
 
     assert "reports" in out
     assert "an agent reported two settled facts that contradict each other" in out
