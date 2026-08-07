@@ -5,6 +5,7 @@ from .tables import (
     Chunk,
     Community,
     Document,
+    HealthSnapshot,
     Profile,
     SessionItem,
     UploadCapability,
@@ -29,5 +30,6 @@ __all__ = [
     "UploadCapability",
     "Usage",
     "UsageEvent",
+    "HealthSnapshot",
     "Watermark",
 ]

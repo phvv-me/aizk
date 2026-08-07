@@ -47,6 +47,7 @@ from .reports import (
     SetupReport,
     StorageHealth,
 )
+from .snapshot import HealthSnapshotJob, StoredHealth, stored_health
 from .usage import UsageFilterReport, usage_report
 
 __all__ = [
@@ -79,11 +80,14 @@ __all__ = [
     "alembic_config",
     "alembic_current",
     "alembic_head",
+    "HealthSnapshotJob",
+    "StoredHealth",
     "corpus_health",
     "doctor",
     "enable_query_stats",
     "grant_app_role_privileges",
     "hardware_health",
+    "stored_health",
     "health",
     "probe_endpoint",
     "queue_schema_present",

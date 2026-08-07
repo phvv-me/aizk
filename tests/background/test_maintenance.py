@@ -42,7 +42,7 @@ from aizk.types import Scopes
 
 
 @given(
-    flags=st.lists(st.booleans(), min_size=14, max_size=14),
+    flags=st.lists(st.booleans(), min_size=15, max_size=15),
     cron=st.sampled_from(["0 3 * * *", "30 4 * * 0"]),
 )
 def test_job_registry_names_and_settings_are_coherent(
@@ -64,6 +64,7 @@ def test_job_registry_names_and_settings_are_coherent(
         "chunk_recovery",
         "artifact_integrity",
         "cleanup",
+        "health_snapshot",
     }
     scoped = [job for job in jobs if isinstance(job, ScopedScheduledJob)]
     queue_names = {job.entrypoint for job in scoped}

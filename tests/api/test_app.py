@@ -1,6 +1,6 @@
 import hashlib
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from datetime import UTC, datetime, time
+from datetime import UTC, datetime, time, timedelta
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
@@ -789,8 +789,12 @@ def test_admin_links_reads_the_configured_console_tool_urls(
     }
 
 
-def test_admin_health_excludes_the_live_recall_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    report = ops.HealthReport(
+def stored(stale: bool = False) -> ops.StoredHealth:
+    """One stored reading, the shape a worker pass leaves behind."""
+    measured = datetime.now(UTC) - timedelta(
+        minutes=settings.health_snapshot_stale_minutes + 1 if stale else 0
+    )
+    return ops.StoredHealth(
         migration=ops.SchemaHealth(current="head", head="head", up_to_date=True),
         rls_violations=[],
         row_counts={},
@@ -822,15 +826,52 @@ def test_admin_health_excludes_the_live_recall_probe(monkeypatch: pytest.MonkeyP
         ),
         recall=None,
         duration_ms=1.0,
+        measured_at=measured,
+        stale=stale,
     )
-    health = AsyncMock(return_value=report)
-    monkeypatch.setattr(app_module.ops, "health", health)
+
+
+def test_admin_health_reads_a_measurement_rather_than_taking_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The probes need the database owner, which this process is deliberately denied.
+
+    Calling them here authenticated as the application role and failed every request, so the
+    endpoint reads what a worker holding that credential measured and left behind.
+    """
+    read = AsyncMock(return_value=stored())
+    probe = AsyncMock()
+    monkeypatch.setattr(app_module.ops, "stored_health", read)
+    monkeypatch.setattr(app_module.ops, "health", probe)
 
     response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health")
 
     assert response.status_code == 200
     assert response.json()["recall"] is None
-    health.assert_awaited_once_with(include_recall=False)
+    assert response.json()["stale"] is False
+    probe.assert_not_awaited()
+
+
+@pytest.mark.parametrize("stale", [True, False], ids=["stale", "current"])
+def test_admin_health_says_when_a_reading_is_old_instead_of_presenting_it_as_now(
+    monkeypatch: pytest.MonkeyPatch, stale: bool
+) -> None:
+    monkeypatch.setattr(app_module.ops, "stored_health", AsyncMock(return_value=stored(stale)))
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health")
+
+    assert response.json()["stale"] is stale
+
+
+def test_admin_health_is_absent_until_a_worker_pass_has_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_module.ops, "stored_health", AsyncMock(return_value=None))
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health")
+
+    assert response.status_code == 200
+    assert response.json() is None
 
 
 def test_admin_recall_probes_the_largest_visible_corpus(monkeypatch: pytest.MonkeyPatch) -> None:

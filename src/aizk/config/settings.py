@@ -507,6 +507,14 @@ class Settings(BaseSettings):
     graph_ppr_damping: float = 0.5
     graph_ppr_frontier: int = 32
     graph_seed_entities: int = 16
+    # The operator health report is measured by the worker and read from its stored snapshot,
+    # since the probes behind it need the database owner and the public API process is denied
+    # that credential. Five minutes keeps the console current without paying for the probes
+    # on every page load, and `health_snapshot_stale_minutes` is when the console should say
+    # the reading is old rather than present it as now.
+    health_snapshot_cron: str = "*/5 * * * *"
+    health_snapshot_enabled: bool = True
+    health_snapshot_stale_minutes: PositiveInt = 20
     profile_recall_k: int = 1
     recall_chars_per_token: float = 4.0
     recall_frequency_weight: float = 0.02

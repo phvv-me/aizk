@@ -6,6 +6,7 @@ from .coordination_lock import CoordinationLock
 from .document import Document
 from .entity import EntityClaim, EntityContent
 from .fact import FactClaim, FactContent
+from .health import HealthSnapshot
 from .ontology import EntityKind, RelationKind, RelationPolicy
 from .profile import Profile
 from .queue import QueueEvent, QueueSchedule, QueueTask
@@ -39,5 +40,6 @@ __all__ = [
     "UploadCapability",
     "Usage",
     "UsageEvent",
+    "HealthSnapshot",
     "Watermark",
 ]

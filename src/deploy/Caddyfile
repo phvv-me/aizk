@@ -177,22 +177,18 @@
 			redir * /grafana/explore?schemaVersion=1&orgId=1&panes=%7B%22aizk%22%3A%7B%22datasource%22%3A%22aizk-traces%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22aizk-traces%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22%22%7D%5D%7D%7D 302
 		}
 
-		# The console pages themselves, served from this hostname rather than redirected to the
-		# application's. The app reads its origin from the forwarded headers below and asks
-		# Logto for the callback belonging to whichever hostname the browser used, so this
-		# host's own callback must be registered on the Logto application beside the
-		# application host's. The sidebar's Logto, Grafana and Traces links land on the routes
-		# above, so the tools stay behind this same gate.
-		@console path /admin /admin/* /auth/* /events/* /_app/*
-		handle @console {
-			reverse_proxy frontend:3000
-		}
-
-		# This host's root is the console. Every named tool above is a more specific matcher,
-		# and Caddy sorts `handle` blocks by specificity, so this catch-all cannot shadow them
-		# however it is ordered in the file.
+		# The console pages live in the application build, and this host sends a browser to
+		# them rather than serving them, because `oauth2-proxy` gates this hostname with the
+		# same Logto application the app itself signs in against. Serving the pages here ran
+		# the gate's authorization request and then the app's own, two interleaved flows on
+		# one client in one browser, and Logto answered the second with `Sign-in session not
+		# found`. The app already reads its origin per request, so serving the console here
+		# needs only its own Logto client for the gate, not another code change.
+		#
+		# Every named tool above is a more specific matcher, and Caddy sorts `handle` blocks
+		# by specificity, so this catch-all cannot shadow them however it is ordered.
 		handle {
-			redir * /admin 302
+			redir * {$AIZK_WEB_PUBLIC_URL}/admin 302
 		}
 	}
 }

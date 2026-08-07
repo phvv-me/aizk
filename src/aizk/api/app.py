@@ -511,14 +511,17 @@ class AizkAPI:
         require_admin(who.user)
         return AdminLinks.current()
 
-    async def admin_health(self, who: Verified) -> ops.HealthReport:
-        """Return schema, RLS, storage, queue, and endpoint health for operators.
+    async def admin_health(self, who: Verified) -> ops.StoredHealth | None:
+        """Return the schema, RLS, storage, queue, and endpoint health a worker measured.
 
-        The live recall probe is excluded so this never blocks the page load; fetch
-        `/api/admin/health/recall` separately once the rest of the page has rendered.
+        This reads a measurement rather than taking one. The probes behind it count rows and
+        read policies across every scope, which only the database owner may do, and this
+        process is deliberately denied that credential. Nothing until the first worker pass
+        has run, and `stale` once a reading is older than the console should present as now.
         """
         require_admin(who.user)
-        return await ops.health(include_recall=False)
+        async with who.user as session:
+            return await ops.stored_health(session)
 
     async def admin_recall(self, who: Verified) -> ops.RecallHealth | None:
         """Run the live recall probe over the largest corpus visible to any scope."""

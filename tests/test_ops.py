@@ -1,9 +1,10 @@
 import io
 import json
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import TracebackType
 from typing import Protocol, Self
+from unittest.mock import AsyncMock
 
 import dbutil
 import httpx
@@ -16,6 +17,7 @@ from sqlalchemy import URL, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.sql.base import Executable
 from sqlalchemy.sql.elements import TextClause
+from sqlmodel import delete, select
 
 import aizk.ops as ops
 from aizk.background.status import TasksStatus
@@ -23,7 +25,7 @@ from aizk.config import DatabaseBackend, settings
 from aizk.ontology import Ontology
 from aizk.ops import EndpointHealth
 from aizk.retrieval import Candidate, Lane
-from aizk.store import Artifact, Blob, Chunk, Usage
+from aizk.store import Artifact, Blob, Chunk, HealthSnapshot, Usage
 from aizk.store.engine import Session
 from aizk.store.identity import User
 from aizk.usage import UsageAccountingJob, UsageCapture
@@ -731,3 +733,119 @@ def test_health_skips_the_live_recall_probe_when_asked(
 
     assert report.recall is None
     assert called is False
+
+
+def _measured(row_counts: dict[str, int] | None = None) -> ops.HealthReport:
+    """One complete health report, the shape a real pass produces."""
+    return ops.HealthReport(
+        migration=ops.SchemaHealth(current="head", head="head", up_to_date=True),
+        rls_violations=[],
+        row_counts=row_counts or {},
+        queue=TasksStatus(
+            pending=0,
+            running=0,
+            failed=0,
+            last_success=None,
+            oldest_queued=None,
+            projection_pending=0,
+        ),
+        endpoints=[],
+        extraction=ops.ExtractionHealth(backend="local", window_chars=1, output_tokens=1),
+        identity=ops.IdentityHealth(mode="local", public_url=None),
+        corpora=[],
+        actors=[],
+        scopes=[],
+        scope_storage=[],
+        storage=ops.StorageHealth(
+            originals=0,
+            logical_bytes=0,
+            physical_blobs=0,
+            original_bytes=0,
+            stored_bytes=0,
+            compression_saved_bytes=0,
+            unverified_blobs=0,
+            failed_integrity_blobs=0,
+            last_integrity_check=None,
+        ),
+        recall=None,
+        duration_ms=1.0,
+    )
+
+
+def test_health_snapshot_job_stores_what_it_measured_for_a_process_denied_the_owner(
+    migrated_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker holds the owner credential the console's process is denied, so it measures.
+
+    Reading back through the application role is the property that matters: that is the role
+    the API runs as, and asking it to take the measurement itself is what failed before.
+    """
+    measured = _measured({"a": 1})
+    monkeypatch.setattr(ops.snapshot, "health", AsyncMock(return_value=measured))
+
+    async def run() -> ops.StoredHealth | None:
+        await ops.HealthSnapshotJob().execute()
+        async with User.system() as session:
+            return await ops.stored_health(session)
+
+    stored = dbutil.run(run())
+
+    assert stored is not None
+    assert stored.row_counts == {"a": 1}
+    assert stored.stale is False
+
+
+def test_stored_health_is_absent_until_a_pass_has_run(migrated_db: None) -> None:
+    async def read() -> ops.StoredHealth | None:
+        async with User.system().owner as session:
+            await session.exec(delete(HealthSnapshot))
+        async with User.system() as session:
+            return await ops.stored_health(session)
+
+    assert dbutil.run(read()) is None
+
+
+def test_stored_health_marks_a_reading_older_than_its_window_stale(
+    migrated_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    measured = _measured()
+    monkeypatch.setattr(ops.snapshot, "health", AsyncMock(return_value=measured))
+
+    async def run() -> ops.StoredHealth | None:
+        await ops.HealthSnapshotJob().execute()
+        stale_at = datetime.now(UTC) - timedelta(
+            minutes=settings.health_snapshot_stale_minutes + 1
+        )
+        async with User.system().owner as session:
+            await session.exec(update(HealthSnapshot).values(updated_at=stale_at))
+        async with User.system() as session:
+            return await ops.stored_health(session)
+
+    stored = dbutil.run(run())
+
+    assert stored is not None and stored.stale is True
+
+
+def test_a_second_pass_replaces_the_reading_rather_than_accumulating(
+    migrated_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reports = [
+        _measured({"pass": 1}),
+        _measured({"pass": 2}),
+    ]
+    monkeypatch.setattr(ops.snapshot, "health", AsyncMock(side_effect=reports))
+
+    async def run() -> tuple[int, dict[str, int]]:
+        await ops.HealthSnapshotJob().execute()
+        await ops.HealthSnapshotJob().execute()
+        async with User.system().owner as session:
+            rows = len((await session.exec(select(HealthSnapshot))).all())
+        async with User.system() as session:
+            latest = await ops.stored_health(session)
+        assert latest is not None
+        return rows, latest.row_counts
+
+    rows, counts = dbutil.run(run())
+
+    assert rows == 1
+    assert counts == {"pass": 2}
