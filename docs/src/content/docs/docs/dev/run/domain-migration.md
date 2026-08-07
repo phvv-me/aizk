@@ -8,18 +8,21 @@ environment values. One part is not boring at all, and it fails silently, so it 
 
 ## The setting that must not follow the domain
 
-`AIZK_IDENTITY_URL` looks like configuration and behaves like a schema constant. It is the
-namespace every identity is hashed into, never an address anything is fetched from.
+The namespace every identity is hashed into is `_IDENTITY_NAMESPACE` in `config/settings.py`.
+It is not a setting and cannot be set from the environment, which is the point. It was a
+configurable `identity_url` typed as a URL until this was understood, and a value that looks like
+a deployment address is an invitation to update it when the deployment moves.
 
 ```python
+_IDENTITY_NAMESPACE = "https://aizk.phvv.me"
+
+
 def subject_id(self, subject: str) -> UUID5:
-    namespace = str(self.identity_url).rstrip("/")
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"{namespace}/subjects/{subject}")
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/subjects/{subject}")
 
 
 def scope_id(self, external_id: str) -> UUID5:
-    namespace = str(self.identity_url).rstrip("/")
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"{namespace}/scopes/{external_id}")
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/scopes/{external_id}")
 ```
 
 Two things come out of that namespace. Every user id, and every **scope** id. Scope ids are
@@ -27,7 +30,7 @@ stored in the `scopes` array on documents, chunks, entities, facts and profiles,
 security matches a caller's scopes against those arrays.
 
 ```text
-  AIZK_IDENTITY_URL ──┬──▶ uuid5(ns, "<url>/subjects/<sub>") ──▶ user id
+  _IDENTITY_NAMESPACE ┬──▶ uuid5(ns, "<url>/subjects/<sub>") ──▶ user id
                       └──▶ uuid5(ns, "<url>/scopes/<name>")  ──▶ scope id
                                                                     │
    stored rows carry scope ids ─────────────────────────────────────┤
@@ -49,20 +52,15 @@ returns nothing, the dashboard shows an empty account, and the data is still sit
 tables untouched. It is recoverable only by putting the old value back, which is why the failure
 is worse than a crash would be.
 
-:::danger[Pin it before you touch anything else]
-Set `AIZK_IDENTITY_URL` explicitly in the deployment's `.env`, to the value already in use, and
-leave it there forever. Until it is written down it lives as a default in the source, and a
-later edit that looks like tidying moves it.
+:::danger[Leave the constant alone]
+Do not edit `_IDENTITY_NAMESPACE`, and do not "genericize" it when preparing a fork or a rename.
+The string being somebody's old domain is cosmetic. Its value is arbitrary and its stability is
+not, exactly like a UUID namespace, which is what it is. The anonymous and system ids derive from
+the same constant, so the rule covers all three at once.
 
-```sh
-AIZK_IDENTITY_URL=https://the.original.host
-```
-
-A deployment that has never stored anything may pick any namespace it likes, once.
+A deployment that has never stored anything may choose a different value once, before its first
+write, and never again.
 :::
-
-The two frozen seeds at the top of `config/settings.py`, for the anonymous and system users, are
-the same thing written as literals. They stay exactly as they are, in a fork too.
 
 ## What actually has to change
 
@@ -84,11 +82,12 @@ the token subject, and those subjects belong to Logto's records, so a fresh Logt
 subjects and detaches every user exactly as a changed namespace would. Moving the domain is an
 endpoint change against the same database.
 
-1. **Pin `AIZK_IDENTITY_URL`** to the value already in use, and confirm the running server agrees
-   before continuing.
+1. **Confirm the namespace is untouched** in whatever build is about to deploy. Nothing in the
+   environment can move it, so this is a check against the source rather than the config.
 
    ```sh
-   docker exec aizk-server-1 python -c "from aizk.config import settings; print(settings.identity_url)"
+   docker exec aizk-server-1 python -c \
+     "from aizk.config.settings import _IDENTITY_NAMESPACE; print(_IDENTITY_NAMESPACE)"
    ```
 
 2. **Add the new hostnames to the tunnel** while the old ones still resolve. Nothing points at
@@ -118,7 +117,7 @@ endpoint change against the same database.
 
    `row_counts` unchanged and a `recall` block with candidates is the proof. Zero candidates
    against a populated `row_counts` is the namespace failure described above, and the fix is to
-   put `AIZK_IDENTITY_URL` back rather than to touch the data.
+   put the constant back rather than to touch the data.
 
 7. **Retire the old hostnames** only once the new ones have carried real traffic. Leave the old
    redirect URIs registered for a while longer, since they cost nothing and are what a stale

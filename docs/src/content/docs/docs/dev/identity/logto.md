@@ -32,7 +32,8 @@ which carries `iss`, `sub`, `aud`, `exp`, `iat` and three optional display names
 `ValidationError` there is logged and returns nothing, which fails closed.
 
 Stable IDs are derived, never stored. `Settings.subject_id` and `Settings.scope_id` are both
-UUID5 over `identity_url`, which defaults to `https://aizk.phvv.me`.
+UUID5 over `_IDENTITY_NAMESPACE`, a frozen constant rather than a setting, because
+every stored scope id derives from it and a changed value matches nothing already written.
 
 ```python
 uuid.uuid5(uuid.NAMESPACE_URL, f"{namespace}/subjects/{subject}")

@@ -32,13 +32,19 @@ type RoleText = Annotated[str, StringConstraints(strip_whitespace=True, min_leng
 _PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 _LOGTO_POLICY_FILE = _PACKAGE_ROOT / "src" / "deploy" / "logto.conf"
 _ENV_FILE = _PACKAGE_ROOT / ".env"
-# Frozen namespace seeds. These two strings are hashed into the anonymous and system user ids,
-# so they are part of the stored data rather than part of the configuration, and they stay
-# exactly as written even in a fork that serves a different domain. Editing either one mints
-# different ids and detaches every row those two identities own, which no migration can undo
-# because the old ids are unrecoverable from the new ones.
-_ANONYMOUS_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "https://aizk.phvv.me/subjects/anonymous")
-_SYSTEM_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "https://aizk.phvv.me/subjects/system")
+# The namespace every derived identifier is hashed into, and deliberately not a setting. It is
+# an input to a hash rather than an address, and nothing fetches it or advertises it. It spent
+# time as a configurable `identity_url` typed as a URL, which is an invitation to change it when
+# a deployment moves domain, and that edit cannot be undone from its result.
+#
+# Every user id and every scope id is `uuid5` of this string. Scope ids live in the `scopes`
+# array on every row row-security filters, so a different value renames nothing. It mints a
+# disjoint set that matches nothing already stored, and row security then correctly hides the
+# whole corpus from everyone while raising no error at all. It stays byte for byte as written
+# here, in a fork and on a new domain, and the two ids below are the same rule spelled out.
+_IDENTITY_NAMESPACE = "https://aizk.phvv.me"
+_ANONYMOUS_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/subjects/anonymous")
+_SYSTEM_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/subjects/system")
 # A bare, dot-free host is the docker-compose service naming convention (e.g. `vllm-llm`).
 _LOCAL_LLM_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
@@ -317,13 +323,6 @@ class Settings(BaseSettings):
     gliner_variants: dict[str, str] = {}
     graph_build_concurrency: int = 4
     graph_facts_k: int = 20
-    # A UUID namespace seed, not an address anything is fetched from, and NOT a deployment URL
-    # to be swapped for whatever host a fork runs on. Every user identity is `uuid5` of this
-    # string with the token subject, so changing it silently re-derives every id and orphans
-    # every row those ids own. It reads like configuration and is closer to a schema constant.
-    # A deployment that wants its own identity space sets it once before storing anything and
-    # never again. See the frozen anonymous and system seeds at the top of this module.
-    identity_url: AnyHttpUrl = AnyHttpUrl("https://aizk.phvv.me")
     # VectorChord is the low-memory default. HNSW and tsvector are the portable fallback.
     index_backend: str = "vchordrq"
     insight_cron: str = "0 7 * * 0"
@@ -988,13 +987,11 @@ class Settings(BaseSettings):
 
     def subject_id(self, subject: str) -> UUID5:
         """Derive a stable Aizk user ID from an external subject."""
-        namespace = str(self.identity_url).rstrip("/")
-        return uuid.uuid5(uuid.NAMESPACE_URL, f"{namespace}/subjects/{subject}")
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/subjects/{subject}")
 
     def scope_id(self, external_id: str) -> UUID5:
         """Derive a stable Aizk scope ID from an external or synthetic identifier."""
-        namespace = str(self.identity_url).rstrip("/")
-        return uuid.uuid5(uuid.NAMESPACE_URL, f"{namespace}/scopes/{external_id}")
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/scopes/{external_id}")
 
     def scope_ids(self, external_ids: str | None) -> frozenset[UUID5]:
         """Derive scope IDs from a comma-separated operator input."""
