@@ -16,6 +16,8 @@ from sqlalchemy import text as sql
 
 import aizk.memory as memory_module
 from aizk.config import settings
+from aizk.retrieval import RecallEvidence
+from aizk.retrieval.models import Candidate, Lane
 from aizk.memory import WriteResult
 from aizk.provenance import CaptureContext
 from aizk.store.identity import User
@@ -206,3 +208,31 @@ def test_report_text_annotation_enforces_the_configured_cap() -> None:
     adapter.validate_python("x" * settings.mcp_report_max_chars)
     with pytest.raises(ValidationError):
         adapter.validate_python("x" * (settings.mcp_report_max_chars + 1))
+
+
+def test_recall_names_the_report_scope_for_an_operator_reading_one_back(
+    monkeypatch: pytest.MonkeyPatch,
+    tools: dict[str, FunctionTool],
+) -> None:
+    """No Logto organization backs the report scope, so its evidence still needs a name.
+
+    An operator's read authority covers the report scope, so evidence standing in it reaches
+    the scope catalog. When that catalog could not name it, every `find` an operator ran that
+    matched a filed report raised instead of answering.
+    """
+    operator = _operator()
+    candidate = Candidate(
+        lane=Lane.Kind.FACTS,
+        line="an agent reported two settled facts that contradict each other",
+        scopes=frozenset({settings.reports_scope_id}),
+    )
+
+    async def stub(query: str, user: User, token_budget: int | None = None) -> RecallEvidence:
+        return RecallEvidence(candidates=(candidate,))
+
+    monkeypatch.setattr(memory_module.retrieval, "evidence", stub)
+
+    out = dbutil.run(tools["find"].fn(query="what did agents report", context=context_for(operator)))
+
+    assert "reports" in out
+    assert "an agent reported two settled facts that contradict each other" in out

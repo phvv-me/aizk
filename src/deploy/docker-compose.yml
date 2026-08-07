@@ -741,6 +741,12 @@ services:
       # be impossible. The console must own an origin, so the alias redirects to whatever origin
       # Logto is configured with rather than pretending to serve it here.
       AIZK_LOGTO_ADMIN_ENDPOINT: ${AIZK_LOGTO_ADMIN_ENDPOINT:?set AIZK_LOGTO_ADMIN_ENDPOINT}
+      # Where the operator hostname sends a browser for the console pages. They are served from
+      # the application origin because the browser sign-in callback is registered for exactly
+      # one origin, so serving them here would fail the token exchange rather than sign anyone
+      # in. Required rather than defaulted, since an empty value would redirect to `/admin` on
+      # this host and loop back through this same rule.
+      AIZK_WEB_PUBLIC_URL: ${AIZK_WEB_PUBLIC_URL:?set AIZK_WEB_PUBLIC_URL}
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     read_only: true

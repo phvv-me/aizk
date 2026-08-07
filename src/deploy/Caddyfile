@@ -49,8 +49,13 @@
 	# by `@mcp` above; both matchers currently share this Caddyfile's mutually-exclusive route
 	# group, and `@mcp` being declared first is what lets it win, so this exclusion keeps that
 	# correct however the two blocks ever get reordered.
+	# `/admin` is the operator console's own build inside this same app. It is served from this
+	# host rather than the operator hostname because the browser sign-in callback is registered
+	# for one origin, so a second origin would fail the exchange rather than sign anyone in.
+	# Reaching it needs the operator role regardless of host: its layout asks the API and
+	# answers 403 to anyone else, so the gate is the app's, not this route's.
 	@app {
-		path /app /app/* /auth/* /events/* /_app/*
+		path /app /app/* /admin /admin/* /auth/* /events/* /_app/*
 		not path /auth/callback
 	}
 	handle @app {
@@ -172,43 +177,19 @@
 			redir * /grafana/explore?schemaVersion=1&orgId=1&panes=%7B%22aizk%22%3A%7B%22datasource%22%3A%22aizk-traces%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22tempo%22%2C%22uid%22%3A%22aizk-traces%22%7D%2C%22queryType%22%3A%22traceql%22%2C%22query%22%3A%22%22%7D%5D%7D%7D 302
 		}
 
-		# This host's root is the operator console. A bare `/` here serves the console itself
-		# rather than redirecting or answering 404, and the product application keeps its own
-		# hostname, so the two faces never compete for a path. Every named tool above is a
-		# more specific matcher, and Caddy sorts `handle` blocks by specificity, so this
-		# catch-all cannot shadow them however it is ordered in the file.
+		# This host's root is the operator console. Every named tool above is a more specific
+		# matcher, and Caddy sorts `handle` blocks by specificity, so this catch-all cannot
+		# shadow them however it is ordered in the file.
 		#
-		# The operator pages are a separate future build inside this same SvelteKit app. Until
-		# they exist a bare `/` lands on the app's own root. Teaching it which face to present
-		# needs a host hint rather than a routing change here, either passing the console
-		# hostname through as a header the app reads, or giving the app a dedicated base path.
-		# Neither is built yet, which is why a bare `/` used to reach the SvelteKit app and
-		# answer 404. That app publishes nothing at the root, at `/app`, or at `/app/admin` on
-		# this host, so forwarding here handed an authenticated operator a dead end. Until the
-		# operator pages exist, the root names the tools that are actually reachable, which is
-		# both honest about what is built and the shortest path to the one you came for. Replace
-		# this with a reverse proxy the day the app serves something here.
+		# The console pages now exist inside the application build, so this no longer answers
+		# with a hand-written index of the tools. It cannot serve them from here either: the
+		# browser sign-in callback is registered for exactly one origin, so an operator signing
+		# in on this hostname would fail the token exchange rather than reach a page. The pages
+		# therefore live on the application origin, this root sends a browser to them, and the
+		# console's own sidebar carries Logto, Grafana and Traces back to the routes above.
+		# Serve them from here the day the sign-in callback accepts a second origin.
 		handle {
-			header Content-Type "text/html; charset=utf-8"
-			respond <<HTML
-				<!doctype html><meta charset="utf-8">
-				<title>AIZK operator console</title>
-				<meta name="viewport" content="width=device-width,initial-scale=1">
-				<style>
-				:root{color-scheme:light dark}
-				body{font:16px/1.6 ui-sans-serif,system-ui,sans-serif;max-width:34rem;margin:14vh auto;padding:0 1.5rem}
-				h1{font-size:1.4rem;font-weight:600;margin:0 0 .25rem}
-				p{color:color-mix(in oklab,currentColor 60%,transparent);margin:0 0 2rem}
-				a{display:block;padding:.85rem 1rem;margin:.5rem 0;border:1px solid color-mix(in oklab,currentColor 20%,transparent);border-radius:.5rem;text-decoration:none;color:inherit}
-				a:hover{border-color:color-mix(in oklab,currentColor 45%,transparent)}
-				b{font-weight:600}small{color:color-mix(in oklab,currentColor 55%,transparent)}
-				</style>
-				<h1>AIZK operator console</h1>
-				<p>Signed in. Everything below sits behind this same gate.</p>
-				<a href="/logto"><b>Logto</b><br><small>Identity, users, roles and applications, on its own origin</small></a>
-				<a href="/grafana/"><b>Grafana</b><br><small>Dashboards, logs and metrics</small></a>
-				<a href="/traces"><b>Traces</b><br><small>Request paths in Tempo</small></a>
-				HTML 200
+			redir * {$AIZK_WEB_PUBLIC_URL}/admin 302
 		}
 	}
 }

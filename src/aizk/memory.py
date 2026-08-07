@@ -8,6 +8,7 @@ from . import graph, retrieval
 from .artifacts import ArtifactIntake, ArtifactReceipt
 from .background.jobs.projection import enqueue_document
 from .background.wake import NoopWorkerWake, WorkerWake
+from .config import settings
 from .extract import ingest as extract_ingest
 from .provenance import CaptureContext
 from .retrieval import Evidence, RecallEvidence, RecallResult
@@ -95,13 +96,29 @@ class Memory:
             frozenset().union(*(candidate.scopes for candidate in candidates)),
             len(candidates),
         )
-        scope_details = {self.user.id: RecallResult.Scope(name="private")} | {
-            organization.id: RecallResult.Scope(
-                name=organization.name,
-                description=organization.description,
+        reports = settings.reports_scope_id
+        scope_details = (
+            {self.user.id: RecallResult.Scope(name="private")}
+            | {
+                organization.id: RecallResult.Scope(
+                    name=organization.name,
+                    description=organization.description,
+                )
+                for organization in self.user.organizations
+            }
+            # No Logto organization backs the report scope, so an operator reading one back
+            # would otherwise meet a catalog that cannot name the scope its evidence stands in.
+            | (
+                {
+                    reports: RecallResult.Scope(
+                        name="reports",
+                        description="Reports agents filed about memory, readable by operators.",
+                    )
+                }
+                if reports in self.user.scopes.read
+                else {}
             )
-            for organization in self.user.organizations
-        }
+        )
         return evidence, RecallResult.from_candidates(candidates, scope_details)
 
     async def find(
