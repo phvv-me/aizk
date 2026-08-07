@@ -651,8 +651,15 @@ services:
       AIZK_WEB_CLIENT_ID: ${AIZK_WEB_CLIENT_ID:-}
       AIZK_WEB_CLIENT_SECRET: ${AIZK_WEB_CLIENT_SECRET:-}
       AIZK_WEB_SESSION_SECRET: ${AIZK_WEB_SESSION_SECRET:-}
-      # adapter-node checks form submissions against this origin, the one public URL.
-      ORIGIN: ${AIZK_WEB_PUBLIC_URL:-}
+      # The operator hostname, when the console answers on one of its own rather than sharing
+      # the application's. Empty leaves every request resolving to the application origin.
+      AIZK_WEB_OPERATOR_URL: ${AIZK_WEB_OPERATOR_URL:-}
+      # adapter-node reads the origin per request rather than from one fixed `ORIGIN`, because
+      # the console and the application answer on different hostnames and a fixed origin would
+      # send a browser signing in on one back to the other. Only Caddy can reach this port, so
+      # these headers are the proxy's own and not a client's to forge.
+      PROTOCOL_HEADER: x-forwarded-proto
+      HOST_HEADER: x-forwarded-host
       # File bytes never pass through this server: the browser PUTs them straight to the
       # api service's capability path through Caddy. Form actions carry only small
       # declarations, so the adapter-node default body cap of 512K stays in force.
@@ -741,12 +748,6 @@ services:
       # be impossible. The console must own an origin, so the alias redirects to whatever origin
       # Logto is configured with rather than pretending to serve it here.
       AIZK_LOGTO_ADMIN_ENDPOINT: ${AIZK_LOGTO_ADMIN_ENDPOINT:?set AIZK_LOGTO_ADMIN_ENDPOINT}
-      # Where the operator hostname sends a browser for the console pages. They are served from
-      # the application origin because the browser sign-in callback is registered for exactly
-      # one origin, so serving them here would fail the token exchange rather than sign anyone
-      # in. Required rather than defaulted, since an empty value would redirect to `/admin` on
-      # this host and loop back through this same rule.
-      AIZK_WEB_PUBLIC_URL: ${AIZK_WEB_PUBLIC_URL:?set AIZK_WEB_PUBLIC_URL}
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     read_only: true

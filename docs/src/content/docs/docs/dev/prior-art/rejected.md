@@ -51,7 +51,6 @@ already holds, and a second copy is a thing that can disagree.
 | local `user_`, `group_`, and `membership` tables | identity now derives from the verified token, so the tables, the `aizk user` and `aizk group` CLI verbs, membership grants, the public-group toggle, and the group-delete trigger all went with them |
 | a bespoke graph workflow ledger | the graph is a rebuildable projection and PgQueuer already owns durable execution state |
 | Redis anywhere in the stack | PgQueuer is the only queue and Docling runs its local worker engine, so nothing needed a second datastore |
-| Zitadel as the identity provider | Logto covers organizations, roles, and public metadata with one token claim, and running two identity stacks bought nothing |
 | a Reflex Python dashboard | browser concerns moved to a separate SvelteKit app and its own API service, which left MCP as an agents-only surface of five tools rather than the 36 it once carried |
 | graph-only authority | source briefs and chunks are more faithful than generated profiles and summaries, so the graph augments evidence and never replaces it |
 

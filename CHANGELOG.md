@@ -537,7 +537,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 - Autonomy, a pgqueuer-backed worker and cron scheduler driving graph build, session
   promotion, dedup, decay, communities, RAPTOR, profiles, and insights.
 - 36 MCP tools over FastMCP, everyday memory verbs, group governance, and root-only
-  maintenance and admin, with Zitadel or local API-key identity.
+  maintenance and admin, with Logto identity.
 - The eval harness, hit@k/nDCG@k/MRR scoring, a config sweep, and EverMemBench/TEMPO dataset
   loaders gated behind `AIZK_BENCHMARKS_ENABLED`.
 - Documentation at [phvv.me/aizk](https://phvv.me/aizk), the engine explained in five parts,

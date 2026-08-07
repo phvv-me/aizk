@@ -48,3 +48,22 @@ export function adminHref(
 ): string {
   return withQuery(route, parameters);
 }
+
+/**
+ * The origin a browser arriving on `origin` is sent back to, which is that origin only when
+ * this deployment answers on it.
+ *
+ * Logto redeems an authorization code only against the exact redirect it was issued for, and
+ * the console and the application answer on different hostnames. Echoing whatever origin
+ * arrived would let any Host header mint a redirect, so an unrecognized one falls back to the
+ * first known origin rather than being trusted.
+ */
+export function trustedOrigin(origin: string, known: readonly string[]): string {
+  const answered = known.filter(Boolean);
+  return answered.includes(origin) ? origin : answered[0];
+}
+
+/** Where a completed sign-in lands, which is the console when it owns the origin used. */
+export function homeFor(origin: string, operator: string): string {
+  return operator && origin === operator ? adminRoutes.overview : appRoutes.dashboard;
+}
