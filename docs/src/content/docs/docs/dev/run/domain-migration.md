@@ -9,8 +9,13 @@ environment values. One part is not boring at all, and it fails silently, so it 
 ## The setting that must not follow the domain
 
 The namespace every identity is hashed into is `_IDENTITY_NAMESPACE` in `config/settings.py`.
+It is a name rather than an address, in the same sense that nobody fetches
+`http://www.w3.org/1999/xhtml`. A domain one controls is the ordinary way to get a globally
+unique name without a registry, which is what XML namespaces and Java package names do, and
+`uuid.NAMESPACE_URL` is RFC 4122's namespace for URLs so a URL shaped seed is its intended input.
+
 It is not a setting and cannot be set from the environment, which is the point. It was a
-configurable `identity_url` typed as a URL until this was understood, and a value that looks like
+configurable `identity_url` typed as a URL until that was understood, and a value that looks like
 a deployment address is an invitation to update it when the deployment moves.
 
 ```python

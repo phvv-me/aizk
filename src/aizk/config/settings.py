@@ -32,16 +32,20 @@ type RoleText = Annotated[str, StringConstraints(strip_whitespace=True, min_leng
 _PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 _LOGTO_POLICY_FILE = _PACKAGE_ROOT / "src" / "deploy" / "logto.conf"
 _ENV_FILE = _PACKAGE_ROOT / ".env"
-# The namespace every derived identifier is hashed into, and deliberately not a setting. It is
-# an input to a hash rather than an address, and nothing fetches it or advertises it. It spent
-# time as a configurable `identity_url` typed as a URL, which is an invitation to change it when
-# a deployment moves domain, and that edit cannot be undone from its result.
+# The namespace every derived identifier is hashed into. A name, not an address. Nothing fetches
+# it, nothing advertises it, and it is never compared against a request host, exactly as nobody
+# fetches `http://www.w3.org/1999/xhtml`. Using a domain one controls is the ordinary way to get
+# a globally unique name with no registry to ask, which is what XML namespaces, RDF, JSON-LD
+# contexts and Java package names all do, and `uuid.NAMESPACE_URL` is RFC 4122's namespace for
+# URLs so a URL shaped seed is its intended input. An opaque word would hash just as well and
+# would collide with every other project that reached for the same word.
 #
-# Every user id and every scope id is `uuid5` of this string. Scope ids live in the `scopes`
-# array on every row row-security filters, so a different value renames nothing. It mints a
-# disjoint set that matches nothing already stored, and row security then correctly hides the
-# whole corpus from everyone while raising no error at all. It stays byte for byte as written
-# here, in a fork and on a new domain, and the two ids below are the same rule spelled out.
+# Deliberately not a setting, because it is load bearing in a way an address never is. Every user
+# id and every scope id is `uuid5` of this string, and scope ids live in the `scopes` array on
+# every row row-security filters. A different value renames nothing. It mints a disjoint set that
+# matches nothing already stored, so row security correctly hides the whole corpus from everyone
+# and raises no error at all. The value is therefore part of the data, and stays byte for byte as
+# written here through a fork, a rename, and a move to a new domain.
 _IDENTITY_NAMESPACE = "https://aizk.phvv.me"
 _ANONYMOUS_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/subjects/anonymous")
 _SYSTEM_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/subjects/system")
