@@ -29,6 +29,7 @@ from aizk.web import WebSearch
 USER_TOOLS = {
     "find",
     "keep",
+    "report",
     "share",
     "status",
 }

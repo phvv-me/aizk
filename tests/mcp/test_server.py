@@ -90,6 +90,8 @@ def test_registration_is_exactly_the_client_verbs(tools: dict[str, FunctionTool]
         "upload",
     }
     assert "required" not in tools["keep"].parameters
+    assert set(tools["report"].parameters["properties"]) == {"text"}
+    assert tools["report"].parameters["required"] == ["text"]
     # every share input is optional so a caller may bring either selection alone
     assert set(tools["share"].parameters["properties"]) == {
         "documents",
@@ -119,6 +121,7 @@ def test_registration_is_exactly_the_client_verbs(tools: dict[str, FunctionTool]
 def test_tool_schemas_bound_expensive_inputs(tools: dict[str, FunctionTool]) -> None:
     find_properties = tools["find"].parameters["properties"]
     keep_properties = tools["keep"].parameters["properties"]
+    report_properties = tools["report"].parameters["properties"]
     share_properties = tools["share"].parameters["properties"]
     upload_properties = mcp_server.UploadDeclaration.model_json_schema()["properties"]
 
@@ -126,6 +129,7 @@ def test_tool_schemas_bound_expensive_inputs(tools: dict[str, FunctionTool]) -> 
     assert find_properties["budget"]["maximum"] == settings.mcp_recall_budget_max_tokens
     assert set(find_properties) == {"query", "budget", "scopes", "web", "fresh"}
     assert keep_properties["text"]["anyOf"][0]["maxLength"] == (settings.mcp_remember_max_chars)
+    assert report_properties["text"]["maxLength"] == settings.mcp_report_max_chars
     assert keep_properties["source_uri"]["anyOf"][0]["maxLength"] == (
         settings.mcp_source_uri_max_chars
     )
@@ -380,6 +384,7 @@ def test_status_returns_authority_usage_and_processing(
     [
         ("find", "query", "find query cannot be blank"),
         ("keep", "text", "keep requires text or a source URI"),
+        ("report", "text", "report text cannot be blank"),
     ],
 )
 @pytest.mark.parametrize("blank", ["", "  ", "\n\t"])
@@ -756,6 +761,7 @@ def test_text_only_deployment_refuses_artifact_intake(
     [
         ("find", {"query": "what changed"}),
         ("keep", {"text": "A durable memory."}),
+        ("report", {"text": "Two settled facts about the same subject contradict."}),
         ("share", {"documents": [uuid7()]}),
     ],
 )
@@ -901,6 +907,7 @@ def test_end_to_end_an_mcp_minted_grant_is_redeemed_by_the_api_put(
     ("tool_name", "arguments"),
     [
         ("keep", {"text": "a durable note"}),
+        ("report", {"text": "a confusing pair of facts"}),
         ("share", {"documents": [uuid7()]}),
         (
             "keep",

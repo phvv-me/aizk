@@ -81,9 +81,9 @@ def install_failing_quota_session(
     monkeypatch: pytest.MonkeyPatch,
     code: str,
     failures: int,
-) -> list[ReturningInsert[tuple[int]]]:
+) -> list[ReturningInsert[int]]:
     """Replace the quota transaction with one controlled SQLSTATE sequence."""
-    calls: list[ReturningInsert[tuple[int]]] = []
+    calls: list[ReturningInsert[int]] = []
 
     class OriginalFailure(Exception):
         sqlstate = code
@@ -93,7 +93,7 @@ def install_failing_quota_session(
             return 1
 
     class Session:
-        async def exec(self, statement: ReturningInsert[tuple[int]]) -> Result:
+        async def exec(self, statement: ReturningInsert[int]) -> Result:
             calls.append(statement)
             if len(calls) <= failures:
                 raise DBAPIError("quota", {}, OriginalFailure(), False)

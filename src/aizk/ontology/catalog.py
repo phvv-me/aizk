@@ -15,7 +15,7 @@ from ..serving.embed import EmbedClient
 from ..store.engine import Session
 from ..store.models import Entity, Relation
 from ..store.models.tables import RelationPolicy
-from ..store.vector import cosine_distance, embedding_vector
+from ..store.vector import cosine_distance, embedding_column, embedding_vector
 from .system import System
 
 
@@ -221,7 +221,7 @@ class Ontology(FrozenModel):
                 for ordinal, (suggestion, embedding) in enumerate(suggestions)
             ],
         )
-        distance = cosine_distance(Entity.Kind.embedding, inputs.c.embedding)
+        distance = cosine_distance(Entity.Kind.embedding, embedding_column(inputs))
         nearest = (
             select(Entity.Kind.name)
             .where(

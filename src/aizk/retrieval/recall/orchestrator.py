@@ -9,8 +9,6 @@ from pydantic.types import PositiveInt
 
 from ...config import settings
 from ...config.settings import StatementValue
-from ...exceptions import OntologyNotReadyError
-from ...ontology import Ontology
 from ...serving.embed import EmbedClient
 from ...serving.gate import GateClient
 from ...store import Fact
@@ -24,7 +22,7 @@ from .program import build_recall_statement
 _speaker_query_template = "{query}\nThe asking speaker is {label}."
 
 
-async def query_entities(query: str, user: User) -> list[str]:
+async def query_entities(query: str) -> list[str]:
     """The lowered entity names a query mentions, the graph expansion's seeds.
 
     The statement compares `lower(name)` on the column side, expression-index friendly
@@ -34,11 +32,6 @@ async def query_entities(query: str, user: User) -> list[str]:
     """
     if not settings.graph_entity_seeding:
         return []
-    try:
-        Ontology.current()
-    except OntologyNotReadyError:
-        async with user as session:
-            await Ontology.ensure(session)
     return await GateClient.from_settings(settings).named_entities(query)
 
 
@@ -172,7 +165,7 @@ async def _execute(
     )
     embedded, named = await asyncio.gather(
         EmbedClient.from_settings(settings).embed([search_query], mode="query"),
-        query_entities(query, user),
+        query_entities(query),
     )
     [vector] = embedded
     context = QueryContext(

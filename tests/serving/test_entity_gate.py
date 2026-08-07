@@ -29,6 +29,18 @@ def gate() -> GateClient:
     return GateClient.from_settings(settings)
 
 
+def wired(client: httpx.AsyncClient, throttle: asyncio.Semaphore) -> GateClient:
+    """The real client over a supplied transport, carrying the production settings."""
+    return GateClient(
+        client=client,
+        throttle=throttle,
+        gate_threshold=settings.gliner_gate_threshold,
+        gate_floor=settings.gliner_gate_floor,
+        mention_labels=settings.gliner_mention_labels,
+        mention_threshold=settings.gliner_mention_threshold,
+    )
+
+
 def sidecar(monkeypatch: pytest.MonkeyPatch, result: dict) -> list[tuple[str, dict]]:
     """Route the gate client to an in-memory sidecar answering one canned result."""
     requests: list[tuple[str, dict]] = []
@@ -71,12 +83,9 @@ def test_client_raises_on_an_error_status() -> None:
     )
     with pytest.raises(httpx.HTTPStatusError):
         run(
-            GateClient(
-                client=client,
-                throttle=asyncio.Semaphore(1),
-                gate_threshold=settings.gliner_gate_threshold,
-                gate_floor=settings.gliner_gate_floor,
-            ).post("/classify", ClassifyRequest(text="where", tasks={}), ClassifyResponse)
+            wired(client, asyncio.Semaphore(1)).post(
+                "/classify", ClassifyRequest(text="where", tasks={}), ClassifyResponse
+            )
         )
 
 
@@ -154,8 +163,8 @@ def test_named_entities_extracts_normalized_unique_entity_names(
             "/extract",
             {
                 "text": "Ada uses Git",
-                "entity_types": Ontology.current().gate_labels,
-                "threshold": settings.gliner_gate_threshold,
+                "entity_types": list(settings.gliner_mention_labels),
+                "threshold": settings.gliner_mention_threshold,
             },
         )
     ]
@@ -232,12 +241,7 @@ def test_call_queues_behind_the_per_variant_throttle(monkeypatch: pytest.MonkeyP
 
     async def burst() -> None:
         request = ClassifyRequest(text="note", tasks={"present": ["Person"]})
-        gate = GateClient(
-            client=client,
-            throttle=request_throttle("http://gliner.test", 2),
-            gate_threshold=settings.gliner_gate_threshold,
-            gate_floor=settings.gliner_gate_floor,
-        )
+        gate = wired(client, request_throttle("http://gliner.test", 2))
         async with asyncio.TaskGroup() as group:
             for _ in range(10):
                 group.create_task(gate.post("/classify", request, ClassifyResponse))

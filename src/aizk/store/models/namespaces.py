@@ -195,8 +195,10 @@ class Entity:
         """Personalized PageRank seeds summed per entity.
 
         Entities the query names carry decisive mass, exact lowered-name matches at full
-        mention mass and, when enabled, trigram matches at similarity-scaled mass so a
-        misspelled mention still seeds without outweighing an exact one. When any name
+        mention mass and, when enabled, trigram matches above `graph_mention_similarity` at
+        similarity-scaled mass so a misspelled mention still seeds without outweighing an
+        exact one. The `%` operator stays in the join so the trigram index drives the scan
+        while the floor cuts the long tail it admits by default. When any name
         matches, mass spreads from the mentions alone, the pure connection signal; dense
         entity and fact-endpoint seeds are only the fallback.
         """
@@ -209,13 +211,17 @@ class Entity:
         ).where(lowered == any_(mentions))
         if context.fuzzy:
             mention = func.unnest(mentions).table_valued("mention").render_derived()
+            closeness = func.similarity(lowered, mention.c.mention)
             fuzzy_matches = (
                 select(
                     cls.Content.id.label("entity_id"),
-                    (mention_mass * func.similarity(lowered, mention.c.mention)).label("mass"),
+                    (mention_mass * closeness).label("mass"),
                 )
                 .select_from(mention.join(cls.Content, lowered.bool_op("%")(mention.c.mention)))
-                .where(lowered != mention.c.mention)
+                .where(
+                    lowered != mention.c.mention,
+                    closeness >= bindparam("graph_mention_similarity", type_=Float),
+                )
             )
             mention_entities = union_all(exact_mentions, fuzzy_matches).cte("mention_entity")
         else:

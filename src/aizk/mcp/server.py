@@ -18,7 +18,7 @@ from ..background.wake import NoopWorkerWake, WorkerWake
 from ..config import Settings
 from ..exceptions import QuotaExceededError
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
-from ..memory import Memory, ShareResult
+from ..memory import Memory, ShareResult, WriteResult
 from ..status import StatusReport
 from ..storage import ByteStore, IntegrityMismatch
 from ..store import Artifact, Blob, Usage
@@ -80,6 +80,7 @@ class AizkMCP(FastMCP):
             self.status_tool(),
             self.find_tool(),
             self.keep_tool(),
+            self.report_tool(),
             self.share_tool(),
         ):
             self.tool(verb)
@@ -318,6 +319,55 @@ class AizkMCP(FastMCP):
                 raise ToolError(str(exhausted)) from exhausted
 
         return keep
+
+    def report_tool(self) -> Callable[..., Coroutine[None, None, WriteResult]]:
+        """Build the `report` tool with input bounds from this server's settings."""
+        config = self.settings
+
+        async def report(
+            context: Context,
+            text: Annotated[
+                str,
+                StringConstraints(
+                    strip_whitespace=True,
+                    min_length=1,
+                    max_length=config.mcp_report_max_chars,
+                ),
+            ],
+        ) -> WriteResult:
+            """Flag memory that is confusing, contradictory, or ungrounded for an operator.
+
+            Call this the moment `find`, `keep`, or `share` hand you evidence you cannot square,
+            such as two settled facts that contradict each other, a fact whose own source
+            excerpt does not actually support its claim, a tool that refused an argument you
+            had no way to obtain, or a `find` that came back empty for a question the corpus
+            plainly answers. You are the only party holding that evidence right now, and it is
+            lost the moment this call is not made, so quote the exact facts, document IDs, and
+            tool names involved rather than summarizing them from memory.
+
+            The report is written and extracted exactly like `keep`, deliberately, because
+            whether two reports describe the same recurring problem, and whether a problem
+            already fixed has come back, are graph and timeline questions an operator can only
+            answer if a report is a real source rather than a status flag.
+
+            This is a one-way box. What you write here is stored where no caller, including
+            you and including this same conversation, can ever read it back, only an operator
+            can. Do not expect it to change your own answer, and do not treat filing it as
+            having fixed the confusion, since only the operator acting on it does that.
+
+            text: what is wrong and the exact evidence for it, bounded by deployment settings.
+            """
+            if not (text := text.strip()):
+                raise ToolError("report text cannot be blank")
+            user = await self.user(context, identified=True)
+            try:
+                return await self.memory(user, client_label(context)).report(text)
+            except ValueError as invalid:
+                raise ToolError(str(invalid)) from invalid
+            except QuotaExceededError as exhausted:
+                raise ToolError(str(exhausted)) from exhausted
+
+        return report
 
     def share_tool(self) -> Callable[..., Coroutine[None, None, ShareResult]]:
         """Build the `share` tool with input bounds from this server's settings."""

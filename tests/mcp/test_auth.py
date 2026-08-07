@@ -168,6 +168,61 @@ def test_client_builds_current_read_and_write_authority(
     assert user.organizations[1].members == ()
 
 
+@pytest.mark.parametrize(
+    ("roles", "operator"),
+    [((), False), (("aizk-user",), False), (("aizk-user", "aizk-admin"), True)],
+    ids=["no-roles", "plain-user", "admin"],
+)
+def test_client_writes_the_report_scope_for_everyone_and_reads_it_only_for_the_admin_role(
+    monkeypatch: pytest.MonkeyPatch,
+    roles: tuple[str, ...],
+    operator: bool,
+) -> None:
+    client = lt.LogtoClient()
+
+    async def no_orgs(subject: str, *, fresh: bool = False) -> tuple[lt.Org, ...]:
+        return ()
+
+    async def no_public(*, fresh: bool = False) -> tuple[lt.Org, ...]:
+        return ()
+
+    monkeypatch.setattr(client, "user_orgs", no_orgs)
+    monkeypatch.setattr(client, "public_orgs", no_public)
+    monkeypatch.setattr(client, "account", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        client, "user_roles", AsyncMock(return_value=tuple(lt.Role(id=r, name=r) for r in roles))
+    )
+    now = int(time.time())
+    user = dbutil.run(
+        client.user(
+            lt.Claims(
+                iss=AnyHttpUrl("https://auth.test/oidc"),
+                sub="user-1",
+                aud="https://aizk.test/mcp",
+                iat=now,
+                exp=now + 60,
+            )
+        )
+    )
+    dbutil.run(client.close())
+
+    reports_scope = settings.reports_scope_id
+    assert reports_scope in user.scopes.write
+    assert (reports_scope in user.scopes.read) is operator
+
+
+def test_anonymous_caller_gets_neither_report_write_nor_report_read() -> None:
+    """An unauthenticated reporter has no accountability, so it may not write a report either."""
+    client = lt.LogtoClient()
+
+    user = dbutil.run(client.anonymous())
+    dbutil.run(client.close())
+
+    assert settings.reports_scope_id not in user.scopes.write
+    assert settings.reports_scope_id not in user.scopes.read
+    assert user.scopes.write == frozenset()
+
+
 def test_client_derives_and_validates_logto_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
     _configure_logto(monkeypatch)
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json=_discovery()))

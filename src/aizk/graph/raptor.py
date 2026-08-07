@@ -24,7 +24,7 @@ from ..store.engine import Session
 from ..store.identity import User
 from ..store.locking import acquire_locks
 from ..store.models.tables import EntityClaim, EntityContent, FactClaim, FactContent
-from ..store.vector import cosine_distance, embedding_vector
+from ..store.vector import cosine_distance, embedding_column, embedding_vector
 from ..types import Scopes
 from .ids import entity_id, fact_id
 from .models import Node, RaptorReport
@@ -183,7 +183,7 @@ class RaptorBuilder(FlexModel):
         )
         left = vectors.alias("raptor_left")
         right = vectors.alias("raptor_right")
-        distance = cosine_distance(left.c.embedding, right.c.embedding)
+        distance = cosine_distance(embedding_column(left), embedding_column(right))
         with span("raptor_similarity_query"):
             async with User.system(self.scopes) as session:
                 pairs = await session.exec(

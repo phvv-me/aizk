@@ -242,6 +242,18 @@ class User(rls.Context, prefix="app"):
             raise ScopeNotFoundError("Logto does not grant write permission in every target scope")
         return target
 
+    def report_scope(self) -> Scopes:
+        """Resolve the fixed operator-only report destination, refusing an unauthorized caller.
+
+        Every caller `LogtoClient` authenticates carries this scope in `write`, so this only
+        ever refuses a caller built by some other path, such as a private or system identity
+        that was never meant to file a report.
+        """
+        target = frozenset({settings.reports_scope_id})
+        if not target <= self.scopes.write:
+            raise ScopeNotFoundError("this caller may not write operator reports")
+        return target
+
 
 class Exec:
     """Index by a row model to run one statement as one caller transaction.

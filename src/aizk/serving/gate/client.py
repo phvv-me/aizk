@@ -37,6 +37,8 @@ class GateClient(HttpService):
 
     gate_threshold: float
     gate_floor: frozenset[str]
+    mention_labels: tuple[str, ...]
+    mention_threshold: float
 
     @classmethod
     def from_settings(cls, config: Settings, variant: str = "") -> GateClient:
@@ -47,6 +49,8 @@ class GateClient(HttpService):
             throttle=request_throttle(url, config.gliner_concurrency),
             gate_threshold=config.gliner_gate_threshold,
             gate_floor=config.gliner_gate_floor,
+            mention_labels=config.gliner_mention_labels,
+            mention_threshold=config.gliner_mention_threshold,
         )
 
     @staticmethod
@@ -134,8 +138,8 @@ class GateClient(HttpService):
         return sorted({span.strip().lower() for span in spans if span.strip()})
 
     async def named_entities(self, text: str) -> list[str]:
-        """Return normalized unique names of live ontology types mentioned in text."""
-        return await self.mentions(text, Ontology.current().gate_labels, self.gate_threshold)
+        """Return normalized unique names the text mentions, the graph expansion's seeds."""
+        return await self.mentions(text, self.mention_labels, self.mention_threshold)
 
     async def relevant(self, text: str) -> bool:
         """Return whether text carries an extractable ontology type."""

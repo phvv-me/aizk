@@ -49,7 +49,7 @@ jinja2 = "<4,>=3.1.6"
 tenacity = "<10,>=9.1.4"
 
 [pypi-dependencies.sqlalchemy]
-version = "<2.1,>=2.0.47"
+version = "<3,>=2.1.0b3"
 extras = ["asyncio"]
 
 [pypi-dependencies.py-key-value-aio]
@@ -69,7 +69,7 @@ path = "../."
 editable = true
 
 [pypi-options.dependency-overrides]
-sqlalchemy = ">=2.0.47,<2.1"
+sqlalchemy = ">=2.1.0b3,<3"
 
 [feature.dev.pypi-dependencies]
 fire = "<0.8,>=0.7.1"
@@ -105,7 +105,7 @@ pytest-clarity = "<2,>=1.0.1"
 pytest-rerunfailures = "<17,>=16.3"
 pytest-timeout = "<3,>=2.4.0"
 hypothesis = "<7,>=6.155.3"
-polyfactory = "<3,>=2.22.4"
+polyfactory = "<4,>=3.3"
 faker = "<41,>=40.23.0"
 syrupy = "<6,>=5.3.2"
 dirty-equals = "<0.12,>=0.11"

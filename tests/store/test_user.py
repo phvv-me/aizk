@@ -111,6 +111,17 @@ def test_write_scope_defaults_to_personal_and_resolves_named_intersections() -> 
         reader.write_scope(["first"])
 
 
+def test_report_scope_resolves_to_the_one_fixed_operator_destination() -> None:
+    user_id = uuid5()
+    reporter = User.authorized(user_id, write=(user_id, settings.reports_scope_id))
+
+    assert reporter.report_scope() == frozenset({settings.reports_scope_id})
+
+    unauthorized = User.authorized(user_id, write=(user_id,))
+    with pytest.raises(ScopeNotFoundError, match="may not write operator reports"):
+        unauthorized.report_scope()
+
+
 def test_user_indexes_current_organization_directory_and_standing() -> None:
     user_id, public_id, private_id = uuid5(), uuid5(), uuid5()
     named = OrganizationMember(name="Pedro", username="pedro")

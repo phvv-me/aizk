@@ -345,21 +345,30 @@ class LogtoClient:
         preferred_username: str | None = None,
         username: str | None = None,
     ) -> User:
-        """Build one AIZK identity from an already selected Logto authority snapshot."""
+        """Build one AIZK identity from an already selected Logto authority snapshot.
+
+        Every authenticated caller gets write into the one synthetic report scope, so `report`
+        needs no organization to exist for it. Only a caller holding the tenant-wide operator
+        role reads it back, which is what keeps a filed report legible to nobody else.
+        """
         organizations = self._merged(member_orgs, public_orgs)
         if account is not None:
             name, username, avatar = account.name, account.username, account.avatar
         else:
             username, avatar = preferred_username or username, None
         user_id = self.settings.subject_id(subject)
+        reports_scope = self.settings.reports_scope_id
+        operator = any(role.name == self.settings.logto_admin_role for role in roles)
         return User.authorized(
             user_id,
             read=(
                 user_id,
                 *(self.settings.scope_id(organization_id) for organization_id in organizations),
+                *((reports_scope,) if operator else ()),
             ),
             write=(
                 user_id,
+                reports_scope,
                 *(
                     self.settings.scope_id(organization.id)
                     for organization in member_orgs

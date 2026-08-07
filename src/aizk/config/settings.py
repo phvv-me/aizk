@@ -329,6 +329,25 @@ class Settings(BaseSettings):
     gliner_extract_threshold: float = 0.7
     gliner_gate_floor: frozenset[str] = frozenset({"Person"})
     gliner_gate_threshold: float = 0.7
+    # Span extraction reads natural type names, not the ontology's kinds, because a mention is
+    # resolved against real entity names afterwards and the label only steers the span. Measured
+    # on 200 real facts: the 43 snake_case kinds recover 48.9% of the entities their own text
+    # names, these recover 85.9%, and `raptor_summary` means nothing to the model.
+    gliner_mention_labels: tuple[str, ...] = (
+        "person",
+        "organization",
+        "project",
+        "software library or tool",
+        "method or technique",
+        "dataset",
+        "metric or measurement",
+        "paper or publication",
+        "model",
+        "concept",
+        "place",
+    )
+    # The gate classifies, this extracts spans, and 0.7 silences a fifth of all queries outright.
+    gliner_mention_threshold: float = 0.3
     gliner_timeout: float = 30.0
     # The default GLiNER sidecar. Aizk never loads its weights in the server process.
     gliner_url: str = "http://localhost:8006"
@@ -396,6 +415,11 @@ class Settings(BaseSettings):
     mcp_recall_budget_max_tokens: PositiveInt = 16_384
     mcp_recall_query_max_chars: PositiveInt = 16_384
     mcp_remember_max_chars: PositiveInt = 5_000_000
+    # A report quotes the settled facts, the source excerpt, and a short explanation, which
+    # a few paragraphs and two or three excerpts comfortably cover. It is a small fraction of
+    # `mcp_remember_max_chars`, which exists for preserved originals and long-form notes a
+    # report is never meant to be, so a caller stuck retrying cannot back a corpus through it.
+    mcp_report_max_chars: PositiveInt = 8_000
     mcp_request_rate_per_second: PositiveFloat = 5.0
     mcp_scope_names_max: PositiveInt = 32
     mcp_share_documents_max: PositiveInt = 100
@@ -476,6 +500,10 @@ class Settings(BaseSettings):
     graph_mass_window: int = 80
     graph_mention_fuzzy: bool = True
     graph_mention_mass: float = 10.0
+    # Trigram floor for a fuzzy mention match. Postgres defaults `%` to 0.3, which spread one
+    # query's mention mass over 100 to 250 of the 49,862 entity names and barely personalized
+    # the walk at all; 0.6 seeds 19 and still recovers more truth than the wider net did.
+    graph_mention_similarity: float = 0.6
     graph_ppr_damping: float = 0.5
     graph_ppr_frontier: int = 32
     graph_seed_entities: int = 16
@@ -1015,6 +1043,16 @@ class Settings(BaseSettings):
         """Derive scope IDs from a comma-separated operator input."""
         names = (name.strip() for name in (external_ids or "").split(","))
         return frozenset(self.scope_id(name) for name in names if name)
+
+    @property
+    def reports_scope_id(self) -> UUID5:
+        """The one synthetic scope every authenticated caller may write an operator report into.
+
+        No Logto organization backs it, so no membership call could ever resolve it by name.
+        `LogtoClient` grants it to every authenticated caller's write authority and to an
+        operator's read authority alone, which is what makes a report legible to nobody else.
+        """
+        return self.scope_id("aizk:reports")
 
     @property
     def chunk_denylist_languages(self) -> frozenset[str]:

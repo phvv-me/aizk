@@ -39,7 +39,10 @@ def test_chunk_rankings_walk_their_index_before_any_document_is_joined() -> None
         # Joining document inside the ranking costs the planner the chunk index, so the
         # window ranks chunks alone and over-fetches for the join that follows it.
         assert "JOIN document" not in window
-        assert "LIMIT %(fusion_depth)s * %(fusion_overfetch)s" in window
+        # Each driver spells a bound parameter its own way and only some cast it, so assert the
+        # over-fetch arithmetic itself rather than one driver's rendering of it.
+        limit = window[window.rindex("LIMIT") :]
+        assert "fusion_depth" in limit and "*" in limit and "fusion_overfetch" in limit
         assert f"FROM {lane}_window JOIN document" in sql
 
 

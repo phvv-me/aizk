@@ -37,7 +37,7 @@ class MonthlyQuotaCounter(TableBase, table=True):
         kind: QuotaKind,
         limit: int,
         units: int = 1,
-    ) -> ReturningInsert[tuple[int]]:
+    ) -> ReturningInsert[int]:
         """Consume `units` of one counter only while its configured limit has room.
 
         A unit is what the operation really costs, which for an external provider call is

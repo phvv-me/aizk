@@ -3,7 +3,7 @@ from typing import cast
 
 from patos.sql import CosineHalfvec
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import ColumnElement, Float
+from sqlalchemy import ColumnElement, Float, FromClause
 
 from ..config import DatabaseBackend, settings
 
@@ -43,3 +43,14 @@ def cosine_distance[L: Sequence[float] | None, R: Sequence[float]](
 ) -> ColumnElement[float]:
     """Build portable cosine distance without relying on SQLAlchemy operator forwarding."""
     return cast(ColumnElement[float], left.op("<=>", return_type=Float)(right))
+
+
+def embedding_column(
+    source: FromClause, name: str = "embedding"
+) -> ColumnElement[Sequence[float]]:
+    """Read one vector column off a `values()` construct as the vector it was declared with.
+
+    A `values()` column carries the union of every type the construct can hold rather than the
+    one its `column()` declared, so the vector type is restored here instead of at each caller.
+    """
+    return cast(ColumnElement[Sequence[float]], source.c[name])

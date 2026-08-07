@@ -643,6 +643,9 @@ def test_mention_matching_compiles_trigram_fuzz_only_when_enabled(fuzzy: bool) -
     )
 
     assert ("similarity(" in sql) is fuzzy
+    # the trigram operator drives the index, the floor cuts the long tail it admits by default
+    assert ("graph_mention_similarity" in sql) is fuzzy
+    assert ("%%" in sql) is fuzzy
     assert "mention_entity" in sql
 
 
@@ -846,23 +849,22 @@ def test_query_entity_seeding_controls_the_lowered_gate_names(
     stub_gate(monkeypatch, named)
     monkeypatch.setattr(settings, "graph_entity_seeding", enabled)
 
-    assert dbutil.run(recall_module.query_entities("who uses what", User.system())) == expected
+    assert dbutil.run(recall_module.query_entities("who uses what")) == expected
     assert calls == (["who uses what"] if enabled else [])
 
 
-def test_query_entities_loads_the_ontology_in_a_fresh_process(
-    migrated_db: None,
-    fake_embedder: RecordingEmbedder,
+def test_query_entities_seeds_without_an_ontology_or_a_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Mention labels are configured, so a cold process seeds without loading the ontology."""
+
     async def named(text: str) -> list[str]:
-        assert Ontology.current().entity_names
         return [text]
 
     monkeypatch.setattr(Ontology, "_cached", None)
     stub_gate(monkeypatch, named)
 
-    assert dbutil.run(recall_module.query_entities("ada", User.system())) == ["ada"]
+    assert dbutil.run(recall_module.query_entities("ada")) == ["ada"]
 
 
 def test_recall_runs_the_maximal_plan_unless_the_caller_forces_one(

@@ -187,12 +187,50 @@ class Memory:
             )
             await self.wake.wake()
             return result
-        text = cast("str", text)
+        return await self._ingest_document(
+            cast("str", text),
+            self.user.write_scope(scopes),
+            source_uri=source_uri,
+            observed_at=observed_at,
+            expires_at=expires_at,
+        )
+
+    async def report(self, text: str) -> WriteResult:
+        """File one confusing or contradictory memory finding into the operator-only scope.
+
+        Mechanically this is `remember`'s text write with the destination fixed to the one
+        scope every authenticated caller may write and only an operator may read, so it shares
+        `remember`'s monthly quota and, because the exact same content hashes to the exact same
+        document within that one scope, the same dedupe that already protects a stuck retry
+        from filing the same document twice.
+
+        The write itself runs as a system transaction scoped to exactly that one scope rather
+        than as the reporting caller. A chunk's own row security proves it belongs to a document
+        the writer can already see, and this caller can never see the report scope by design, so
+        its own transaction could write the document but never the chunks under it. `created_by`
+        still names the real caller, since only the transaction's authority moves.
+        """
+        await quota.consume(self.user.id, Usage.Event.Operation.remember_text)
+        target = self.user.report_scope()
+        return await self._ingest_document(text, target, actor=User.system(target))
+
+    async def _ingest_document(
+        self,
+        text: str,
+        target: Scopes,
+        actor: User | None = None,
+        source_uri: str | None = None,
+        observed_at: datetime | None = None,
+        expires_at: datetime | None = None,
+    ) -> WriteResult:
+        """Store one text source under `target`, queue it for graph projection, wake workers.
+
+        actor: transaction identity the write runs as, the caller unless one is given.
+        """
         declaration = extract_ingest.SourceDeclaration.from_text(text)
-        target = self.user.write_scope(scopes)
         annotate_operation(Usage.Event.Operation.remember_text, target)
         document_id = await extract_ingest.ingest_text(
-            self.user,
+            actor or self.user,
             text,
             title=declaration.title,
             source_uri=source_uri,
