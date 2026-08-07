@@ -64,8 +64,9 @@
 
 # The operator console, a second site in the same container that Cloudflare reaches at web:8082.
 # It is one hostname with paths rather than a name per tool because Cloudflare's free Universal
-# SSL certificate covers only first-level subdomains, so `observability.admin.phvv.me` would need
-# a paid certificate while `admin.phvv.me/grafana` costs nothing. The port collides with nothing,
+# SSL certificate covers only first-level subdomains, so a nested `observability.admin.<domain>`
+# would need a paid certificate while `<admin host>/grafana` costs nothing. The port collides
+# with nothing,
 # since the 8082 the last rule above dials belongs to the separate `docs` container.
 :8082 {
 	encode zstd gzip
@@ -116,40 +117,21 @@
 			}
 		}
 
-		# `/console` does not say which tool it is, so `/logto` is an alias onto it rather than a
-		# rename. Confirmed directly against the logto container: its server, not its client
-		# bundle, hard-codes the admin console at `/console`, since a bare `/` there 302s to
-		# the separate end-user sign-in flow at `auth.phvv.me/unknown-session` instead of the
-		# console shell. Stripping `/logto` down to `/` the way `handle_path` normally would
-		# therefore lands on the wrong Logto surface, so this alias redirects to `/console`
-		# instead of proxying there directly. `/auth` is unavailable for the same alias role
-		# because the SvelteKit app already owns it. `handle_path` rather than `handle` plus
-		# `uri strip_prefix`, because Caddy orders `redir` ahead of `uri`, so the strip would
-		# run after the redirect had already read `{uri}` and the alias would send `/logto/x`
-		# to `/console/logto/x`.
-		handle_path /logto* {
-			redir * /console{uri} 302
-		}
-
-		# Logto's console is already a path-based app on its own port, so it joins the console
-		# host rather than taking a second hostname. `/api` is the management API the console
-		# calls and `/me` is its account app, and neither collides here, since the browser never
-		# calls them. The SvelteKit client that owns `/api` paths runs server side against the
-		# api container instead. Logto already names this origin as its admin endpoint, so its
-		# redirect URIs and CORS need no change, and reaching it through this block puts it
-		# behind the operator gate too.
-		handle /console* {
-			reverse_proxy logto:3002
-		}
-
-		# The console's own bundle, fetched and inspected directly from the logto container, asks
-		# for `/assets/index-*.js` at the root rather than under `/console`. Without this route the
-		# scripts fall through to the catch-all, arrive at a SvelteKit app that has never heard of
-		# them, and the console renders a blank white page having served a perfectly good 200.
-		# Nothing else on this host owns `/assets`, since the SvelteKit build publishes under
-		# `/_app`, so forwarding the whole prefix is unambiguous.
-		handle /assets/* {
-			reverse_proxy logto:3002
+		# Logto's console is NOT served from this host, and cannot be. It must own an origin,
+		# because serving it under a path was asked for upstream in 2022 and never implemented, so
+		# a subpath deployment answers 404 however the routing is arranged. An earlier comment here
+		# claimed the opposite and cost real time, so it is stated plainly. `docs/dev/run/console.md`
+		# carries the same warning and the cutover it belongs to.
+		#
+		# `/logto` therefore stays as the discoverable name and sends the browser to the origin
+		# that does serve it. `/console` and `/assets` are deliberately absent rather than proxied,
+		# since routing them here would only reproduce the 404 with more moving parts.
+		# Both names redirect rather than proxy. `/console` is kept because it is the path people
+		# type and bookmark, and answering it with a redirect is honest where proxying it would
+		# answer 404, while `/logto` says which tool it is.
+		@console_alias path /logto /logto/* /console /console/*
+		handle @console_alias {
+			redir * {$AIZK_LOGTO_ADMIN_ENDPOINT} 302
 		}
 
 		handle /api/* {
@@ -158,7 +140,7 @@
 
 		# The console bundle asks for `/oidc/session/end` and `/oidc/device` as root-relative
 		# paths, read out of the shipped `index-*.js` rather than guessed, so they resolve
-		# against this host and not the `auth.phvv.me` origin Logto is configured with. Without
+		# against this host and not the separate auth origin Logto is configured with. Without
 		# this route they fall through to the catch-all and the console cannot end a session or
 		# complete a device flow, having otherwise rendered fine.
 		handle /oidc/* {
@@ -223,7 +205,7 @@
 				</style>
 				<h1>AIZK operator console</h1>
 				<p>Signed in. Everything below sits behind this same gate.</p>
-				<a href="/console"><b>Logto</b><br><small>Identity, users, roles and applications</small></a>
+				<a href="/logto"><b>Logto</b><br><small>Identity, users, roles and applications, on its own origin</small></a>
 				<a href="/grafana/"><b>Grafana</b><br><small>Dashboards, logs and metrics</small></a>
 				<a href="/traces"><b>Traces</b><br><small>Request paths in Tempo</small></a>
 				HTML 200

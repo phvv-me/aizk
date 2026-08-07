@@ -32,6 +32,11 @@ type RoleText = Annotated[str, StringConstraints(strip_whitespace=True, min_leng
 _PACKAGE_ROOT = Path(__file__).resolve().parents[3]
 _LOGTO_POLICY_FILE = _PACKAGE_ROOT / "src" / "deploy" / "logto.conf"
 _ENV_FILE = _PACKAGE_ROOT / ".env"
+# Frozen namespace seeds. These two strings are hashed into the anonymous and system user ids,
+# so they are part of the stored data rather than part of the configuration, and they stay
+# exactly as written even in a fork that serves a different domain. Editing either one mints
+# different ids and detaches every row those two identities own, which no migration can undo
+# because the old ids are unrecoverable from the new ones.
 _ANONYMOUS_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "https://aizk.phvv.me/subjects/anonymous")
 _SYSTEM_USER_ID = uuid.uuid5(uuid.NAMESPACE_URL, "https://aizk.phvv.me/subjects/system")
 # A bare, dot-free host is the docker-compose service naming convention (e.g. `vllm-llm`).
@@ -312,6 +317,12 @@ class Settings(BaseSettings):
     gliner_variants: dict[str, str] = {}
     graph_build_concurrency: int = 4
     graph_facts_k: int = 20
+    # A UUID namespace seed, not an address anything is fetched from, and NOT a deployment URL
+    # to be swapped for whatever host a fork runs on. Every user identity is `uuid5` of this
+    # string with the token subject, so changing it silently re-derives every id and orphans
+    # every row those ids own. It reads like configuration and is closer to a schema constant.
+    # A deployment that wants its own identity space sets it once before storing anything and
+    # never again. See the frozen anonymous and system seeds at the top of this module.
     identity_url: AnyHttpUrl = AnyHttpUrl("https://aizk.phvv.me")
     # VectorChord is the low-memory default. HNSW and tsvector are the portable fallback.
     index_backend: str = "vchordrq"

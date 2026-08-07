@@ -736,6 +736,11 @@ services:
       # because the Caddyfile bakes it in at parse time and an absent value would widen the
       # matcher instead of closing the route.
       AIZK_OTLP_TOKEN: ${AIZK_OTLP_TOKEN:?set AIZK_OTLP_TOKEN}
+      # Where `/logto` sends the browser. This was removed once as unused, which was true while
+      # the console was proxied from this host, and stopped being true when that turned out to
+      # be impossible. The console must own an origin, so the alias redirects to whatever origin
+      # Logto is configured with rather than pretending to serve it here.
+      AIZK_LOGTO_ADMIN_ENDPOINT: ${AIZK_LOGTO_ADMIN_ENDPOINT:?set AIZK_LOGTO_ADMIN_ENDPOINT}
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
     read_only: true
@@ -772,9 +777,9 @@ services:
       OAUTH2_PROXY_CLIENT_ID: ${AIZK_ADMIN_CLIENT_ID:-}
       OAUTH2_PROXY_CLIENT_SECRET: ${AIZK_ADMIN_CLIENT_SECRET:-}
       OAUTH2_PROXY_COOKIE_SECRET: ${AIZK_ADMIN_COOKIE_SECRET:-}
-      OAUTH2_PROXY_REDIRECT_URL: ${AIZK_ADMIN_PUBLIC_URL:-https://admin.phvv.me}/oauth2/callback
-      OAUTH2_PROXY_COOKIE_DOMAINS: ${AIZK_ADMIN_HOST:-admin.phvv.me}
-      OAUTH2_PROXY_WHITELIST_DOMAINS: ${AIZK_ADMIN_HOST:-admin.phvv.me}
+      OAUTH2_PROXY_REDIRECT_URL: ${AIZK_ADMIN_PUBLIC_URL:?set AIZK_ADMIN_PUBLIC_URL}/oauth2/callback
+      OAUTH2_PROXY_COOKIE_DOMAINS: ${AIZK_ADMIN_HOST:?set AIZK_ADMIN_HOST}
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${AIZK_ADMIN_HOST:?set AIZK_ADMIN_HOST}
       OAUTH2_PROXY_COOKIE_SECURE: "true"
       # Logto puts tenant roles in the `roles` claim once the `roles` scope is requested, so the
       # managed operator role from `logto.conf` is the group this gate admits.
@@ -1070,7 +1075,7 @@ services:
       # dashboard and Explore, which is all `/traces` and the overview need, and the three
       # datasources come from files and are `editable: false` so nobody has cause to add one.
       GF_USERS_AUTO_ASSIGN_ORG_ROLE: Editor
-      GF_SERVER_ROOT_URL: ${AIZK_ADMIN_PUBLIC_URL:-https://admin.phvv.me}/grafana
+      GF_SERVER_ROOT_URL: ${AIZK_ADMIN_PUBLIC_URL:?set AIZK_ADMIN_PUBLIC_URL}/grafana
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - ./observability/grafana:/etc/grafana/provisioning:ro
@@ -1115,7 +1120,7 @@ services:
       AIZK_REQUIRE_AUTH: "1"
     restart: "no"
 
-  # The outbound Cloudflare Tunnel publishes auth.phvv.me from Logto and aizk.phvv.me from
+  # The outbound Cloudflare Tunnel publishes the auth hostname from Logto and the public one from
   # Caddy through the public profile. Logto starts first, then the tunnel's native readiness
   # endpoint proves an active Cloudflare connection before any process resolves the canonical
   # public OIDC issuer through it. Neither origin publishes a host port; cloudflared dials both
