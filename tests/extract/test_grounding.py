@@ -234,6 +234,19 @@ def proposed(quote: str, statement: str, stance: Stance = Stance.settled) -> Tim
         ("the earlier margin claim is refuted", Stance.refuted),
         # the least settled register present decides, never the first one found
         ("Smith reports that the refuted margin may hold", Stance.refuted),
+        # the supersession gap: constructions that predicate a correction on a claim, none
+        # of them the bare adjective `invalid`, `false` or `obsolete` that ordinary
+        # technical prose uses for a value rather than a withdrawn claim
+        ("the figure reported for Kestrel in March is invalid", Stance.refuted),
+        ("the earlier result is no longer valid", Stance.refuted),
+        ("that conclusion is obsolete", Stance.refuted),
+        ("the result turned out to be false", Stance.refuted),
+        ("the claim was debunked", Stance.refuted),
+        # adversarial: the same words in their ordinary technical sense never read as refuted
+        ("the parser rejects invalid input", Stance.settled),
+        ("a false positive rate of 0.02", Stance.settled),
+        ("the obsolete API was removed", Stance.settled),
+        ("the function's return type is void", Stance.settled),
     ],
 )
 def test_certainty_reads_the_least_settled_register_a_span_speaks_in(
@@ -351,6 +364,34 @@ def test_a_correcting_sentence_marks_the_fact_and_the_others_do_not() -> None:
     assert not Qualification.read(
         proposed("Aizk uses PostgreSQL", "Aizk uses PostgreSQL."), "Aizk uses PostgreSQL."
     ).correcting
+
+
+def test_the_kestrel_supersession_incident_is_a_regression_case() -> None:
+    # the reported defect end to end: a May note invalidating a March claim with the
+    # adjective `invalid` rather than a verb `_REGISTERS` already stemmed. Before the fix
+    # the sentence read as settled, so `correcting` stayed False and `contests` was False,
+    # meaning the correction would have been stored alongside the stale claim instead of
+    # superseding it.
+    may_note = (
+        "The 0.81 recall at 10 figure reported for Kestrel in March is invalid. The held "
+        "out set had leaked into Kestrel's training shards through the sharding rework."
+    )
+    fact = proposed(
+        "The 0.81 recall at 10 figure reported for Kestrel in March is invalid",
+        "The 0.81 recall at 10 figure reported for Kestrel in March is invalid.",
+    )
+
+    qualification = Qualification.read(fact, may_note)
+    stored = fact.model_copy(
+        update={
+            "stance": qualification.settledness(fact.stance),
+            "correcting": qualification.correcting,
+        }
+    )
+
+    assert qualification.source is Stance.refuted
+    assert qualification.correcting
+    assert stored.contests
 
 
 def test_the_projection_refuses_a_flattened_hedge_and_stamps_what_it_keeps() -> None:

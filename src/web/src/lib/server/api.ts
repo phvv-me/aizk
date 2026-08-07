@@ -1,21 +1,37 @@
 import type { LogtoClient } from '@logto/sveltekit';
 import { fail, type ActionFailure } from '@sveltejs/kit';
 import type {
+  AdminLinks,
   Answer,
+  DoctorReport,
   FindingPage,
   GraphSlice,
+  HardwareHealth,
+  HealthReport,
   Me,
+  Operation,
   OrganizationDirectory,
   Overview,
   ProcessingReport,
+  RecallHealth,
   SourcePage,
   SubjectPage,
   ThemePage,
+  UsageFilterReport,
   UsageReport
 } from '$lib/api';
 import * as sdk from '$lib/api/generated';
 import { createClient } from '$lib/api/generated/client';
 import { settings } from './settings';
+
+/** One composed filter over durable usage, every field optional and independent. */
+export type UsageFilter = {
+  operation?: Operation;
+  actorId?: string;
+  scopeId?: string;
+  start?: string;
+  end?: string;
+};
 
 /** A rejected browser API call carrying the status and human-facing detail. */
 export class ApiError extends Error {
@@ -162,6 +178,47 @@ export class ApiClient {
       await sdk.removeMember({
         client: await this.client(),
         path: { name: organization, member_id: memberId }
+      })
+    );
+  }
+
+  async adminLinks(): Promise<AdminLinks> {
+    return unwrap(await sdk.adminLinks({ client: await this.client() }));
+  }
+
+  async adminHealth(): Promise<HealthReport> {
+    return unwrap(await sdk.adminHealth({ client: await this.client() }));
+  }
+
+  /** Run the live recall probe on demand, never during the page's own initial load. */
+  async adminRecall(): Promise<RecallHealth | null> {
+    return unwrap(await sdk.adminRecall({ client: await this.client() }));
+  }
+
+  async adminHardware(): Promise<HardwareHealth> {
+    return unwrap(await sdk.adminHardware({ client: await this.client() }));
+  }
+
+  async adminDoctor(showErrorMessages = true): Promise<DoctorReport> {
+    return unwrap(
+      await sdk.adminDoctor({
+        client: await this.client(),
+        query: { show_error_messages: showErrorMessages }
+      })
+    );
+  }
+
+  async adminUsage(filter: UsageFilter = {}): Promise<UsageFilterReport> {
+    return unwrap(
+      await sdk.adminUsage({
+        client: await this.client(),
+        query: {
+          operation: filter.operation,
+          actor_id: filter.actorId,
+          scope_id: filter.scopeId,
+          start: filter.start,
+          end: filter.end
+        }
       })
     );
   }

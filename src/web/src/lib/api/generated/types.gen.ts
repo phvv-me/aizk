@@ -5,6 +5,70 @@ export type ClientOptions = {
 };
 
 /**
+ * ActorUsage
+ *
+ * Aggregate successful work and transferred bytes for one authenticated caller.
+ */
+export type ActorUsage = {
+    /**
+     * Actor Id
+     */
+    actor_id: string;
+    /**
+     * Recalls
+     */
+    recalls: number;
+    /**
+     * Remembers
+     */
+    remembers: number;
+    /**
+     * Files
+     */
+    files: number;
+    /**
+     * Shares
+     */
+    shares: number;
+    /**
+     * Artifact Reads
+     */
+    artifact_reads: number;
+    /**
+     * Request Bytes
+     */
+    request_bytes: number;
+    /**
+     * Response Bytes
+     */
+    response_bytes: number;
+};
+
+/**
+ * AdminLinks
+ *
+ * The three external tools the operator sidebar links to, read from server config.
+ *
+ * The console origin is configurable, so the browser reads these instead of a hardcoded
+ * href. The default values are the same relative paths Caddy already answers on the
+ * operator console's own host, `/logto`, `/grafana/`, and `/traces`.
+ */
+export type AdminLinks = {
+    /**
+     * Logto Url
+     */
+    logto_url: string;
+    /**
+     * Grafana Url
+     */
+    grafana_url: string;
+    /**
+     * Traces Url
+     */
+    traces_url: string;
+};
+
+/**
  * Answer
  *
  * One recall answer rendered as merit-ordered Markdown evidence.
@@ -22,18 +86,12 @@ export type Answer = {
  * Identify one accepted original and its asynchronous processing state.
  */
 export type ArtifactReceipt = {
-    /**
-     * Artifact Id
-     */
-    artifact_id: string;
-    /**
-     * Content Id
-     */
-    content_id: string;
+    artifact_id: Uuid7;
+    content_id: Uuid7;
     state: State;
 };
 
-export type ArtifactStatus = 'queued' | 'processing' | 'ready' | 'failed';
+export type ArtifactStatus = 'queued' | 'processing' | 'ready' | 'failed' | 'unreadable';
 
 /**
  * ArtifactView
@@ -102,7 +160,310 @@ export type CallerStatus = {
 
 export type Confidence = 'high' | 'medium' | 'low' | 'unavailable';
 
+/**
+ * ConversionDiagnostic
+ *
+ * One failed or active artifact conversion without caller-visible source text.
+ */
+export type ConversionDiagnostic = {
+    /**
+     * Artifact Id
+     */
+    artifact_id: string;
+    /**
+     * Content Id
+     */
+    content_id: string;
+    /**
+     * Artifact Name
+     */
+    artifact_name: string;
+    state: ConversionState;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Age Seconds
+     */
+    age_seconds: number;
+    error: ErrorIdentity | null;
+    queue_failure?: ConversionQueueFailure | null;
+    /**
+     * Queue Status
+     */
+    queue_status?: 'queued' | 'picked' | 'failed' | null;
+    /**
+     * Retry Guidance
+     */
+    retry_guidance: string;
+};
+
+/**
+ * ConversionQueueFailure
+ *
+ * The retained terminal PgQueuer job that owns one artifact conversion.
+ */
+export type ConversionQueueFailure = {
+    /**
+     * Job Id
+     */
+    job_id: number | string;
+    /**
+     * Attempts
+     */
+    attempts: number;
+    error: ErrorIdentity | null;
+};
+
+export type ConversionState = 'failed' | 'unreadable' | 'active_terminal_queue' | 'active_queued' | 'active_stale' | 'active_fresh';
+
+/**
+ * DoctorFinding
+ *
+ * One concise operational conclusion and its next safe action.
+ */
+export type DoctorFinding = {
+    severity: Severity;
+    /**
+     * Code
+     */
+    code: string;
+    /**
+     * Count
+     */
+    count: number;
+    /**
+     * Message
+     */
+    message: string;
+    /**
+     * Action
+     */
+    action: string;
+};
+
+/**
+ * DoctorReport
+ *
+ * Read-only queue, retry history, and artifact conversion diagnosis.
+ *
+ * Every bounded detail list defaults to empty so the browser API's generated client keeps
+ * it required rather than optional, since a defaulted list is always present in the response.
+ */
+export type DoctorReport = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    /**
+     * Healthy
+     */
+    healthy: boolean;
+    /**
+     * Stale After Seconds
+     */
+    stale_after_seconds: number;
+    /**
+     * Long Running After Seconds
+     */
+    long_running_after_seconds: number;
+    /**
+     * History Seconds
+     */
+    history_seconds: number;
+    /**
+     * Detail Limit
+     */
+    detail_limit: number;
+    /**
+     * Error Messages Included
+     */
+    error_messages_included: boolean;
+    summary: DoctorSummary;
+    /**
+     * Findings
+     */
+    findings: Array<DoctorFinding>;
+    /**
+     * Queue Failure Groups
+     */
+    queue_failure_groups: Array<QueueFailureGroup>;
+    /**
+     * Queue Issues
+     */
+    queue_issues: Array<QueueIssue>;
+    /**
+     * Recent Exception Groups
+     */
+    recent_exception_groups: Array<ExceptionHistoryGroup>;
+    /**
+     * Conversions
+     */
+    conversions: Array<ConversionDiagnostic>;
+};
+
+/**
+ * DoctorSummary
+ *
+ * Complete issue counts, independent from the bounded detail lists.
+ *
+ * Every field defaults to zero so the browser API's generated client keeps it required
+ * rather than optional, since a defaulted count is always present in the response.
+ */
+export type DoctorSummary = {
+    /**
+     * Current Failed Jobs
+     */
+    current_failed_jobs: number;
+    /**
+     * Stale Picked Jobs
+     */
+    stale_picked_jobs: number;
+    /**
+     * Long Running Picked Jobs
+     */
+    long_running_picked_jobs: number;
+    /**
+     * Recent Exception Events
+     */
+    recent_exception_events: number;
+    /**
+     * Failed Conversions
+     */
+    failed_conversions: number;
+    /**
+     * Unreadable Conversions
+     */
+    unreadable_conversions: number;
+    /**
+     * Orphaned Active Conversions
+     */
+    orphaned_active_conversions: number;
+    /**
+     * Queued Active Conversions
+     */
+    queued_active_conversions: number;
+    /**
+     * Fresh Active Conversions
+     */
+    fresh_active_conversions: number;
+    /**
+     * Stale Active Conversions
+     */
+    stale_active_conversions: number;
+};
+
 export type EtaStatus = 'complete' | 'estimating' | 'insufficient_history' | 'blocked';
+
+/**
+ * EndpointHealth
+ *
+ * Describe one model endpoint's reachability, served identity, and context contract.
+ */
+export type EndpointHealth = {
+    /**
+     * Name
+     */
+    name: string;
+    /**
+     * Url
+     */
+    url: string;
+    /**
+     * Reachable
+     */
+    reachable: boolean;
+    /**
+     * Model
+     */
+    model?: string | null;
+    /**
+     * Served As
+     */
+    served_as?: string | null;
+    /**
+     * Configured As
+     */
+    configured_as?: string | null;
+    /**
+     * Matched
+     */
+    matched?: boolean | null;
+    /**
+     * Context Tokens
+     */
+    context_tokens?: number | null;
+};
+
+/**
+ * ErrorIdentity
+ *
+ * A non-reversible operator-safe identity for one stored error.
+ */
+export type ErrorIdentity = {
+    /**
+     * Type
+     */
+    type: string;
+    /**
+     * Fingerprint
+     */
+    fingerprint: string;
+    /**
+     * Sanitized Message
+     */
+    sanitized_message?: string | null;
+};
+
+/**
+ * ExceptionHistoryGroup
+ *
+ * Recent exception history aggregated separately from current failures.
+ */
+export type ExceptionHistoryGroup = {
+    /**
+     * Entrypoint
+     */
+    entrypoint: string;
+    /**
+     * Status
+     */
+    status: 'exception' | 'failed';
+    error: ErrorIdentity | null;
+    /**
+     * Count
+     */
+    count: number;
+    /**
+     * Oldest At
+     */
+    oldest_at: string;
+    /**
+     * Newest At
+     */
+    newest_at: string;
+};
+
+/**
+ * ExtractionHealth
+ *
+ * Show the configured extraction window and output budget beside its backend.
+ */
+export type ExtractionHealth = {
+    /**
+     * Backend
+     */
+    backend: string;
+    /**
+     * Window Chars
+     */
+    window_chars: number;
+    /**
+     * Output Tokens
+     */
+    output_tokens: number;
+};
 
 /**
  * FindingPage
@@ -255,6 +616,123 @@ export type HttpValidationError = {
 };
 
 /**
+ * HardwareHealth
+ *
+ * Host CPU, memory, and disk load and per-lane GPU occupancy already collected server-side.
+ *
+ * Read from VictoriaMetrics, which Alloy's built-in unix exporter and the vLLM lanes already
+ * feed, rather than probed directly with `mainboard`. No aizk process holds NVML device access
+ * to a GPU, so raw device telemetry (temperature, power, memory used) is not available from any
+ * process in this deployment; the per-lane KV-cache occupancy and queue depth below are the real
+ * GPU-adjacent signal that exists today. `reachable` is false whenever `metrics_url` is unset or
+ * VictoriaMetrics cannot be reached, in which case every measurement stays absent rather than a
+ * stale or fabricated zero. Every field but `reachable` defaults, so the generated client keeps
+ * them required rather than optional too.
+ */
+export type HardwareHealth = {
+    /**
+     * Reachable
+     */
+    reachable: boolean;
+    /**
+     * Load1
+     */
+    load1: number | null;
+    /**
+     * Load5
+     */
+    load5: number | null;
+    /**
+     * Load15
+     */
+    load15: number | null;
+    /**
+     * Memory Total Bytes
+     */
+    memory_total_bytes: number | null;
+    /**
+     * Memory Available Bytes
+     */
+    memory_available_bytes: number | null;
+    /**
+     * Disk Total Bytes
+     */
+    disk_total_bytes: number | null;
+    /**
+     * Disk Available Bytes
+     */
+    disk_available_bytes: number | null;
+    /**
+     * Lanes
+     */
+    lanes: Array<ModelLaneLoad>;
+};
+
+/**
+ * HealthReport
+ *
+ * Combine schema, RLS, storage, queue, models, identity, corpora, and recall health.
+ */
+export type HealthReport = {
+    migration: SchemaHealth;
+    /**
+     * Rls Violations
+     */
+    rls_violations: Array<string>;
+    /**
+     * Row Counts
+     */
+    row_counts: {
+        [key: string]: number;
+    };
+    queue: TasksStatus;
+    /**
+     * Endpoints
+     */
+    endpoints: Array<EndpointHealth>;
+    extraction: ExtractionHealth;
+    identity: IdentityHealth;
+    /**
+     * Corpora
+     */
+    corpora: Array<ScopeHealth>;
+    /**
+     * Actors
+     */
+    actors: Array<ActorUsage>;
+    /**
+     * Scopes
+     */
+    scopes: Array<ScopeUsage>;
+    /**
+     * Scope Storage
+     */
+    scope_storage: Array<ScopeStorage>;
+    storage: StorageHealth;
+    recall: RecallHealth | null;
+    /**
+     * Duration Ms
+     */
+    duration_ms: number;
+};
+
+/**
+ * IdentityHealth
+ *
+ * Show whether requests use Logto identity or the explicit local auth-off identity.
+ */
+export type IdentityHealth = {
+    /**
+     * Mode
+     */
+    mode: string;
+    /**
+     * Public Url
+     */
+    public_url: string | null;
+};
+
+/**
  * KnowledgeTotals
  *
  * Human-facing totals for the knowledge visible to one caller.
@@ -300,6 +778,37 @@ export type Me = {
      * Organizations
      */
     organizations: Array<OrganizationProfile>;
+};
+
+/**
+ * ModelLaneLoad
+ *
+ * One vLLM serving lane's scrape reachability and live GPU occupancy.
+ *
+ * Every field but `service` defaults, so the browser API's generated client keeps them
+ * required rather than optional, since a defaulted field is always present in the response.
+ */
+export type ModelLaneLoad = {
+    /**
+     * Service
+     */
+    service: string;
+    /**
+     * Up
+     */
+    up: boolean;
+    /**
+     * Kv Cache Usage Pct
+     */
+    kv_cache_usage_pct: number | null;
+    /**
+     * Requests Running
+     */
+    requests_running: number | null;
+    /**
+     * Requests Waiting
+     */
+    requests_waiting: number | null;
 };
 
 /**
@@ -549,6 +1058,119 @@ export type ProcessingStatus = {
 };
 
 /**
+ * QueueFailureGroup
+ *
+ * Current retained failures grouped without exposing exception messages.
+ */
+export type QueueFailureGroup = {
+    /**
+     * Entrypoint
+     */
+    entrypoint: string;
+    error: ErrorIdentity | null;
+    /**
+     * Count
+     */
+    count: number;
+    /**
+     * Attempts Min
+     */
+    attempts_min: number;
+    /**
+     * Attempts Max
+     */
+    attempts_max: number;
+    /**
+     * Oldest At
+     */
+    oldest_at: string;
+    /**
+     * Newest At
+     */
+    newest_at: string;
+    /**
+     * Remediation
+     */
+    remediation: string;
+};
+
+/**
+ * QueueIssue
+ *
+ * One current retained failure or unhealthy picked queue job.
+ */
+export type QueueIssue = {
+    /**
+     * Id
+     */
+    id: number | string;
+    /**
+     * Entrypoint
+     */
+    entrypoint: string;
+    kind: QueueIssueKind;
+    /**
+     * Updated At
+     */
+    updated_at: string;
+    /**
+     * Heartbeat At
+     */
+    heartbeat_at: string;
+    /**
+     * Age Seconds
+     */
+    age_seconds: number;
+    /**
+     * Attempts
+     */
+    attempts: number;
+    latest_error: ErrorIdentity | null;
+    /**
+     * Retry Guidance
+     */
+    retry_guidance: string;
+};
+
+export type QueueIssueKind = 'stale_picked' | 'long_running_picked';
+
+/**
+ * RecallHealth
+ *
+ * Record one bounded real recall over the largest corpus visible to its scope set.
+ */
+export type RecallHealth = {
+    /**
+     * Query
+     */
+    query: string;
+    /**
+     * Scopes
+     */
+    scopes: Array<string>;
+    /**
+     * Candidates
+     */
+    candidates: number;
+    /**
+     * Top Source
+     */
+    top_source: string | null;
+    /**
+     * Sample
+     */
+    sample: string;
+    /**
+     * Latency Ms
+     */
+    latency_ms: number;
+    /**
+     * Error
+     */
+    error?: string | null;
+};
+
+/**
  * RecentDocument
  *
  * Presentation metadata for one authored document without internal identifiers.
@@ -575,6 +1197,136 @@ export type RecentDocument = {
      */
     kind: string;
 };
+
+/**
+ * SchemaHealth
+ *
+ * Compare the live Alembic revision with the migration head packaged by this build.
+ */
+export type SchemaHealth = {
+    /**
+     * Current
+     */
+    current: string | null;
+    /**
+     * Head
+     */
+    head: string;
+    /**
+     * Up To Date
+     */
+    up_to_date: boolean;
+};
+
+/**
+ * ScopeHealth
+ *
+ * Measure one exact scope-set corpus, its graph progress, and latest durable writes.
+ */
+export type ScopeHealth = {
+    /**
+     * Scopes
+     */
+    scopes: Array<string>;
+    /**
+     * Creators
+     */
+    creators: number;
+    /**
+     * Documents
+     */
+    documents: number;
+    /**
+     * Chunks
+     */
+    chunks: number;
+    /**
+     * Processed Chunks
+     */
+    processed_chunks: number;
+    /**
+     * Entities
+     */
+    entities: number;
+    /**
+     * Facts
+     */
+    facts: number;
+    /**
+     * Profiles
+     */
+    profiles: number;
+    /**
+     * Last Write At
+     */
+    last_write_at: string;
+    /**
+     * Last Projection At
+     */
+    last_projection_at: string | null;
+};
+
+/**
+ * ScopeStorage
+ *
+ * Measure logical original-file references in one exact private or shared scope set.
+ */
+export type ScopeStorage = {
+    /**
+     * Scopes
+     */
+    scopes: Array<string>;
+    /**
+     * Artifact Revisions
+     */
+    artifact_revisions: number;
+    /**
+     * Logical Bytes
+     */
+    logical_bytes: number;
+};
+
+/**
+ * ScopeUsage
+ *
+ * Attribute successful work to one private or organization target scope.
+ */
+export type ScopeUsage = {
+    /**
+     * Scope Id
+     */
+    scope_id: string;
+    /**
+     * Recalls
+     */
+    recalls: number;
+    /**
+     * Remembers
+     */
+    remembers: number;
+    /**
+     * Files
+     */
+    files: number;
+    /**
+     * Shares
+     */
+    shares: number;
+    /**
+     * Artifact Reads
+     */
+    artifact_reads: number;
+    /**
+     * Request Bytes
+     */
+    request_bytes: number;
+    /**
+     * Response Bytes
+     */
+    response_bytes: number;
+};
+
+export type Severity = 'error' | 'warning' | 'info';
 
 export type SourceOrigin = 'all' | 'document' | 'file';
 
@@ -705,8 +1457,16 @@ export type StageEstimate = {
  * State
  *
  * Durable processing state independent from PgQueuer's delivery state.
+ *
+ * `failed` and `unreadable` are both terminal-looking but mean different things to a
+ * retry. `failed` is what a timeout, a network blip, or a Docling restart leaves behind,
+ * so `aizk admin queue retry conversion` keeps offering it back to the queue. `unreadable`
+ * is what Docling's own policy check leaves behind when the format itself is the problem,
+ * a verdict the exact same bytes would repeat on every retry, so it is excluded from that
+ * query and never re-queued. It stays visible with its stored `error` for anyone who asks
+ * what was rejected and why.
  */
-export type State = 'pending' | 'queued' | 'processing' | 'ready' | 'failed';
+export type State = 'pending' | 'queued' | 'processing' | 'ready' | 'failed' | 'unreadable';
 
 /**
  * StatusReport
@@ -721,6 +1481,50 @@ export type StatusReport = {
     caller: CallerStatus;
     usage: UsageStatus;
     processing: ProcessingStatus;
+};
+
+/**
+ * StorageHealth
+ *
+ * Separate logical file references from physical object-store consumption.
+ */
+export type StorageHealth = {
+    /**
+     * Originals
+     */
+    originals: number;
+    /**
+     * Logical Bytes
+     */
+    logical_bytes: number;
+    /**
+     * Physical Blobs
+     */
+    physical_blobs: number;
+    /**
+     * Original Bytes
+     */
+    original_bytes: number;
+    /**
+     * Stored Bytes
+     */
+    stored_bytes: number;
+    /**
+     * Compression Saved Bytes
+     */
+    compression_saved_bytes: number;
+    /**
+     * Unverified Blobs
+     */
+    unverified_blobs: number;
+    /**
+     * Failed Integrity Blobs
+     */
+    failed_integrity_blobs: number;
+    /**
+     * Last Integrity Check
+     */
+    last_integrity_check: string | null;
 };
 
 /**
@@ -784,6 +1588,38 @@ export type SubjectView = {
 };
 
 /**
+ * TasksStatus
+ *
+ * Bounded operational snapshot of the durable queue and projection backlog.
+ */
+export type TasksStatus = {
+    /**
+     * Pending
+     */
+    pending: number;
+    /**
+     * Running
+     */
+    running: number;
+    /**
+     * Failed
+     */
+    failed: number;
+    /**
+     * Last Success
+     */
+    last_success: string | null;
+    /**
+     * Oldest Queued
+     */
+    oldest_queued: string | null;
+    /**
+     * Projection Pending
+     */
+    projection_pending: number;
+};
+
+/**
  * ThemePage
  *
  * One page of visible graph themes, ordered by size because a graph holds thousands.
@@ -841,6 +1677,49 @@ export type ThemeView = {
      * Scopes
      */
     scopes: Array<string>;
+};
+
+export type Uuid7 = string;
+
+/**
+ * UsageFilterReport
+ *
+ * Durable usage aggregated by actor and by organization scope under one composed filter.
+ *
+ * Every column an operator can filter on, kind, actor, organization scope, and the time
+ * window, is indexed, so the same predicate set narrows both breakdowns in one query pass
+ * rather than loading rows and summing them in Python.
+ */
+export type UsageFilterReport = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    operation: Operation | null;
+    /**
+     * Actor Id
+     */
+    actor_id: string | null;
+    /**
+     * Scope Id
+     */
+    scope_id: string | null;
+    /**
+     * Start
+     */
+    start: string | null;
+    /**
+     * End
+     */
+    end: string | null;
+    /**
+     * By Actor
+     */
+    by_actor: Array<ActorUsage>;
+    /**
+     * By Scope
+     */
+    by_scope: Array<ScopeUsage>;
 };
 
 /**
@@ -1591,3 +2470,161 @@ export type SetMemberRoleResponses = {
 };
 
 export type SetMemberRoleResponse = SetMemberRoleResponses[keyof SetMemberRoleResponses];
+
+export type AdminLinksData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/links';
+};
+
+export type AdminLinksResponses = {
+    /**
+     * Successful Response
+     */
+    200: AdminLinks;
+};
+
+export type AdminLinksResponse = AdminLinksResponses[keyof AdminLinksResponses];
+
+export type AdminHealthData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/health';
+};
+
+export type AdminHealthResponses = {
+    /**
+     * Successful Response
+     */
+    200: HealthReport;
+};
+
+export type AdminHealthResponse = AdminHealthResponses[keyof AdminHealthResponses];
+
+export type AdminRecallData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/health/recall';
+};
+
+export type AdminRecallResponses = {
+    /**
+     * Response Admin Recall
+     *
+     * Successful Response
+     */
+    200: RecallHealth | null;
+};
+
+export type AdminRecallResponse = AdminRecallResponses[keyof AdminRecallResponses];
+
+export type AdminHardwareData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/api/admin/hardware';
+};
+
+export type AdminHardwareResponses = {
+    /**
+     * Successful Response
+     */
+    200: HardwareHealth;
+};
+
+export type AdminHardwareResponse = AdminHardwareResponses[keyof AdminHardwareResponses];
+
+export type AdminDoctorData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Stale Minutes
+         */
+        stale_minutes?: number;
+        /**
+         * Long Running Minutes
+         */
+        long_running_minutes?: number;
+        /**
+         * History Hours
+         */
+        history_hours?: number;
+        /**
+         * Limit
+         */
+        limit?: number;
+        /**
+         * Show Error Messages
+         */
+        show_error_messages?: boolean;
+    };
+    url: '/api/admin/doctor';
+};
+
+export type AdminDoctorErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AdminDoctorError = AdminDoctorErrors[keyof AdminDoctorErrors];
+
+export type AdminDoctorResponses = {
+    /**
+     * Successful Response
+     */
+    200: DoctorReport;
+};
+
+export type AdminDoctorResponse = AdminDoctorResponses[keyof AdminDoctorResponses];
+
+export type AdminUsageData = {
+    body?: never;
+    path?: never;
+    query?: {
+        /**
+         * Operation
+         */
+        operation?: Operation | null;
+        /**
+         * Actor Id
+         */
+        actor_id?: string | null;
+        /**
+         * Scope Id
+         */
+        scope_id?: string | null;
+        /**
+         * Start
+         */
+        start?: string | null;
+        /**
+         * End
+         */
+        end?: string | null;
+    };
+    url: '/api/admin/usage';
+};
+
+export type AdminUsageErrors = {
+    /**
+     * Validation Error
+     */
+    422: HttpValidationError;
+};
+
+export type AdminUsageError = AdminUsageErrors[keyof AdminUsageErrors];
+
+export type AdminUsageResponses = {
+    /**
+     * Successful Response
+     */
+    200: UsageFilterReport;
+};
+
+export type AdminUsageResponse = AdminUsageResponses[keyof AdminUsageResponses];

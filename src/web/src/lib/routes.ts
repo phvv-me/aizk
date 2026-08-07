@@ -13,15 +13,38 @@ export const appRoutes = {
 
 export type AppRoute = (typeof appRoutes)[keyof typeof appRoutes];
 
-/** Add deterministic search parameters to one canonical application route. */
-export function appHref(
-  route: AppRoute,
-  parameters: Record<string, string | number | undefined> = {}
-): string {
+export const adminRoutes = {
+  overview: '/admin/overview',
+  queues: '/admin/queues',
+  ingestion: '/admin/ingestion',
+  storage: '/admin/storage',
+  usage: '/admin/usage'
+} as const;
+
+export type AdminRoute = (typeof adminRoutes)[keyof typeof adminRoutes];
+
+/** Add deterministic search parameters to one canonical route. */
+function withQuery(route: string, parameters: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams();
   Object.entries(parameters).forEach(([key, value]) => {
     if (value !== undefined && value !== '') search.set(key, String(value));
   });
   const query = search.toString();
   return query ? `${route}?${query}` : route;
+}
+
+/** Add deterministic search parameters to one canonical application route. */
+export function appHref(
+  route: AppRoute,
+  parameters: Record<string, string | number | undefined> = {}
+): string {
+  return withQuery(route, parameters);
+}
+
+/** Add deterministic search parameters to one canonical operator console route. */
+export function adminHref(
+  route: AdminRoute,
+  parameters: Record<string, string | number | undefined> = {}
+): string {
+  return withQuery(route, parameters);
 }

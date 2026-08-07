@@ -108,7 +108,16 @@ class Settings(BaseSettings):
     )
 
     admin_database_url: str = ""
+    # The operator console shares its origin with these tools once Caddy proxies `/admin/*` to
+    # the same host that already answers `/logto`, `/grafana/*` and `/traces`, so a same-origin
+    # relative path is the right default and needs no host to be told. A deployment that moves a
+    # tool to its own origin, or a console reached under a different host, overrides one setting
+    # rather than a code change, which is the whole point of the sidebar reading these from the
+    # server instead of a hardcoded href.
+    admin_grafana_url: str = "/grafana/"
+    admin_logto_console_url: str = "/logto"
     admin_password: str = ""
+    admin_traces_url: str = "/traces"
     admin_user: str = "aizk_admin"
     anonymous_user_id: UUID5 = _ANONYMOUS_USER_ID
     api_host: str = "127.0.0.1"
@@ -429,6 +438,11 @@ class Settings(BaseSettings):
     )
     multihop_max_hops: int = 2
     otlp_endpoint: AnyHttpUrl | None = None
+    # VictoriaMetrics from the optional `observability` profile, queried read-only for the host
+    # CPU, memory, disk, and model-lane series Alloy already scrapes there. Empty by default so a
+    # deployment running without that profile gets an absent hardware panel instead of a dial to
+    # a collector that was never started, the same convention `otlp_endpoint` above already uses.
+    metrics_url: AnyHttpUrl | None = None
     default_user_id: UUID5 = _SYSTEM_USER_ID
     profiling: bool = False
     profile_batch_size: int = 64

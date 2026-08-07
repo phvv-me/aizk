@@ -7,9 +7,13 @@
     ChevronsUpDown,
     CircleDot,
     Compass,
+    ExternalLink,
     FileText,
+    HardDrive,
+    Inbox,
     LayoutDashboard,
     Lightbulb,
+    ListChecks,
     LogOut,
     Menu,
     MessageCircleQuestion,
@@ -21,11 +25,24 @@
   import type { Me } from '$lib/api';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
   import { Separator } from '$lib/components/ui/separator';
-  import { navigation, type NavIcon } from '$lib/nav';
-  import { appRoutes } from '$lib/routes';
+  import type { NavIcon, NavSection } from '$lib/nav';
   import { cn } from '$lib/utils';
 
-  let { me, accountUrl }: { me: Me; accountUrl: string } = $props();
+  type ExternalToolLink = { label: string; href: string; description: string };
+
+  let {
+    me,
+    accountUrl,
+    sections,
+    brandHref,
+    externalLinks = []
+  }: {
+    me: Me;
+    accountUrl: string;
+    sections: NavSection[];
+    brandHref: string;
+    externalLinks?: ExternalToolLink[];
+  } = $props();
 
   const icons: Record<NavIcon, typeof IconType> = {
     dashboard: LayoutDashboard,
@@ -37,15 +54,18 @@
     themes: Network,
     usage: ChartNoAxesCombined,
     processing: Activity,
-    organizations: Building2
+    organizations: Building2,
+    overview: LayoutDashboard,
+    queues: ListChecks,
+    ingestion: Inbox,
+    storage: HardDrive
   };
-  const sections = navigation();
   const initial = $derived((me.label ?? '').slice(0, 1).toUpperCase() || '?');
 </script>
 
 <header class="border-sidebar-border bg-sidebar sticky top-0 z-30 border-b md:hidden">
   <div class="flex h-14 items-center justify-between px-4">
-    <a href={appRoutes.dashboard} class="flex items-center gap-2 font-semibold tracking-tight">
+    <a href={brandHref} class="flex items-center gap-2 font-semibold tracking-tight">
       <Sparkles class="text-primary size-5" aria-hidden="true" />
       AIZK
     </a>
@@ -80,6 +100,23 @@
             </div>
           {/each}
         </nav>
+        {#if externalLinks.length > 0}
+          <Separator class="my-3" />
+          <p class="text-muted-foreground px-2 pb-1 text-xs font-medium tracking-wide uppercase">
+            External tools
+          </p>
+          {#each externalLinks as link (link.href)}
+            <a
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              class="text-muted-foreground hover:bg-accent hover:text-foreground flex items-center gap-2 rounded-md px-2 py-2 text-sm"
+            >
+              <ExternalLink class="size-4 shrink-0" aria-hidden="true" />
+              {link.label}
+            </a>
+          {/each}
+        {/if}
         <Separator class="my-3" />
         <a
           href={accountUrl}
@@ -107,7 +144,7 @@
   aria-label="Primary"
 >
   <a
-    href={appRoutes.dashboard}
+    href={brandHref}
     class="flex items-center gap-2 px-5 py-5 text-lg font-semibold tracking-tight"
   >
     <Sparkles class="text-primary size-5" aria-hidden="true" />
@@ -143,6 +180,29 @@
       </div>
     {/each}
   </nav>
+  {#if externalLinks.length > 0}
+    <div class="border-sidebar-border border-t px-3 py-3">
+      <p class="text-muted-foreground px-2 pb-1 text-xs font-medium tracking-wide uppercase">
+        External tools
+      </p>
+      <ul class="space-y-0.5">
+        {#each externalLinks as link (link.href)}
+          <li>
+            <a
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              title={link.description}
+              class="text-muted-foreground hover:bg-accent/60 hover:text-foreground focus-visible:ring-ring flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
+            >
+              <ExternalLink class="size-4 shrink-0" aria-hidden="true" />
+              <span class="flex-1 truncate">{link.label}</span>
+            </a>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
   <Separator />
   <div class="p-3">
     <DropdownMenu.Root>
@@ -183,4 +243,3 @@
     </DropdownMenu.Root>
   </div>
 </aside>
-Compass,

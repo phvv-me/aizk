@@ -376,8 +376,13 @@ async def recall_health(corpus: ScopeHealth) -> RecallHealth:
         )
 
 
-async def health() -> HealthReport:
-    """Read one bounded operational and end-to-end regression snapshot."""
+async def health(include_recall: bool = True) -> HealthReport:
+    """Read one bounded operational and end-to-end regression snapshot.
+
+    include_recall: run the live retrieval probe, which took roughly 3 seconds in
+        production. The browser overview endpoint sets this false and fetches
+        `RecallHealth` from its own lazily-loaded endpoint instead.
+    """
     started = perf_counter()
     head = alembic_head(alembic_config())
     current_task = asyncio.create_task(alembic_current())
@@ -397,7 +402,7 @@ async def health() -> HealthReport:
     corpora = await corpora_task
     actors, scopes, scope_storage, storage = await usage_task
     endpoints = [await task for task in endpoint_tasks]
-    recall_report = await recall_health(corpora[0]) if corpora else None
+    recall_report = await recall_health(corpora[0]) if include_recall and corpora else None
     return HealthReport(
         migration=SchemaHealth(current=current, head=head, up_to_date=current == head),
         rls_violations=violations,

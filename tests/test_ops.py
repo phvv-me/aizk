@@ -691,3 +691,43 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
         "gliner",
     ]
     assert all(endpoint.reachable for endpoint in report.endpoints)
+
+
+def test_health_skips_the_live_recall_probe_when_asked(
+    migrated_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected_corpus = corpus()
+    called = False
+
+    async def fake_probe(
+        name: str, url: str, path: str, configured_as: str | None
+    ) -> EndpointHealth:
+        return EndpointHealth(name=name, url=url, reachable=True)
+
+    async def fake_overview() -> TasksStatus:
+        return TasksStatus(
+            pending=0,
+            running=0,
+            failed=0,
+            last_success=None,
+            oldest_queued=None,
+            projection_pending=0,
+        )
+
+    async def fake_corpora() -> list[ops.ScopeHealth]:
+        return [expected_corpus]
+
+    async def unreachable_recall(selected: ops.ScopeHealth) -> ops.RecallHealth:
+        nonlocal called
+        called = True
+        raise AssertionError("the live recall probe must not run")
+
+    monkeypatch.setattr(ops.probes, "probe_endpoint", fake_probe)
+    monkeypatch.setattr(ops.probes, "tasks_overview", fake_overview)
+    monkeypatch.setattr(ops.probes, "corpus_health", fake_corpora)
+    monkeypatch.setattr(ops.probes, "recall_health", unreachable_recall)
+
+    report = dbutil.run(ops.health(include_recall=False))
+
+    assert report.recall is None
+    assert called is False

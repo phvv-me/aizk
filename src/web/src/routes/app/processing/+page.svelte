@@ -25,7 +25,8 @@
     queued: 'outline',
     processing: 'secondary',
     ready: 'default',
-    failed: 'destructive'
+    failed: 'destructive',
+    unreadable: 'outline'
   };
   const conversion = $derived(processing?.stages.find((stage) => stage.key === 'conversion'));
   const projection = $derived(processing?.stages.find((stage) => stage.key === 'graph_projection'));

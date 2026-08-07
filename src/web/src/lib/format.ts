@@ -33,3 +33,20 @@ export function formatDateTime(value: string | null | undefined): string {
 export function sentence(value: string): string {
   return value.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
 }
+
+// The stored operation kind predates the `find` tool's rename and stays `recall` because
+// every usage report column keys on it. This map keeps that one raw value out of the
+// operator's eyes, the same way the caller-facing usage page already never prints it.
+const OPERATION_LABELS: Record<string, string> = {
+  recall: 'Recall',
+  remember_text: 'Remember (text)',
+  remember_file: 'Remember (file)',
+  share: 'Share',
+  artifact_read: 'Artifact read',
+  web_search: 'Web search',
+  web_fetch: 'Web fetch'
+};
+
+export function formatOperation(operation: string): string {
+  return OPERATION_LABELS[operation] ?? sentence(operation);
+}

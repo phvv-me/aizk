@@ -1,3 +1,4 @@
+from datetime import datetime
 from http import HTTPStatus
 from typing import Annotated, Self, cast
 
@@ -6,7 +7,7 @@ from fastapi import Depends, FastAPI
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from obstore.exceptions import BaseError as ObjectStoreError
 from patos import FrozenModel
-from pydantic import Field, StringConstraints, ValidationError, model_validator
+from pydantic import UUID5, Field, StringConstraints, ValidationError, model_validator
 from pydantic.json_schema import JsonSchemaValue
 from pydantic.types import JsonValue
 from starlette.exceptions import HTTPException
@@ -14,6 +15,7 @@ from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
+from .. import ops
 from ..artifacts.models import ArtifactReceipt
 from ..artifacts.service import ArtifactIntake
 from ..artifacts.uploads import (
@@ -29,8 +31,10 @@ from ..integrations.logto import OrganizationChange, OrganizationManager
 from ..memory import Memory
 from ..status import StatusReport
 from ..storage import ByteLimitExceeded
+from ..store import UsageEvent
 from ..store.identity import User
 from ..usage import annotate_caller
+from .admin import AdminLinks, require_admin
 from .artifacts import ArtifactDashboard, ArtifactView
 from .dashboard import Dashboard, KnowledgeTotals, RecentDocument, UsageTotals
 from .explorer import FindingPage, GraphSlice, SourceOrigin, SourcePage, SubjectPage, ThemePage
@@ -205,7 +209,8 @@ class AizkAPI:
     capabilities are minted by the MCP `keep` upload mode into one
     PostgreSQL-backed store, and only this service redeems them through the
     capability PUT. The FastAPI response models make `FastAPI.openapi` the
-    generated web client's contract.
+    generated web client's contract. Every `/api/admin/*` route additionally
+    requires the managed operator role, checked after the same bearer verification.
     """
 
     def __init__(self, auth: Auth, uploads: UploadBox, intake: ArtifactIntake) -> None:
@@ -296,6 +301,16 @@ class AizkAPI:
             methods=["DELETE"],
             operation_id="remove_member",
         )
+        api.add_api_route("/api/admin/links", self.admin_links, operation_id="admin_links")
+        api.add_api_route("/api/admin/health", self.admin_health, operation_id="admin_health")
+        api.add_api_route(
+            "/api/admin/health/recall", self.admin_recall, operation_id="admin_recall"
+        )
+        api.add_api_route(
+            "/api/admin/hardware", self.admin_hardware, operation_id="admin_hardware"
+        )
+        api.add_api_route("/api/admin/doctor", self.admin_doctor, operation_id="admin_doctor")
+        api.add_api_route("/api/admin/usage", self.admin_usage, operation_id="admin_usage")
         return api
 
     @staticmethod
@@ -490,3 +505,66 @@ class AizkAPI:
     async def remove_member(self, name: str, member_id: str, who: Verified) -> OrganizationChange:
         """Remove one member after a live permission check."""
         return await self.manager(who).remove(name, member_id)
+
+    async def admin_links(self, who: Verified) -> AdminLinks:
+        """Return the external tool URLs the operator sidebar links to."""
+        require_admin(who.user)
+        return AdminLinks.current()
+
+    async def admin_health(self, who: Verified) -> ops.HealthReport:
+        """Return schema, RLS, storage, queue, and endpoint health for operators.
+
+        The live recall probe is excluded so this never blocks the page load; fetch
+        `/api/admin/health/recall` separately once the rest of the page has rendered.
+        """
+        require_admin(who.user)
+        return await ops.health(include_recall=False)
+
+    async def admin_recall(self, who: Verified) -> ops.RecallHealth | None:
+        """Run the live recall probe over the largest corpus visible to any scope."""
+        require_admin(who.user)
+        corpora = await ops.corpus_health()
+        return await ops.recall_health(corpora[0]) if corpora else None
+
+    async def admin_hardware(self, who: Verified) -> ops.HardwareHealth:
+        """Return host and model-lane load already collected by the observability profile."""
+        require_admin(who.user)
+        return await ops.hardware_health()
+
+    async def admin_doctor(
+        self,
+        who: Verified,
+        stale_minutes: int = 15,
+        long_running_minutes: int = 60,
+        history_hours: int = 24,
+        limit: int = 50,
+        show_error_messages: bool = False,
+    ) -> ops.DoctorReport:
+        """Diagnose queue failures, unhealthy leases, and artifact conversions."""
+        require_admin(who.user)
+        return await ops.doctor(
+            stale_minutes=stale_minutes,
+            long_running_minutes=long_running_minutes,
+            history_hours=history_hours,
+            limit=limit,
+            show_error_messages=show_error_messages,
+        )
+
+    async def admin_usage(
+        self,
+        who: Verified,
+        operation: UsageEvent.Operation | None = None,
+        actor_id: UUID5 | None = None,
+        scope_id: UUID5 | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> ops.UsageFilterReport:
+        """Aggregate durable usage by actor and by organization under one composed filter."""
+        require_admin(who.user)
+        return await ops.usage_report(
+            operation=operation,
+            actor_id=actor_id,
+            scope_id=scope_id,
+            start=start,
+            end=end,
+        )

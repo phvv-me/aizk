@@ -9,6 +9,7 @@ from .tables import (
     SessionItem,
     UploadCapability,
     Usage,
+    UsageEvent,
     Watermark,
 )
 
@@ -27,5 +28,6 @@ __all__ = [
     "SessionItem",
     "UploadCapability",
     "Usage",
+    "UsageEvent",
     "Watermark",
 ]

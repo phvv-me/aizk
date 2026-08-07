@@ -20,6 +20,7 @@ from .models import (
     SessionItem,
     UploadCapability,
     Usage,
+    UsageEvent,
     Watermark,
 )
 
@@ -48,6 +49,7 @@ __all__ = [
     "UploadCapability",
     "TableBase",
     "Usage",
+    "UsageEvent",
     "Watermark",
     "id_array",
     "verify_rls",

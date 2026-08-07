@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { navigation } from '../src/lib/nav';
+import { adminNavigation, navigation } from '../src/lib/nav';
 
 describe('navigation', () => {
   it('offers the fixed product destinations in their information architecture', () => {
@@ -29,6 +29,20 @@ describe('navigation', () => {
     expect(sections.map((section) => section.label)).not.toContain('Member management');
     expect(sections.at(-1)?.links).toEqual([
       { label: 'Organizations', href: '/app/organizations', icon: 'organizations' }
+    ]);
+  });
+});
+
+describe('adminNavigation', () => {
+  it('offers the fixed operator console destinations', () => {
+    const sections = adminNavigation();
+    expect(sections.map((section) => section.label)).toEqual(['Operator']);
+    expect(sections.flatMap((section) => section.links).map((link) => link.href)).toEqual([
+      '/admin/overview',
+      '/admin/queues',
+      '/admin/ingestion',
+      '/admin/storage',
+      '/admin/usage'
     ]);
   });
 });

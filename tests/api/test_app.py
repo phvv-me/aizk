@@ -14,6 +14,7 @@ from patos import FrozenModel
 from starlette.routing import Route
 
 import aizk.api.app as app_module
+import aizk.ops as ops
 from aizk.api.app import AizkAPI
 from aizk.api.artifacts import ArtifactDashboard
 from aizk.api.dashboard import Dashboard
@@ -22,6 +23,7 @@ from aizk.artifacts.models import ArtifactReceipt
 from aizk.artifacts.service import ArtifactIntake
 from aizk.artifacts.uploads import InertIntake, UploadBox, UploadRequest
 from aizk.auth import Auth, Caller
+from aizk.background.status import TasksStatus
 from aizk.config import settings
 from aizk.exceptions import QuotaExceededError, ScopeNotFoundError
 from aizk.integrations.clamav import MalwareRejectedError, MalwareUnavailableError
@@ -35,7 +37,7 @@ from aizk.status import (
     UsageStatus,
     UsageSummary,
 )
-from aizk.store import Artifact
+from aizk.store import Artifact, Usage
 from aizk.store.identity import OrganizationStanding, User
 from aizk.types import Scopes
 
@@ -93,6 +95,12 @@ _PROTECTED = (
         "/api/organizations/{name}/members/{member_id}",
         "/api/organizations/Lab/members/member-1",
     ),
+    ("GET", "/api/admin/links", "/api/admin/links"),
+    ("GET", "/api/admin/health", "/api/admin/health"),
+    ("GET", "/api/admin/health/recall", "/api/admin/health/recall"),
+    ("GET", "/api/admin/hardware", "/api/admin/hardware"),
+    ("GET", "/api/admin/doctor", "/api/admin/doctor"),
+    ("GET", "/api/admin/usage", "/api/admin/usage"),
 )
 
 
@@ -736,3 +744,224 @@ def test_organization_administration_requires_a_matching_current_user(
 
     assert response.status_code == 403
     assert "current user" in response.json()["detail"]
+
+
+def admin() -> Caller:
+    """Build the caller a Logto token carrying the managed operator role would resolve to."""
+    owner = uuid5()
+    return verified(User.authorized(owner, read=(owner,), roles=(settings.logto_admin_role,)))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/admin/links",
+        "/api/admin/health",
+        "/api/admin/health/recall",
+        "/api/admin/hardware",
+        "/api/admin/doctor",
+        "/api/admin/usage",
+    ],
+)
+def test_admin_routes_refuse_a_caller_without_the_operator_role(
+    monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    response = call(service_as(monkeypatch, verified()), "GET", path)
+
+    assert response.status_code == 403
+    assert "operator" in response.json()["detail"]
+
+
+def test_admin_links_reads_the_configured_console_tool_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "admin_logto_console_url", "https://logto.test")
+    monkeypatch.setattr(settings, "admin_grafana_url", "/grafana/")
+    monkeypatch.setattr(settings, "admin_traces_url", "/traces")
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/links")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "logto_url": "https://logto.test",
+        "grafana_url": "/grafana/",
+        "traces_url": "/traces",
+    }
+
+
+def test_admin_health_excludes_the_live_recall_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    report = ops.HealthReport(
+        migration=ops.SchemaHealth(current="head", head="head", up_to_date=True),
+        rls_violations=[],
+        row_counts={},
+        queue=TasksStatus(
+            pending=0,
+            running=0,
+            failed=0,
+            last_success=None,
+            oldest_queued=None,
+            projection_pending=0,
+        ),
+        endpoints=[],
+        extraction=ops.ExtractionHealth(backend="local", window_chars=1, output_tokens=1),
+        identity=ops.IdentityHealth(mode="local", public_url=None),
+        corpora=[],
+        actors=[],
+        scopes=[],
+        scope_storage=[],
+        storage=ops.StorageHealth(
+            originals=0,
+            logical_bytes=0,
+            physical_blobs=0,
+            original_bytes=0,
+            stored_bytes=0,
+            compression_saved_bytes=0,
+            unverified_blobs=0,
+            failed_integrity_blobs=0,
+            last_integrity_check=None,
+        ),
+        recall=None,
+        duration_ms=1.0,
+    )
+    health = AsyncMock(return_value=report)
+    monkeypatch.setattr(app_module.ops, "health", health)
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health")
+
+    assert response.status_code == 200
+    assert response.json()["recall"] is None
+    health.assert_awaited_once_with(include_recall=False)
+
+
+def test_admin_recall_probes_the_largest_visible_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
+    largest = ops.ScopeHealth(
+        scopes=(uuid5(),),
+        creators=1,
+        documents=9,
+        chunks=9,
+        processed_chunks=9,
+        entities=0,
+        facts=0,
+        profiles=0,
+        last_write_at=datetime(2026, 7, 1, tzinfo=UTC),
+        last_projection_at=None,
+    )
+    smaller = largest.model_copy(update={"documents": 1})
+    recall = ops.RecallHealth(
+        query="probe",
+        scopes=largest.scopes,
+        candidates=1,
+        top_source="Aizk",
+        sample="healthy",
+        latency_ms=2.0,
+    )
+    corpus_health = AsyncMock(return_value=[largest, smaller])
+    recall_health = AsyncMock(return_value=recall)
+    monkeypatch.setattr(app_module.ops, "corpus_health", corpus_health)
+    monkeypatch.setattr(app_module.ops, "recall_health", recall_health)
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health/recall")
+
+    assert response.status_code == 200
+    assert response.json()["candidates"] == 1
+    recall_health.assert_awaited_once_with(largest)
+
+
+def test_admin_recall_is_absent_without_any_stored_corpus(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    corpus_health = AsyncMock(return_value=[])
+    recall_health = AsyncMock()
+    monkeypatch.setattr(app_module.ops, "corpus_health", corpus_health)
+    monkeypatch.setattr(app_module.ops, "recall_health", recall_health)
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health/recall")
+
+    assert response.status_code == 200
+    assert response.json() is None
+    recall_health.assert_not_awaited()
+
+
+def test_admin_hardware_returns_the_metrics_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    hardware = ops.HardwareHealth(reachable=False)
+    hardware_health = AsyncMock(return_value=hardware)
+    monkeypatch.setattr(app_module.ops, "hardware_health", hardware_health)
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/hardware")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "reachable": False,
+        "load1": None,
+        "load5": None,
+        "load15": None,
+        "memory_total_bytes": None,
+        "memory_available_bytes": None,
+        "disk_total_bytes": None,
+        "disk_available_bytes": None,
+        "lanes": [],
+    }
+    hardware_health.assert_awaited_once_with()
+
+
+def test_admin_doctor_forwards_query_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    report = ops.DoctorReport(
+        generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+        healthy=True,
+        stale_after_seconds=600,
+        long_running_after_seconds=1200,
+        history_seconds=3600,
+        detail_limit=10,
+        error_messages_included=True,
+        summary=ops.DoctorSummary(),
+    )
+    doctor = AsyncMock(return_value=report)
+    monkeypatch.setattr(app_module.ops, "doctor", doctor)
+
+    response = call(
+        service_as(monkeypatch, admin()),
+        "GET",
+        "/api/admin/doctor?stale_minutes=5&long_running_minutes=20&history_hours=1&limit=10"
+        "&show_error_messages=true",
+    )
+
+    assert response.status_code == 200
+    doctor.assert_awaited_once_with(
+        stale_minutes=5,
+        long_running_minutes=20,
+        history_hours=1,
+        limit=10,
+        show_error_messages=True,
+    )
+
+
+def test_admin_usage_forwards_composed_filters(monkeypatch: pytest.MonkeyPatch) -> None:
+    actor, org = uuid5(), uuid5()
+    report = ops.UsageFilterReport(
+        generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+        operation=Usage.Event.Operation.recall,
+        actor_id=actor,
+        scope_id=org,
+        start=None,
+        end=None,
+        by_actor=[],
+        by_scope=[],
+    )
+    usage_report = AsyncMock(return_value=report)
+    monkeypatch.setattr(app_module.ops, "usage_report", usage_report)
+
+    response = call(
+        service_as(monkeypatch, admin()),
+        "GET",
+        f"/api/admin/usage?operation=recall&actor_id={actor}&scope_id={org}"
+        "&start=2026-01-01T00:00:00Z&end=2026-02-01T00:00:00Z",
+    )
+
+    assert response.status_code == 200
+    usage_report.assert_awaited_once_with(
+        operation=Usage.Event.Operation.recall,
+        actor_id=actor,
+        scope_id=org,
+        start=datetime(2026, 1, 1, tzinfo=UTC),
+        end=datetime(2026, 2, 1, tzinfo=UTC),
+    )

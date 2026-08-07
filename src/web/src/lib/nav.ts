@@ -1,4 +1,4 @@
-import { appRoutes } from './routes';
+import { adminRoutes, appRoutes } from './routes';
 
 export type NavIcon =
   | 'dashboard'
@@ -10,7 +10,11 @@ export type NavIcon =
   | 'themes'
   | 'usage'
   | 'processing'
-  | 'organizations';
+  | 'organizations'
+  | 'overview'
+  | 'queues'
+  | 'ingestion'
+  | 'storage';
 
 export type NavLink = {
   label: string;
@@ -53,6 +57,22 @@ export function navigation(): NavSection[] {
     {
       label: 'Collaboration',
       links: [{ label: 'Organizations', href: appRoutes.organizations, icon: 'organizations' }]
+    }
+  ];
+}
+
+/** Build the fixed operator console information architecture. */
+export function adminNavigation(): NavSection[] {
+  return [
+    {
+      label: 'Operator',
+      links: [
+        { label: 'Overview', href: adminRoutes.overview, icon: 'overview' },
+        { label: 'Queues', href: adminRoutes.queues, icon: 'queues' },
+        { label: 'Ingestion', href: adminRoutes.ingestion, icon: 'ingestion' },
+        { label: 'Storage', href: adminRoutes.storage, icon: 'storage' },
+        { label: 'Usage', href: adminRoutes.usage, icon: 'usage' }
+      ]
     }
   ];
 }

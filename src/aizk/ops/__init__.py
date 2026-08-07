@@ -11,6 +11,7 @@ from .doctor import (
     QueueIssue,
     doctor,
 )
+from .hardware import HardwareHealth, ModelLaneLoad, hardware_health
 from .probes import (
     corpus_health,
     health,
@@ -46,6 +47,7 @@ from .reports import (
     SetupReport,
     StorageHealth,
 )
+from .usage import UsageFilterReport, usage_report
 
 __all__ = [
     "ActorUsage",
@@ -59,8 +61,10 @@ __all__ = [
     "ErrorIdentity",
     "ExceptionHistoryGroup",
     "ExtractionHealth",
+    "HardwareHealth",
     "HealthReport",
     "IdentityHealth",
+    "ModelLaneLoad",
     "RecallHealth",
     "QueueFailureGroup",
     "QueueIssue",
@@ -71,6 +75,7 @@ __all__ = [
     "ScopeUsage",
     "SetupReport",
     "StorageHealth",
+    "UsageFilterReport",
     "alembic_config",
     "alembic_current",
     "alembic_head",
@@ -78,6 +83,7 @@ __all__ = [
     "doctor",
     "enable_query_stats",
     "grant_app_role_privileges",
+    "hardware_health",
     "health",
     "probe_endpoint",
     "queue_schema_present",
@@ -88,4 +94,5 @@ __all__ = [
     "scoped_rls_violations",
     "setup",
     "usage_health",
+    "usage_report",
 ]

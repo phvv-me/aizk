@@ -553,6 +553,7 @@
                     "title": "Budget"
                   }
                 },
+                "additionalProperties": false,
                 "type": "object",
                 "required": [
                   "query"
@@ -683,6 +684,7 @@
                     "title": "Description"
                   }
                 },
+                "additionalProperties": false,
                 "type": "object",
                 "required": [
                   "name"
@@ -761,6 +763,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "description": "One exact-email member addition with its organization role.",
                 "properties": {
                   "email": {
@@ -843,6 +846,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
                 "description": "One replacement organization role for a current member.",
                 "properties": {
                   "role": {
@@ -913,10 +917,396 @@
           }
         }
       }
+    },
+    "/api/admin/links": {
+      "get": {
+        "summary": "Admin Links",
+        "description": "Return the external tool URLs the operator sidebar links to.",
+        "operationId": "admin_links",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminLinks"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/health": {
+      "get": {
+        "summary": "Admin Health",
+        "description": "Return schema, RLS, storage, queue, and endpoint health for operators.\n\nThe live recall probe is excluded so this never blocks the page load; fetch\n`/api/admin/health/recall` separately once the rest of the page has rendered.",
+        "operationId": "admin_health",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthReport"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/health/recall": {
+      "get": {
+        "summary": "Admin Recall",
+        "description": "Run the live recall probe over the largest corpus visible to any scope.",
+        "operationId": "admin_recall",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RecallHealth"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Admin Recall"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/hardware": {
+      "get": {
+        "summary": "Admin Hardware",
+        "description": "Return host and model-lane load already collected by the observability profile.",
+        "operationId": "admin_hardware",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HardwareHealth"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/doctor": {
+      "get": {
+        "summary": "Admin Doctor",
+        "description": "Diagnose queue failures, unhealthy leases, and artifact conversions.",
+        "operationId": "admin_doctor",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "stale_minutes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 15,
+              "title": "Stale Minutes"
+            }
+          },
+          {
+            "name": "long_running_minutes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 60,
+              "title": "Long Running Minutes"
+            }
+          },
+          {
+            "name": "history_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 24,
+              "title": "History Hours"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "show_error_messages",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Show Error Messages"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DoctorReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/usage": {
+      "get": {
+        "summary": "Admin Usage",
+        "description": "Aggregate durable usage by actor and by organization under one composed filter.",
+        "operationId": "admin_usage",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "operation",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Operation"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Operation"
+            }
+          },
+          {
+            "name": "actor_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid5"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Id"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid5"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageFilterReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ActorUsage": {
+        "properties": {
+          "actor_id": {
+            "type": "string",
+            "format": "uuid5",
+            "title": "Actor Id"
+          },
+          "recalls": {
+            "type": "integer",
+            "title": "Recalls"
+          },
+          "remembers": {
+            "type": "integer",
+            "title": "Remembers"
+          },
+          "files": {
+            "type": "integer",
+            "title": "Files"
+          },
+          "shares": {
+            "type": "integer",
+            "title": "Shares"
+          },
+          "artifact_reads": {
+            "type": "integer",
+            "title": "Artifact Reads"
+          },
+          "request_bytes": {
+            "type": "integer",
+            "title": "Request Bytes"
+          },
+          "response_bytes": {
+            "type": "integer",
+            "title": "Response Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "actor_id",
+          "recalls",
+          "remembers",
+          "files",
+          "shares",
+          "artifact_reads",
+          "request_bytes",
+          "response_bytes"
+        ],
+        "title": "ActorUsage",
+        "description": "Aggregate successful work and transferred bytes for one authenticated caller."
+      },
+      "AdminLinks": {
+        "properties": {
+          "logto_url": {
+            "type": "string",
+            "title": "Logto Url"
+          },
+          "grafana_url": {
+            "type": "string",
+            "title": "Grafana Url"
+          },
+          "traces_url": {
+            "type": "string",
+            "title": "Traces Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "logto_url",
+          "grafana_url",
+          "traces_url"
+        ],
+        "title": "AdminLinks",
+        "description": "The three external tools the operator sidebar links to, read from server config.\n\nThe console origin is configurable, so the browser reads these instead of a hardcoded\nhref. The default values are the same relative paths Caddy already answers on the\noperator console's own host, `/logto`, `/grafana/`, and `/traces`."
+      },
       "Answer": {
         "properties": {
           "markdown": {
@@ -924,6 +1314,7 @@
             "title": "Markdown"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "markdown"
@@ -934,19 +1325,16 @@
       "ArtifactReceipt": {
         "properties": {
           "artifact_id": {
-            "type": "string",
-            "format": "uuid7",
-            "title": "Artifact Id"
+            "$ref": "#/components/schemas/UUID7"
           },
           "content_id": {
-            "type": "string",
-            "format": "uuid7",
-            "title": "Content Id"
+            "$ref": "#/components/schemas/UUID7"
           },
           "state": {
             "$ref": "#/components/schemas/State"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "artifact_id",
@@ -962,7 +1350,8 @@
           "queued",
           "processing",
           "ready",
-          "failed"
+          "failed",
+          "unreadable"
         ]
       },
       "ArtifactView": {
@@ -995,6 +1384,7 @@
             "title": "Detail"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "source_uri",
@@ -1075,6 +1465,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -1097,6 +1488,339 @@
           "unavailable"
         ]
       },
+      "ConversionDiagnostic": {
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Artifact Id"
+          },
+          "content_id": {
+            "type": "string",
+            "format": "uuid7",
+            "title": "Content Id"
+          },
+          "artifact_name": {
+            "type": "string",
+            "title": "Artifact Name"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ConversionState"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "age_seconds": {
+            "type": "integer",
+            "title": "Age Seconds"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queue_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConversionQueueFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "queue_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "queued",
+                  "picked",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Status"
+          },
+          "retry_guidance": {
+            "type": "string",
+            "title": "Retry Guidance"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "content_id",
+          "artifact_name",
+          "state",
+          "updated_at",
+          "age_seconds",
+          "error",
+          "retry_guidance"
+        ],
+        "title": "ConversionDiagnostic",
+        "description": "One failed or active artifact conversion without caller-visible source text."
+      },
+      "ConversionQueueFailure": {
+        "properties": {
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string",
+                "format": "uuid7"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "job_id",
+          "attempts",
+          "error"
+        ],
+        "title": "ConversionQueueFailure",
+        "description": "The retained terminal PgQueuer job that owns one artifact conversion."
+      },
+      "ConversionState": {
+        "type": "string",
+        "enum": [
+          "failed",
+          "unreadable",
+          "active_terminal_queue",
+          "active_queued",
+          "active_stale",
+          "active_fresh"
+        ]
+      },
+      "DoctorFinding": {
+        "properties": {
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "severity",
+          "code",
+          "count",
+          "message",
+          "action"
+        ],
+        "title": "DoctorFinding",
+        "description": "One concise operational conclusion and its next safe action."
+      },
+      "DoctorReport": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "healthy": {
+            "type": "boolean",
+            "title": "Healthy"
+          },
+          "stale_after_seconds": {
+            "type": "integer",
+            "title": "Stale After Seconds"
+          },
+          "long_running_after_seconds": {
+            "type": "integer",
+            "title": "Long Running After Seconds"
+          },
+          "history_seconds": {
+            "type": "integer",
+            "title": "History Seconds"
+          },
+          "detail_limit": {
+            "type": "integer",
+            "title": "Detail Limit"
+          },
+          "error_messages_included": {
+            "type": "boolean",
+            "title": "Error Messages Included"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DoctorSummary"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/DoctorFinding"
+            },
+            "type": "array",
+            "title": "Findings",
+            "default": []
+          },
+          "queue_failure_groups": {
+            "items": {
+              "$ref": "#/components/schemas/QueueFailureGroup"
+            },
+            "type": "array",
+            "title": "Queue Failure Groups",
+            "default": []
+          },
+          "queue_issues": {
+            "items": {
+              "$ref": "#/components/schemas/QueueIssue"
+            },
+            "type": "array",
+            "title": "Queue Issues",
+            "default": []
+          },
+          "recent_exception_groups": {
+            "items": {
+              "$ref": "#/components/schemas/ExceptionHistoryGroup"
+            },
+            "type": "array",
+            "title": "Recent Exception Groups",
+            "default": []
+          },
+          "conversions": {
+            "items": {
+              "$ref": "#/components/schemas/ConversionDiagnostic"
+            },
+            "type": "array",
+            "title": "Conversions",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "generated_at",
+          "healthy",
+          "stale_after_seconds",
+          "long_running_after_seconds",
+          "history_seconds",
+          "detail_limit",
+          "error_messages_included",
+          "summary",
+          "findings",
+          "queue_failure_groups",
+          "queue_issues",
+          "recent_exception_groups",
+          "conversions"
+        ],
+        "title": "DoctorReport",
+        "description": "Read-only queue, retry history, and artifact conversion diagnosis.\n\nEvery bounded detail list defaults to empty so the browser API's generated client keeps\nit required rather than optional, since a defaulted list is always present in the response."
+      },
+      "DoctorSummary": {
+        "properties": {
+          "current_failed_jobs": {
+            "type": "integer",
+            "title": "Current Failed Jobs",
+            "default": 0
+          },
+          "stale_picked_jobs": {
+            "type": "integer",
+            "title": "Stale Picked Jobs",
+            "default": 0
+          },
+          "long_running_picked_jobs": {
+            "type": "integer",
+            "title": "Long Running Picked Jobs",
+            "default": 0
+          },
+          "recent_exception_events": {
+            "type": "integer",
+            "title": "Recent Exception Events",
+            "default": 0
+          },
+          "failed_conversions": {
+            "type": "integer",
+            "title": "Failed Conversions",
+            "default": 0
+          },
+          "unreadable_conversions": {
+            "type": "integer",
+            "title": "Unreadable Conversions",
+            "default": 0
+          },
+          "orphaned_active_conversions": {
+            "type": "integer",
+            "title": "Orphaned Active Conversions",
+            "default": 0
+          },
+          "queued_active_conversions": {
+            "type": "integer",
+            "title": "Queued Active Conversions",
+            "default": 0
+          },
+          "fresh_active_conversions": {
+            "type": "integer",
+            "title": "Fresh Active Conversions",
+            "default": 0
+          },
+          "stale_active_conversions": {
+            "type": "integer",
+            "title": "Stale Active Conversions",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "current_failed_jobs",
+          "stale_picked_jobs",
+          "long_running_picked_jobs",
+          "recent_exception_events",
+          "failed_conversions",
+          "unreadable_conversions",
+          "orphaned_active_conversions",
+          "queued_active_conversions",
+          "fresh_active_conversions",
+          "stale_active_conversions"
+        ],
+        "title": "DoctorSummary",
+        "description": "Complete issue counts, independent from the bounded detail lists.\n\nEvery field defaults to zero so the browser API's generated client keeps it required\nrather than optional, since a defaulted count is always present in the response."
+      },
       "ETAStatus": {
         "type": "string",
         "enum": [
@@ -1105,6 +1829,194 @@
           "insufficient_history",
           "blocked"
         ]
+      },
+      "EndpointHealth": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "reachable": {
+            "type": "boolean",
+            "title": "Reachable"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "served_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Served As"
+          },
+          "configured_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured As"
+          },
+          "matched": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched"
+          },
+          "context_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Tokens"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "url",
+          "reachable"
+        ],
+        "title": "EndpointHealth",
+        "description": "Describe one model endpoint's reachability, served identity, and context contract."
+      },
+      "ErrorIdentity": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "sanitized_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanitized Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "fingerprint"
+        ],
+        "title": "ErrorIdentity",
+        "description": "A non-reversible operator-safe identity for one stored error."
+      },
+      "ExceptionHistoryGroup": {
+        "properties": {
+          "entrypoint": {
+            "type": "string",
+            "title": "Entrypoint"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "exception",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "oldest_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Oldest At"
+          },
+          "newest_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Newest At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entrypoint",
+          "status",
+          "error",
+          "count",
+          "oldest_at",
+          "newest_at"
+        ],
+        "title": "ExceptionHistoryGroup",
+        "description": "Recent exception history aggregated separately from current failures."
+      },
+      "ExtractionHealth": {
+        "properties": {
+          "backend": {
+            "type": "string",
+            "title": "Backend"
+          },
+          "window_chars": {
+            "type": "integer",
+            "title": "Window Chars"
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "backend",
+          "window_chars",
+          "output_tokens"
+        ],
+        "title": "ExtractionHealth",
+        "description": "Show the configured extraction window and output budget beside its backend."
       },
       "FindingPage": {
         "properties": {
@@ -1129,6 +2041,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "total",
@@ -1222,6 +2135,7 @@
             "title": "Scopes"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -1260,6 +2174,7 @@
             "title": "Statement"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "source",
@@ -1286,6 +2201,7 @@
             "title": "Degree"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -1319,6 +2235,7 @@
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "nodes",
@@ -1340,6 +2257,243 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HardwareHealth": {
+        "properties": {
+          "reachable": {
+            "type": "boolean",
+            "title": "Reachable"
+          },
+          "load1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load1"
+          },
+          "load5": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load5"
+          },
+          "load15": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Load15"
+          },
+          "memory_total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Total Bytes"
+          },
+          "memory_available_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Available Bytes"
+          },
+          "disk_total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Total Bytes"
+          },
+          "disk_available_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Available Bytes"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/ModelLaneLoad"
+            },
+            "type": "array",
+            "title": "Lanes",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reachable",
+          "load1",
+          "load5",
+          "load15",
+          "memory_total_bytes",
+          "memory_available_bytes",
+          "disk_total_bytes",
+          "disk_available_bytes",
+          "lanes"
+        ],
+        "title": "HardwareHealth",
+        "description": "Host CPU, memory, and disk load and per-lane GPU occupancy already collected server-side.\n\nRead from VictoriaMetrics, which Alloy's built-in unix exporter and the vLLM lanes already\nfeed, rather than probed directly with `mainboard`. No aizk process holds NVML device access\nto a GPU, so raw device telemetry (temperature, power, memory used) is not available from any\nprocess in this deployment; the per-lane KV-cache occupancy and queue depth below are the real\nGPU-adjacent signal that exists today. `reachable` is false whenever `metrics_url` is unset or\nVictoriaMetrics cannot be reached, in which case every measurement stays absent rather than a\nstale or fabricated zero. Every field but `reachable` defaults, so the generated client keeps\nthem required rather than optional too."
+      },
+      "HealthReport": {
+        "properties": {
+          "migration": {
+            "$ref": "#/components/schemas/SchemaHealth"
+          },
+          "rls_violations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rls Violations"
+          },
+          "row_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Row Counts"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/TasksStatus"
+          },
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/EndpointHealth"
+            },
+            "type": "array",
+            "title": "Endpoints"
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/ExtractionHealth"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/IdentityHealth"
+          },
+          "corpora": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeHealth"
+            },
+            "type": "array",
+            "title": "Corpora"
+          },
+          "actors": {
+            "items": {
+              "$ref": "#/components/schemas/ActorUsage"
+            },
+            "type": "array",
+            "title": "Actors"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeUsage"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "scope_storage": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeStorage"
+            },
+            "type": "array",
+            "title": "Scope Storage"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/StorageHealth"
+          },
+          "recall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecallHealth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "migration",
+          "rls_violations",
+          "row_counts",
+          "queue",
+          "endpoints",
+          "extraction",
+          "identity",
+          "corpora",
+          "actors",
+          "scopes",
+          "scope_storage",
+          "storage",
+          "recall",
+          "duration_ms"
+        ],
+        "title": "HealthReport",
+        "description": "Combine schema, RLS, storage, queue, models, identity, corpora, and recall health."
+      },
+      "IdentityHealth": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "public_url"
+        ],
+        "title": "IdentityHealth",
+        "description": "Show whether requests use Logto identity or the explicit local auth-off identity."
       },
       "KnowledgeTotals": {
         "properties": {
@@ -1369,6 +2523,7 @@
             "default": 0
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "documents",
@@ -1405,6 +2560,7 @@
             "title": "Organizations"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "label",
@@ -1413,6 +2569,62 @@
         ],
         "title": "Me",
         "description": "The signed-in caller's label, operator standing, and organizations from Logto."
+      },
+      "ModelLaneLoad": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "up": {
+            "type": "boolean",
+            "title": "Up"
+          },
+          "kv_cache_usage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kv Cache Usage Pct"
+          },
+          "requests_running": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requests Running"
+          },
+          "requests_waiting": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requests Waiting"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "service",
+          "up",
+          "kv_cache_usage_pct",
+          "requests_running",
+          "requests_waiting"
+        ],
+        "title": "ModelLaneLoad",
+        "description": "One vLLM serving lane's scrape reachability and live GPU occupancy.\n\nEvery field but `service` defaults, so the browser API's generated client keeps them\nrequired rather than optional, since a defaulted field is always present in the response."
       },
       "Operation": {
         "type": "string",
@@ -1446,6 +2658,7 @@
             "title": "Member"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "organization"
@@ -1464,6 +2677,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "organizations"
@@ -1490,6 +2704,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -1539,6 +2754,7 @@
             "title": "Public"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -1595,6 +2811,7 @@
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -1645,6 +2862,7 @@
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -1680,6 +2898,7 @@
             "title": "Artifacts"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "totals",
@@ -1760,6 +2979,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "generated_at",
@@ -1844,6 +3064,7 @@
             "title": "Enriched Upper Seconds"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "generated_at",
@@ -1856,6 +3077,203 @@
         ],
         "title": "ProcessingStatus",
         "description": "Caller-visible processing stages and honest ETA ranges."
+      },
+      "QueueFailureGroup": {
+        "properties": {
+          "entrypoint": {
+            "type": "string",
+            "title": "Entrypoint"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "attempts_min": {
+            "type": "integer",
+            "title": "Attempts Min"
+          },
+          "attempts_max": {
+            "type": "integer",
+            "title": "Attempts Max"
+          },
+          "oldest_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Oldest At"
+          },
+          "newest_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Newest At"
+          },
+          "remediation": {
+            "type": "string",
+            "title": "Remediation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entrypoint",
+          "error",
+          "count",
+          "attempts_min",
+          "attempts_max",
+          "oldest_at",
+          "newest_at",
+          "remediation"
+        ],
+        "title": "QueueFailureGroup",
+        "description": "Current retained failures grouped without exposing exception messages."
+      },
+      "QueueIssue": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string",
+                "format": "uuid7"
+              }
+            ],
+            "title": "Id"
+          },
+          "entrypoint": {
+            "type": "string",
+            "title": "Entrypoint"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/QueueIssueKind"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "heartbeat_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Heartbeat At"
+          },
+          "age_seconds": {
+            "type": "integer",
+            "title": "Age Seconds"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "latest_error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retry_guidance": {
+            "type": "string",
+            "title": "Retry Guidance"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "entrypoint",
+          "kind",
+          "updated_at",
+          "heartbeat_at",
+          "age_seconds",
+          "attempts",
+          "latest_error",
+          "retry_guidance"
+        ],
+        "title": "QueueIssue",
+        "description": "One current retained failure or unhealthy picked queue job."
+      },
+      "QueueIssueKind": {
+        "type": "string",
+        "enum": [
+          "stale_picked",
+          "long_running_picked"
+        ]
+      },
+      "RecallHealth": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "scopes": {
+            "items": {
+              "type": "string",
+              "format": "uuid5"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "candidates": {
+            "type": "integer",
+            "title": "Candidates"
+          },
+          "top_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Source"
+          },
+          "sample": {
+            "type": "string",
+            "title": "Sample"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query",
+          "scopes",
+          "candidates",
+          "top_source",
+          "sample",
+          "latency_ms"
+        ],
+        "title": "RecallHealth",
+        "description": "Record one bounded real recall over the largest corpus visible to its scope set."
       },
       "RecentDocument": {
         "properties": {
@@ -1884,6 +3302,7 @@
             "title": "Kind"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "source_uri",
@@ -1894,6 +3313,199 @@
         ],
         "title": "RecentDocument",
         "description": "Presentation metadata for one authored document without internal identifiers."
+      },
+      "SchemaHealth": {
+        "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
+          },
+          "head": {
+            "type": "string",
+            "title": "Head"
+          },
+          "up_to_date": {
+            "type": "boolean",
+            "title": "Up To Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "current",
+          "head",
+          "up_to_date"
+        ],
+        "title": "SchemaHealth",
+        "description": "Compare the live Alembic revision with the migration head packaged by this build."
+      },
+      "ScopeHealth": {
+        "properties": {
+          "scopes": {
+            "items": {
+              "type": "string",
+              "format": "uuid5"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "creators": {
+            "type": "integer",
+            "title": "Creators"
+          },
+          "documents": {
+            "type": "integer",
+            "title": "Documents"
+          },
+          "chunks": {
+            "type": "integer",
+            "title": "Chunks"
+          },
+          "processed_chunks": {
+            "type": "integer",
+            "title": "Processed Chunks"
+          },
+          "entities": {
+            "type": "integer",
+            "title": "Entities"
+          },
+          "facts": {
+            "type": "integer",
+            "title": "Facts"
+          },
+          "profiles": {
+            "type": "integer",
+            "title": "Profiles"
+          },
+          "last_write_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Last Write At"
+          },
+          "last_projection_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Projection At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scopes",
+          "creators",
+          "documents",
+          "chunks",
+          "processed_chunks",
+          "entities",
+          "facts",
+          "profiles",
+          "last_write_at",
+          "last_projection_at"
+        ],
+        "title": "ScopeHealth",
+        "description": "Measure one exact scope-set corpus, its graph progress, and latest durable writes."
+      },
+      "ScopeStorage": {
+        "properties": {
+          "scopes": {
+            "items": {
+              "type": "string",
+              "format": "uuid5"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "artifact_revisions": {
+            "type": "integer",
+            "title": "Artifact Revisions"
+          },
+          "logical_bytes": {
+            "type": "integer",
+            "title": "Logical Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scopes",
+          "artifact_revisions",
+          "logical_bytes"
+        ],
+        "title": "ScopeStorage",
+        "description": "Measure logical original-file references in one exact private or shared scope set."
+      },
+      "ScopeUsage": {
+        "properties": {
+          "scope_id": {
+            "type": "string",
+            "format": "uuid5",
+            "title": "Scope Id"
+          },
+          "recalls": {
+            "type": "integer",
+            "title": "Recalls"
+          },
+          "remembers": {
+            "type": "integer",
+            "title": "Remembers"
+          },
+          "files": {
+            "type": "integer",
+            "title": "Files"
+          },
+          "shares": {
+            "type": "integer",
+            "title": "Shares"
+          },
+          "artifact_reads": {
+            "type": "integer",
+            "title": "Artifact Reads"
+          },
+          "request_bytes": {
+            "type": "integer",
+            "title": "Request Bytes"
+          },
+          "response_bytes": {
+            "type": "integer",
+            "title": "Response Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "scope_id",
+          "recalls",
+          "remembers",
+          "files",
+          "shares",
+          "artifact_reads",
+          "request_bytes",
+          "response_bytes"
+        ],
+        "title": "ScopeUsage",
+        "description": "Attribute successful work to one private or organization target scope."
+      },
+      "Severity": {
+        "type": "string",
+        "enum": [
+          "error",
+          "warning",
+          "info"
+        ]
       },
       "SourceOrigin": {
         "type": "string",
@@ -1929,6 +3541,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "total",
@@ -1993,6 +3606,7 @@
             "title": "Scopes"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -2114,6 +3728,7 @@
             "title": "Oldest At"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "key",
@@ -2141,10 +3756,11 @@
           "queued",
           "processing",
           "ready",
-          "failed"
+          "failed",
+          "unreadable"
         ],
         "title": "State",
-        "description": "Durable processing state independent from PgQueuer's delivery state."
+        "description": "Durable processing state independent from PgQueuer's delivery state.\n\n`failed` and `unreadable` are both terminal-looking but mean different things to a\nretry. `failed` is what a timeout, a network blip, or a Docling restart leaves behind,\nso `aizk admin queue retry conversion` keeps offering it back to the queue. `unreadable`\nis what Docling's own policy check leaves behind when the format itself is the problem,\na verdict the exact same bytes would repeat on every retry, so it is excluded from that\nquery and never re-queued. It stays visible with its stored `error` for anyone who asks\nwhat was rejected and why."
       },
       "StatusReport": {
         "properties": {
@@ -2163,6 +3779,7 @@
             "$ref": "#/components/schemas/ProcessingStatus"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "generated_at",
@@ -2172,6 +3789,69 @@
         ],
         "title": "StatusReport",
         "description": "Identity, durable usage, and processing health for one caller."
+      },
+      "StorageHealth": {
+        "properties": {
+          "originals": {
+            "type": "integer",
+            "title": "Originals"
+          },
+          "logical_bytes": {
+            "type": "integer",
+            "title": "Logical Bytes"
+          },
+          "physical_blobs": {
+            "type": "integer",
+            "title": "Physical Blobs"
+          },
+          "original_bytes": {
+            "type": "integer",
+            "title": "Original Bytes"
+          },
+          "stored_bytes": {
+            "type": "integer",
+            "title": "Stored Bytes"
+          },
+          "compression_saved_bytes": {
+            "type": "integer",
+            "title": "Compression Saved Bytes"
+          },
+          "unverified_blobs": {
+            "type": "integer",
+            "title": "Unverified Blobs"
+          },
+          "failed_integrity_blobs": {
+            "type": "integer",
+            "title": "Failed Integrity Blobs"
+          },
+          "last_integrity_check": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Integrity Check"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "originals",
+          "logical_bytes",
+          "physical_blobs",
+          "original_bytes",
+          "stored_bytes",
+          "compression_saved_bytes",
+          "unverified_blobs",
+          "failed_integrity_blobs",
+          "last_integrity_check"
+        ],
+        "title": "StorageHealth",
+        "description": "Separate logical file references from physical object-store consumption."
       },
       "SubjectPage": {
         "properties": {
@@ -2196,6 +3876,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "total",
@@ -2243,6 +3924,7 @@
             "title": "Scopes"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -2255,6 +3937,60 @@
         ],
         "title": "SubjectView",
         "description": "One visible subject claim with its current graph degree."
+      },
+      "TasksStatus": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "title": "Pending"
+          },
+          "running": {
+            "type": "integer",
+            "title": "Running"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "last_success": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success"
+          },
+          "oldest_queued": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Queued"
+          },
+          "projection_pending": {
+            "type": "integer",
+            "title": "Projection Pending"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pending",
+          "running",
+          "failed",
+          "last_success",
+          "oldest_queued",
+          "projection_pending"
+        ],
+        "title": "TasksStatus",
+        "description": "Bounded operational snapshot of the durable queue and projection backlog."
       },
       "ThemePage": {
         "properties": {
@@ -2279,6 +4015,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "total",
@@ -2329,6 +4066,7 @@
             "title": "Scopes"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -2341,6 +4079,105 @@
         ],
         "title": "ThemeView",
         "description": "One visible graph community with a bounded member preview."
+      },
+      "UUID7": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "UsageFilterReport": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Operation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid5"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid5"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "by_actor": {
+            "items": {
+              "$ref": "#/components/schemas/ActorUsage"
+            },
+            "type": "array",
+            "title": "By Actor"
+          },
+          "by_scope": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeUsage"
+            },
+            "type": "array",
+            "title": "By Scope"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "generated_at",
+          "operation",
+          "actor_id",
+          "scope_id",
+          "start",
+          "end",
+          "by_actor",
+          "by_scope"
+        ],
+        "title": "UsageFilterReport",
+        "description": "Durable usage aggregated by actor and by organization scope under one composed filter.\n\nEvery column an operator can filter on, kind, actor, organization scope, and the time\nwindow, is indexed, so the same predicate set narrows both breakdowns in one query pass\nrather than loading rows and summing them in Python."
       },
       "UsagePoint": {
         "properties": {
@@ -2373,6 +4210,7 @@
             "title": "Duration Ms"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "bucket",
@@ -2422,6 +4260,7 @@
             "default": []
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "generated_at",
@@ -2463,6 +4302,7 @@
             "$ref": "#/components/schemas/UsageSummary"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "generated_at",
@@ -2538,6 +4378,7 @@
             "default": 0.0
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "recalls",
@@ -2584,6 +4425,7 @@
             "default": 0
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "recalls",

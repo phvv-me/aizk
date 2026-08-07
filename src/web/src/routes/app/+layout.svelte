@@ -1,13 +1,20 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import Sidebar from '$lib/components/Sidebar.svelte';
+  import { navigation } from '$lib/nav';
+  import { appRoutes } from '$lib/routes';
   import type { LayoutServerData } from './$types';
 
   let { data, children }: { data: LayoutServerData; children: Snippet } = $props();
 </script>
 
 <div class="min-h-screen">
-  <Sidebar me={data.me} accountUrl={data.accountUrl} />
+  <Sidebar
+    me={data.me}
+    accountUrl={data.accountUrl}
+    sections={navigation()}
+    brandHref={appRoutes.dashboard}
+  />
   <main class="md:pl-64">
     <div class="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-10">
       {#if !data.apiOnline}

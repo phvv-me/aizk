@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddMemberData, AddMemberErrors, AddMemberResponses, CreateOrganizationData, CreateOrganizationResponses, FindingsData, FindingsErrors, FindingsResponses, GraphData, GraphErrors, GraphResponses, HealthData, HealthResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, ProcessingData, ProcessingEventsData, ProcessingEventsResponse, ProcessingEventsResponses, ProcessingResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses, SourcesData, SourcesErrors, SourcesResponses, StatusData, StatusErrors, StatusResponses, SubjectsData, SubjectsErrors, SubjectsResponses, ThemesData, ThemesErrors, ThemesResponses, UsageData, UsageErrors, UsageResponses } from './types.gen';
+import type { AddMemberData, AddMemberErrors, AddMemberResponses, AdminDoctorData, AdminDoctorErrors, AdminDoctorResponses, AdminHardwareData, AdminHardwareResponses, AdminHealthData, AdminHealthResponses, AdminLinksData, AdminLinksResponses, AdminRecallData, AdminRecallResponses, AdminUsageData, AdminUsageErrors, AdminUsageResponses, CreateOrganizationData, CreateOrganizationResponses, FindingsData, FindingsErrors, FindingsResponses, GraphData, GraphErrors, GraphResponses, HealthData, HealthResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, ProcessingData, ProcessingEventsData, ProcessingEventsResponse, ProcessingEventsResponses, ProcessingResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses, SourcesData, SourcesErrors, SourcesResponses, StatusData, StatusErrors, StatusResponses, SubjectsData, SubjectsErrors, SubjectsResponses, ThemesData, ThemesErrors, ThemesResponses, UsageData, UsageErrors, UsageResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -241,4 +241,73 @@ export const setMemberRole = <ThrowOnError extends boolean = false>(options: Opt
         'Content-Type': 'application/json',
         ...options.headers
     }
+});
+
+/**
+ * Admin Links
+ *
+ * Return the external tool URLs the operator sidebar links to.
+ */
+export const adminLinks = <ThrowOnError extends boolean = false>(options?: Options<AdminLinksData, ThrowOnError>): RequestResult<AdminLinksResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminLinksResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/admin/links',
+    ...options
+});
+
+/**
+ * Admin Health
+ *
+ * Return schema, RLS, storage, queue, and endpoint health for operators.
+ *
+ * The live recall probe is excluded so this never blocks the page load; fetch
+ * `/api/admin/health/recall` separately once the rest of the page has rendered.
+ */
+export const adminHealth = <ThrowOnError extends boolean = false>(options?: Options<AdminHealthData, ThrowOnError>): RequestResult<AdminHealthResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminHealthResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/admin/health',
+    ...options
+});
+
+/**
+ * Admin Recall
+ *
+ * Run the live recall probe over the largest corpus visible to any scope.
+ */
+export const adminRecall = <ThrowOnError extends boolean = false>(options?: Options<AdminRecallData, ThrowOnError>): RequestResult<AdminRecallResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminRecallResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/admin/health/recall',
+    ...options
+});
+
+/**
+ * Admin Hardware
+ *
+ * Return host and model-lane load already collected by the observability profile.
+ */
+export const adminHardware = <ThrowOnError extends boolean = false>(options?: Options<AdminHardwareData, ThrowOnError>): RequestResult<AdminHardwareResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminHardwareResponses, unknown, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/admin/hardware',
+    ...options
+});
+
+/**
+ * Admin Doctor
+ *
+ * Diagnose queue failures, unhealthy leases, and artifact conversions.
+ */
+export const adminDoctor = <ThrowOnError extends boolean = false>(options?: Options<AdminDoctorData, ThrowOnError>): RequestResult<AdminDoctorResponses, AdminDoctorErrors, ThrowOnError> => (options?.client ?? client).get<AdminDoctorResponses, AdminDoctorErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/admin/doctor',
+    ...options
+});
+
+/**
+ * Admin Usage
+ *
+ * Aggregate durable usage by actor and by organization under one composed filter.
+ */
+export const adminUsage = <ThrowOnError extends boolean = false>(options?: Options<AdminUsageData, ThrowOnError>): RequestResult<AdminUsageResponses, AdminUsageErrors, ThrowOnError> => (options?.client ?? client).get<AdminUsageResponses, AdminUsageErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/admin/usage',
+    ...options
 });

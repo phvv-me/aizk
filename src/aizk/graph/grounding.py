@@ -44,12 +44,20 @@ _REGISTERS: tuple[tuple[re.Pattern[str], Stance], ...] = (
         Stance.disputed,
     ),
     (
+        # `invalid`, `obsolete` and `false` are ordinary technical vocabulary here, invalid
+        # input, an obsolete API, a false positive rate, so none is admitted bare. Each is
+        # gated behind a construction that predicates it of a claim rather than describing a
+        # value: a copula directly before the adjective, or `turned out to be` before
+        # `false`. Bare correction verbs need no such gate, they carry no comparable
+        # everyday sense in this corpus.
         re.compile(
-            r"\b(?:correct(?:ed|ing|ion)|corrigendum|disprov\w+|erratum|incorrect|"
+            r"\b(?:correct(?:ed|ing|ion)|corrigendum|debunk\w+|disprov\w+|erratum|incorrect|"
             r"invalidat\w+|misstat\w+|mistaken|overstat\w+|refut\w+|retract\w+|supersed\w+|"
             r"withdrawn)\b"
-            r"|\bdoes not (?:hold|support|replicate)\b|\bno longer (?:true|holds?)\b"
-            r"|\b(?:was|is|were) wrong\b",
+            r"|\bdoes not (?:hold|support|replicate)\b|\bno longer (?:true|holds?|valid)\b"
+            r"|\b(?:was|is|were) wrong\b"
+            r"|\b(?:is|was|are|were) (?:now )?(?:invalid|obsolete)\b"
+            r"|\bturned out to be false\b",
             re.IGNORECASE,
         ),
         Stance.refuted,

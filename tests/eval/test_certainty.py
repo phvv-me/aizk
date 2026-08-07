@@ -23,9 +23,9 @@ CASES = load_certainty_cases(CERTAINTY_CASES_PATH)
 def test_every_committed_case_is_adversarial_by_construction() -> None:
     # the corpus is only worth reading if each case already passes quote verification, so
     # nothing in it is caught by the check that existed before
-    assert len(CASES) == 32
+    assert len(CASES) == 46
     assert all(case.quote in case.sentence for case in CASES)
-    assert sum(case.distorting for case in CASES) == 12
+    assert sum(case.distorting for case in CASES) == 17
 
 
 def test_the_change_is_measured_rather_than_asserted() -> None:
@@ -37,9 +37,21 @@ def test_the_change_is_measured_rather_than_asserted() -> None:
     assert report.source_paired_before == 0.0
     # what the gate does now, and what it costs. These are the numbers to argue with: if a
     # lexicon change moves them, this test says so instead of letting the claim drift.
-    assert report.flattening_admitted == pytest.approx(1 / 12)
-    assert report.false_rejection == pytest.approx(1 / 20)
-    assert report.settledness_accuracy == pytest.approx(31 / 32)
+    #
+    # The refuted register grew five constructions (a copula before `invalid`/`obsolete`,
+    # `no longer valid`, `turned out to be false`, `debunked`) to close the supersession
+    # defect, so 14 cases joined the corpus: 5 flattened/preserved pairs exercising each new
+    # construction plus 4 adversarial negatives (`invalid input`, `false positive rate`, an
+    # `obsolete API`, a `void` return type) proving none of them fires on ordinary technical
+    # prose. Both guarded rates fall, both denominators grow by exactly the new cases, and
+    # both moves are in the direction the fix intends: flattening_admitted 1/12 -> 1/17,
+    # because the five new flattenings are now correctly rejected; false_rejection
+    # 1/20 -> 1/29, because the five new preserved cases and four negatives are all still
+    # admitted; settledness_accuracy 31/32 -> 45/46, because the new register reads every
+    # one of the fourteen new sentences correctly and dilutes the one pre-existing miss.
+    assert report.flattening_admitted == pytest.approx(1 / 17)
+    assert report.false_rejection == pytest.approx(1 / 29)
+    assert report.settledness_accuracy == pytest.approx(45 / 46)
     assert report.source_paired == 1.0
     assert report.distortion_labelled == 1.0
 

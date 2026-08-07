@@ -6,7 +6,7 @@ from uuid import UUID
 
 import asyncpg
 from patos import FrozenModel
-from pydantic import UUID7, ValidationError
+from pydantic import UUID7, ConfigDict, ValidationError
 from sqlalchemy import and_, func, or_
 from sqlmodel import select
 from sqlmodel.sql.expression import Select
@@ -103,7 +103,13 @@ class ConversionDiagnostic(FrozenModel):
 
 
 class DoctorSummary(FrozenModel):
-    """Complete issue counts, independent from the bounded detail lists."""
+    """Complete issue counts, independent from the bounded detail lists.
+
+    Every field defaults to zero so the browser API's generated client keeps it required
+    rather than optional, since a defaulted count is always present in the response.
+    """
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
     current_failed_jobs: int = 0
     stale_picked_jobs: int = 0
@@ -128,7 +134,13 @@ class DoctorFinding(FrozenModel):
 
 
 class DoctorReport(FrozenModel):
-    """Read-only queue, retry history, and artifact conversion diagnosis."""
+    """Read-only queue, retry history, and artifact conversion diagnosis.
+
+    Every bounded detail list defaults to empty so the browser API's generated client keeps
+    it required rather than optional, since a defaulted list is always present in the response.
+    """
+
+    model_config = ConfigDict(json_schema_serialization_defaults_required=True)
 
     generated_at: datetime
     healthy: bool
