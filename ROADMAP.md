@@ -60,3 +60,12 @@ This roadmap separates shipped behavior from hypotheses that still need measured
 - [ ] Replace remaining migration-only PostgreSQL DDL strings with reusable SQLAlchemy DDL
   elements where the extension APIs permit it.
 - [ ] Freeze the MCP and operator surfaces only after the benchmark results settle the defaults.
+- [ ] Revisit the identity namespace before any second deployment shares data with this one.
+  `_IDENTITY_NAMESPACE` is frozen at a URL shaped name and every user id and scope id is a
+  `uuid5` of it, so it is stored data rather than configuration and cannot move without minting
+  a disjoint set that matches nothing already written. That is settled for this deployment and
+  costs nothing, including if the domain in it is retired, because the string is a name and never
+  resolves. It becomes a real question only in two cases, merging two deployments that were
+  seeded differently, or offering a hosted multi-deployment product where one namespace per
+  tenant would be wanted from the first write. Neither is close, and the migration runbook covers
+  the domain move that is.
