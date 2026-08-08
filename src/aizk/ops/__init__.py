@@ -47,8 +47,19 @@ from .reports import (
     SetupReport,
     StorageHealth,
 )
-from .snapshot import HealthSnapshotJob, StoredHealth, stored_health
-from .usage import UsageFilterReport, usage_report
+from .snapshot import (
+    DoctorSnapshotJob,
+    HealthSnapshotJob,
+    Measured,
+    StoredDoctor,
+    StoredHealth,
+    StoredUsage,
+    UsageSnapshotJob,
+    stored_doctor,
+    stored_health,
+    stored_usage,
+)
+from .usage import PeriodUsage, PlatformUsage, platform_usage
 
 __all__ = [
     "ActorUsage",
@@ -76,18 +87,26 @@ __all__ = [
     "ScopeUsage",
     "SetupReport",
     "StorageHealth",
-    "UsageFilterReport",
+    "PeriodUsage",
+    "PlatformUsage",
     "alembic_config",
     "alembic_current",
     "alembic_head",
+    "DoctorSnapshotJob",
     "HealthSnapshotJob",
+    "Measured",
+    "StoredDoctor",
     "StoredHealth",
+    "StoredUsage",
+    "UsageSnapshotJob",
     "corpus_health",
     "doctor",
     "enable_query_stats",
     "grant_app_role_privileges",
     "hardware_health",
+    "stored_doctor",
     "stored_health",
+    "stored_usage",
     "health",
     "probe_endpoint",
     "queue_schema_present",
@@ -98,5 +117,5 @@ __all__ = [
     "scoped_rls_violations",
     "setup",
     "usage_health",
-    "usage_report",
+    "platform_usage",
 ]

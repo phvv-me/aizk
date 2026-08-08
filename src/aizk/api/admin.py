@@ -29,7 +29,10 @@ class AdminLinks(FrozenModel):
 def require_admin(user: User) -> None:
     """Refuse a caller without the managed operator role.
 
-    Raises `PermissionError`, which the API's shared exception handling already maps to 403.
+    Reads the same standing the caller carries into PostgreSQL rather than re-deriving it
+    from the role list, so this answer and row security can never disagree about who is an
+    operator. Raises `PermissionError`, which the API's shared exception handling already
+    maps to 403.
     """
-    if settings.logto_admin_role not in user.roles:
+    if not user.operator:
         raise PermissionError("operator access required")

@@ -1,9 +1,9 @@
 import io
 import json
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from types import TracebackType
-from typing import Protocol, Self
+from typing import NamedTuple, Protocol, Self
 from unittest.mock import AsyncMock
 
 import dbutil
@@ -12,6 +12,7 @@ import pytest
 import seedgraph
 from factories import CandidateFactory
 from id_factory import uuid5, uuid8
+from patos import FrozenModel
 from pydantic import JsonValue
 from sqlalchemy import URL, update
 from sqlalchemy.exc import DBAPIError
@@ -25,7 +26,8 @@ from aizk.config import DatabaseBackend, settings
 from aizk.ontology import Ontology
 from aizk.ops import EndpointHealth
 from aizk.retrieval import Candidate, Lane
-from aizk.store import Artifact, Blob, Chunk, HealthSnapshot, Usage
+from aizk.status import UsageSummary
+from aizk.store import Artifact, Blob, Chunk, OperatorReading, OperatorSnapshot, Usage
 from aizk.store.engine import Session
 from aizk.store.identity import User
 from aizk.usage import UsageAccountingJob, UsageCapture
@@ -772,54 +774,141 @@ def _measured(row_counts: dict[str, int] | None = None) -> ops.HealthReport:
     )
 
 
-def test_health_snapshot_job_stores_what_it_measured_for_a_process_denied_the_owner(
-    migrated_db: None, monkeypatch: pytest.MonkeyPatch
+def _diagnosed() -> ops.DoctorReport:
+    """One complete queue and conversion diagnosis, the shape a real pass produces."""
+    return ops.DoctorReport(
+        generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+        healthy=True,
+        stale_after_seconds=900,
+        long_running_after_seconds=3600,
+        history_seconds=86400,
+        detail_limit=50,
+        error_messages_included=False,
+        summary=ops.DoctorSummary(),
+    )
+
+
+def _aggregated() -> ops.PlatformUsage:
+    """One complete platform usage aggregate, the shape a real pass produces."""
+    return ops.PlatformUsage(
+        generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+        periods=(
+            ops.PeriodUsage(
+                days=7,
+                start=datetime(2026, 6, 25, tzinfo=UTC),
+                summary=UsageSummary(recalls=3),
+            ),
+        ),
+        lifetime=UsageSummary(recalls=9),
+        points=(),
+        by_actor=(),
+        by_scope=(),
+    )
+
+
+def operator() -> User:
+    """One caller holding the Logto operator role, the only standing these readings answer."""
+    return User.authorized(uuid5(), roles=(settings.logto_admin_role,))
+
+
+class SnapshotCase(NamedTuple):
+    """One operator reading under test, with how to fake it and how to read it back."""
+
+    job: type[ops.SnapshotJob]
+    probe: str
+    measure: Callable[[], FrozenModel]
+    read: Callable[[Session], Awaitable[ops.Measured | None]]
+    stale_minutes: int
+
+
+READINGS = (
+    pytest.param(
+        SnapshotCase(
+            ops.HealthSnapshotJob,
+            "health",
+            _measured,
+            ops.stored_health,
+            settings.health_snapshot_stale_minutes,
+        ),
+        id="health",
+    ),
+    pytest.param(
+        SnapshotCase(
+            ops.DoctorSnapshotJob,
+            "doctor",
+            _diagnosed,
+            ops.stored_doctor,
+            settings.doctor_snapshot_stale_minutes,
+        ),
+        id="doctor",
+    ),
+    pytest.param(
+        SnapshotCase(
+            ops.UsageSnapshotJob,
+            "platform_usage",
+            _aggregated,
+            ops.stored_usage,
+            settings.usage_snapshot_stale_minutes,
+        ),
+        id="usage",
+    ),
+)
+
+
+@pytest.mark.parametrize("case", READINGS)
+def test_each_reading_is_measured_by_the_worker_and_read_back_by_the_app_role(
+    case: SnapshotCase, migrated_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The worker holds the owner credential the console's process is denied, so it measures.
 
     Reading back through the application role is the property that matters: that is the role
     the API runs as, and asking it to take the measurement itself is what failed before.
     """
-    measured = _measured({"a": 1})
-    monkeypatch.setattr(ops.snapshot, "health", AsyncMock(return_value=measured))
+    measured = case.measure()
+    monkeypatch.setattr(ops.snapshot, case.probe, AsyncMock(return_value=measured))
 
-    async def run() -> ops.StoredHealth | None:
-        await ops.HealthSnapshotJob().execute()
-        async with User.system() as session:
-            return await ops.stored_health(session)
+    async def run() -> ops.Measured | None:
+        await case.job().execute()
+        async with operator() as session:
+            return await case.read(session)
 
     stored = dbutil.run(run())
 
     assert stored is not None
-    assert stored.row_counts == {"a": 1}
+    assert stored.model_dump(exclude={"measured_at", "stale"}) == measured.model_dump()
     assert stored.stale is False
 
 
-def test_stored_health_is_absent_until_a_pass_has_run(migrated_db: None) -> None:
-    async def read() -> ops.StoredHealth | None:
+@pytest.mark.parametrize("case", READINGS)
+def test_each_reading_is_absent_until_a_pass_has_run(
+    case: SnapshotCase, migrated_db: None
+) -> None:
+    async def read() -> ops.Measured | None:
         async with User.system().owner as session:
-            await session.exec(delete(HealthSnapshot))
-        async with User.system() as session:
-            return await ops.stored_health(session)
+            await session.exec(delete(OperatorSnapshot))
+        async with operator() as session:
+            return await case.read(session)
 
     assert dbutil.run(read()) is None
 
 
-def test_stored_health_marks_a_reading_older_than_its_window_stale(
-    migrated_db: None, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("case", READINGS)
+def test_each_reading_older_than_its_own_window_is_marked_stale(
+    case: SnapshotCase, migrated_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    measured = _measured()
-    monkeypatch.setattr(ops.snapshot, "health", AsyncMock(return_value=measured))
+    monkeypatch.setattr(ops.snapshot, case.probe, AsyncMock(return_value=case.measure()))
 
-    async def run() -> ops.StoredHealth | None:
-        await ops.HealthSnapshotJob().execute()
-        stale_at = datetime.now(UTC) - timedelta(
-            minutes=settings.health_snapshot_stale_minutes + 1
-        )
+    async def run() -> ops.Measured | None:
+        await case.job().execute()
+        stale_at = datetime.now(UTC) - timedelta(minutes=case.stale_minutes + 1)
         async with User.system().owner as session:
-            await session.exec(update(HealthSnapshot).values(updated_at=stale_at))
-        async with User.system() as session:
-            return await ops.stored_health(session)
+            await session.exec(
+                update(OperatorSnapshot)
+                .where(OperatorSnapshot.key == case.job.reading)
+                .values(updated_at=stale_at)
+            )
+        async with operator() as session:
+            return await case.read(session)
 
     stored = dbutil.run(run())
 
@@ -839,8 +928,16 @@ def test_a_second_pass_replaces_the_reading_rather_than_accumulating(
         await ops.HealthSnapshotJob().execute()
         await ops.HealthSnapshotJob().execute()
         async with User.system().owner as session:
-            rows = len((await session.exec(select(HealthSnapshot))).all())
-        async with User.system() as session:
+            rows = len(
+                (
+                    await session.exec(
+                        select(OperatorSnapshot).where(
+                            OperatorSnapshot.key == OperatorReading.health
+                        )
+                    )
+                ).all()
+            )
+        async with operator() as session:
             latest = await ops.stored_health(session)
         assert latest is not None
         return rows, latest.row_counts
@@ -849,3 +946,53 @@ def test_a_second_pass_replaces_the_reading_rather_than_accumulating(
 
     assert rows == 1
     assert counts == {"pass": 2}
+
+
+def test_readings_are_kept_apart_rather_than_overwriting_each_other(
+    migrated_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every reading shares one table, so each must land under its own key."""
+    monkeypatch.setattr(ops.snapshot, "health", AsyncMock(return_value=_measured({"pass": 1})))
+    monkeypatch.setattr(ops.snapshot, "doctor", AsyncMock(return_value=_diagnosed()))
+    monkeypatch.setattr(ops.snapshot, "platform_usage", AsyncMock(return_value=_aggregated()))
+
+    async def run() -> tuple[ops.StoredHealth | None, ops.StoredDoctor | None, ops.StoredUsage | None]:
+        for job in (ops.HealthSnapshotJob(), ops.DoctorSnapshotJob(), ops.UsageSnapshotJob()):
+            await job.execute()
+        async with operator() as session:
+            return (
+                await ops.stored_health(session),
+                await ops.stored_doctor(session),
+                await ops.stored_usage(session),
+            )
+
+    health, doctor, usage = dbutil.run(run())
+
+    assert health is not None and health.row_counts == {"pass": 1}
+    assert doctor is not None and doctor.detail_limit == 50
+    assert usage is not None and usage.lifetime.recalls == 9
+
+
+@pytest.mark.parametrize("case", READINGS)
+def test_a_caller_without_the_operator_role_is_refused_by_row_security(
+    case: SnapshotCase, migrated_db: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The console's own check is not the only thing keeping these readings from a tenant.
+
+    They carry platform-wide material the rest of the schema protects with row security,
+    including the names of artifacts whose own table is scoped, so an endpoint that forgot
+    to check the role would still return nothing.
+    """
+    monkeypatch.setattr(ops.snapshot, case.probe, AsyncMock(return_value=case.measure()))
+
+    async def run() -> tuple[ops.Measured | None, ops.Measured | None]:
+        await case.job().execute()
+        async with User.private(uuid5()) as session:
+            tenant = await case.read(session)
+        async with operator() as session:
+            return tenant, await case.read(session)
+
+    tenant, seen = dbutil.run(run())
+
+    assert tenant is None
+    assert seen is not None

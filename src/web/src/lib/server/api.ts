@@ -3,35 +3,25 @@ import { fail, type ActionFailure } from '@sveltejs/kit';
 import type {
   AdminLinks,
   Answer,
-  DoctorReport,
   FindingPage,
   GraphSlice,
   HardwareHealth,
-  HealthReport,
   Me,
-  Operation,
   OrganizationDirectory,
   Overview,
   ProcessingReport,
   RecallHealth,
   SourcePage,
+  StoredDoctor,
+  StoredHealth,
+  StoredUsage,
   SubjectPage,
   ThemePage,
-  UsageFilterReport,
   UsageReport
 } from '$lib/api';
 import * as sdk from '$lib/api/generated';
 import { createClient } from '$lib/api/generated/client';
 import { settings } from './settings';
-
-/** One composed filter over durable usage, every field optional and independent. */
-export type UsageFilter = {
-  operation?: Operation;
-  actorId?: string;
-  scopeId?: string;
-  start?: string;
-  end?: string;
-};
 
 /** A rejected browser API call carrying the status and human-facing detail. */
 export class ApiError extends Error {
@@ -40,6 +30,25 @@ export class ApiError extends Error {
     detail: string
   ) {
     super(detail);
+  }
+}
+
+/**
+ * One loaded operator reading, keeping two different silences apart.
+ *
+ * `unreachable` means the API never answered. A null `value` with a reachable API means the
+ * worker has not measured this yet, which is an ordinary state after a fresh deploy and not
+ * an incident. Collapsing both into "unavailable" sent operators looking for an outage that
+ * was really a schedule that had not come round.
+ */
+export type Reading<T> = { value: T | null; unreachable: boolean };
+
+/** Load one operator reading, reporting an unreachable API rather than throwing. */
+export async function reading<T>(load: () => Promise<T | null>): Promise<Reading<T>> {
+  try {
+    return { value: await load(), unreachable: false };
+  } catch {
+    return { value: null, unreachable: true };
   }
 }
 
@@ -186,7 +195,7 @@ export class ApiClient {
     return unwrap(await sdk.adminLinks({ client: await this.client() }));
   }
 
-  async adminHealth(): Promise<HealthReport> {
+  async adminHealth(): Promise<StoredHealth | null> {
     return unwrap(await sdk.adminHealth({ client: await this.client() }));
   }
 
@@ -199,27 +208,11 @@ export class ApiClient {
     return unwrap(await sdk.adminHardware({ client: await this.client() }));
   }
 
-  async adminDoctor(showErrorMessages = true): Promise<DoctorReport> {
-    return unwrap(
-      await sdk.adminDoctor({
-        client: await this.client(),
-        query: { show_error_messages: showErrorMessages }
-      })
-    );
+  async adminDoctor(): Promise<StoredDoctor | null> {
+    return unwrap(await sdk.adminDoctor({ client: await this.client() }));
   }
 
-  async adminUsage(filter: UsageFilter = {}): Promise<UsageFilterReport> {
-    return unwrap(
-      await sdk.adminUsage({
-        client: await this.client(),
-        query: {
-          operation: filter.operation,
-          actor_id: filter.actorId,
-          scope_id: filter.scopeId,
-          start: filter.start,
-          end: filter.end
-        }
-      })
-    );
+  async adminUsage(): Promise<StoredUsage | null> {
+    return unwrap(await sdk.adminUsage({ client: await this.client() }));
   }
 }

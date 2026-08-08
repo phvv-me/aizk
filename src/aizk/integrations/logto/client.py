@@ -358,7 +358,8 @@ class LogtoClient:
             username, avatar = preferred_username or username, None
         user_id = self.settings.subject_id(subject)
         reports_scope = self.settings.reports_scope_id
-        operator = any(role.name == self.settings.logto_admin_role for role in roles)
+        held = tuple(role.name for role in roles)
+        operator = User.is_operator(held)
         return User.authorized(
             user_id,
             read=(
@@ -379,7 +380,7 @@ class LogtoClient:
             name=name,
             username=username,
             avatar=avatar,
-            roles=(role.name for role in roles),
+            roles=held,
             organizations=(self.standing(organization) for organization in organizations.values()),
         )
 

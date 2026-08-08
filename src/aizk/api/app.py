@@ -1,4 +1,3 @@
-from datetime import datetime
 from http import HTTPStatus
 from typing import Annotated, Self, cast
 
@@ -7,7 +6,7 @@ from fastapi import Depends, FastAPI
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from obstore.exceptions import BaseError as ObjectStoreError
 from patos import FrozenModel
-from pydantic import UUID5, Field, StringConstraints, ValidationError, model_validator
+from pydantic import Field, StringConstraints, ValidationError, model_validator
 from pydantic.json_schema import JsonSchemaValue
 from pydantic.types import JsonValue
 from starlette.exceptions import HTTPException
@@ -31,7 +30,6 @@ from ..integrations.logto import OrganizationChange, OrganizationManager
 from ..memory import Memory
 from ..status import StatusReport
 from ..storage import ByteLimitExceeded
-from ..store import UsageEvent
 from ..store.identity import User
 from ..usage import annotate_caller
 from .admin import AdminLinks, require_admin
@@ -117,7 +115,7 @@ class Me(FrozenModel):
         """Present the verified caller without exposing identifiers or scope internals."""
         return cls(
             label=user.label,
-            admin=settings.logto_admin_role in user.roles,
+            admin=user.operator,
             organizations=tuple(
                 OrganizationProfile.model_validate(organization, from_attributes=True)
                 for organization in user.organizations
@@ -524,50 +522,45 @@ class AizkAPI:
             return await ops.stored_health(session)
 
     async def admin_recall(self, who: Verified) -> ops.RecallHealth | None:
-        """Run the live recall probe over the largest corpus visible to any scope."""
+        """Run the live recall probe over the largest corpus the stored reading names.
+
+        Which corpora exist is a platform-wide count only the owner may take, so it is read
+        from the worker's reading rather than measured here. The retrieval itself runs under
+        an ordinary scoped session, which is what makes the probe a real exercise of the same
+        path a caller takes. Nothing until a worker pass has named a corpus.
+        """
         require_admin(who.user)
-        corpora = await ops.corpus_health()
-        return await ops.recall_health(corpora[0]) if corpora else None
+        async with who.user as session:
+            stored = await ops.stored_health(session)
+        if stored is None or not stored.corpora:
+            return None
+        return await ops.recall_health(stored.corpora[0])
 
     async def admin_hardware(self, who: Verified) -> ops.HardwareHealth:
         """Return host and model-lane load already collected by the observability profile."""
         require_admin(who.user)
         return await ops.hardware_health()
 
-    async def admin_doctor(
-        self,
-        who: Verified,
-        stale_minutes: int = 15,
-        long_running_minutes: int = 60,
-        history_hours: int = 24,
-        limit: int = 50,
-        show_error_messages: bool = False,
-    ) -> ops.DoctorReport:
-        """Diagnose queue failures, unhealthy leases, and artifact conversions."""
-        require_admin(who.user)
-        return await ops.doctor(
-            stale_minutes=stale_minutes,
-            long_running_minutes=long_running_minutes,
-            history_hours=history_hours,
-            limit=limit,
-            show_error_messages=show_error_messages,
-        )
+    async def admin_doctor(self, who: Verified) -> ops.StoredDoctor | None:
+        """Return the queue and artifact conversion diagnosis a worker measured.
 
-    async def admin_usage(
-        self,
-        who: Verified,
-        operation: UsageEvent.Operation | None = None,
-        actor_id: UUID5 | None = None,
-        scope_id: UUID5 | None = None,
-        start: datetime | None = None,
-        end: datetime | None = None,
-    ) -> ops.UsageFilterReport:
-        """Aggregate durable usage by actor and by organization under one composed filter."""
+        The conversion half counts artifact state across every scope, which only the database
+        owner may do, so this reads a measurement rather than taking one. Nothing until the
+        first worker pass has run. `aizk admin doctor` still diagnoses live with its own
+        windows, because the CLI runs where that credential legitimately lives.
+        """
         require_admin(who.user)
-        return await ops.usage_report(
-            operation=operation,
-            actor_id=actor_id,
-            scope_id=scope_id,
-            start=start,
-            end=end,
-        )
+        async with who.user as session:
+            return await ops.stored_doctor(session)
+
+    async def admin_usage(self, who: Verified) -> ops.StoredUsage | None:
+        """Return the platform-wide usage aggregate a worker measured.
+
+        Every caller's usage row is scoped to that caller alone, so aggregating across all of
+        them needs the owner credential this process is denied. The reading carries each
+        offered window's totals and the daily series behind them, which is what lets the
+        console change period without another query. Nothing until a worker pass has run.
+        """
+        require_admin(who.user)
+        async with who.user as session:
+            return await ops.stored_usage(session)

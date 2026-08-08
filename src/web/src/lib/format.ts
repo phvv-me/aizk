@@ -30,23 +30,13 @@ export function formatDateTime(value: string | null | undefined): string {
   }).format(new Date(value));
 }
 
-export function sentence(value: string): string {
-  return value.replaceAll('_', ' ').replace(/^./, (letter) => letter.toUpperCase());
-}
-
-// The stored operation kind predates the `find` tool's rename and stays `recall` because
-// every usage report column keys on it. This map keeps that one raw value out of the
-// operator's eyes, the same way the caller-facing usage page already never prints it.
-const OPERATION_LABELS: Record<string, string> = {
-  recall: 'Recall',
-  remember_text: 'Remember (text)',
-  remember_file: 'Remember (file)',
-  share: 'Share',
-  artifact_read: 'Artifact read',
-  web_search: 'Web search',
-  web_fetch: 'Web fetch'
-};
-
-export function formatOperation(operation: string): string {
-  return OPERATION_LABELS[operation] ?? sentence(operation);
+export function formatAge(value: string | null | undefined): string {
+  if (!value) return 'at an unknown time';
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  return `${Math.round(hours / 24)} days ago`;
 }

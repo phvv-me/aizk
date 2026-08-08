@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddMemberData, AddMemberErrors, AddMemberResponses, AdminDoctorData, AdminDoctorErrors, AdminDoctorResponses, AdminHardwareData, AdminHardwareResponses, AdminHealthData, AdminHealthResponses, AdminLinksData, AdminLinksResponses, AdminRecallData, AdminRecallResponses, AdminUsageData, AdminUsageErrors, AdminUsageResponses, CreateOrganizationData, CreateOrganizationResponses, FindingsData, FindingsErrors, FindingsResponses, GraphData, GraphErrors, GraphResponses, HealthData, HealthResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, ProcessingData, ProcessingEventsData, ProcessingEventsResponse, ProcessingEventsResponses, ProcessingResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses, SourcesData, SourcesErrors, SourcesResponses, StatusData, StatusErrors, StatusResponses, SubjectsData, SubjectsErrors, SubjectsResponses, ThemesData, ThemesErrors, ThemesResponses, UsageData, UsageErrors, UsageResponses } from './types.gen';
+import type { AddMemberData, AddMemberErrors, AddMemberResponses, AdminDoctorData, AdminDoctorResponses, AdminHardwareData, AdminHardwareResponses, AdminHealthData, AdminHealthResponses, AdminLinksData, AdminLinksResponses, AdminRecallData, AdminRecallResponses, AdminUsageData, AdminUsageResponses, CreateOrganizationData, CreateOrganizationResponses, FindingsData, FindingsErrors, FindingsResponses, GraphData, GraphErrors, GraphResponses, HealthData, HealthResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, ProcessingData, ProcessingEventsData, ProcessingEventsResponse, ProcessingEventsResponses, ProcessingResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses, SourcesData, SourcesErrors, SourcesResponses, StatusData, StatusErrors, StatusResponses, SubjectsData, SubjectsErrors, SubjectsResponses, ThemesData, ThemesErrors, ThemesResponses, UsageData, UsageErrors, UsageResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -257,10 +257,12 @@ export const adminLinks = <ThrowOnError extends boolean = false>(options?: Optio
 /**
  * Admin Health
  *
- * Return schema, RLS, storage, queue, and endpoint health for operators.
+ * Return the schema, RLS, storage, queue, and endpoint health a worker measured.
  *
- * The live recall probe is excluded so this never blocks the page load; fetch
- * `/api/admin/health/recall` separately once the rest of the page has rendered.
+ * This reads a measurement rather than taking one. The probes behind it count rows and
+ * read policies across every scope, which only the database owner may do, and this
+ * process is deliberately denied that credential. Nothing until the first worker pass
+ * has run, and `stale` once a reading is older than the console should present as now.
  */
 export const adminHealth = <ThrowOnError extends boolean = false>(options?: Options<AdminHealthData, ThrowOnError>): RequestResult<AdminHealthResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminHealthResponses, unknown, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -271,7 +273,12 @@ export const adminHealth = <ThrowOnError extends boolean = false>(options?: Opti
 /**
  * Admin Recall
  *
- * Run the live recall probe over the largest corpus visible to any scope.
+ * Run the live recall probe over the largest corpus the stored reading names.
+ *
+ * Which corpora exist is a platform-wide count only the owner may take, so it is read
+ * from the worker's reading rather than measured here. The retrieval itself runs under
+ * an ordinary scoped session, which is what makes the probe a real exercise of the same
+ * path a caller takes. Nothing until a worker pass has named a corpus.
  */
 export const adminRecall = <ThrowOnError extends boolean = false>(options?: Options<AdminRecallData, ThrowOnError>): RequestResult<AdminRecallResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminRecallResponses, unknown, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
@@ -293,9 +300,14 @@ export const adminHardware = <ThrowOnError extends boolean = false>(options?: Op
 /**
  * Admin Doctor
  *
- * Diagnose queue failures, unhealthy leases, and artifact conversions.
+ * Return the queue and artifact conversion diagnosis a worker measured.
+ *
+ * The conversion half counts artifact state across every scope, which only the database
+ * owner may do, so this reads a measurement rather than taking one. Nothing until the
+ * first worker pass has run. `aizk admin doctor` still diagnoses live with its own
+ * windows, because the CLI runs where that credential legitimately lives.
  */
-export const adminDoctor = <ThrowOnError extends boolean = false>(options?: Options<AdminDoctorData, ThrowOnError>): RequestResult<AdminDoctorResponses, AdminDoctorErrors, ThrowOnError> => (options?.client ?? client).get<AdminDoctorResponses, AdminDoctorErrors, ThrowOnError>({
+export const adminDoctor = <ThrowOnError extends boolean = false>(options?: Options<AdminDoctorData, ThrowOnError>): RequestResult<AdminDoctorResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminDoctorResponses, unknown, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/admin/doctor',
     ...options
@@ -304,9 +316,14 @@ export const adminDoctor = <ThrowOnError extends boolean = false>(options?: Opti
 /**
  * Admin Usage
  *
- * Aggregate durable usage by actor and by organization under one composed filter.
+ * Return the platform-wide usage aggregate a worker measured.
+ *
+ * Every caller's usage row is scoped to that caller alone, so aggregating across all of
+ * them needs the owner credential this process is denied. The reading carries each
+ * offered window's totals and the daily series behind them, which is what lets the
+ * console change period without another query. Nothing until a worker pass has run.
  */
-export const adminUsage = <ThrowOnError extends boolean = false>(options?: Options<AdminUsageData, ThrowOnError>): RequestResult<AdminUsageResponses, AdminUsageErrors, ThrowOnError> => (options?.client ?? client).get<AdminUsageResponses, AdminUsageErrors, ThrowOnError>({
+export const adminUsage = <ThrowOnError extends boolean = false>(options?: Options<AdminUsageData, ThrowOnError>): RequestResult<AdminUsageResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminUsageResponses, unknown, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
     url: '/api/admin/usage',
     ...options

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatEtaRange, formatOperation, sentence } from '../src/lib/format';
+import { formatAge, formatDuration, formatEtaRange } from '../src/lib/format';
 
 describe('processing formatters', () => {
   it('formats bounded ETA ranges without false precision', () => {
@@ -9,28 +9,22 @@ describe('processing formatters', () => {
     expect(formatEtaRange(null, 60)).toBe('ETA unavailable until more recent work completes');
   });
 
-  it('formats durations and machine names for product copy', () => {
+  it('formats durations for product copy', () => {
     expect(formatDuration(20)).toBe('under a minute');
     expect(formatDuration(3720)).toBe('1 hr 2 min');
-    expect(sentence('graph_projection')).toBe('Graph projection');
   });
 });
 
-describe('formatOperation', () => {
-  it('labels the stored recall operation without implying a second tool exists', () => {
-    expect(formatOperation('recall')).toBe('Recall');
+describe('formatAge', () => {
+  it('says how old a reading is so a stale one is visible as stale', () => {
+    const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    expect(formatAge(minutesAgo(0))).toBe('just now');
+    expect(formatAge(minutesAgo(7))).toBe('7 min ago');
+    expect(formatAge(minutesAgo(180))).toBe('3 hr ago');
+    expect(formatAge(minutesAgo(60 * 24 * 2))).toBe('2 days ago');
   });
 
-  it('labels every other stored operation kind', () => {
-    expect(formatOperation('remember_text')).toBe('Remember (text)');
-    expect(formatOperation('remember_file')).toBe('Remember (file)');
-    expect(formatOperation('share')).toBe('Share');
-    expect(formatOperation('artifact_read')).toBe('Artifact read');
-    expect(formatOperation('web_search')).toBe('Web search');
-    expect(formatOperation('web_fetch')).toBe('Web fetch');
-  });
-
-  it('falls back to a sentence-cased label for an unmapped kind', () => {
-    expect(formatOperation('unknown_kind')).toBe('Unknown kind');
+  it('never claims a time it was not given', () => {
+    expect(formatAge(null)).toBe('at an unknown time');
   });
 });

@@ -67,6 +67,17 @@ x-aizk-runtime: &aizk-runtime
     AIZK_DOCLING_DOCUMENT_TIMEOUT: ${AIZK_DOCLING_DOCUMENT_TIMEOUT:-1800}
     AIZK_DOCLING_REQUEST_TIMEOUT: ${AIZK_DOCLING_REQUEST_TIMEOUT:-1860}
     AIZK_DOCLING_CONCURRENCY: ${AIZK_DOCLING_CONCURRENCY:-2}
+    # The console links out to tools the operator hostname gates, while the console itself is
+    # a section of the application on its own hostname. A relative path would therefore
+    # resolve against the application and reach nothing, so a deployment that gates its tools
+    # elsewhere sets these absolute. The relative defaults stay for a single-host deployment.
+    # Host and model-lane load come from the metrics the observability profile already
+    # collects, so the console reads them rather than probing hardware itself. Empty leaves
+    # the panel honestly reporting that this deployment collects none.
+    AIZK_METRICS_URL: ${AIZK_METRICS_URL-http://victoriametrics:8428}
+    AIZK_ADMIN_LOGTO_CONSOLE_URL: ${AIZK_ADMIN_LOGTO_CONSOLE_URL:-/logto}
+    AIZK_ADMIN_GRAFANA_URL: ${AIZK_ADMIN_GRAFANA_URL:-/grafana/}
+    AIZK_ADMIN_TRACES_URL: ${AIZK_ADMIN_TRACES_URL:-/traces}
     AIZK_CLAMAV_HOST: clamav
     AIZK_CLAMAV_PORT: "3310"
     AIZK_CLAMAV_TIMEOUT: ${AIZK_CLAMAV_TIMEOUT:-120}
@@ -256,8 +267,14 @@ services:
   # Docling converts accepted originals into normalized Markdown and native JSON derivatives.
   # AIZK owns queuing through PgQueuer, while Docling uses its bounded local engine only. No Redis
   # or Docling async queue enters the deployment. The API key limits use to trusted AIZK processes.
+  # Built from the pinned published image rather than run directly, only to add the Japanese
+  # tesseract data it omits. `Dockerfile.docling` explains why that omission is invisible at
+  # runtime and therefore has to be caught at build time.
   docling:
-    image: quay.io/docling-project/docling-serve-cpu:v1.26.0@sha256:7e07522e0240c1db3ff5b837ffa969c2ecd5a71664c0e0369f5a69fc169e30ba
+    image: aizk-docling
+    build:
+      context: ../..
+      dockerfile: src/deploy/Dockerfile.docling
     environment:
       DOCLING_SERVE_API_KEY: ${AIZK_DOCLING_API_KEY:?set AIZK_DOCLING_API_KEY}
       DOCLING_SERVE_ENABLE_UI: "false"
@@ -651,15 +668,10 @@ services:
       AIZK_WEB_CLIENT_ID: ${AIZK_WEB_CLIENT_ID:-}
       AIZK_WEB_CLIENT_SECRET: ${AIZK_WEB_CLIENT_SECRET:-}
       AIZK_WEB_SESSION_SECRET: ${AIZK_WEB_SESSION_SECRET:-}
-      # The operator hostname, when the console answers on one of its own rather than sharing
-      # the application's. Empty leaves every request resolving to the application origin.
-      AIZK_WEB_OPERATOR_URL: ${AIZK_WEB_OPERATOR_URL:-}
-      # adapter-node reads the origin per request rather than from one fixed `ORIGIN`, because
-      # the console and the application answer on different hostnames and a fixed origin would
-      # send a browser signing in on one back to the other. Only Caddy can reach this port, so
-      # these headers are the proxy's own and not a client's to forge.
-      PROTOCOL_HEADER: x-forwarded-proto
-      HOST_HEADER: x-forwarded-host
+      # adapter-node checks form submissions against this origin, the one public URL. The
+      # console is a section of this application rather than a second one on its own
+      # hostname, so there is only ever one origin to check against.
+      ORIGIN: ${AIZK_WEB_PUBLIC_URL:-}
       # File bytes never pass through this server: the browser PUTs them straight to the
       # api service's capability path through Caddy. Form actions carry only small
       # declarations, so the adapter-node default body cap of 512K stays in force.

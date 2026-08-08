@@ -945,7 +945,7 @@
     "/api/admin/health": {
       "get": {
         "summary": "Admin Health",
-        "description": "Return schema, RLS, storage, queue, and endpoint health for operators.\n\nThe live recall probe is excluded so this never blocks the page load; fetch\n`/api/admin/health/recall` separately once the rest of the page has rendered.",
+        "description": "Return the schema, RLS, storage, queue, and endpoint health a worker measured.\n\nThis reads a measurement rather than taking one. The probes behind it count rows and\nread policies across every scope, which only the database owner may do, and this\nprocess is deliberately denied that credential. Nothing until the first worker pass\nhas run, and `stale` once a reading is older than the console should present as now.",
         "operationId": "admin_health",
         "responses": {
           "200": {
@@ -953,7 +953,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthReport"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StoredHealth"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Admin Health"
                 }
               }
             }
@@ -969,7 +977,7 @@
     "/api/admin/health/recall": {
       "get": {
         "summary": "Admin Recall",
-        "description": "Run the live recall probe over the largest corpus visible to any scope.",
+        "description": "Run the live recall probe over the largest corpus the stored reading names.\n\nWhich corpora exist is a platform-wide count only the owner may take, so it is read\nfrom the worker's reading rather than measured here. The retrieval itself runs under\nan ordinary scoped session, which is what makes the probe a real exercise of the same\npath a caller takes. Nothing until a worker pass has named a corpus.",
         "operationId": "admin_recall",
         "responses": {
           "200": {
@@ -1025,207 +1033,65 @@
     "/api/admin/doctor": {
       "get": {
         "summary": "Admin Doctor",
-        "description": "Diagnose queue failures, unhealthy leases, and artifact conversions.",
+        "description": "Return the queue and artifact conversion diagnosis a worker measured.\n\nThe conversion half counts artifact state across every scope, which only the database\nowner may do, so this reads a measurement rather than taking one. Nothing until the\nfirst worker pass has run. `aizk admin doctor` still diagnoses live with its own\nwindows, because the CLI runs where that credential legitimately lives.",
         "operationId": "admin_doctor",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "stale_minutes",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 15,
-              "title": "Stale Minutes"
-            }
-          },
-          {
-            "name": "long_running_minutes",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 60,
-              "title": "Long Running Minutes"
-            }
-          },
-          {
-            "name": "history_hours",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 24,
-              "title": "History Hours"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 50,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "show_error_messages",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean",
-              "default": false,
-              "title": "Show Error Messages"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DoctorReport"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StoredDoctor"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Admin Doctor"
                 }
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/admin/usage": {
       "get": {
         "summary": "Admin Usage",
-        "description": "Aggregate durable usage by actor and by organization under one composed filter.",
+        "description": "Return the platform-wide usage aggregate a worker measured.\n\nEvery caller's usage row is scoped to that caller alone, so aggregating across all of\nthem needs the owner credential this process is denied. The reading carries each\noffered window's totals and the daily series behind them, which is what lets the\nconsole change period without another query. Nothing until a worker pass has run.",
         "operationId": "admin_usage",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "operation",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/Operation"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Operation"
-            }
-          },
-          {
-            "name": "actor_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "uuid5"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Actor Id"
-            }
-          },
-          {
-            "name": "scope_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "uuid5"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Scope Id"
-            }
-          },
-          {
-            "name": "start",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Start"
-            }
-          },
-          {
-            "name": "end",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "format": "date-time"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "End"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UsageFilterReport"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/StoredUsage"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Admin Usage"
                 }
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     }
   },
@@ -1655,101 +1521,6 @@
         ],
         "title": "DoctorFinding",
         "description": "One concise operational conclusion and its next safe action."
-      },
-      "DoctorReport": {
-        "properties": {
-          "generated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Generated At"
-          },
-          "healthy": {
-            "type": "boolean",
-            "title": "Healthy"
-          },
-          "stale_after_seconds": {
-            "type": "integer",
-            "title": "Stale After Seconds"
-          },
-          "long_running_after_seconds": {
-            "type": "integer",
-            "title": "Long Running After Seconds"
-          },
-          "history_seconds": {
-            "type": "integer",
-            "title": "History Seconds"
-          },
-          "detail_limit": {
-            "type": "integer",
-            "title": "Detail Limit"
-          },
-          "error_messages_included": {
-            "type": "boolean",
-            "title": "Error Messages Included"
-          },
-          "summary": {
-            "$ref": "#/components/schemas/DoctorSummary"
-          },
-          "findings": {
-            "items": {
-              "$ref": "#/components/schemas/DoctorFinding"
-            },
-            "type": "array",
-            "title": "Findings",
-            "default": []
-          },
-          "queue_failure_groups": {
-            "items": {
-              "$ref": "#/components/schemas/QueueFailureGroup"
-            },
-            "type": "array",
-            "title": "Queue Failure Groups",
-            "default": []
-          },
-          "queue_issues": {
-            "items": {
-              "$ref": "#/components/schemas/QueueIssue"
-            },
-            "type": "array",
-            "title": "Queue Issues",
-            "default": []
-          },
-          "recent_exception_groups": {
-            "items": {
-              "$ref": "#/components/schemas/ExceptionHistoryGroup"
-            },
-            "type": "array",
-            "title": "Recent Exception Groups",
-            "default": []
-          },
-          "conversions": {
-            "items": {
-              "$ref": "#/components/schemas/ConversionDiagnostic"
-            },
-            "type": "array",
-            "title": "Conversions",
-            "default": []
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "generated_at",
-          "healthy",
-          "stale_after_seconds",
-          "long_running_after_seconds",
-          "history_seconds",
-          "detail_limit",
-          "error_messages_included",
-          "summary",
-          "findings",
-          "queue_failure_groups",
-          "queue_issues",
-          "recent_exception_groups",
-          "conversions"
-        ],
-        "title": "DoctorReport",
-        "description": "Read-only queue, retry history, and artifact conversion diagnosis.\n\nEvery bounded detail list defaults to empty so the browser API's generated client keeps\nit required rather than optional, since a defaulted list is always present in the response."
       },
       "DoctorSummary": {
         "properties": {
@@ -2366,108 +2137,6 @@
         "title": "HardwareHealth",
         "description": "Host CPU, memory, and disk load and per-lane GPU occupancy already collected server-side.\n\nRead from VictoriaMetrics, which Alloy's built-in unix exporter and the vLLM lanes already\nfeed, rather than probed directly with `mainboard`. No aizk process holds NVML device access\nto a GPU, so raw device telemetry (temperature, power, memory used) is not available from any\nprocess in this deployment; the per-lane KV-cache occupancy and queue depth below are the real\nGPU-adjacent signal that exists today. `reachable` is false whenever `metrics_url` is unset or\nVictoriaMetrics cannot be reached, in which case every measurement stays absent rather than a\nstale or fabricated zero. Every field but `reachable` defaults, so the generated client keeps\nthem required rather than optional too."
       },
-      "HealthReport": {
-        "properties": {
-          "migration": {
-            "$ref": "#/components/schemas/SchemaHealth"
-          },
-          "rls_violations": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Rls Violations"
-          },
-          "row_counts": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "Row Counts"
-          },
-          "queue": {
-            "$ref": "#/components/schemas/TasksStatus"
-          },
-          "endpoints": {
-            "items": {
-              "$ref": "#/components/schemas/EndpointHealth"
-            },
-            "type": "array",
-            "title": "Endpoints"
-          },
-          "extraction": {
-            "$ref": "#/components/schemas/ExtractionHealth"
-          },
-          "identity": {
-            "$ref": "#/components/schemas/IdentityHealth"
-          },
-          "corpora": {
-            "items": {
-              "$ref": "#/components/schemas/ScopeHealth"
-            },
-            "type": "array",
-            "title": "Corpora"
-          },
-          "actors": {
-            "items": {
-              "$ref": "#/components/schemas/ActorUsage"
-            },
-            "type": "array",
-            "title": "Actors"
-          },
-          "scopes": {
-            "items": {
-              "$ref": "#/components/schemas/ScopeUsage"
-            },
-            "type": "array",
-            "title": "Scopes"
-          },
-          "scope_storage": {
-            "items": {
-              "$ref": "#/components/schemas/ScopeStorage"
-            },
-            "type": "array",
-            "title": "Scope Storage"
-          },
-          "storage": {
-            "$ref": "#/components/schemas/StorageHealth"
-          },
-          "recall": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RecallHealth"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "duration_ms": {
-            "type": "number",
-            "title": "Duration Ms"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "migration",
-          "rls_violations",
-          "row_counts",
-          "queue",
-          "endpoints",
-          "extraction",
-          "identity",
-          "corpora",
-          "actors",
-          "scopes",
-          "scope_storage",
-          "storage",
-          "recall",
-          "duration_ms"
-        ],
-        "title": "HealthReport",
-        "description": "Combine schema, RLS, storage, queue, models, identity, corpora, and recall health."
-      },
       "IdentityHealth": {
         "properties": {
           "mode": {
@@ -2908,6 +2577,31 @@
         ],
         "title": "Overview",
         "description": "Knowledge totals, usage, recent sources, and artifact processing states."
+      },
+      "PeriodUsage": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Start"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/UsageSummary"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "days",
+          "start",
+          "summary"
+        ],
+        "title": "PeriodUsage",
+        "description": "One window the console offers and the totals measured over it."
       },
       "ProcessingReport": {
         "properties": {
@@ -3853,6 +3547,288 @@
         "title": "StorageHealth",
         "description": "Separate logical file references from physical object-store consumption."
       },
+      "StoredDoctor": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "healthy": {
+            "type": "boolean",
+            "title": "Healthy"
+          },
+          "stale_after_seconds": {
+            "type": "integer",
+            "title": "Stale After Seconds"
+          },
+          "long_running_after_seconds": {
+            "type": "integer",
+            "title": "Long Running After Seconds"
+          },
+          "history_seconds": {
+            "type": "integer",
+            "title": "History Seconds"
+          },
+          "detail_limit": {
+            "type": "integer",
+            "title": "Detail Limit"
+          },
+          "error_messages_included": {
+            "type": "boolean",
+            "title": "Error Messages Included"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DoctorSummary"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/DoctorFinding"
+            },
+            "type": "array",
+            "title": "Findings",
+            "default": []
+          },
+          "queue_failure_groups": {
+            "items": {
+              "$ref": "#/components/schemas/QueueFailureGroup"
+            },
+            "type": "array",
+            "title": "Queue Failure Groups",
+            "default": []
+          },
+          "queue_issues": {
+            "items": {
+              "$ref": "#/components/schemas/QueueIssue"
+            },
+            "type": "array",
+            "title": "Queue Issues",
+            "default": []
+          },
+          "recent_exception_groups": {
+            "items": {
+              "$ref": "#/components/schemas/ExceptionHistoryGroup"
+            },
+            "type": "array",
+            "title": "Recent Exception Groups",
+            "default": []
+          },
+          "conversions": {
+            "items": {
+              "$ref": "#/components/schemas/ConversionDiagnostic"
+            },
+            "type": "array",
+            "title": "Conversions",
+            "default": []
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "generated_at",
+          "healthy",
+          "stale_after_seconds",
+          "long_running_after_seconds",
+          "history_seconds",
+          "detail_limit",
+          "error_messages_included",
+          "summary",
+          "findings",
+          "queue_failure_groups",
+          "queue_issues",
+          "recent_exception_groups",
+          "conversions",
+          "measured_at",
+          "stale"
+        ],
+        "title": "StoredDoctor",
+        "description": "The stored queue and artifact conversion diagnosis."
+      },
+      "StoredHealth": {
+        "properties": {
+          "migration": {
+            "$ref": "#/components/schemas/SchemaHealth"
+          },
+          "rls_violations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rls Violations"
+          },
+          "row_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Row Counts"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/TasksStatus"
+          },
+          "endpoints": {
+            "items": {
+              "$ref": "#/components/schemas/EndpointHealth"
+            },
+            "type": "array",
+            "title": "Endpoints"
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/ExtractionHealth"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/IdentityHealth"
+          },
+          "corpora": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeHealth"
+            },
+            "type": "array",
+            "title": "Corpora"
+          },
+          "actors": {
+            "items": {
+              "$ref": "#/components/schemas/ActorUsage"
+            },
+            "type": "array",
+            "title": "Actors"
+          },
+          "scopes": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeUsage"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "scope_storage": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeStorage"
+            },
+            "type": "array",
+            "title": "Scope Storage"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/StorageHealth"
+          },
+          "recall": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecallHealth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms"
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "migration",
+          "rls_violations",
+          "row_counts",
+          "queue",
+          "endpoints",
+          "extraction",
+          "identity",
+          "corpora",
+          "actors",
+          "scopes",
+          "scope_storage",
+          "storage",
+          "recall",
+          "duration_ms",
+          "measured_at",
+          "stale"
+        ],
+        "title": "StoredHealth",
+        "description": "The stored schema, security, storage, queue, and serving reading."
+      },
+      "StoredUsage": {
+        "properties": {
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodUsage"
+            },
+            "type": "array",
+            "title": "Periods"
+          },
+          "lifetime": {
+            "$ref": "#/components/schemas/UsageSummary"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/UsagePoint"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "by_actor": {
+            "items": {
+              "$ref": "#/components/schemas/ActorUsage"
+            },
+            "type": "array",
+            "title": "By Actor"
+          },
+          "by_scope": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeUsage"
+            },
+            "type": "array",
+            "title": "By Scope"
+          },
+          "measured_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Measured At"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "generated_at",
+          "periods",
+          "lifetime",
+          "points",
+          "by_actor",
+          "by_scope",
+          "measured_at",
+          "stale"
+        ],
+        "title": "StoredUsage",
+        "description": "The stored platform-wide usage aggregate."
+      },
       "SubjectPage": {
         "properties": {
           "total": {
@@ -4083,101 +4059,6 @@
       "UUID7": {
         "type": "string",
         "format": "uuid"
-      },
-      "UsageFilterReport": {
-        "properties": {
-          "generated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Generated At"
-          },
-          "operation": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Operation"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "actor_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid5"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor Id"
-          },
-          "scope_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid5"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope Id"
-          },
-          "start": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start"
-          },
-          "end": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "End"
-          },
-          "by_actor": {
-            "items": {
-              "$ref": "#/components/schemas/ActorUsage"
-            },
-            "type": "array",
-            "title": "By Actor"
-          },
-          "by_scope": {
-            "items": {
-              "$ref": "#/components/schemas/ScopeUsage"
-            },
-            "type": "array",
-            "title": "By Scope"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "generated_at",
-          "operation",
-          "actor_id",
-          "scope_id",
-          "start",
-          "end",
-          "by_actor",
-          "by_scope"
-        ],
-        "title": "UsageFilterReport",
-        "description": "Durable usage aggregated by actor and by organization scope under one composed filter.\n\nEvery column an operator can filter on, kind, actor, organization scope, and the time\nwindow, is indexed, so the same predicate set narrows both breakdowns in one query pass\nrather than loading rows and summing them in Python."
       },
       "UsagePoint": {
         "properties": {

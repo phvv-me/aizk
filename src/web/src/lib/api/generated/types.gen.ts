@@ -244,66 +244,6 @@ export type DoctorFinding = {
 };
 
 /**
- * DoctorReport
- *
- * Read-only queue, retry history, and artifact conversion diagnosis.
- *
- * Every bounded detail list defaults to empty so the browser API's generated client keeps
- * it required rather than optional, since a defaulted list is always present in the response.
- */
-export type DoctorReport = {
-    /**
-     * Generated At
-     */
-    generated_at: string;
-    /**
-     * Healthy
-     */
-    healthy: boolean;
-    /**
-     * Stale After Seconds
-     */
-    stale_after_seconds: number;
-    /**
-     * Long Running After Seconds
-     */
-    long_running_after_seconds: number;
-    /**
-     * History Seconds
-     */
-    history_seconds: number;
-    /**
-     * Detail Limit
-     */
-    detail_limit: number;
-    /**
-     * Error Messages Included
-     */
-    error_messages_included: boolean;
-    summary: DoctorSummary;
-    /**
-     * Findings
-     */
-    findings: Array<DoctorFinding>;
-    /**
-     * Queue Failure Groups
-     */
-    queue_failure_groups: Array<QueueFailureGroup>;
-    /**
-     * Queue Issues
-     */
-    queue_issues: Array<QueueIssue>;
-    /**
-     * Recent Exception Groups
-     */
-    recent_exception_groups: Array<ExceptionHistoryGroup>;
-    /**
-     * Conversions
-     */
-    conversions: Array<ConversionDiagnostic>;
-};
-
-/**
  * DoctorSummary
  *
  * Complete issue counts, independent from the bounded detail lists.
@@ -669,54 +609,6 @@ export type HardwareHealth = {
 };
 
 /**
- * HealthReport
- *
- * Combine schema, RLS, storage, queue, models, identity, corpora, and recall health.
- */
-export type HealthReport = {
-    migration: SchemaHealth;
-    /**
-     * Rls Violations
-     */
-    rls_violations: Array<string>;
-    /**
-     * Row Counts
-     */
-    row_counts: {
-        [key: string]: number;
-    };
-    queue: TasksStatus;
-    /**
-     * Endpoints
-     */
-    endpoints: Array<EndpointHealth>;
-    extraction: ExtractionHealth;
-    identity: IdentityHealth;
-    /**
-     * Corpora
-     */
-    corpora: Array<ScopeHealth>;
-    /**
-     * Actors
-     */
-    actors: Array<ActorUsage>;
-    /**
-     * Scopes
-     */
-    scopes: Array<ScopeUsage>;
-    /**
-     * Scope Storage
-     */
-    scope_storage: Array<ScopeStorage>;
-    storage: StorageHealth;
-    recall: RecallHealth | null;
-    /**
-     * Duration Ms
-     */
-    duration_ms: number;
-};
-
-/**
  * IdentityHealth
  *
  * Show whether requests use Logto identity or the explicit local auth-off identity.
@@ -983,6 +875,23 @@ export type Overview = {
      * Artifacts
      */
     artifacts: Array<ArtifactView>;
+};
+
+/**
+ * PeriodUsage
+ *
+ * One window the console offers and the totals measured over it.
+ */
+export type PeriodUsage = {
+    /**
+     * Days
+     */
+    days: number;
+    /**
+     * Start
+     */
+    start: string;
+    summary: UsageSummary;
 };
 
 /**
@@ -1528,6 +1437,164 @@ export type StorageHealth = {
 };
 
 /**
+ * StoredDoctor
+ *
+ * The stored queue and artifact conversion diagnosis.
+ */
+export type StoredDoctor = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    /**
+     * Healthy
+     */
+    healthy: boolean;
+    /**
+     * Stale After Seconds
+     */
+    stale_after_seconds: number;
+    /**
+     * Long Running After Seconds
+     */
+    long_running_after_seconds: number;
+    /**
+     * History Seconds
+     */
+    history_seconds: number;
+    /**
+     * Detail Limit
+     */
+    detail_limit: number;
+    /**
+     * Error Messages Included
+     */
+    error_messages_included: boolean;
+    summary: DoctorSummary;
+    /**
+     * Findings
+     */
+    findings: Array<DoctorFinding>;
+    /**
+     * Queue Failure Groups
+     */
+    queue_failure_groups: Array<QueueFailureGroup>;
+    /**
+     * Queue Issues
+     */
+    queue_issues: Array<QueueIssue>;
+    /**
+     * Recent Exception Groups
+     */
+    recent_exception_groups: Array<ExceptionHistoryGroup>;
+    /**
+     * Conversions
+     */
+    conversions: Array<ConversionDiagnostic>;
+    /**
+     * Measured At
+     */
+    measured_at: string;
+    /**
+     * Stale
+     */
+    stale: boolean;
+};
+
+/**
+ * StoredHealth
+ *
+ * The stored schema, security, storage, queue, and serving reading.
+ */
+export type StoredHealth = {
+    migration: SchemaHealth;
+    /**
+     * Rls Violations
+     */
+    rls_violations: Array<string>;
+    /**
+     * Row Counts
+     */
+    row_counts: {
+        [key: string]: number;
+    };
+    queue: TasksStatus;
+    /**
+     * Endpoints
+     */
+    endpoints: Array<EndpointHealth>;
+    extraction: ExtractionHealth;
+    identity: IdentityHealth;
+    /**
+     * Corpora
+     */
+    corpora: Array<ScopeHealth>;
+    /**
+     * Actors
+     */
+    actors: Array<ActorUsage>;
+    /**
+     * Scopes
+     */
+    scopes: Array<ScopeUsage>;
+    /**
+     * Scope Storage
+     */
+    scope_storage: Array<ScopeStorage>;
+    storage: StorageHealth;
+    recall: RecallHealth | null;
+    /**
+     * Duration Ms
+     */
+    duration_ms: number;
+    /**
+     * Measured At
+     */
+    measured_at: string;
+    /**
+     * Stale
+     */
+    stale: boolean;
+};
+
+/**
+ * StoredUsage
+ *
+ * The stored platform-wide usage aggregate.
+ */
+export type StoredUsage = {
+    /**
+     * Generated At
+     */
+    generated_at: string;
+    /**
+     * Periods
+     */
+    periods: Array<PeriodUsage>;
+    lifetime: UsageSummary;
+    /**
+     * Points
+     */
+    points: Array<UsagePoint>;
+    /**
+     * By Actor
+     */
+    by_actor: Array<ActorUsage>;
+    /**
+     * By Scope
+     */
+    by_scope: Array<ScopeUsage>;
+    /**
+     * Measured At
+     */
+    measured_at: string;
+    /**
+     * Stale
+     */
+    stale: boolean;
+};
+
+/**
  * SubjectPage
  *
  * One bounded subject catalog page.
@@ -1680,47 +1747,6 @@ export type ThemeView = {
 };
 
 export type Uuid7 = string;
-
-/**
- * UsageFilterReport
- *
- * Durable usage aggregated by actor and by organization scope under one composed filter.
- *
- * Every column an operator can filter on, kind, actor, organization scope, and the time
- * window, is indexed, so the same predicate set narrows both breakdowns in one query pass
- * rather than loading rows and summing them in Python.
- */
-export type UsageFilterReport = {
-    /**
-     * Generated At
-     */
-    generated_at: string;
-    operation: Operation | null;
-    /**
-     * Actor Id
-     */
-    actor_id: string | null;
-    /**
-     * Scope Id
-     */
-    scope_id: string | null;
-    /**
-     * Start
-     */
-    start: string | null;
-    /**
-     * End
-     */
-    end: string | null;
-    /**
-     * By Actor
-     */
-    by_actor: Array<ActorUsage>;
-    /**
-     * By Scope
-     */
-    by_scope: Array<ScopeUsage>;
-};
 
 /**
  * UsagePoint
@@ -2496,9 +2522,11 @@ export type AdminHealthData = {
 
 export type AdminHealthResponses = {
     /**
+     * Response Admin Health
+     *
      * Successful Response
      */
-    200: HealthReport;
+    200: StoredHealth | null;
 };
 
 export type AdminHealthResponse = AdminHealthResponses[keyof AdminHealthResponses];
@@ -2540,45 +2568,17 @@ export type AdminHardwareResponse = AdminHardwareResponses[keyof AdminHardwareRe
 export type AdminDoctorData = {
     body?: never;
     path?: never;
-    query?: {
-        /**
-         * Stale Minutes
-         */
-        stale_minutes?: number;
-        /**
-         * Long Running Minutes
-         */
-        long_running_minutes?: number;
-        /**
-         * History Hours
-         */
-        history_hours?: number;
-        /**
-         * Limit
-         */
-        limit?: number;
-        /**
-         * Show Error Messages
-         */
-        show_error_messages?: boolean;
-    };
+    query?: never;
     url: '/api/admin/doctor';
 };
 
-export type AdminDoctorErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type AdminDoctorError = AdminDoctorErrors[keyof AdminDoctorErrors];
-
 export type AdminDoctorResponses = {
     /**
+     * Response Admin Doctor
+     *
      * Successful Response
      */
-    200: DoctorReport;
+    200: StoredDoctor | null;
 };
 
 export type AdminDoctorResponse = AdminDoctorResponses[keyof AdminDoctorResponses];
@@ -2586,45 +2586,17 @@ export type AdminDoctorResponse = AdminDoctorResponses[keyof AdminDoctorResponse
 export type AdminUsageData = {
     body?: never;
     path?: never;
-    query?: {
-        /**
-         * Operation
-         */
-        operation?: Operation | null;
-        /**
-         * Actor Id
-         */
-        actor_id?: string | null;
-        /**
-         * Scope Id
-         */
-        scope_id?: string | null;
-        /**
-         * Start
-         */
-        start?: string | null;
-        /**
-         * End
-         */
-        end?: string | null;
-    };
+    query?: never;
     url: '/api/admin/usage';
 };
 
-export type AdminUsageErrors = {
-    /**
-     * Validation Error
-     */
-    422: HttpValidationError;
-};
-
-export type AdminUsageError = AdminUsageErrors[keyof AdminUsageErrors];
-
 export type AdminUsageResponses = {
     /**
+     * Response Admin Usage
+     *
      * Successful Response
      */
-    200: UsageFilterReport;
+    200: StoredUsage | null;
 };
 
 export type AdminUsageResponse = AdminUsageResponses[keyof AdminUsageResponses];

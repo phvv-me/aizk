@@ -49,6 +49,7 @@ dependencies = [
     "mainboard==0.0.9",
     "pgqueuer>=1.1.1,<2",
     "croniter>=6.2.4,<7",
+    "pendulum>=3.2,<4",
     "mangum>=0.19,<1",
     "boto3>=1.40,<2",
     "opentelemetry-sdk>=1.44,<2",

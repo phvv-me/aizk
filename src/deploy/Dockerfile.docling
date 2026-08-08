@@ -1,0 +1,24 @@
+# Docling Serve with the Japanese OCR data its published image does not carry.
+#
+# aizk asks docling for tesseract with `jpn+eng`, because docling's bundled RapidOCR only
+# ever had Chinese models and silently produced wrong CJK for every scanned Japanese page.
+# The published image ships tesseract with `eng` and `osd` alone, and a missing language is
+# not an error tesseract reports through its exit status. `tesseract -l jpn+eng` prints
+# `Failed loading language 'jpn'` and still exits 0, returning English-only OCR, so the
+# absence of this layer is invisible to every caller and to any health check that trusts an
+# exit code. Installing the data here is what makes the request aizk already sends mean what
+# it says.
+#
+# `jpn_vert` is a separate package and is installed beside `jpn` because vertical Japanese is
+# a different trained model, not a rendering mode, and the corpus contains tategaki.
+FROM quay.io/docling-project/docling-serve-cpu:v1.26.0@sha256:7e07522e0240c1db3ff5b837ffa969c2ecd5a71664c0e0369f5a69fc169e30ba
+
+USER 0
+RUN dnf install -y tesseract-langpack-jpn tesseract-langpack-jpn_vert \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf \
+    && tesseract --list-langs | grep -qx jpn \
+    && tesseract --list-langs | grep -qx jpn_vert
+
+# Back to the unprivileged account the published image runs as.
+USER 1001

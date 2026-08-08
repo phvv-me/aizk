@@ -27,8 +27,13 @@ export type NavSection = {
   links: NavLink[];
 };
 
-/** Build the fixed product information architecture. */
-export function navigation(): NavSection[] {
+/** Build the information architecture one caller sees, operator tools included when earned.
+
+ * The console is a section of the application rather than a second application, so an
+ * operator keeps one sidebar, one session and one origin. `operator` comes from the API,
+ * which is the only party able to prove the role, and is false whenever it cannot be asked.
+ */
+export function navigation(operator: boolean = false): NavSection[] {
   return [
     {
       label: 'Knowledge',
@@ -57,7 +62,8 @@ export function navigation(): NavSection[] {
     {
       label: 'Collaboration',
       links: [{ label: 'Organizations', href: appRoutes.organizations, icon: 'organizations' }]
-    }
+    },
+    ...(operator ? adminNavigation() : [])
   ];
 }
 

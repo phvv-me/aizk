@@ -88,7 +88,16 @@ class User(rls.Context, prefix="app"):
     avatar: str | None = Field(default=None, exclude=True)
     roles: tuple[str, ...] = Field(default=(), exclude=True)
     scopes: ScopeTable = ScopeTable()
+    # Written into the transaction alongside `scopes`, so row security can refuse the
+    # operator readings to a caller without the role rather than trusting every endpoint to
+    # remember the check. Nothing may set it directly; `authorized` derives it from Logto.
+    operator: bool = False
     organizations: tuple[OrganizationStanding, ...] = Field(default=(), exclude=True)
+
+    @staticmethod
+    def is_operator(roles: Iterable[str]) -> bool:
+        """Whether these Logto role names carry platform operator standing."""
+        return settings.logto_admin_role in frozenset(roles)
 
     @classmethod
     def authorized(
@@ -106,12 +115,14 @@ class User(rls.Context, prefix="app"):
     ) -> User:
         """Build a caller after an authentication boundary has verified every scope set."""
         writable = frozenset(write)
+        held = tuple(roles)
         return cls(
             id=user_id,
             name=name or label,
             username=username,
             avatar=avatar,
-            roles=tuple(roles),
+            roles=held,
+            operator=cls.is_operator(held),
             scopes=ScopeTable(
                 read=frozenset(read),
                 write=writable,

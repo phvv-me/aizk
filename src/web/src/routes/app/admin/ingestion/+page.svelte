@@ -1,7 +1,9 @@
 <script lang="ts">
   import type { BadgeVariant } from '$lib/components/ui/badge';
   import InfoTip from '$lib/components/InfoTip.svelte';
+  import MeasuredAt from '$lib/components/MeasuredAt.svelte';
   import PageHeader from '$lib/components/PageHeader.svelte';
+  import ReadingUnavailable from '$lib/components/ReadingUnavailable.svelte';
   import { Badge } from '$lib/components/ui/badge';
   import * as Card from '$lib/components/ui/card';
   import { formatDateTime } from '$lib/format';
@@ -9,6 +11,8 @@
   import type { PageServerData } from './$types';
 
   let { data }: { data: PageServerData } = $props();
+
+  const doctor = $derived(data.doctor.value);
 
   const stateLabels: Record<ConversionState, string> = {
     failed: 'Failed',
@@ -33,19 +37,15 @@
   description="Artifact conversion states, including what was permanently rejected and why."
 />
 
-{#if !data.doctor}
-  <Card.Root>
-    <Card.Header>
-      <Card.Title>Ingestion diagnosis is unavailable</Card.Title>
-      <Card.Description>This will return once the AIZK API answers again.</Card.Description>
-    </Card.Header>
-  </Card.Root>
+{#if !doctor}
+  <ReadingUnavailable title="Ingestion diagnosis" unreachable={data.doctor.unreachable} />
 {:else}
+  <MeasuredAt measuredAt={doctor.measured_at} stale={doctor.stale} />
   <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
     <Card.Root class="gap-2 py-4">
       <Card.Header class="px-4">
         <Card.Description>Failed</Card.Description>
-        <Card.Title class="text-3xl">{data.doctor.summary.failed_conversions}</Card.Title>
+        <Card.Title class="text-3xl">{doctor.summary.failed_conversions}</Card.Title>
       </Card.Header>
     </Card.Root>
     <Card.Root class="gap-2 py-4">
@@ -57,17 +57,17 @@
             text="Docling's own policy check permanently refused this format. This is terminal and excluded from retry, not a bug to fix."
           />
         </div>
-        <Card.Title class="text-3xl">{data.doctor.summary.unreadable_conversions}</Card.Title>
+        <Card.Title class="text-3xl">{doctor.summary.unreadable_conversions}</Card.Title>
       </Card.Header>
     </Card.Root>
     <Card.Root class="gap-2 py-4">
       <Card.Header class="px-4">
         <Card.Description>Active</Card.Description>
         <Card.Title class="text-3xl"
-          >{data.doctor.summary.queued_active_conversions +
-            data.doctor.summary.fresh_active_conversions +
-            data.doctor.summary.stale_active_conversions +
-            data.doctor.summary.orphaned_active_conversions}</Card.Title
+          >{doctor.summary.queued_active_conversions +
+            doctor.summary.fresh_active_conversions +
+            doctor.summary.stale_active_conversions +
+            doctor.summary.orphaned_active_conversions}</Card.Title
         >
       </Card.Header>
     </Card.Root>
@@ -81,7 +81,7 @@
       </Card.Description>
     </Card.Header>
     <Card.Content>
-      {#if data.doctor.conversions.length === 0}
+      {#if doctor.conversions.length === 0}
         <p class="text-muted-foreground text-sm">
           Nothing failed, unreadable, or active right now.
         </p>
@@ -97,7 +97,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each data.doctor.conversions as conversion (conversion.content_id)}
+              {#each doctor.conversions as conversion (conversion.content_id)}
                 <tr class="border-b last:border-0">
                   <td class="max-w-xs truncate py-3 pr-4 font-medium">{conversion.artifact_name}</td
                   >

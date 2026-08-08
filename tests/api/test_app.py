@@ -37,7 +37,7 @@ from aizk.status import (
     UsageStatus,
     UsageSummary,
 )
-from aizk.store import Artifact, Usage
+from aizk.store import Artifact
 from aizk.store.identity import OrganizationStanding, User
 from aizk.types import Scopes
 
@@ -789,11 +789,13 @@ def test_admin_links_reads_the_configured_console_tool_urls(
     }
 
 
+def measured_at(stale_minutes: int, stale: bool) -> datetime:
+    """When a reading was taken, either just now or past its own staleness window."""
+    return datetime.now(UTC) - timedelta(minutes=stale_minutes + 1 if stale else 0)
+
+
 def stored(stale: bool = False) -> ops.StoredHealth:
     """One stored reading, the shape a worker pass leaves behind."""
-    measured = datetime.now(UTC) - timedelta(
-        minutes=settings.health_snapshot_stale_minutes + 1 if stale else 0
-    )
     return ops.StoredHealth(
         migration=ops.SchemaHealth(current="head", head="head", up_to_date=True),
         rls_violations=[],
@@ -826,7 +828,43 @@ def stored(stale: bool = False) -> ops.StoredHealth:
         ),
         recall=None,
         duration_ms=1.0,
-        measured_at=measured,
+        measured_at=measured_at(settings.health_snapshot_stale_minutes, stale),
+        stale=stale,
+    )
+
+
+def diagnosed(stale: bool = False) -> ops.StoredDoctor:
+    """One stored diagnosis, the shape a worker pass leaves behind."""
+    return ops.StoredDoctor(
+        generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+        healthy=True,
+        stale_after_seconds=900,
+        long_running_after_seconds=3600,
+        history_seconds=86400,
+        detail_limit=50,
+        error_messages_included=False,
+        summary=ops.DoctorSummary(),
+        measured_at=measured_at(settings.doctor_snapshot_stale_minutes, stale),
+        stale=stale,
+    )
+
+
+def aggregated(stale: bool = False) -> ops.StoredUsage:
+    """One stored usage aggregate, the shape a worker pass leaves behind."""
+    return ops.StoredUsage(
+        generated_at=datetime(2026, 7, 1, tzinfo=UTC),
+        periods=(
+            ops.PeriodUsage(
+                days=7,
+                start=datetime(2026, 6, 25, tzinfo=UTC),
+                summary=UsageSummary(recalls=3),
+            ),
+        ),
+        lifetime=UsageSummary(recalls=9),
+        points=(),
+        by_actor=(),
+        by_scope=(),
+        measured_at=measured_at(settings.usage_snapshot_stale_minutes, stale),
         stale=stale,
     )
 
@@ -896,9 +934,13 @@ def test_admin_recall_probes_the_largest_visible_corpus(monkeypatch: pytest.Monk
         sample="healthy",
         latency_ms=2.0,
     )
-    corpus_health = AsyncMock(return_value=[largest, smaller])
+    # Which corpora exist is a platform-wide count, so it comes from the stored reading; the
+    # retrieval itself still runs here, under a scoped session an ordinary caller also uses.
+    reading = stored().model_copy(update={"corpora": (largest, smaller)})
+    probe = AsyncMock()
     recall_health = AsyncMock(return_value=recall)
-    monkeypatch.setattr(app_module.ops, "corpus_health", corpus_health)
+    monkeypatch.setattr(app_module.ops, "stored_health", AsyncMock(return_value=reading))
+    monkeypatch.setattr(app_module.ops, "corpus_health", probe)
     monkeypatch.setattr(app_module.ops, "recall_health", recall_health)
 
     response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health/recall")
@@ -906,11 +948,17 @@ def test_admin_recall_probes_the_largest_visible_corpus(monkeypatch: pytest.Monk
     assert response.status_code == 200
     assert response.json()["candidates"] == 1
     recall_health.assert_awaited_once_with(largest)
+    probe.assert_not_awaited()
 
 
 def test_admin_recall_is_absent_without_any_stored_corpus(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        app_module.ops,
+        "stored_health",
+        AsyncMock(return_value=stored().model_copy(update={"corpora": ()})),
+    )
     corpus_health = AsyncMock(return_value=[])
     recall_health = AsyncMock()
     monkeypatch.setattr(app_module.ops, "corpus_health", corpus_health)
@@ -945,64 +993,64 @@ def test_admin_hardware_returns_the_metrics_probe(monkeypatch: pytest.MonkeyPatc
     hardware_health.assert_awaited_once_with()
 
 
-def test_admin_doctor_forwards_query_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
-    report = ops.DoctorReport(
-        generated_at=datetime(2026, 7, 1, tzinfo=UTC),
-        healthy=True,
-        stale_after_seconds=600,
-        long_running_after_seconds=1200,
-        history_seconds=3600,
-        detail_limit=10,
-        error_messages_included=True,
-        summary=ops.DoctorSummary(),
-    )
-    doctor = AsyncMock(return_value=report)
-    monkeypatch.setattr(app_module.ops, "doctor", doctor)
+def test_admin_doctor_reads_a_diagnosis_rather_than_taking_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The conversion counts cross every scope, so only the owner may take them.
 
-    response = call(
-        service_as(monkeypatch, admin()),
-        "GET",
-        "/api/admin/doctor?stale_minutes=5&long_running_minutes=20&history_hours=1&limit=10"
-        "&show_error_messages=true",
-    )
+    This process is denied that credential, which is why the endpoint reads what a worker
+    measured. `aizk admin doctor` still diagnoses live, because the CLI runs where the
+    credential lives.
+    """
+    read = AsyncMock(return_value=diagnosed())
+    probe = AsyncMock()
+    monkeypatch.setattr(app_module.ops, "stored_doctor", read)
+    monkeypatch.setattr(app_module.ops, "doctor", probe)
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/doctor")
 
     assert response.status_code == 200
-    doctor.assert_awaited_once_with(
-        stale_minutes=5,
-        long_running_minutes=20,
-        history_hours=1,
-        limit=10,
-        show_error_messages=True,
-    )
+    assert response.json()["healthy"] is True
+    assert response.json()["stale"] is False
+    probe.assert_not_awaited()
 
 
-def test_admin_usage_forwards_composed_filters(monkeypatch: pytest.MonkeyPatch) -> None:
-    actor, org = uuid5(), uuid5()
-    report = ops.UsageFilterReport(
-        generated_at=datetime(2026, 7, 1, tzinfo=UTC),
-        operation=Usage.Event.Operation.recall,
-        actor_id=actor,
-        scope_id=org,
-        start=None,
-        end=None,
-        by_actor=[],
-        by_scope=[],
-    )
-    usage_report = AsyncMock(return_value=report)
-    monkeypatch.setattr(app_module.ops, "usage_report", usage_report)
+def test_admin_doctor_is_absent_until_a_worker_pass_has_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_module.ops, "stored_doctor", AsyncMock(return_value=None))
 
-    response = call(
-        service_as(monkeypatch, admin()),
-        "GET",
-        f"/api/admin/usage?operation=recall&actor_id={actor}&scope_id={org}"
-        "&start=2026-01-01T00:00:00Z&end=2026-02-01T00:00:00Z",
-    )
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/doctor")
 
     assert response.status_code == 200
-    usage_report.assert_awaited_once_with(
-        operation=Usage.Event.Operation.recall,
-        actor_id=actor,
-        scope_id=org,
-        start=datetime(2026, 1, 1, tzinfo=UTC),
-        end=datetime(2026, 2, 1, tzinfo=UTC),
-    )
+    assert response.json() is None
+
+
+def test_admin_usage_reads_the_platform_aggregate_a_worker_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each usage row is scoped to its own caller, so aggregating them needs the owner."""
+    read = AsyncMock(return_value=aggregated())
+    probe = AsyncMock()
+    monkeypatch.setattr(app_module.ops, "stored_usage", read)
+    monkeypatch.setattr(app_module.ops, "platform_usage", probe)
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/usage")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["lifetime"]["recalls"] == 9
+    assert [period["days"] for period in body["periods"]] == [7]
+    assert body["stale"] is False
+    probe.assert_not_awaited()
+
+
+def test_admin_usage_is_absent_until_a_worker_pass_has_measured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(app_module.ops, "stored_usage", AsyncMock(return_value=None))
+
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/usage")
+
+    assert response.status_code == 200
+    assert response.json() is None

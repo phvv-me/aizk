@@ -44,7 +44,18 @@ def fake_client(series: dict[str, list[dict]]) -> type:
 
         async def get(self, path: str, params: dict[str, str]) -> FakeResponse:
             assert path == "/api/v1/query"
-            return FakeResponse({"data": {"result": series.get(params["query"], [])}})
+            # The envelope a real store sends, `status` beside `data` and `resultType` inside
+            # it, neither of which this reads. A fixture carrying only the read fields let a
+            # response model that forbade the rest pass every test and fail every real query.
+            return FakeResponse(
+                {
+                    "status": "success",
+                    "data": {
+                        "resultType": "vector",
+                        "result": series.get(params["query"], []),
+                    },
+                }
+            )
 
     return Client
 
@@ -155,3 +166,62 @@ def test_hardware_health_degrades_to_unreachable_on_any_failure(
     health = dbutil.run(ops.hardware_health())
 
     assert health == ops.HardwareHealth(reachable=False)
+
+
+def test_hardware_health_ignores_envelope_fields_it_does_not_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A metrics store may send whatever else it likes beside the one field this reads.
+
+    VictoriaMetrics returns `status`, `resultType` and per-sample extras. Refusing them made
+    every query raise, which the caller turned into one honest-looking `reachable=False`, so
+    the panel reported the whole store unreachable while it was answering every request.
+    """
+    monkeypatch.setattr(settings, "metrics_url", AnyHttpUrl("http://victoriametrics:8428"))
+    generous = {hardware._HOST_QUERIES["load1"]: [{**sample("0.5"), "unexpected": "ignored"}]}
+    monkeypatch.setattr(hardware.httpx, "AsyncClient", fake_client(generous))
+
+    health = dbutil.run(ops.hardware_health())
+
+    assert health.reachable is True
+    assert health.load1 == 0.5
+
+
+@pytest.mark.parametrize(
+    ("llm_url", "expected"),
+    [
+        ("http://vllm-llm:8000/v1", ("vllm-emb", "vllm-rerank", "vllm-llm")),
+        ("https://openrouter.ai/api/v1", ("vllm-emb", "vllm-rerank")),
+    ],
+    ids=["local-extraction", "external-extraction"],
+)
+def test_model_lanes_name_only_what_this_deployment_hosts(
+    monkeypatch: pytest.MonkeyPatch, llm_url: str, expected: tuple[str, ...]
+) -> None:
+    """A lane served from outside is absent rather than reported down.
+
+    Extraction moved to a hosted provider, so no local lane answers for it. Listing it anyway
+    made the console report a permanent failure for a service this deployment never runs.
+    """
+    monkeypatch.setattr(settings, "llm_url", llm_url)
+
+    assert hardware.model_lanes() == expected
+
+
+def test_hardware_lanes_omit_extraction_when_it_is_served_from_outside(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "metrics_url", AnyHttpUrl("http://victoriametrics:8428"))
+    monkeypatch.setattr(settings, "llm_url", "https://openrouter.ai/api/v1")
+    series = {
+        hardware._LANE_QUERIES["up"]: [
+            sample("1", service="vllm-emb"),
+            sample("1", service="vllm-rerank"),
+            sample("0", service="vllm-llm"),
+        ]
+    }
+    monkeypatch.setattr(hardware.httpx, "AsyncClient", fake_client(series))
+
+    health = dbutil.run(ops.hardware_health())
+
+    assert {lane.service for lane in health.lanes} == {"vllm-emb", "vllm-rerank"}

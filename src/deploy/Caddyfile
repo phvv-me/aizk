@@ -49,13 +49,8 @@
 	# by `@mcp` above; both matchers currently share this Caddyfile's mutually-exclusive route
 	# group, and `@mcp` being declared first is what lets it win, so this exclusion keeps that
 	# correct however the two blocks ever get reordered.
-	# `/admin` is the operator console's own build inside this same app. It is served from this
-	# host rather than the operator hostname because the browser sign-in callback is registered
-	# for one origin, so a second origin would fail the exchange rather than sign anyone in.
-	# Reaching it needs the operator role regardless of host: its layout asks the API and
-	# answers 403 to anyone else, so the gate is the app's, not this route's.
 	@app {
-		path /app /app/* /admin /admin/* /auth/* /events/* /_app/*
+		path /app /app/* /auth/* /events/* /_app/*
 		not path /auth/callback
 	}
 	handle @app {
@@ -188,7 +183,7 @@
 		# Every named tool above is a more specific matcher, and Caddy sorts `handle` blocks
 		# by specificity, so this catch-all cannot shadow them however it is ordered.
 		handle {
-			redir * {$AIZK_WEB_PUBLIC_URL}/admin 302
+			redir * {$AIZK_WEB_PUBLIC_URL}/app/admin 302
 		}
 	}
 }

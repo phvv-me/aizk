@@ -507,14 +507,22 @@ class Settings(BaseSettings):
     graph_ppr_damping: float = 0.5
     graph_ppr_frontier: int = 32
     graph_seed_entities: int = 16
-    # The operator health report is measured by the worker and read from its stored snapshot,
-    # since the probes behind it need the database owner and the public API process is denied
-    # that credential. Five minutes keeps the console current without paying for the probes
-    # on every page load, and `health_snapshot_stale_minutes` is when the console should say
-    # the reading is old rather than present it as now.
+    # Every operator reading below is measured by the worker and read from its stored
+    # snapshot, since the probes behind them need the database owner and the public API
+    # process is denied that credential. Each `_stale_minutes` is when the console should say
+    # a reading is old rather than present it as now, so it tracks its own cadence.
+    # Health and the queue diagnosis are incident views, current enough to act on at five
+    # minutes and cheap enough to pay for that often. The usage aggregate scans the whole
+    # ledger for a number that moves slowly, so it runs on the half hour instead.
     health_snapshot_cron: str = "*/5 * * * *"
     health_snapshot_enabled: bool = True
     health_snapshot_stale_minutes: PositiveInt = 20
+    doctor_snapshot_cron: str = "*/5 * * * *"
+    doctor_snapshot_enabled: bool = True
+    doctor_snapshot_stale_minutes: PositiveInt = 20
+    usage_snapshot_cron: str = "*/30 * * * *"
+    usage_snapshot_enabled: bool = True
+    usage_snapshot_stale_minutes: PositiveInt = 120
     profile_recall_k: int = 1
     recall_chars_per_token: float = 4.0
     recall_frequency_weight: float = 0.02

@@ -1,6 +1,6 @@
 import { LogtoClientError, LogtoError, LogtoRequestError, OidcError } from '@logto/sveltekit';
 import { error, redirect } from '@sveltejs/kit';
-import type { Me } from '$lib/api';
+import type { AdminLinks, Me } from '$lib/api';
 import { ApiClient, ApiError } from '$lib/server/api';
 import { settings } from '$lib/server/settings';
 import type { LayoutServerLoad } from './$types';
@@ -21,7 +21,11 @@ export const load: LayoutServerLoad = async ({ locals }) => {
   if (!user) redirect(302, '/auth/sign-in');
   const accountUrl = settings.accountUrl;
   try {
-    return { me: await new ApiClient(locals.logtoClient).me(), apiOnline: true, accountUrl };
+    const api = new ApiClient(locals.logtoClient);
+    const me = await api.me();
+    // Only an operator is offered the external tools, and only the API can prove the role.
+    const links: AdminLinks | null = me.admin ? await api.adminLinks() : null;
+    return { me, apiOnline: true, accountUrl, links };
   } catch (cause) {
     // Broken sessions restart sign-in and authorization denials surface as real errors.
     // Only an unreachable or failing API degrades into the offline shell below.
@@ -33,6 +37,6 @@ export const load: LayoutServerLoad = async ({ locals }) => {
       admin: false,
       organizations: []
     };
-    return { me: fallback, apiOnline: false, accountUrl };
+    return { me: fallback, apiOnline: false, accountUrl, links: null };
   }
 };

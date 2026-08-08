@@ -1,13 +1,23 @@
 import asyncio
 
 import httpx
-from patos import FrozenModel
+from patos import FrozenModel, FrozenOpenModel
 from pydantic import ConfigDict
 
 from ..config import settings
 
 _QUERY_TIMEOUT = 2.0
-_MODEL_LANES = ("vllm-emb", "vllm-rerank", "vllm-llm")
+# The lanes this deployment actually runs. Extraction may be served from outside, in which
+# case no local lane answers for it and reporting one as down names a fault that does not
+# exist. `ExtractionHealth` already says where extraction is served, so the absence here is
+# a lane this deployment does not host rather than a lane that failed.
+_LOCAL_LANES = ("vllm-emb", "vllm-rerank")
+_EXTRACTION_LANE = "vllm-llm"
+
+
+def model_lanes() -> tuple[str, ...]:
+    """The vLLM lanes this deployment hosts, which excludes extraction when it is external."""
+    return _LOCAL_LANES if settings.llm_is_external else (*_LOCAL_LANES, _EXTRACTION_LANE)
 
 # One query per host measurement rather than a combined regex match, so a single field stays
 # readable in the merge below instead of a label match against a second series.
@@ -31,17 +41,23 @@ _LANE_QUERIES = {
 }
 
 
-class _Sample(FrozenModel):
+class _Sample(FrozenOpenModel):
     """One Prometheus instant-query result sample."""
 
     metric: dict[str, str]
     value: tuple[float, str]
 
 
-class _InstantResponse(FrozenModel):
-    """One Prometheus instant-query HTTP response envelope."""
+class _InstantResponse(FrozenOpenModel):
+    """One Prometheus instant-query HTTP response envelope.
 
-    class Data(FrozenModel):
+    The envelope is read for the one field this panel needs, and every other field a metrics
+    store chooses to send is ignored rather than refused. VictoriaMetrics returns `status`
+    beside `data` and `resultType` inside it, none of which this reads, and forbidding them
+    failed every query and reported the whole store unreachable.
+    """
+
+    class Data(FrozenOpenModel):
         result: tuple[_Sample, ...] = ()
 
     data: Data
@@ -108,7 +124,7 @@ def _rounded(value: float | None) -> int | None:
 
 def _lanes(vectors: dict[str, tuple[_Sample, ...]]) -> tuple[ModelLaneLoad, ...]:
     """Merge same-named per-lane samples, keyed by their shared `service` label, into rows."""
-    by_service: dict[str, dict[str, float]] = {lane: {} for lane in _MODEL_LANES}
+    by_service: dict[str, dict[str, float]] = {lane: {} for lane in model_lanes()}
     for field, samples in vectors.items():
         for sample in samples:
             service = sample.metric.get("service")

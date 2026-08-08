@@ -28,7 +28,7 @@ export const handle: Handle = async (input) => {
     // landing page owns and this server never sees. Send the caller to the application instead.
     const completedSignIn = input.event.url.pathname === '/auth/sign-in-callback';
     if (isRedirect(cause) && cause.location === '/' && completedSignIn) {
-      redirect(302, settings.homeFor(input.event.url.origin));
+      redirect(302, '/app/dashboard');
     }
     throw cause;
   }
