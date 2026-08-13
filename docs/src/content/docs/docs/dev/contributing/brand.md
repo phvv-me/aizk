@@ -61,6 +61,11 @@ measurements use the local monospace stack.
 The repository banner, documentation, marketing site, web app, browser icons, social cards, and
 hackathon thumbnail all derive from this system.
 
+The generator records the source and output hashes plus dimensions in `brand-manifest.json`.
+Checks validate that committed manifest instead of rerasterizing SVG text with the runner's local
+fonts. Regeneration remains explicit, so a fresh checkout verifies the same release assets on every
+platform.
+
 ```text
 canonical SVGs
       |

@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "sources": {
+    "icon.svg": "cae75be6f91c16545d0e6e12adb10a9acf4521d586c08515330b071fe235441d",
+    "logo.svg": "d83b76c64f64088b46d4c18fcccef92ea6073b248f46ffbfc2f73541b88e02bf",
+    "banner.svg": "126bff6e3591e41ca1a54759d0552b942c9cb9f02ef6d16418061973d114dad9",
+    "social-card.svg": "f479ab1cf7689cfd06b1a8c1b91c54628a0489011cf38d3591102bf9cc4f502a"
+  },
+  "targets": {
+    "docs/src/assets/icon-512.png": {
+      "source": "icon.svg",
+      "sha256": "2ffe9e54133a3701ea3f9d690e9978426060879ce08810834b7ba7ada50065e3",
+      "width": 512,
+      "height": 512
+    },
+    "docs/public/apple-touch-icon.png": {
+      "source": "icon.svg",
+      "sha256": "bed0da183698bef30148f1678d69ff9a5d4db45647adca6dfdb5209d5a37fcd6",
+      "width": 180,
+      "height": 180
+    },
+    "src/web/static/apple-touch-icon.png": {
+      "source": "icon.svg",
+      "sha256": "bed0da183698bef30148f1678d69ff9a5d4db45647adca6dfdb5209d5a37fcd6",
+      "width": 180,
+      "height": 180
+    },
+    "docs/src/assets/logo.png": {
+      "source": "logo.svg",
+      "sha256": "e4d8e67c7e37faf0a8f4aa72d4ea343c3683457077dc409d1d8c1d03feb71576",
+      "width": 1120,
+      "height": 400
+    },
+    "docs/src/assets/banner.png": {
+      "source": "banner.svg",
+      "sha256": "2f289b3e650ef76db018cb39f15e55dd437f0f72c773ed9588c02acc16f67b97",
+      "width": 2560,
+      "height": 640
+    },
+    "docs/src/assets/social-card.png": {
+      "source": "social-card.svg",
+      "sha256": "98a0d43297af00e8c476e69068788d90bbf211d9d075322e09e05a1e8308c77a",
+      "width": 1200,
+      "height": 630
+    },
+    "docs/public/social-card.png": {
+      "source": "social-card.svg",
+      "sha256": "98a0d43297af00e8c476e69068788d90bbf211d9d075322e09e05a1e8308c77a",
+      "width": 1200,
+      "height": 630
+    },
+    "src/web/static/social-card.png": {
+      "source": "social-card.svg",
+      "sha256": "98a0d43297af00e8c476e69068788d90bbf211d9d075322e09e05a1e8308c77a",
+      "width": 1200,
+      "height": 630
+    },
+    "hackathon/thumbnail.png": {
+      "source": "social-card.svg",
+      "sha256": "98a0d43297af00e8c476e69068788d90bbf211d9d075322e09e05a1e8308c77a",
+      "width": 1200,
+      "height": 630
+    }
+  }
+}

@@ -35,6 +35,7 @@ cdk.out/
 
 # editable recording sources stay local while scripts and edit notes remain versioned
 /hackathon/video/**/*.mp4
+.pnpm-store/
 
 # python
 __pycache__/
