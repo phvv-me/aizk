@@ -23,11 +23,11 @@ August 18 at 6 PM JST.
 
 ## Top flag
 
-The deployed product is no longer the blocker. The top risk is packaging a coherent public release
-from the large uncommitted working tree, then proving the exact judge path from a signed-out browser
-and clean client profile. Direct OAuth and the full live memory flow passed as Maya through pinned
-OpenCode. The secure SSM demo-directory password was refreshed and verified after the recording
-rehearsal. Release cleanup, final screenshots, video editing, and the Devpost entry remain open.
+The deployed product and public release are no longer blockers. The top risk is proving the exact
+judge path from a signed-out browser and clean client profile. Direct OAuth and the full live memory
+flow passed as Maya through pinned OpenCode. The secure SSM demo-directory password was refreshed
+and verified after the recording rehearsal. Final screenshots, video editing, and the Devpost entry
+remain open.
 
 ## Current readiness
 
@@ -58,11 +58,9 @@ rehearsal. Release cleanup, final screenshots, video editing, and the Devpost en
 
 These are the only submission blockers, in order.
 
-1. Separate the large working tree into one coherent release candidate, run every gate, then have
-   Pedro review, commit, and push it.
-2. Cut the complete walkthrough to the narrated submission length, upload it, and verify it while
+1. Cut the complete walkthrough to the narrated submission length, upload it, and verify it while
    signed out.
-3. Create and complete the Devpost draft, run the final smoke twice, then submit by August 18 at
+2. Create and complete the Devpost draft, run the final smoke twice, then submit by August 18 at
    6 PM JST.
 
 Managed MCP, the composed query plan, new benchmark automation, extra corpus material, budget email,
@@ -110,11 +108,11 @@ Target completion is August 15 at noon JST.
 - [x] Run documentation diagnostics, the 94-page build, page checks, and brand drift checks
 - [x] Synthesize and diff the deployed CDK stack before both August 13 deployments
 - [x] Run package lint, import contracts, all three type checkers, and frontend checks on the final release candidate
-- [ ] Run every test and infrastructure check once more from the exact submitted commit
+- [x] Run every test and infrastructure check once more from the exact submitted commit
 - [ ] Run the local Lambda workload once from a clean database after the gates pass
 - [x] Keep the existing dated local baselines. No superseding local result is needed
 - [x] Have Pedro approve and commit the coherent release candidate
-- [ ] Push the release candidate and confirm GitHub checks pass on `main`
+- [x] Push the release candidate and confirm GitHub checks pass on `main`
 
 Acceptance requires a clean release candidate with every required gate green. The working tree may
 contain unrelated user work only if it is clearly excluded from the submitted commit.
@@ -270,7 +268,7 @@ Target completion is August 16 at noon JST.
 - [x] Refresh and verify Maya's secure SSM demo-directory password after the recording rehearsal
 - [ ] Test the complete flow in a signed-out isolated browser and clean Codex profile
 - [ ] Test from a network that is not the development machine
-- [ ] Rehearse from a clean clone using only committed instructions
+- [x] Verify the exact public commit from a clean Docker clone using only committed files
 - [x] Confirm the repository, docs, demo, and video need no local path or private DNS
 - [x] Confirm the Maya account signs in directly without email approval from Pedro
 - [ ] Verify rate limits allow the complete judge flow twice
@@ -341,7 +339,7 @@ Target completion is August 18 at noon JST.
 
 - [ ] Freeze code and corpus
 - [ ] Run every local gate from the submitted commit
-- [ ] Confirm GitHub checks are green
+- [x] Confirm GitHub checks are green
 - [ ] Run the complete cloud smoke flow twice
 - [ ] Confirm no retained queue failures, Lambda errors, or throttles
 - [ ] Open repository, docs, AWS demo, and video from a signed-out browser
