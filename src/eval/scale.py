@@ -12,11 +12,11 @@ from loguru import logger
 from mainboard import meter
 from patos import FrozenModel, Model
 from pydantic import UUID5, UUID7, UUID8
-from sqlalchemy import BigInteger, String, column, func, insert
+from sqlalchemy import BigInteger, String, column, func, insert, text
 from sqlalchemy import table as sql_table
 from sqlmodel import select
 
-from aizk.config import settings
+from aizk.config import DatabaseBackend, settings
 from aizk.graph.communities import CommunityDetector
 from aizk.ontology import System
 from aizk.retrieval import Plan, QueryContext, recall
@@ -29,7 +29,7 @@ from aizk.store import (
     Fact,
     TableBase,
 )
-from aizk.store.engine import Session
+from aizk.store.engine import Database, Session
 from aizk.store.identity import User
 
 from .cleanup import purge_scope
@@ -64,6 +64,8 @@ _CORPUS_TABLES = (
     "entity_content",
     "document",
 )
+
+_COCKROACH_PROJECTIONS = (("aizk_private", "scoped_vector", "scoped_vector_pkey"),)
 
 _STATISTICS = sql_table(
     "pg_stat_user_tables",
@@ -454,7 +456,7 @@ async def measure_lanes(
         )
 
     async def scoped_count() -> None:
-        await session.exec(select(Chunk.id.count()))
+        await session.exec(select(func.count()).select_from(Chunk))
 
     async def local() -> None:
         await retrieve(Plan.focused())
@@ -488,6 +490,25 @@ async def measure_community_detection(session: Session) -> float:
 
 async def storage_footprint(session: Session) -> tuple[int, int]:
     """Return total and index bytes occupied by the benchmark corpus tables."""
+    if settings.database_backend is DatabaseBackend.cockroachdb:
+        total_bytes = 0
+        primary_bytes = 0
+        tables = []
+        for name in _CORPUS_TABLES:
+            primary = TableBase.metadata.tables[name].primary_key.name or f"{name}_pkey"
+            tables.append(("public", name, primary))
+        async with Database.owner().session(session.user) as owner:
+            for schema, name, primary in (*tables, *_COCKROACH_PROJECTIONS):
+                table = f'"{schema}"."{name}"'
+                table_ranges = await owner.execute(
+                    text(f"SHOW RANGES FROM TABLE {table} WITH DETAILS")
+                )
+                primary_ranges = await owner.execute(
+                    text(f'SHOW RANGES FROM INDEX {table}@"{primary}" WITH DETAILS')
+                )
+                total_bytes += sum(int(row.range_size) for row in table_ranges)
+                primary_bytes += sum(int(row.range_size) for row in primary_ranges)
+        return total_bytes, total_bytes - primary_bytes
     footprint = (
         await session.exec(
             select(

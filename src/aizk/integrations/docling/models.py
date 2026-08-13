@@ -84,10 +84,9 @@ class ArtifactBytes(FrozenModel):
 class DoclingOptions(FrozenModel):
     """Declare the bounded conversion policy sent to Docling Serve.
 
-    Image export and output formats remain architectural invariants. Docling may use images while
-    converting, but AIZK receives placeholders and stores only the Markdown derivative. The native
-    document tree is not requested at all, because nothing ever read it and a large PDF answers
-    with tens of megabytes of JSON that would be parsed once and dropped.
+    Output format remains an architectural invariant. Image export is embedded only when the
+    text-description lane needs figure bytes, and those data URIs are replaced before the
+    derivative is stored. The native document tree is not requested because nothing reads it.
 
     The OCR engine and its languages are always declared. Docling's automatic choice is RapidOCR,
     whose bundled recognition model is Chinese and which has no Japanese model set at all, so a
@@ -97,6 +96,7 @@ class DoclingOptions(FrozenModel):
     """
 
     pipeline: Literal["standard", "vlm"] = "standard"
+    image_export_mode: Literal["placeholder", "embedded"] = "placeholder"
     do_ocr: bool = True
     force_ocr: bool = False
     ocr_engine: str = "tesseract"
@@ -114,7 +114,7 @@ class DoclingOptions(FrozenModel):
         """Serialize the supported stable v1 options as multipart form values."""
         values: dict[str, str | list[str]] = {
             "to_formats": ["md"],
-            "image_export_mode": "placeholder",
+            "image_export_mode": self.image_export_mode,
             "pipeline": self.pipeline,
             "do_ocr": str(self.do_ocr).lower(),
             "force_ocr": str(self.force_ocr).lower(),

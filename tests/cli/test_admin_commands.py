@@ -8,10 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from id_factory import uuid7
-from pydantic import AnyHttpUrl, SecretStr
+from pydantic import AnyHttpUrl
 
 import aizk.commands.admin as commands
-from aizk.artifacts import CompactionReport
+from aizk.artifacts.models import CompactionReport
 from aizk.integrations.logto import Account, PolicyReport, RoleAssignment, RoleReport
 from aizk.integrations.web import Freshness, SearchLane
 from aizk.web import MemorySignals, RouterProbe, SanctionedPlan
@@ -716,7 +716,6 @@ def test_settings_show_is_sorted_and_redacts_every_secret_shape(
     monkeypatch.setattr(commands.settings, "admin_database_url", "postgresql://admin:pw@db/aizk")
     monkeypatch.setattr(commands.settings, "app_password", "pw")
     monkeypatch.setattr(commands.settings, "embed_api_key", "key")
-    monkeypatch.setattr(commands.settings, "oauth_client_secret", SecretStr("secret"))
 
     dispatch(["settings", "show"])
     payload = json.loads(capsys.readouterr().out)
@@ -725,7 +724,6 @@ def test_settings_show_is_sorted_and_redacts_every_secret_shape(
     assert payload["admin_database_url"] == "<redacted>"
     assert payload["app_password"] == "<redacted>"
     assert payload["embed_api_key"] == "<redacted>"
-    assert payload["oauth_client_secret"] == "<redacted>"
     assert payload["api_host"] == commands.settings.api_host
 
     dispatch(["settings", "show", "api-host"])

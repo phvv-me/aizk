@@ -9,7 +9,8 @@ from obstore.store import MemoryStore
 from patos import sql
 from pydantic import UUID7
 
-from aizk.artifacts import ArtifactCompaction, ArtifactRepository, CompactionDisabled
+from aizk.artifacts.repository import ArtifactRepository
+from aizk.artifacts.service import ArtifactCompaction, CompactionDisabled
 from aizk.storage import ByteStore, StoredBytes, StoredObject
 from aizk.store import Blob
 

@@ -75,6 +75,11 @@ class Ontology(FrozenModel):
     async def refresh(cls, session: Session) -> Ontology:
         """Refresh missing database embeddings and rebuild the extraction prompt."""
         await cls.embed_missing_kinds(session)
+        return await cls.load(session)
+
+    @classmethod
+    async def load(cls, session: Session) -> Ontology:
+        """Build the extraction catalog from stored kinds without calling the embedder."""
         entity_rows = list(
             await session.exec(
                 select(Entity.Kind.name, Entity.Kind.description)

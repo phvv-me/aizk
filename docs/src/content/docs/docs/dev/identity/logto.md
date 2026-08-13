@@ -87,8 +87,9 @@ suspended account, or one lacking the `aizk-user` role, raises `LogtoAccessError
 
 ## MCP and the browser differ only at the edge
 
-The MCP server hands FastMCP an `OIDCProxy` built by `Auth.provider()` and reads the request's
-token through `get_access_token()`. The browser API declares an `HTTPBearer` dependency and calls
+The MCP server hands FastMCP a `RemoteAuthProvider` built by `Auth.provider()` and reads the
+verified Logto token through `get_access_token()`. The browser API declares an `HTTPBearer`
+dependency and calls
 `Auth.bearer(token)`, which returns a `Caller` carrying both the resolved `User` and the raw Logto
 subject. The API needs that raw subject because organization management calls act as the person
 making them. Everything after those two lines is identical.

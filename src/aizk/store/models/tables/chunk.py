@@ -31,7 +31,7 @@ from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from ....config import DatabaseBackend, settings
 from ...mixins import Embedded, Id, Scoped, TableBase
-from ...vector import cosine_distance
+from ...vector import cosine_distance, scoped_vector_candidates
 
 if TYPE_CHECKING:
     from ....retrieval.models.lane import QueryContext
@@ -176,18 +176,39 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
         # its ordered-chunks relationship.
         from .document import Document
 
-        chunk_distance = cosine_distance(cls.embedding, context.vector)
         active = Document.is_active()
         if context.owned:
             active = and_(active, Document.scopes == context.scope_set)
-        dense_ranked = cls.ranking(
-            context,
-            chunk_distance,
-            cls.embedding.is_not(None),
-            chunk_distance < context.floor,
-            name="dense",
-            sources=active,
-        )
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            dense_candidates = scoped_vector_candidates(
+                "chunk",
+                context.vector,
+                context.fusion_window,
+                context.scope_set if context.owned else None,
+            )
+            dense_ranked = (
+                select(
+                    cls.id,
+                    cls.document_id,
+                    dense_candidates.c.distance.label("ordering"),
+                )
+                .join(dense_candidates, dense_candidates.c.source_id == cls.id)
+                .join(Document, Document.id == cls.document_id)
+                .where(active, dense_candidates.c.distance < context.floor)
+                .order_by(dense_candidates.c.distance)
+                .limit(context.fusion_depth)
+                .subquery("dense_ranked")
+            )
+        else:
+            chunk_distance = cosine_distance(cls.embedding, context.vector)
+            dense_ranked = cls.ranking(
+                context,
+                chunk_distance,
+                cls.embedding.is_not(None),
+                chunk_distance < context.floor,
+                name="dense",
+                sources=active,
+            )
         dense_chunks = select(
             dense_ranked.c.id,
             dense_ranked.c.document_id,

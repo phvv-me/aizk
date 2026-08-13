@@ -1,12 +1,14 @@
 ---
-title: "Backups and recovery"
-description: "What is backed up, what restoring actually restores, and what it does not."
+title: "PostgreSQL backups and recovery"
+description: "What the self-hosted PostgreSQL backup covers, what restoring brings back and what it omits."
 ---
 
-A backup is only as good as the last time somebody restored it. This page covers what
+A backup is only as good as the last time somebody restored it. This page applies to the
+self-hosted PostgreSQL profile. The crAIZK AWS demo currently disables application-managed
+backups and relies on CockroachDB Cloud and S3 service controls. This page covers what
 `src/aizk/backup.py` actually writes, what a restore brings back, and the several things it does
 not. It assumes you know the role split from
-[PostgreSQL and storage](/docs/dev/run/postgres/).
+[PostgreSQL profile](/docs/dev/run/postgres/).
 
 ```text
   aizk admin database backup  =  one pg_dump --format=custom
@@ -103,9 +105,6 @@ artifact metadata, but the bytes themselves are in SeaweedFS. There is no automa
 backup in this repository. That is a real gap, and closing it means copying the SeaweedFS data
 directory alongside a matching generation of the database archive and testing both together.
 
-**OAuth state.** The FastMCP dynamic client registrations and upstream tokens in the `/oauth`
-volume are not in any dump. Losing that volume means every MCP client signs in again.
-
 **Logs.** Loki retains 30 days and is not a backup of anything.
 
 ## The local volume is staging, not a strategy
@@ -130,7 +129,7 @@ authenticated recall returns evidence.
 
 - [The release gate](/docs/dev/run/release-gate/) turns the drill into a pass or fail item.
 - [Upgrades](/docs/dev/run/upgrades/) explains where a backup fits in the upgrade order.
-- [PostgreSQL and storage](/docs/dev/run/postgres/) covers roles, tuning and encryption at rest.
+- [PostgreSQL profile](/docs/dev/run/postgres/) covers roles, tuning and encryption at rest.
 - [The job system](/docs/dev/passes/jobs/) explains how scheduled jobs like this one are wired.
 
 </div>

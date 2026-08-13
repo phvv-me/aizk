@@ -1,0 +1,55 @@
+{
+  "captured_on": "2026-08-13",
+  "region": "ap-southeast-1",
+  "stack": {
+    "name": "AizkCockroachdb",
+    "resource_status": "UPDATE_COMPLETE"
+  },
+  "database_setup": {
+    "status_code": 200,
+    "function_error": null,
+    "migrated_from": "0001_cockroachdb",
+    "migrated_to": "0001_cockroachdb",
+    "queue_installed": false
+  },
+  "schedules": {
+    "mcp_warm": {
+      "state": "ENABLED",
+      "expression": "rate(5 minutes)",
+      "flexible_window": "OFF"
+    },
+    "worker_recovery": {
+      "state": "ENABLED",
+      "expression": "rate(15 minutes)",
+      "flexible_window": "OFF"
+    }
+  },
+  "budget": {
+    "type": "COST",
+    "limit_usd": 10.0,
+    "time_unit": "MONTHLY",
+    "actual_usd": 0.004
+  },
+  "lambda_last_24_hours": {
+    "mcp": {
+      "invocations": 994,
+      "errors": 0
+    },
+    "worker": {
+      "invocations": 109,
+      "errors": 0
+    }
+  },
+  "log_review_last_24_hours": {
+    "mcp_events_reviewed": 8178,
+    "worker_events_reviewed": 2427,
+    "exact_project_atlas_payload_matches": 0,
+    "structured_model_payload_matches": 0,
+    "credential_value_matches": 0,
+    "notes": [
+      "Nine MCP log lines matched the word authorization only inside the public OAuth discovery route name.",
+      "No request body, Project Atlas text, structured prompt, structured model input, password, token, API key, or client secret appeared in the reviewed log messages."
+    ]
+  },
+  "redaction": "Account identifiers, physical resource identifiers, log bodies, request identifiers, connection strings, credentials, and user data are omitted."
+}

@@ -1,9 +1,9 @@
 # Docling Serve with the Japanese OCR data its published image does not carry.
 #
-# aizk asks docling for tesseract with `jpn+eng`, because docling's bundled RapidOCR only
+# The optional legacy service asks Docling for `jpn+eng+jpn_vert`, since bundled RapidOCR only
 # ever had Chinese models and silently produced wrong CJK for every scanned Japanese page.
 # The published image ships tesseract with `eng` and `osd` alone, and a missing language is
-# not an error tesseract reports through its exit status. `tesseract -l jpn+eng` prints
+# not an error tesseract reports through its exit status. `tesseract -l jpn+eng+jpn_vert` prints
 # `Failed loading language 'jpn'` and still exits 0, returning English-only OCR, so the
 # absence of this layer is invisible to every caller and to any health check that trusts an
 # exit code. Installing the data here is what makes the request aizk already sends mean what

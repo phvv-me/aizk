@@ -90,6 +90,7 @@ class CockroachDBAdapter(DatabaseAdapter):
         query = dict(parsed.query)
         mode = query.pop("sslmode", None)
         root_certificate = query.pop("sslrootcert", None)
+        query.pop("application_name", None)
         if mode is None:
             return parsed, None
         normalized = parsed.set(query=query)
@@ -119,6 +120,7 @@ class CockroachDBAdapter(DatabaseAdapter):
                 array(user.scopes.read),
                 array(user.scopes.write),
                 array(user.scopes.public),
+                str(user.operator).lower(),
             )
         )
 

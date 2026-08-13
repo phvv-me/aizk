@@ -1,6 +1,6 @@
 ---
 title: "MCP tools"
-description: "The four tools an agent can call, with every parameter and every return shape."
+description: "The five tools an agent can call, with every parameter and every return shape."
 ---
 
 This page names every parameter and limit, all of them shipped defaults a deployment can move.
@@ -8,23 +8,25 @@ Connecting a client is covered under [Claude Code](/docs/user/clients/claude-cod
 
 import Diagram from '../../../../../components/Diagram.astro';
 
-A connected client sees four tools and one resource. Every call runs as you, returns no row you
+A connected client sees five tools and one resource. Every call runs as you, returns no row you
 could not already read, and is capped at 5 requests per second.
 
 <Diagram
-  title="How the four tools reach the store, and how find points back to stored bytes"
+  title="How the five tools reach the store, and how find points back to stored bytes"
   nodes={[
-    { id:'agent', label:'agent', col:1.5, row:0, emphasis:true },
+    { id:'agent', label:'agent', col:2, row:0, emphasis:true },
     { id:'status', label:'status', col:0, row:1 },
     { id:'find', label:'find', col:1, row:1 },
     { id:'keep', label:'keep', col:2, row:1 },
-    { id:'share', label:'share', col:3, row:1 },
+    { id:'report', label:'report', col:3, row:1 },
+    { id:'share', label:'share', col:4, row:1 },
     { id:'bytes', label:'stored original', col:1, row:2 },
   ]}
   edges={[
     { from:'agent', to:'status' },
     { from:'agent', to:'find' },
     { from:'agent', to:'keep' },
+    { from:'agent', to:'report' },
     { from:'agent', to:'share' },
     { from:'find', to:'bytes', label:'resource', dashed:true },
   ]}
@@ -36,6 +38,7 @@ Agents call these as ordinary functions.
 aizk.status(days=30)
 aizk.find(query="why did we switch extractors?", budget=2048)
 aizk.keep(text="...", scopes=["Book Club"])
+aizk.report(text="Two settled claims contradict. Documents 0198... and 0199...")
 aizk.share(documents=["019f..."], scopes=["Book Club"])
 ```
 
@@ -185,6 +188,21 @@ The server gives you the whole URL. Do not build it. It is a single-use private 
 anyone holding it before it expires can perform that one write. Never log, share, or retry with it.
 Bytes not matching the declared size and hash are rejected.
 
+## report
+
+Sends contradictory, ungrounded, missing, or unusable evidence to an operator-only scope.
+
+```text
+aizk.report(text="Documents 0198... and 0199... make contradictory settled claims about...")
+```
+
+| Parameter | Type | Bounds |
+|---|---|---|
+| `text` | string | 1 to 8,000 characters by default |
+
+Quote the claims, excerpts, document IDs, and tool names. The returned ID names a one-way report that
+only operators can read. Reports share the text-memory quota and deduplicate identical retries.
+
 ## share
 
 Copies or moves documents you name, or previews what a query would select.
@@ -219,12 +237,8 @@ A result with `preview` set was not written, and each document's `destination` n
 once one exists, so read both rather than assuming. `dry_run` previews an explicit `documents` list
 and adds nothing to a query.
 
-Sharing copies by default, so the original stays yours, which
-[Sharing and organizations](/docs/user/using/sharing/) explains. `move` copies and then retires the
-private original, leaving the destination copy the only one recall returns while the original's
-rows, bytes and provenance stay. Both halves commit together, and a move touches only your own
-private documents. Repeating either call changes nothing, and a source revised since an earlier
-share refreshes that copy first.
+[Sharing and organizations](/docs/user/using/sharing/) explains copy, move, revision refresh, and
+the provenance that remains after a private original is retired.
 
 ## The artifact resource
 

@@ -38,7 +38,7 @@ Python the same value is a `frozenset[UUID5]`, aliased as `Scopes` in `src/aizk/
 A join table is the obvious alternative and it is the wrong one here, for two reasons.
 
 The first is the policy. The read check is one array containment test, `scopes <@ readable`, which
-PostgreSQL evaluates per row against a value already sitting in a transaction-local setting. With
+the active SQL backend evaluates per row against transaction-local authority. With
 a join table every policy on every table would become a correlated subquery with a grouped
 `HAVING`, evaluated inside row security, on every read.
 
@@ -49,23 +49,24 @@ and cannot be an index lookup.
 
 ## The predicate
 
-`Scoped.__rls__` compiles the policies. The caller's standing arrives as the `app.scopes` setting,
-which `rls.Context` writes with `SET LOCAL`, and `_authority` turns each JSON key of that setting
-back into a native `uuid[]` so the containment operators work on the right type.
+`Scoped.__rls__` compiles the policies. The caller's standing reaches the transaction through the
+database adapter. PostgreSQL uses `app.scopes` settings. CockroachDB uses an encoded
+`application_name` value. `_authority` turns either form into native UUID arrays for the
+containment operators.
 
 ```text
   read a row?
     │
     ├── cardinality(scopes) = 0 ?              ──▶ no
     │
-    ├── scopes <@ app.scopes->'read' ?         ──▶ yes
+    ├── scopes <@ caller.read ?                 ──▶ yes
     │
     ├── cardinality(scopes) = 1
-    │   AND scopes <@ app.scopes->'public' ?   ──▶ yes
+    │   AND scopes <@ caller.public ?           ──▶ yes
     │
     └── otherwise                              ──▶ no
 
-  write a row?  nonempty AND scopes <@ app.scopes->'write'
+  write a row?  nonempty AND scopes <@ caller.write
 ```
 
 That cardinality guard on the public branch is the whole reason public organizations stay

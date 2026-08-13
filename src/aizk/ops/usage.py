@@ -48,9 +48,7 @@ async def platform_usage() -> PlatformUsage:
     cannot answer "which organization".
     """
     generated_at = pendulum.now("UTC")
-    starts = {
-        days: generated_at.subtract(days=days - 1).start_of("day") for days in _PERIODS
-    }
+    starts = {days: generated_at.subtract(days=days - 1).start_of("day") for days in _PERIODS}
     targets = Usage.Event.targets.f.unnest().table_valued("scope_id").render_derived()
     by_actor = select(Usage.Event.created_by.label("actor_id"), *Usage.Event.aggregate()).group_by(
         Usage.Event.created_by

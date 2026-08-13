@@ -5,13 +5,14 @@ import pytest
 import rls
 from factories import seed_artifact
 from id_factory import uuid5, uuid7, uuid8
-from pydantic import UUID5, UUID7, UUID8, ValidationError
+from pydantic import UUID5, UUID7, UUID8, JsonValue, ValidationError
 from sqlalchemy import ForeignKeyConstraint
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm.exc import StaleDataError
 from sqlmodel import select
 
-from aizk.artifacts import ArtifactRepository, OriginalDescription
+from aizk.artifacts.models import OriginalDescription
+from aizk.artifacts.repository import ArtifactRepository, StorageQuotaExceeded
 from aizk.storage import IntegrityCheck, StoredBytes
 from aizk.store import Artifact, Blob, Document
 from aizk.store.identity import User
@@ -66,6 +67,7 @@ def test_artifact_models_keep_bytes_outside_postgres() -> None:
     assert content.revision == 1
     assert content.companion_text is None
     assert content.markdown is None
+    assert content.caption_metadata == []
     assert content.indexed_at is None
     assert artifact.contents == []
     assert artifact.promoted_from is None
@@ -514,7 +516,15 @@ def test_repository_versions_one_uri_and_persists_derivatives_in_postgres() -> N
         assert await repository.pending(user, scopes, limit=1) == (first.content_id,)
 
         indexed = datetime(2026, 7, 4, tzinfo=UTC)
-        await repository.store_conversion(user, current, "# Paper\n", indexed)
+        await repository.record_candidate(user, current, "# Paper\n", "test-v1")
+        caption_metadata: list[dict[str, JsonValue]] = [{"provider": "CoreWeave", "cost": 0.001}]
+        await repository.promote_candidate(
+            user,
+            current,
+            "test-v1",
+            indexed,
+            caption_metadata,
+        )
         await repository.set_state(
             user,
             second.content_id,
@@ -534,6 +544,10 @@ def test_repository_versions_one_uri_and_persists_derivatives_in_postgres() -> N
         assert [item.revision for item in contents] == [1, 2]
         original = next(item for item in contents if item.id == second.content_id)
         assert original.markdown == "# Paper\n"
+        assert original.conversion_policy == "test-v1"
+        assert original.caption_metadata == caption_metadata
+        assert original.candidate_markdown is None
+        assert original.candidate_policy is None
         assert original.indexed_at == indexed
         assert original.state is Artifact.Content.State.ready
         assert original.processed_at is not None
@@ -544,6 +558,40 @@ def test_repository_versions_one_uri_and_persists_derivatives_in_postgres() -> N
             "etag": stored.etag,
             "storage_version": stored.version,
         }
+
+    dbutil.run(body())
+
+
+def test_repository_serializes_and_enforces_each_users_stored_byte_quota() -> None:
+    async def body() -> None:
+        await dbutil.reset_db()
+        owner = uuid5()
+        scopes = frozenset({owner})
+        user = User.private(owner)
+        repository = ArtifactRepository(user_byte_limit=3)
+        description = OriginalDescription(filename="note.txt", media_type="text/plain")
+
+        await repository.create_original(
+            user,
+            stored_bytes("objects/within-quota", uuid8(), 2),
+            description,
+            scopes,
+        )
+        with pytest.raises(StorageQuotaExceeded, match="3 byte storage quota"):
+            await repository.create_original(
+                user,
+                stored_bytes("objects/over-quota", uuid8(), 2),
+                description,
+                scopes,
+            )
+
+        other = uuid5()
+        await repository.create_original(
+            User.private(other),
+            stored_bytes("objects/other-user", uuid8(), 2),
+            description,
+            frozenset({other}),
+        )
 
     dbutil.run(body())
 
@@ -698,11 +746,28 @@ def test_repository_rejects_mismatched_queue_scopes_and_missing_content() -> Non
                 frozenset({owner, extra}),
             )
         with pytest.raises(LookupError, match="conversion scopes"):
-            await repository.store_conversion(
+            await repository.record_candidate(
                 user,
                 original.model_copy(update={"content_id": uuid7()}),
                 "text",
+                "test-v1",
+            )
+        missing = original.model_copy(update={"content_id": uuid7()})
+        await repository.record_candidate_error(user, original, "failed-v1", "x" * 2000)
+        async with user as session:
+            quarantined = await session.get(Artifact.Content, original.content_id)
+        assert quarantined is not None
+        assert quarantined.candidate_policy == "failed-v1"
+        assert quarantined.candidate_error == "x" * 1024
+        with pytest.raises(LookupError, match="candidate quarantine"):
+            await repository.record_candidate_error(user, missing, "test-v1", "failed")
+        with pytest.raises(LookupError, match="candidate disappeared"):
+            await repository.promote_candidate(
+                user,
+                original,
+                "test-v1",
                 datetime.now(UTC),
+                [],
             )
         with pytest.raises(LookupError, match="queued scopes"):
             await repository.set_state(
@@ -747,7 +812,8 @@ def test_repository_reads_stored_markdown_with_the_identity_its_document_needs()
         )
         original = await repository.original(user, receipt.content_id, scopes)
         indexed = datetime(2026, 7, 3, tzinfo=UTC)
-        await repository.store_conversion(user, original, "# Paper\n", indexed)
+        await repository.record_candidate(user, original, "# Paper\n", "test-v1")
+        await repository.promote_candidate(user, original, "test-v1", indexed, [])
 
         converted = await repository.converted(user, receipt.content_id, scopes)
         assert converted.markdown == "# Paper\n"

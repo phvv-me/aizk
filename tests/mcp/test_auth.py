@@ -6,9 +6,7 @@ from unittest.mock import AsyncMock
 import dbutil
 import httpx
 import pytest
-from fastmcp import settings as fastmcp_settings
-from fastmcp.server.auth import AccessToken
-from fastmcp.server.auth.oidc_proxy import OIDCProxy
+from fastmcp.server.auth import AccessToken, RemoteAuthProvider
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import AnyHttpUrl, SecretStr
@@ -50,8 +48,6 @@ def _configure_logto(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "mcp_public_url", AnyHttpUrl("https://aizk.test"))
     monkeypatch.setattr(settings, "logto_client_id", "client")
     monkeypatch.setattr(settings, "logto_client_secret", SecretStr("secret"))
-    monkeypatch.setattr(settings, "oauth_client_id", "oauth-client")
-    monkeypatch.setattr(settings, "oauth_client_secret", SecretStr("oauth-secret"))
 
 
 def _mock_client(handler: httpx.MockTransport) -> lt.LogtoClient:
@@ -703,36 +699,26 @@ def test_resolve_fallback_matches_auth_mode_and_keeps_public_scopes(
 
 @pytest.mark.parametrize("enabled", [True, False])
 def test_provider_advertises_logto_only_when_configured(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
 ) -> None:
     if enabled:
         _configure_logto(monkeypatch)
     else:
         monkeypatch.setattr(settings, "logto_url", None)
         monkeypatch.setattr(settings, "mcp_public_url", None)
-    monkeypatch.setattr(fastmcp_settings, "home", tmp_path)
-    monkeypatch.setattr(
-        httpx,
-        "get",
-        lambda url, **kwargs: httpx.Response(
-            200,
-            json=_discovery(),
-            request=httpx.Request("GET", str(url)),
-        ),
-    )
     client = lt.LogtoClient()
     provider = Auth(client).provider()
     dbutil.run(client.close())
 
-    assert isinstance(provider, OIDCProxy) is enabled
-    if isinstance(provider, OIDCProxy):
-        # Aizk's own scope and resource policy, not FastMCP's internals or wire protocol.
-        registration = provider.client_registration_options
-        assert registration is not None
-        assert registration.default_scopes == ["control", "offline_access", "openid"]
+    assert isinstance(provider, RemoteAuthProvider) is enabled
+    if isinstance(provider, RemoteAuthProvider):
+        assert [str(server) for server in provider.authorization_servers] == [
+            "https://auth.test/oidc"
+        ]
+        assert provider.scopes_supported == ["control", "offline_access", "openid"]
         assert provider.required_scopes == ["control"]
+        assert provider.resource_name == "AIZK"
         assert settings.mcp_resource_id == "https://aizk.test/mcp"
-        # The committed gateway must proxy exactly the provider's routes plus the MCP paths.
         routes = {route.path for route in provider.get_routes("/mcp")}
         gateway = Path(__file__).parents[2] / "src/deploy/Caddyfile"
         gateway_routes = set(
@@ -742,13 +728,7 @@ def test_provider_advertises_logto_only_when_configured(
                 if line.strip().startswith("@mcp path ")
             ).split()[2:]
         )
-        # `/revoke` is served but not enumerated by `get_routes`, so it has to be named here
-        # or this assertion would reject a gateway that is actually correct. The provider's
-        # own authorization server metadata advertises `revocation_endpoint` at that path,
-        # and the running server answers there rather than falling through to the docs site,
-        # both confirmed against the deployment. A spec compliant client reads the metadata,
-        # so a gateway missing the path 404s the one call that revokes a token.
-        assert gateway_routes == routes | {"/mcp", "/mcp/*", "/revoke"}
+        assert gateway_routes == routes | {"/mcp", "/mcp/*"}
 
 
 def test_bearer_uses_the_local_identity_when_auth_is_off(
@@ -844,9 +824,8 @@ def test_auth_builds_cached_verifiers_and_resolves_only_valid_claims(
             algorithm: str,
             required_scopes: list[str],
             audience: str,
-            http_client: httpx.AsyncClient,
         ) -> None:
-            del jwks_uri, issuer, required_scopes, audience, http_client
+            del jwks_uri, issuer, required_scopes, audience
             self.algorithm = algorithm
 
         async def verify_token(self, token: str) -> AccessToken | None:

@@ -108,18 +108,23 @@ def artifact_content(
     revision: int = 1,
     state: Artifact.Content.State = Artifact.Content.State.pending,
     created_at: datetime | None = None,
+    markdown: str | None = None,
+    conversion_policy: str | None = None,
 ) -> Artifact.Content:
     """Build one artifact content revision bound to a blob."""
-    extra = {"created_at": created_at} if created_at is not None else {}
-    return Artifact.Content(
+    content = Artifact.Content(
         artifact_id=artifact_id,
         blob_id=blob_id,
         revision=revision,
         state=state,
         created_by=owner,
         scopes=list(scopes),
-        **extra,
+        markdown=markdown,
+        conversion_policy=conversion_policy,
     )
+    if created_at is not None:
+        content.created_at = created_at
+    return content
 
 
 async def seed_artifact(
@@ -133,6 +138,8 @@ async def seed_artifact(
     state: Artifact.Content.State = Artifact.Content.State.pending,
     created_at: datetime | None = None,
     source_uri: str | None = None,
+    markdown: str | None = None,
+    conversion_policy: str | None = None,
 ) -> StoredArtifact:
     """Persist one original artifact revision through the scoped app role and return its rows."""
     scope_list = list(scopes)
@@ -142,7 +149,14 @@ async def seed_artifact(
         session.add_all((blob, artifact))
         await session.flush()
         content = artifact_content(
-            artifact.id, blob.id, owner, scope_list, state=state, created_at=created_at
+            artifact.id,
+            blob.id,
+            owner,
+            scope_list,
+            state=state,
+            created_at=created_at,
+            markdown=markdown,
+            conversion_policy=conversion_policy,
         )
         session.add(content)
     return StoredArtifact(owner, blob, artifact, content)

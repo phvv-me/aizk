@@ -5,7 +5,7 @@ from patos import FrozenModel
 from pydantic import UUID7
 from sqlalchemy import and_, or_
 from sqlalchemy.sql.elements import ColumnElement
-from sqlmodel import select, update
+from sqlmodel import select
 
 from ...config import settings
 from ...store.identity import User
@@ -19,7 +19,7 @@ from .models import ArtifactConversionJob, ArtifactReindexJob
 class ArtifactProcessor(Protocol):
     """Turn one durable original into stored and recallable derivatives."""
 
-    async def process(self, content_id: UUID7, scopes: Scopes) -> None:
+    async def process(self, content_id: UUID7, scopes: Scopes, policy: str) -> None:
         """Process one original under its exact queued scopes."""
         ...
 
@@ -45,7 +45,11 @@ class DoclingConversionJob(QueueJob[ArtifactConversionJob]):
 
     async def handle(self, payload: ArtifactConversionJob) -> None:
         """Resolve and process one original only through its durable PostgreSQL identity."""
-        await self.processor.process(payload.artifact_content_id, payload.scopes)
+        await self.processor.process(
+            payload.artifact_content_id,
+            payload.scopes,
+            payload.policy,
+        )
 
 
 class MarkdownReindexJob(QueueJob[ArtifactReindexJob]):
@@ -157,14 +161,25 @@ class ReconversionSweep(FrozenModel):
     """
 
     media_prefixes: tuple[str, ...]
+    policy: str
     source_prefix: str | None = None
+    text_pattern: str | None = None
 
     def selects(self) -> ColumnElement[bool]:
         """The predicate matching this sweep's originals inside one converted revision."""
         media = or_(*[Blob.media_type.startswith(prefix) for prefix in self.media_prefixes])
-        if self.source_prefix is None:
-            return media
-        return and_(media, Artifact.source_uri.startswith(self.source_prefix))
+        selected: ColumnElement[bool] = media
+        if self.source_prefix is not None:
+            selected = and_(selected, Artifact.source_uri.startswith(self.source_prefix))
+        if self.text_pattern is not None:
+            selected = and_(
+                selected,
+                or_(
+                    Artifact.name.op("~")(self.text_pattern),
+                    ArtifactContent.markdown.op("~")(self.text_pattern),
+                ),
+            )
+        return selected
 
 
 class ArtifactReconversion:
@@ -176,56 +191,74 @@ class ArtifactReconversion:
     async def enqueue(self, limit: int) -> int:
         """Enqueue at most `limit` of this sweep's converted originals.
 
-        The ordering invariant is that an original's move back to `queued` commits before its
-        task exists and never after. A worker can pick the task up the instant it lands and
-        write `ready` again, so a sweep still holding an open transaction would overwrite that
-        worker with a stale `queued` and leave an artifact nothing is working on. Reading the
-        whole window first also keeps a row unlocked while the queue writes.
+        Production stays `ready` while the candidate runs. Queue deduplication and the policy
+        stamps make a repeated sweep finite without exposing a half-finished derivative.
         """
         if limit < 1:
             raise ValueError("reconversion limit must be positive")
         admitted = 0
         async with Queue(dsn=settings.asyncpg_dsn) as queue:
-            for content_id, scopes in await self.originals(limit):
-                await self.claim(content_id)
+            active_ids = await self.active_content_ids(queue)
+            for content_id, scopes in await self.originals(limit, active_ids):
                 admitted += await queue.enqueue(
                     DoclingConversionJob,
-                    ArtifactConversionJob(artifact_content_id=content_id, scopes=scopes),
+                    ArtifactConversionJob(
+                        artifact_content_id=content_id,
+                        scopes=scopes,
+                        policy=self.sweep.policy,
+                    ),
                     str(content_id),
                 )
         return admitted
 
-    async def originals(self, limit: int) -> tuple[tuple[UUID7, Scopes], ...]:
+    async def originals(
+        self,
+        limit: int,
+        active_ids: tuple[UUID, ...] = (),
+    ) -> tuple[tuple[UUID7, Scopes], ...]:
         """Read the converted originals still carrying an older conversion, oldest first.
 
         Only the identity and the scope set are selected, since a candidate whose whole row
         came back would detoast the very Markdown this sweep is about to replace.
         """
+        predicates = [
+            ArtifactContent.state == ArtifactContent.State.ready,
+            ArtifactContent.markdown.is_not(None),
+            or_(
+                ArtifactContent.conversion_policy.is_(None),
+                ArtifactContent.conversion_policy != self.sweep.policy,
+            ),
+            or_(
+                ArtifactContent.candidate_policy.is_(None),
+                ArtifactContent.candidate_policy != self.sweep.policy,
+            ),
+            self.sweep.selects(),
+        ]
+        if active_ids:
+            predicates.append(ArtifactContent.id.not_in(active_ids))
         async with User.system().owner as session:
             rows = (
                 await session.exec(
                     select(ArtifactContent.id, ArtifactContent.scopes)
                     .join(Artifact, Artifact.id == ArtifactContent.artifact_id)
                     .join(Blob, Blob.id == ArtifactContent.blob_id)
-                    .where(
-                        ArtifactContent.state == ArtifactContent.State.ready,
-                        self.sweep.selects(),
-                    )
+                    .where(*predicates)
                     .order_by(ArtifactContent.updated_at, ArtifactContent.id)
                     .limit(limit)
                 )
             ).all()
             return tuple((content_id, frozenset(scopes)) for content_id, scopes in rows)
 
-    async def claim(self, content_id: UUID7) -> None:
-        """Commit one original's move back to `queued` in its own transaction."""
-        async with User.system().owner as session:
-            await session.exec(
-                update(ArtifactContent)
-                .where(ArtifactContent.id == content_id)
-                .values(state=ArtifactContent.State.queued)
-                .execution_options(synchronize_session=False)
-            )
+    async def active_content_ids(self, queue: Queue) -> tuple[UUID, ...]:
+        """Decode conversions already protected by the queue's content-ID lock."""
+        payloads = await queue.active_payloads(DoclingConversionJob.entrypoint)
+        content_ids: list[UUID] = []
+        for payload in payloads:
+            try:
+                content_ids.append(ArtifactConversionJob.decode(payload).artifact_content_id)
+            except TypeError, ValueError:
+                continue
+        return tuple(content_ids)
 
 
 class ArtifactRechunk:
@@ -282,10 +315,15 @@ class ArtifactRechunk:
 # Fetched HTML is where site chrome lives, and the boilerplate cleaner only runs on those.
 _WEB_PAGES = ReconversionSweep(
     media_prefixes=("text/html", "application/xhtml+xml"),
+    policy="web-boilerplate-v1",
     source_prefix="http",
 )
-# Anything Docling may read with an OCR engine, whatever door it arrived through.
-_SCANNED_DOCUMENTS = ReconversionSweep(media_prefixes=("application/pdf", "image/"))
+# Japanese PDF and image derivatives are the bounded population at risk from the OCR fix.
+_SCANNED_DOCUMENTS = ReconversionSweep(
+    media_prefixes=("application/pdf", "image/"),
+    policy="japanese-ocr-v2",
+    text_pattern="[一-龯ぁ-ゖァ-ヺ々〆ヶ]",
+)
 
 
 async def retry_failed_artifacts(limit: int = 100) -> int:

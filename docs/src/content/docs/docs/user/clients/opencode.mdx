@@ -4,13 +4,21 @@ description: "Connect OpenCode to aizk over the same OAuth-protected endpoint."
 ---
 
 This page assumes you have an account on a running aizk deployment and know its address, which
-[Quickstart](/docs/user/quickstart/) covers. The examples use `https://aizk.phvv.me/mcp`, so replace
-it with your own address.
+[Quickstart](/docs/user/quickstart/) covers. Replace `YOUR_AIZK_HOST` below with the host for your
+deployment.
 
 import Diagram from '../../../../../components/Diagram.astro';
 
 OpenCode is the shortest of the three client setups. One committed file, one sign-in command, and one
 command for when something looks wrong.
+
+:::caution[Use a release that speaks modern MCP]
+As of August 13, 2026, OpenCode `1.18.8` is the official release that negotiates MCP
+`2026-07-28`. OpenCode reverted that client in `1.18.9` while upstream compatibility problems are
+resolved, so releases `1.18.9` through `1.18.18` cannot connect to a modern-only aizk server. Pin
+`1.18.8` for now and check the [OpenCode rollback](https://github.com/anomalyco/opencode/pull/39373)
+before removing the pin.
+:::
 
 ## The configuration file
 
@@ -22,7 +30,13 @@ OpenCode reads its servers from `opencode.json` in the project root.
   "mcp": {
     "aizk": {
       "type": "remote",
-      "url": "https://aizk.phvv.me/mcp",
+      "url": "https://YOUR_AIZK_HOST/mcp",
+      "oauth": {
+        "clientId": "YOUR_AIZK_CLIENT_ID",
+        "scope": "control offline_access openid",
+        "callbackPort": 8912,
+        "redirectUri": "http://127.0.0.1:8912/callback"
+      },
       "enabled": true
     }
   }
@@ -65,15 +79,15 @@ tell a configuration problem from an authorization problem.
   ]}
 />
 
-Seeing the four tools listed is not quite proof. Ask OpenCode to call `status` and confirm it returns
+Seeing the five tools listed is not quite proof. Ask OpenCode to call `status` and confirm it returns
 your name and your organizations. That is the first call that needs a token aizk actually accepted.
 
 ## What you get once it works
 
-Four tools and one resource, the same set every client sees. `status` reports who you are and what is
-still processing, `find` answers one question with evidence, `keep` stores a note or a file, and
-`share` copies documents into a team. [MCP tools](/docs/user/reference/tools/) is the full surface with
-every parameter.
+Five tools and one resource, the same set every client sees. `status` reports who you are and what is
+still processing, `find` answers one question with evidence, `keep` stores a note or a file,
+`report` sends a memory problem to the operator, and `share` copies documents into a team.
+[MCP tools](/docs/user/reference/tools/) is the full surface with every parameter.
 
 Committing `opencode.json` shares the connection and nothing else. Each person signs in as themselves
 and each person's memory stays private by default, so a shared config file never implies shared memory.

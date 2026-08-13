@@ -1,10 +1,12 @@
 ---
-title: "PostgreSQL and storage"
-description: "Initialization, the tuning that assumes a large host, and the disk layout."
+title: "PostgreSQL profile"
+description: "Initialization, extensions, tuning and disk layout for the self-hosted PostgreSQL profile."
 ---
 
-PostgreSQL is not a dependency of aizk so much as it is the engine. Vectors, BM25, the graph, the
-job queue and every authorization decision live in it. This page covers how the cluster is
+This page applies only to the self-hosted PostgreSQL profile. PostgreSQL stores its documents,
+vectors, BM25 index, graph, queue and authorization state. The CockroachDB Cloud profile uses a
+separate migration, C-SPANN and the portable queue described on
+[Database profiles](/docs/dev/run/databases/). This page covers how the PostgreSQL cluster is
 created, tuned and stored. It assumes you know the service list from
 [Deployment topology](/docs/dev/run/topology/) and can read SQL.
 
@@ -137,7 +139,6 @@ physical disk holds the bytes.
 AIZK_POSTGRES_DATA_VOLUME=/mnt/ssd2/aizk/postgres
 AIZK_OBJECT_DATA_VOLUME=/mnt/ssd2/aizk/objects
 AIZK_BACKUP_VOLUME=/mnt/ssd2/aizk/backups
-AIZK_OAUTH_VOLUME=/mnt/ssd2/aizk/oauth
 AIZK_CLAMAV_DATA_VOLUME=/mnt/ssd2/aizk/clamav
 AIZK_LOKI_VOLUME=/mnt/ssd2/aizk/loki
 AIZK_ALLOY_VOLUME=/mnt/ssd2/aizk/alloy

@@ -21,8 +21,9 @@ from sqlalchemy.sql.selectable import CTE
 from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
+from ...config import DatabaseBackend, settings
 from ..mixins import Standing
-from ..vector import cosine_distance
+from ..vector import cosine_distance, scoped_vector_candidates
 from .tables import (
     Artifact,
     Chunk,
@@ -226,18 +227,42 @@ class Entity:
             mention_entities = union_all(exact_mentions, fuzzy_matches).cte("mention_entity")
         else:
             mention_entities = exact_mentions.cte("mention_entity")
-        entity_distance = cosine_distance(cls.Content.embedding, context.vector)
-        dense_entities = (
-            select(
-                cls.Content.id.label("entity_id"),
-                seed_mass_from(
-                    bindparam("graph_entity_seed_weight", type_=Float), entity_distance
-                ).label("mass"),
+        entity_limit = bindparam("graph_seed_entities", type_=Integer)
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            entity_candidates = scoped_vector_candidates("entity", context.vector, entity_limit)
+            closest_entities = (
+                select(
+                    cls.Claim.content_id.label("entity_id"),
+                    func.min(entity_candidates.c.distance).label("distance"),
+                )
+                .join(entity_candidates, entity_candidates.c.source_id == cls.Claim.id)
+                .group_by(cls.Claim.content_id)
+                .subquery("closest_entity")
             )
-            .where(cls.Content.embedding.is_not(None))
-            .order_by(entity_distance)
-            .limit(bindparam("graph_seed_entities", type_=Integer))
-        )
+            candidate_distance = closest_entities.c.distance
+            dense_entities = (
+                select(
+                    closest_entities.c.entity_id,
+                    seed_mass_from(
+                        bindparam("graph_entity_seed_weight", type_=Float), candidate_distance
+                    ).label("mass"),
+                )
+                .order_by(candidate_distance)
+                .limit(entity_limit)
+            )
+        else:
+            vector_distance = cosine_distance(cls.Content.embedding, context.vector)
+            dense_entities = (
+                select(
+                    cls.Content.id.label("entity_id"),
+                    seed_mass_from(
+                        bindparam("graph_entity_seed_weight", type_=Float), vector_distance
+                    ).label("mass"),
+                )
+                .where(cls.Content.embedding.is_not(None))
+                .order_by(vector_distance)
+                .limit(entity_limit)
+            )
         endpoint_mass = seed_mass_from(
             bindparam("graph_fact_seed_weight", type_=Float), dense_facts.c.distance
         )

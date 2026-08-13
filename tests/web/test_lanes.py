@@ -26,4 +26,4 @@ def test_a_dispatch_with_no_lane_at_all_names_no_provider() -> None:
 def test_the_default_chains_are_the_measured_ones() -> None:
     assert settings.web_search_keyword_providers == ("firecrawl",)
     assert settings.web_search_semantic_providers == ("exa",)
-    assert settings.web_search_fetch_providers == ("firecrawl-reader", "docling-reader")
+    assert settings.web_search_fetch_providers == ("firecrawl-reader",)

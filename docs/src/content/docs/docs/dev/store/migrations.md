@@ -1,25 +1,32 @@
 ---
 title: "Migrations and DDL"
-description: "The squashed initial revision, the declarative DDL layer, and the drift check."
+description: "The PostgreSQL revision history, fused CockroachDB baseline, declarative DDL and drift checks."
 ---
 
-There are exactly two Alembic revisions in `src/aizk/store/migrations/versions/`. This page walks
-what is inside them, the DDL layer they lean on, and how to add a third. It assumes you have
-read [Row level security](/docs/dev/store/rls/), because a good half of `0001_init` is frozen
-policy.
+The profiles have separate Alembic histories. PostgreSQL has fourteen revisions in
+`migrations/versions/`. CockroachDB has one baseline in
+`migrations/cockroachdb/versions/`. Read
+[Row level security](/docs/dev/store/rls/) first because policy is frozen into both baselines.
 
-## Two revisions
+## PostgreSQL revision history
 
-`0001_init` squashes the entire historical chain, the former `0001` through `0006`. Fresh
-installs and CI build the whole schema from that one file. The production database was already
-at the old head, so it was reconciled by restamping, `alembic stamp 0001_init`, rather than by
-re-running anything. Its `downgrade` raises `NotImplementedError`, since a squash has no faithful
-reverse.
+`0001_init` squashes the first historical chain. Later revisions add portable SQL, runtime,
+quotas, web egress, storage controls, diagnostics, operator views and captions. Fresh PostgreSQL
+installs replay the chain to head.
 
-`0002_durable_usage` is small. It adds `capture_key` to `usage_event` as nullable,
-backfills existing rows with `'legacy:' || id::text`, makes the column `NOT NULL`, and creates
-the unique index `uq_usage_event_capture_key`, making transport accounting idempotent across
-worker restarts.
+The initial revision carries PostgreSQL-specific extensions, BM25, half-vector indexes and the
+first frozen policy set. Later revisions must not rewrite that history.
+
+## CockroachDB fused baseline
+
+`0001_cockroachdb` creates the current CockroachDB schema in one pass. It does not replay
+PostgreSQL extension operations or queue history. It creates full vector columns, portable
+durable queue tables, CockroachDB policy expressions and the private C-SPANN projection.
+
+The baseline is fused because the cloud profile was introduced after the memory model existed.
+Replaying backend-specific PostgreSQL history would add compatibility work with no deployed
+CockroachDB state to preserve. Append a new CockroachDB revision only after a deployed cloud
+database needs history beyond the baseline.
 
 ## What 0001_init lays down
 
@@ -109,10 +116,9 @@ all of them in `src/aizk/store/migrations/env.py`.
 typed `AlterRLSOp`, and sets `process_revision_directives=omit_runtime_table_info` so runtime-only
 table info never leaks into a generated script.
 
-`tests/store/test_migrations.py` proves it end to end. It creates a disposable database, upgrades
-to head, inserts a document and a chunk, and asserts that the artifact tables exist, that
-`relforcerowsecurity` holds, that the chunk insert check contains `(document_id, scopes) IN`, and
-that the stamped revision is `0002_durable_usage`.
+`tests/store/test_migrations.py` proves the PostgreSQL path end to end. CockroachDB migration
+coverage lives with its backend smoke and deployment checks. Both paths must reach their own head
+before request traffic starts.
 
 ## Adding a migration
 
@@ -123,9 +129,9 @@ chefe run aizk database check-rls
 ```
 
 :::caution[Autogenerate is a drafter, not an author]
-Change the model first, autogenerate, then read the generated script before applying it. It does
-not know about the exclusions above, so a hand-written statement usually needs a hand-written
-migration line to match.
+Change the model first, select the intended backend history, then read the generated script before
+applying it. Autogenerate does not understand every extension or policy exclusion, so custom DDL
+often needs a hand-written migration line.
 :::
 
 `chefe run aizk database migrate --sql` writes the offline script instead of applying it, the

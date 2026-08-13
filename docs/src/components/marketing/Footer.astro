@@ -1,4 +1,6 @@
 ---
+import icon from '../../assets/icon.svg?raw';
+
 const groups = [
   {
     title: 'Start',
@@ -30,10 +32,10 @@ const groups = [
   {
     title: 'Run',
     links: [
-      { label: 'Hardware and cost', href: '/docs/dev/run/hardware/' },
-      { label: 'First start', href: '/docs/dev/run/first-start/' },
-      { label: 'Security model', href: '/docs/dev/run/security/' },
-      { label: 'Backups', href: '/docs/dev/run/backups/' },
+      { label: 'Deployment options', href: '/docs/dev/run/databases/' },
+      { label: 'Cloud profile', href: '/docs/dev/run/aws/' },
+      { label: 'Self-hosted setup', href: '/docs/dev/run/first-start/' },
+      { label: 'Security', href: '/docs/dev/run/security/' },
     ],
   },
 ];
@@ -42,9 +44,12 @@ const groups = [
 <footer class="mx-auto max-w-6xl px-4 py-16">
   <div class="grid gap-10 md:grid-cols-[1.5fr_repeat(4,1fr)]">
     <div class="space-y-3">
-      <p class="text-lg font-semibold" style="font-family: var(--font-brand)">aizk</p>
+      <a href="/" class="flex items-center gap-2 text-lg font-semibold tracking-tight">
+        <span class="size-7" aria-hidden="true" set:html={icon} />
+        <span style="font-family: var(--font-brand)">aizk</span>
+      </a>
       <p class="text-base-content/60 max-w-xs text-sm">
-        Self-hosted shared memory for people, teams and MCP agents.
+        Portable shared memory for people, teams and MCP agents.
       </p>
       <div class="flex gap-2">
         <a href="https://github.com/phvv-me/aizk" class="btn btn-outline btn-xs" rel="noopener">
@@ -70,7 +75,7 @@ const groups = [
   <div
     class="border-base-300 text-base-content/50 mt-12 flex flex-wrap items-center justify-between gap-3 border-t pt-6 text-xs"
   >
-    <p>MIT licensed. Built by Pedro Valois.</p>
+    <p>Apache 2.0 licensed. Built by Pedro Valois.</p>
     <p>
       Security reports go to <a
         href="mailto:contact@phvv.me"

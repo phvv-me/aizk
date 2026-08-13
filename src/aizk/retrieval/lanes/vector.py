@@ -18,6 +18,7 @@ class VectorLane(Lane):
         match self.kind:
             case Lane.Kind.WORKING_MEMORY:
                 return self.by_vector(
+                    "session_item",
                     SessionItem.embedding,
                     SessionItem.line(),
                     SessionItem.id,
@@ -30,6 +31,7 @@ class VectorLane(Lane):
                 )
             case Lane.Kind.PROFILE:
                 return self.by_vector(
+                    "profile",
                     Profile.embedding,
                     Profile.summary,
                     Profile.id,
@@ -41,6 +43,7 @@ class VectorLane(Lane):
                 )
             case Lane.Kind.COMMUNITIES:
                 return self.by_vector(
+                    "community",
                     Community.embedding,
                     Community.line(),
                     Community.id,

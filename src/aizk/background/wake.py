@@ -38,7 +38,7 @@ class LambdaWorkerWake:
                 self.client.invoke,
                 FunctionName=self.function_name,
                 InvocationType="Event",
-                Payload=b"{}",
+                Payload=b'{"kind":"worker"}',
             )
         except (BotoCoreError, ClientError, OSError) as error:
             logger.warning("worker wake failed and will use scheduled recovery: {}", error)

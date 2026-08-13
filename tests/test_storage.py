@@ -325,3 +325,18 @@ def test_s3_factory_uses_configured_credentials_and_short_lived_signing(
     assert backend.client_options == {"allow_http": allow_http}
     assert (method, key, signed_lifetime) == ("GET", "objects/key", lifetime)
     assert calls == []
+
+
+def test_s3_factory_leaves_native_aws_credentials_to_the_execution_role() -> None:
+    backend = s3_backend(
+        endpoint=None,
+        bucket="aizk",
+        access_key="",
+        secret_key="",
+    )
+
+    assert backend.config["checksum_algorithm"] == "SHA256"
+    assert "endpoint" not in backend.config
+    assert "access_key_id" not in backend.config
+    assert "secret_access_key" not in backend.config
+    assert backend.client_options == {"allow_http": "false"}

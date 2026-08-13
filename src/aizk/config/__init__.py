@@ -6,6 +6,7 @@ from loguru import logger
 from opentelemetry import trace
 from opentelemetry.trace import format_span_id, format_trace_id
 
+from .parameters import load_parameter_environment
 from .settings import DatabaseBackend, Settings
 
 if TYPE_CHECKING:
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
     from loguru import Record
 
 # Shared process configuration
+load_parameter_environment()
 settings = cast("Callable[[], Settings]", Settings)()
 
 

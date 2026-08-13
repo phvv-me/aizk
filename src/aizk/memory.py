@@ -1,11 +1,11 @@
 from datetime import datetime
-from typing import cast
+from typing import Protocol, cast
 
 from patos import FrozenModel
 from pydantic import Field
 
 from . import graph, retrieval
-from .artifacts import ArtifactIntake, ArtifactReceipt
+from .artifacts.models import ArtifactReceipt
 from .background.jobs.projection import enqueue_document
 from .background.wake import NoopWorkerWake, WorkerWake
 from .config import settings
@@ -51,6 +51,20 @@ class ShareResult(FrozenModel):
     preview: bool = False
 
 
+class MemoryIntake(Protocol):
+    """Preserve one URI when a caller explicitly requests an original artifact."""
+
+    async def uri(
+        self,
+        user: User,
+        uri: str,
+        scopes: ScopeNames | None = None,
+        companion_text: str | None = None,
+        observed_at: datetime | None = None,
+        expires_at: datetime | None = None,
+    ) -> ArtifactReceipt: ...
+
+
 class Memory:
     """Expose AIZK memory operations for one authenticated caller.
 
@@ -65,7 +79,7 @@ class Memory:
     def __init__(
         self,
         user: User,
-        intake: ArtifactIntake,
+        intake: MemoryIntake,
         wake: WorkerWake | None = None,
         web: WebSearch | None = None,
         client: str | None = None,

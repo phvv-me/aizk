@@ -5,11 +5,13 @@ from types import ModuleType, SimpleNamespace
 from typing import cast
 
 import dbutil
+import httpx
 import pytest
 from bg_doubles import FakeJob, RecordingPg, RecordingQueue, fake_runtime
 from hypothesis import given
 from hypothesis import strategies as st
 from id_factory import uuid5, uuid5s
+from openai import APIConnectionError
 from pgqueuer import PgQueuer
 from pydantic import UUID5
 
@@ -232,6 +234,35 @@ def test_serverless_worker_requires_cockroach_and_drains_one_wave(
     assert runner.once == 1
     assert runner.runs == 1
     assert len(refreshed) == 2
+
+
+def test_portable_worker_loads_exact_ontology_when_embedding_is_unavailable(
+    migrated_db: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = fake_runtime()
+    runner = PortableRunner()
+    loaded: list[Session] = []
+
+    async def unavailable(cls: type[Ontology], session: Session) -> None:
+        del cls, session
+        raise APIConnectionError(request=httpx.Request("POST", "http://embed.invalid"))
+
+    async def load(cls: type[Ontology], session: Session) -> None:
+        del cls
+        loaded.append(session)
+
+    def assemble(received: Runtime, batch_size: int | None = None) -> PortableWorker:
+        del received, batch_size
+        return cast(PortableWorker, runner)
+
+    monkeypatch.setattr(Ontology, "refresh", classmethod(unavailable))
+    monkeypatch.setattr(Ontology, "load", classmethod(load))
+    monkeypatch.setattr(schedule_mod, "portable_worker", assemble)
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+
+    assert asyncio.run(run_worker_once(runtime, 2)) == 6
+    assert len(loaded) == 1
 
 
 def test_scope_roster_unions_document_and_session_scopes(migrated_db: None) -> None:

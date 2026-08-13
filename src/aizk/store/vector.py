@@ -3,7 +3,11 @@ from typing import cast
 
 from patos.sql import CosineHalfvec
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import ColumnElement, Float, FromClause
+from pydantic import UUID5
+from sqlalchemy import ColumnElement, Float, FromClause, Uuid, column, func, true
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.sql.selectable import Subquery, TableValuedAlias
+from sqlmodel import select
 
 from ..config import DatabaseBackend, settings
 
@@ -43,6 +47,41 @@ def cosine_distance[L: Sequence[float] | None, R: Sequence[float]](
 ) -> ColumnElement[float]:
     """Build portable cosine distance without relying on SQLAlchemy operator forwarding."""
     return cast(ColumnElement[float], left.op("<=>", return_type=Float)(right))
+
+
+def scoped_vector_candidates(
+    kind: str,
+    vector: ColumnElement[list[float]],
+    limit: ColumnElement[int],
+    scopes: ColumnElement[list[UUID5]] | None = None,
+) -> Subquery:
+    """Rank one CockroachDB projection kind across every exact visible scope partition."""
+
+    def search(scope_set: ColumnElement[list[UUID5]]) -> TableValuedAlias:
+        return (
+            func.aizk_private.cspann_search(kind, scope_set, vector, limit)
+            .table_valued(
+                column("source_id", Uuid()),
+                column("distance", Float()),
+            )
+            .render_derived()
+        )
+
+    candidates: FromClause
+    if scopes is not None:
+        candidates = search(scopes)
+        ranked = select(candidates.c.source_id, candidates.c.distance)
+    else:
+        partitions = (
+            func.aizk_private.cspann_scopes(kind)
+            .table_valued(column("scopes", ARRAY(Uuid())))
+            .render_derived(name=f"{kind}_cspann_scope")
+        )
+        candidates = search(partitions.c.scopes).lateral(name=f"{kind}_cspann_partition")
+        ranked = select(candidates.c.source_id, candidates.c.distance).select_from(
+            partitions.join(candidates, true())
+        )
+    return ranked.order_by(candidates.c.distance).limit(limit).subquery(f"{kind}_cspann_candidate")
 
 
 def embedding_column(

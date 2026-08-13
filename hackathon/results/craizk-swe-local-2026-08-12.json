@@ -1,0 +1,42 @@
+{
+  "date": "2026-08-12",
+  "deployment": "local Lambda runtime emulator with CockroachDB 26.2.5",
+  "database": "craizk_swe_eval",
+  "corpus": {
+    "documents": 6,
+    "source_bytes": 11941,
+    "facts": 37,
+    "entities": 15,
+    "communities": 3
+  },
+  "profile": {
+    "access_recording": false,
+    "communities": true,
+    "entity_catalog": true,
+    "graph_expansion": true,
+    "profiles": false,
+    "raptor": false,
+    "reranker": false,
+    "sources_first": true
+  },
+  "recall": {
+    "queries": 8,
+    "samples": 16,
+    "expectations_matched": 26,
+    "expectations_total": 29,
+    "expectation_coverage": 0.8966,
+    "lambda_find_p50_ms": 866.802,
+    "lambda_find_p95_ms": 2911.071,
+    "internal_total_p50_ms": 846.969,
+    "embedding_p50_ms": 374.034,
+    "database_p50_ms": 462.106,
+    "database_warm_range_ms": [443.646, 536.459],
+    "cold_first_find_ms": 7133.897
+  },
+  "pgAIZK_cross_check": {
+    "note": "The same phrase checks ran against the broader source corpus, so this is diagnostic rather than an apples-to-apples retrieval benchmark.",
+    "expectations_matched": 13,
+    "expectations_total": 29,
+    "expectation_coverage": 0.4483
+  }
+}

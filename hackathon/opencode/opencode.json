@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "aizk": {
+      "type": "remote",
+      "url": "https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp",
+      "oauth": {
+        "clientId": "2yqsd1rbjsxxzkyrem1xv",
+        "scope": "control offline_access openid",
+        "callbackPort": 8912,
+        "redirectUri": "http://127.0.0.1:8912/callback"
+      },
+      "timeout": 60000,
+      "enabled": true
+    }
+  }
+}

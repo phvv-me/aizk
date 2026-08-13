@@ -60,7 +60,7 @@ class UnsupportedFormat(ValueError):
 class RIFFSignature(FrozenModel):
     """Match the RIFF container families whose kind sits four bytes past the header."""
 
-    forms: dict[str, str] = {"WEBP": "image/webp", "WAVE": "audio/wav"}
+    forms: dict[str, str] = {"WEBP": "image/webp"}
 
     def match(self, content: bytes) -> str | None:
         """Return the media type this RIFF payload actually carries, if it is one aizk reads."""

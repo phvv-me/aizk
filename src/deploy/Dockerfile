@@ -14,7 +14,9 @@ WORKDIR /app
 # Dependency layer, cached across source edits. The project and local RLS package are installed as
 # small runtime overlays so changing either never rewrites the multi-gigabyte dependency layer.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project --extra heavy-converter
+RUN .venv/bin/docling-tools models download layout tableformer \
+    --output-dir /app/docling-models
 
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS runtime
 # postgresql-client-18, version-matched to the vchord pg18 server, so the admin backup and restore
@@ -28,7 +30,14 @@ RUN apt-get update \
     && echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
        > /etc/apt/sources.list.d/pgdg.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends postgresql-client-18 \
+    && apt-get install -y --no-install-recommends \
+       postgresql-client-18 \
+       tesseract-ocr \
+       tesseract-ocr-eng \
+       tesseract-ocr-jpn \
+       tesseract-ocr-jpn-vert \
+    && tesseract --list-langs | grep -qx jpn \
+    && tesseract --list-langs | grep -qx jpn_vert \
     && groupadd --gid 10001 aizk \
     && useradd --uid 10001 --gid 10001 --create-home aizk \
     && rm -rf /var/lib/apt/lists/*
@@ -37,6 +46,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # the built virtualenv and the source its editable install points at, both at the same path the
 # builder used so the venv's own path references still resolve
 COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/docling-models /app/docling-models
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 # The house packages are NOT overlaid from sibling checkouts any more. They arrive from PyPI at
@@ -79,12 +89,21 @@ CMD ["node", "build"]
 # The marketing page and the documentation are one static Astro build. Nothing here reaches the
 # database or Logto, so the output is plain files and the serving stage carries no runtime.
 FROM node:24-alpine AS docs-build
+ARG AIZK_DOCS_SITE_URL=https://aizk.phvv.me
+ARG AIZK_DOCS_MCP_CLIENT_ID=YOUR_AIZK_CLIENT_ID
+ENV AIZK_DOCS_SITE_URL=${AIZK_DOCS_SITE_URL}
+ENV AIZK_DOCS_MCP_CLIENT_ID=${AIZK_DOCS_MCP_CLIENT_ID}
 RUN npm install -g pnpm@11
 WORKDIR /app
 COPY docs/package.json docs/pnpm-lock.yaml docs/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY docs ./
-RUN pnpm build
+COPY src/web/static /src/web/static
+COPY hackathon/thumbnail.png /hackathon/thumbnail.png
+# Rasterizing SVGs is platform dependent because Alpine and the development environment carry
+# different font engines. The committed outputs pass `brand:check` before the image build, while
+# this stage consumes those exact files and verifies the rendered pages without regenerating them.
+RUN pnpm exec astro build && node scripts/check-pages.mjs
 
 # Static file serving only. Astro emits `/docs/quickstart/index.html`, so try_files resolves the
 # directory form, and the content-hashed `_astro` assets are safe to cache for a year.
@@ -119,9 +138,10 @@ WORKDIR ${LAMBDA_TASK_ROOT}
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
+COPY --from=docs-build /app/dist ./static
 RUN uv pip install --python .venv --reinstall --no-deps .
 ENV PYTHONPATH="${LAMBDA_TASK_ROOT}/.venv/lib/python3.14/site-packages:${LAMBDA_TASK_ROOT}/src"
-CMD ["aizk.commands.aws.mcp_handler"]
+CMD ["aizk.commands.aws_mcp.mcp_handler"]
 
 # Caddy is the single public origin router for the MCP, OAuth, API, and interface paths. The
 # stage strips the binary's file capabilities and runs as an unprivileged caddy user, which the

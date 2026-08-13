@@ -1,16 +1,18 @@
 import ssl
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import dbutil
 import pytest
 from id_factory import uuid5, uuid8
 from patos.sql import CosineHalfvec
-from pydantic import ValidationError
-from rls import Catalog, Command, CompiledPolicy
+from pydantic import UUID5, ValidationError
+from rls import Catalog, Command, CompiledPolicy, RLSState
 from rls.ddl import RLSAction, RLSStatement
-from sqlalchemy import ColumnElement, MetaData, Table, any_, delete
+from sqlalchemy import ColumnElement, Integer, MetaData, Table, Uuid, any_, column, delete
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session as OrmSession
@@ -19,6 +21,7 @@ from sqlalchemy_cockroachdb.asyncpg import CockroachDBDialect_asyncpg
 from sqlmodel import select
 
 import aizk.store.backend as backend
+import aizk.store.security as security
 from aizk.config import DatabaseBackend, settings
 from aizk.exceptions import NoTenantContext
 from aizk.retrieval.models.lane import QueryContext
@@ -32,9 +35,11 @@ from aizk.store.backend import (
 from aizk.store.ddl import CreateView, DropView, Grant, GrantTarget, postgresql_sql
 from aizk.store.engine import Database, DatabaseRole, Session
 from aizk.store.identity import User
+from aizk.store.migrations.cockroachdb import scoped_cspann
 from aizk.store.mixins.scoped import Scoped, Standing
 from aizk.store.mixins.view import ViewBase
-from aizk.store.vector import CosineVector, cosine_distance
+from aizk.store.security import RLSVerifier
+from aizk.store.vector import CosineVector, cosine_distance, scoped_vector_candidates
 
 
 class RecordingTLSContext:
@@ -102,6 +107,143 @@ def test_cockroach_ddl_quotes_grants_views_and_row_security() -> None:
     assert "WITH (check_option)" in str(view.compile(dialect=dialect))
 
 
+def test_cockroach_operator_policy_uses_the_session_carrier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+
+    rendered = str(
+        Standing.operator().compile(
+            dialect=CockroachDBDialect_asyncpg(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "split_part" in rendered
+    assert "application_name" in rendered
+    assert " AS BOOLEAN" in rendered
+    assert ", 5)" in rendered
+    assert "SELECT" not in rendered
+
+
+def test_cockroach_rls_verifier_accepts_deparser_casts_and_reports_open_tables() -> None:
+    managed = Table("managed_items", MetaData())
+    unmanaged = Table("open_items", managed.metadata)
+    empty = Table("empty_items", managed.metadata)
+    declared_policy = CompiledPolicy(
+        name="scope_read",
+        command=Command.select,
+        using="cardinality(scopes) > CAST(0 AS INT8) "
+        "AND current_setting('app:::uid'::STRING, true) <> ''",
+    )
+    live_policy = declared_policy.model_copy(
+        update={
+            "using": "((cardinality(scopes) > 0:::INT8) AND "
+            "(current_setting('app:::uid':::STRING, true) <> '':::STRING))"
+        }
+    )
+    declared = {managed: RLSState(policies=(declared_policy,))}
+    live = {
+        managed: RLSState(policies=(live_policy,)),
+        unmanaged: RLSState(
+            policies=(CompiledPolicy(name="unexpected", command=Command.select, using="true"),)
+        ),
+        empty: RLSState(enabled=False, forced=False),
+    }
+    catalog = cast(
+        Catalog,
+        SimpleNamespace(
+            tables=(managed, unmanaged, empty),
+            state=declared.get,
+            inspect=lambda connection: live,
+            verify=lambda connection: ["postgres delegated"],
+        ),
+    )
+    verifier = RLSVerifier(catalog)
+    postgres = cast(Connection, SimpleNamespace(dialect=postgresql_dialect()))
+    cockroach = cast(
+        Connection,
+        SimpleNamespace(
+            dialect=CockroachDBDialect_asyncpg(),
+            execute=lambda statement: [
+                ("public", "managed_items", "scope_read", "permissive"),
+                ("public", "open_items", "unexpected", "permissive"),
+            ],
+        ),
+    )
+
+    assert verifier.verify(postgres) == ["postgres delegated"]
+    assert verifier.verify(cockroach) == ["open_items has undeclared row level security"]
+
+
+def test_cockroach_policy_translation_preserves_quoted_triple_colons() -> None:
+    clause = "'a'':::b':::STRING || \"a\"\":::b\":::STRING || $$c:::d$$:::STRING"
+
+    assert security._CockroachPolicy.postgres_casts(clause) == (
+        "'a'':::b'::STRING || \"a\"\":::b\"::STRING || $$c:::d$$::STRING"
+    )
+    declared = security._CockroachPolicy(
+        name="visible", command=Command.select, using="aizk_visible(id)"
+    )
+    reflected = declared.model_copy(update={"using": "public.aizk_visible(id)"})
+    assert declared.matches(reflected, "items")
+
+
+def test_cockroach_migrations_are_one_native_revision() -> None:
+    versions = (
+        Path(__file__).parents[2]
+        / "src"
+        / "aizk"
+        / "store"
+        / "migrations"
+        / "cockroachdb"
+        / "versions"
+    )
+
+    assert [path.name for path in versions.glob("[0-9]*.py")] == ["0001_cockroachdb.py"]
+
+
+def test_scoped_cspann_function_keeps_authority_outside_the_ann_query() -> None:
+    rendered = scoped_cspann.search_function(settings.embed_dim)
+    ann = rendered[rendered.index("RETURN QUERY") :]
+
+    assert "current_setting" not in ann
+    assert "candidate.kind = requested_kind" in ann
+    assert "candidate.scopes = requested_scopes" in ann
+    assert "embedding <=> query_vector" in ann
+
+
+def test_scoped_cspann_creation_reasserts_security_definer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statements: list[str] = []
+    monkeypatch.setattr(
+        scoped_cspann.op,
+        "get_bind",
+        lambda: SimpleNamespace(dialect=CockroachDBDialect_asyncpg()),
+    )
+    monkeypatch.setattr(scoped_cspann.op, "execute", statements.append)
+
+    scoped_cspann.create()
+
+    altered = [statement for statement in statements if statement.startswith("ALTER FUNCTION")]
+    assert altered == [
+        "ALTER FUNCTION aizk_private.cspann_scopes(STRING) SECURITY DEFINER",
+        "ALTER FUNCTION aizk_private.cspann_search(STRING, UUID[], VECTOR(1024), INT8) "
+        "SECURITY DEFINER",
+        "ALTER FUNCTION aizk_private.write_vector(STRING, UUID, UUID, UUID[], "
+        "VECTOR(1024), BOOL) SECURITY DEFINER",
+        "ALTER FUNCTION aizk_private.write_content_vectors(STRING, UUID, VECTOR(1024)) "
+        "SECURITY DEFINER",
+    ]
+    trigger_positions = [
+        index
+        for index, statement in enumerate(statements)
+        if statement.startswith("CREATE TRIGGER")
+    ]
+    assert max(statements.index(statement) for statement in altered) < min(trigger_positions)
+
+
 def test_database_adapters_build_pools_and_bind_cockroach_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -138,6 +280,7 @@ def test_database_adapters_build_pools_and_bind_cockroach_authority(
     recorder = cast(RecordingConnection, connection)
     assert recorder.parameters is not None
     assert str(read_scope) in recorder.parameters["aizk_cockroach_authority"]
+    assert recorder.parameters["aizk_cockroach_authority"].endswith("|false")
 
     untouched = RecordingConnection()
     bind_cockroach_authority(
@@ -170,7 +313,8 @@ def test_cockroach_cloud_urls_use_verified_asyncpg_tls(
     monkeypatch.setattr(backend.ssl, "create_default_context", create_context)
     monkeypatch.setattr(settings, "db_ssl_root_certificate", "operator certificate")
     normalized, configured = CockroachDBAdapter.cloud_connection(
-        "cockroachdb+asyncpg://user@cluster/aizk?sslmode=verify-full&sslrootcert=/missing"
+        "cockroachdb+asyncpg://user@cluster/aizk?application_name=ccloud"
+        "&sslmode=verify-full&sslrootcert=/missing"
     )
     assert normalized.query == {}
     assert configured is contexts[-1]
@@ -254,6 +398,28 @@ def test_portable_vectors_and_chunk_retrieval_compile_for_cockroach(
     assert "to_bm25query" not in fused
     assert isinstance(Chunk.__table__.c.embedding.type, CosineHalfvec)  # import-time postgres
     assert isinstance(context.vector.type, CosineVector)  # runtime cockroach bind
+
+
+def test_cockroach_owned_vector_search_uses_one_exact_scope_partition() -> None:
+    vector = cast(
+        "ColumnElement[list[float]]",
+        column("query_vector", CosineVector(settings.embed_dim)),
+    )
+    limit = cast("ColumnElement[int]", column("query_limit", Integer()))
+    scopes = cast(
+        "ColumnElement[list[UUID5]]",
+        column("query_scopes", ARRAY(Uuid())),
+    )
+
+    rendered = str(
+        scoped_vector_candidates("chunk", vector, limit, scopes).compile(
+            dialect=CockroachDBDialect_asyncpg()
+        )
+    )
+
+    assert "aizk_private.cspann_search" in rendered
+    assert "aizk_private.cspann_scopes" not in rendered
+    assert "query_scopes" in rendered
 
 
 def test_abstract_store_types_remain_unmapped_and_unregistered() -> None:

@@ -4,12 +4,14 @@ import tailwind from '@tailwindcss/vite';
 import { defineConfig } from 'astro/config';
 import d2 from 'astro-d2';
 
+const site = process.env.AIZK_DOCS_SITE_URL ?? 'https://aizk.phvv.me';
+
 // The whole product lives on one origin. A plain Astro page owns `/`, and Astro gives static
 // routes priority over Starlight's dynamic `[...slug]`, so the marketing page wins without a
 // redirect. Starlight has no base option of its own, so every docs page is nested one level
 // deeper under `src/content/docs/docs/` to come out at `/docs/...`.
 export default defineConfig({
-  site: 'https://aizk.phvv.me',
+  site,
   vite: { plugins: [tailwind()] },
   integrations: [
     // D2 draws what mermaid draws badly, the table shapes and the container nesting. useD2js
@@ -18,16 +20,52 @@ export default defineConfig({
       experimental: { useD2js: true },
       layout: 'elk',
       pad: 20,
-      // Theme 1 is D2's neutral grey. The brand carries no accent hue, so a diagram must not
-      // introduce one, and 200 is the closest dark counterpart.
+      // Diagrams stay neutral so readers never confuse brand decoration with data encoding.
+      // Theme 200 is the closest dark counterpart to neutral theme 1.
       theme: { default: '1', dark: '200' },
     }),
     svelte(),
     starlight({
       title: 'aizk',
-      description: 'Self-hosted shared memory for people, teams, and MCP agents.',
+      description: 'Shared memory for people, teams, and MCP agents.',
       logo: { src: './src/assets/icon.svg', alt: 'aizk' },
       favicon: '/favicon.svg',
+      head: [
+        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'preconnect',
+            href: 'https://fonts.gstatic.com',
+            crossorigin: true,
+          },
+        },
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'stylesheet',
+            href: 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap',
+          },
+        },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
+        { tag: 'meta', attrs: { name: 'theme-color', content: '#4f46e5' } },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image', content: `${site}/social-card.png` },
+        },
+        {
+          tag: 'meta',
+          attrs: {
+            property: 'og:image:alt',
+            content: 'aizk · memory your agents actually keep',
+          },
+        },
+        { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:image', content: `${site}/social-card.png` },
+        },
+      ],
       customCss: ['./src/styles/docs.css'],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/phvv-me/aizk' }],
       sidebar: [
@@ -162,17 +200,19 @@ export default defineConfig({
           label: 'Running aizk',
           badge: { text: 'dev', variant: 'note' },
           items: [
-            { label: 'Deployment topology', slug: 'docs/dev/run/topology' },
+            { label: 'Database profiles', slug: 'docs/dev/run/databases' },
+            { label: 'AWS and CockroachDB Cloud', slug: 'docs/dev/run/aws' },
+            { label: 'Self-hosted topology', slug: 'docs/dev/run/topology' },
             { label: 'Hardware and cost', slug: 'docs/dev/run/hardware' },
-            { label: 'First start', slug: 'docs/dev/run/first-start' },
-            { label: 'PostgreSQL and storage', slug: 'docs/dev/run/postgres' },
+            { label: 'PostgreSQL first start', slug: 'docs/dev/run/first-start' },
+            { label: 'PostgreSQL profile', slug: 'docs/dev/run/postgres' },
             { label: 'Object storage and compression', slug: 'docs/dev/run/object-store' },
-            { label: 'Backups and recovery', slug: 'docs/dev/run/backups' },
+            { label: 'PostgreSQL backups', slug: 'docs/dev/run/backups' },
             { label: 'The operator console', slug: 'docs/dev/run/console' },
             { label: 'Observability', slug: 'docs/dev/run/observability' },
             { label: 'Telemetry', slug: 'docs/dev/run/telemetry' },
             { label: 'Upgrades', slug: 'docs/dev/run/upgrades' },
-            { label: 'The security model', slug: 'docs/dev/run/security' },
+            { label: 'Self-hosted security', slug: 'docs/dev/run/security' },
             { label: 'The release gate', slug: 'docs/dev/run/release-gate' },
           ],
         },
@@ -200,6 +240,7 @@ export default defineConfig({
           label: 'Contributing',
           badge: { text: 'dev', variant: 'note' },
           items: [
+            { label: 'Brand and visual identity', slug: 'docs/dev/contributing/brand' },
             { label: 'Development setup', slug: 'docs/dev/contributing/setup' },
             { label: 'Testing', slug: 'docs/dev/contributing/testing' },
             { label: 'Style and typing', slug: 'docs/dev/contributing/style' },

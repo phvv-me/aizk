@@ -1,0 +1,81 @@
+---
+title: "Database profiles"
+description: "How CockroachDB Cloud and PostgreSQL run the same memory model with different storage and queue adapters."
+---
+
+import Diagram from '../../../../../components/Diagram.astro';
+
+AIZK supports two database profiles. A deployment selects one through
+`AIZK_DATABASE_BACKEND`. The MCP surface, identity model, scope semantics and core memory model
+stay the same. Indexing, durable work and object storage change with the profile.
+
+<Diagram
+  title="One AIZK service selects one complete storage profile"
+  nodes={[
+    { id: 'aizk', label: 'AIZK', col: 1, row: 0, emphasis: true },
+    { id: 'choice', label: 'database adapter', col: 1, row: 1 },
+    { id: 'crdb', label: 'CockroachDB Cloud', col: 0, row: 2 },
+    { id: 'pg', label: 'PostgreSQL', col: 2, row: 2 },
+    { id: 'cspann', label: 'C-SPANN and portable queue', col: 0, row: 3 },
+    { id: 'vchord', label: 'VectorChord and PgQueuer', col: 2, row: 3 },
+    { id: 's3', label: 'Amazon S3', col: 0, row: 4 },
+    { id: 'seaweed', label: 'SeaweedFS', col: 2, row: 4 },
+  ]}
+  edges={[
+    { from: 'aizk', to: 'choice' },
+    { from: 'choice', to: 'crdb', label: 'cockroachdb' },
+    { from: 'choice', to: 'pg', label: 'postgresql' },
+    { from: 'crdb', to: 'cspann' },
+    { from: 'cspann', to: 's3' },
+    { from: 'pg', to: 'vchord' },
+    { from: 'vchord', to: 'seaweed' },
+  ]}
+/>
+
+## What stays portable
+
+Both profiles keep documents, chunks, graph claims, temporal state, scope sets, embeddings,
+usage records and durable job state in one SQL database. Both force row level security for the
+application role. A missing application filter must not widen the result.
+
+The adapters live in `src/aizk/store/backend.py`, `src/aizk/store/vector.py` and
+`src/aizk/background/queue.py`. Code above those boundaries should not branch on a database name.
+
+## Where they differ
+
+| Concern | CockroachDB Cloud profile | PostgreSQL profile |
+|---|---|---|
+| Best fit | distributed cloud demo or service | private self-hosted installation |
+| Vector type | full precision `VECTOR` | compact `halfvec` |
+| Vector index | native C-SPANN | VectorChord |
+| Lexical search | portable SQL ranking | VectorChord BM25 |
+| Durable work | AIZK queue tables and portable worker | PgQueuer |
+| Original files | Amazon S3 in the AWS deployment | SeaweedFS through an S3-compatible API |
+| Model calls | hosted OpenAI-compatible endpoints in crAIZK | local model services by default |
+| Schema history | one CockroachDB baseline migration | PostgreSQL Alembic revisions |
+
+The CockroachDB vector adapter searches exact visible scope partitions through
+`aizk_private.cspann_search`. This preserves the scope boundary before candidate ranking rather
+than filtering a global approximate result after the search. The PostgreSQL adapter uses
+VectorChord prefiltering for the same reason.
+
+## Choose one profile per deployment
+
+Do not point one running service at both backends. The adapter is selected when settings load,
+and its engine, vector type, migration set and worker must agree. Migrating data between profiles
+is an explicit export and import operation, not a connection string change.
+
+Choose CockroachDB Cloud when distributed SQL and a small serverless AWS footprint matter. Choose
+PostgreSQL when local operation, local models and the richer PostgreSQL extension stack matter.
+Neither profile is presented as a drop-in replacement for the other.
+
+## Next
+
+<div class="not-content">
+
+- [AWS and CockroachDB Cloud](/docs/dev/run/aws/) documents the live crAIZK deployment.
+- [PostgreSQL profile](/docs/dev/run/postgres/) covers the self-hosted database in depth.
+- [Row level security](/docs/dev/store/rls/) explains the shared authorization contract.
+- [The job system](/docs/dev/passes/jobs/) explains both durable queue implementations.
+
+</div>

@@ -3,8 +3,9 @@ title: "Object storage and compression"
 description: "How stored artifacts are compressed, which formats are accepted, and how to compact a store that predates the current policy."
 ---
 
-Aizk keeps artifact bytes outside PostgreSQL, in an S3-compatible object store, and keeps only
-metadata in the `blob` table. This page covers what gets written there, why almost all of it is
+AIZK keeps artifact bytes outside the SQL database in an S3-compatible object store and keeps
+metadata in the `blob` table. crAIZK uses Amazon S3, while the self-hosted profile uses SeaweedFS.
+This page covers what gets written there, why almost all of it is
 compressed, which formats are refused at the door, and how to bring an older store up to the
 current policy.
 
@@ -27,9 +28,8 @@ went in `encoding`, so every read knows what it is holding.
     └─ write under a fresh random key            └─ verify size and hash of the ORIGINAL
 ```
 
-The content hash always describes the original bytes, never the compressed container. That keeps
-the hash stable when an object is recompressed at a different level, lets two uploads of the same
-file be recognised as the same content, and makes `ArtifactIntegrity` meaningful. Its check
+The content hash describes the original bytes, not the compressed container. It stays stable
+across compression levels and identifies duplicate uploads. `ArtifactIntegrity`
 restores the object and compares the result against the recorded hash, so a pass proves both that
 the container is intact and that it still decodes to the file that was accepted.
 
@@ -101,7 +101,7 @@ configured level, so the reclaimable bytes come back first and a store can be co
 many short passes as you like.
 
 Per object the pass restores the bytes, verifies them against the content hash, writes a
-replacement under a fresh key, repoints PostgreSQL, and only then deletes the old key. An
+replacement under a fresh key, repoints the database row, and only then deletes the old key. An
 interruption leaves an unreferenced object behind rather than a blob row pointing at bytes that
 are gone. When the replacement is not smaller the object stays where it is and only its level is
 stamped.

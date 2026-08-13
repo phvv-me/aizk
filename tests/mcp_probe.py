@@ -84,9 +84,9 @@ def context_for(user: User | None = None, client: mt.Implementation | None = Non
         client_params=None
         if client is None
         else mt.InitializeRequestParams(
-            protocolVersion=mt.LATEST_PROTOCOL_VERSION,
+            protocol_version=mt.LATEST_PROTOCOL_VERSION,
             capabilities=mt.ClientCapabilities(),
-            clientInfo=client,
+            client_info=client,
         ),
     )
     context = Context(fastmcp=server, session=cast("ServerSession", session))

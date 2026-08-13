@@ -1,12 +1,13 @@
 from datetime import UTC, datetime
 
-from pydantic import UUID7
-from sqlalchemy import or_
+from pydantic import UUID7, JsonValue
+from sqlalchemy import func, or_
 from sqlmodel import select, update
 
 from ..storage import IntegrityCheck, StoredBytes, StoredObject
 from ..store import Artifact, Blob
 from ..store.identity import User
+from ..store.locking import acquire_locks
 from ..store.models.tables import ArtifactContent
 from ..types import Scopes
 from .models import ArtifactReceipt, ConvertedArtifact, OriginalArtifact, OriginalDescription
@@ -25,8 +26,15 @@ def _stored_object(row: Blob) -> StoredObject:
     )
 
 
+class StorageQuotaExceeded(ValueError):
+    """The caller has no room for another original in its stored-byte allowance."""
+
+
 class ArtifactRepository:
     """Persist artifact metadata through exact caller-bound PostgreSQL transactions."""
+
+    def __init__(self, user_byte_limit: int | None = None) -> None:
+        self.user_byte_limit = user_byte_limit
 
     async def create_original(
         self,
@@ -38,6 +46,22 @@ class ArtifactRepository:
         """Create a logical artifact revision that references one immutable stored object."""
         ordered_scopes = sorted(scopes, key=str)
         async with user as session:
+            if self.user_byte_limit is not None:
+                await acquire_locks(session, [f"artifact-storage|{user.id}"])
+                total = (
+                    await session.exec(
+                        select(func.sum(Blob.size))
+                        .select_from(Artifact.Content)
+                        .join(Blob, Artifact.Content.blob_id == Blob.id)
+                        .where(Artifact.Content.created_by == user.id)
+                    )
+                ).one()
+                used = int(total or 0)
+                if used + stored.size > self.user_byte_limit:
+                    raise StorageQuotaExceeded(
+                        "upload would exceed the caller's"
+                        f" {self.user_byte_limit} byte storage quota"
+                    )
             artifact = None
             if described.source_uri is not None:
                 artifact = (
@@ -226,6 +250,8 @@ class ArtifactRepository:
                 size=blob.size,
                 source_uri=artifact.source_uri,
                 companion_text=content.companion_text,
+                markdown=content.markdown,
+                conversion_policy=content.conversion_policy,
                 observed_at=content.observed_at,
                 expires_at=content.expires_at,
                 storage_key=blob.storage_key,
@@ -328,18 +354,18 @@ class ArtifactRepository:
                 .execution_options(synchronize_session=False)
             )
 
-    async def store_conversion(
+    async def record_candidate(
         self,
         user: User,
         original: OriginalArtifact,
         markdown: str,
-        indexed_at: datetime,
+        policy: str,
+        error: str | None = None,
     ) -> None:
-        """Store the replaceable Markdown derivative on its exact revision.
+        """Keep one proposed derivative without replacing recallable production text.
 
-        A reconversion overwrites text that is already there, so the authorization read takes
-        the scope array rather than the row, which keeps the outgoing Markdown in its TOAST
-        pages instead of reading it back to throw it away.
+        A rejected candidate stays available for diagnosis, while `candidate_policy` is the
+        durable cursor that keeps the same policy pass from offering it forever.
         """
         async with user as session:
             visible = (
@@ -354,6 +380,59 @@ class ArtifactRepository:
             await session.exec(
                 update(Artifact.Content)
                 .where(Artifact.Content.id == original.content_id)
-                .values(markdown=markdown, indexed_at=indexed_at)
+                .values(
+                    candidate_markdown=markdown,
+                    candidate_policy=policy,
+                    candidate_error=error,
+                )
                 .execution_options(synchronize_session=False)
             )
+
+    async def record_candidate_error(
+        self,
+        user: User,
+        original: OriginalArtifact,
+        policy: str,
+        error: str,
+    ) -> None:
+        """Quarantine a failed attempt while preserving the last good derivative."""
+        async with user as session:
+            written = await session.exec(
+                update(Artifact.Content)
+                .where(Artifact.Content.id == original.content_id)
+                .values(candidate_policy=policy, candidate_error=error[:1024])
+                .execution_options(synchronize_session=False)
+            )
+            if not written.rowcount:
+                raise LookupError("artifact original disappeared before candidate quarantine")
+
+    async def promote_candidate(
+        self,
+        user: User,
+        original: OriginalArtifact,
+        policy: str,
+        indexed_at: datetime,
+        caption_metadata: list[dict[str, JsonValue]],
+    ) -> None:
+        """Atomically make an indexed candidate the production derivative and clear quarantine."""
+        async with user as session:
+            written = await session.exec(
+                update(Artifact.Content)
+                .where(
+                    Artifact.Content.id == original.content_id,
+                    Artifact.Content.candidate_policy == policy,
+                    Artifact.Content.candidate_markdown.is_not(None),
+                )
+                .values(
+                    markdown=Artifact.Content.candidate_markdown,
+                    caption_metadata=caption_metadata,
+                    conversion_policy=policy,
+                    candidate_markdown=None,
+                    candidate_policy=None,
+                    candidate_error=None,
+                    indexed_at=indexed_at,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if not written.rowcount:
+                raise LookupError("conversion candidate disappeared before promotion")

@@ -12,10 +12,11 @@ class ChunkJob(QueuePayload):
 
 
 class ArtifactConversionJob(QueuePayload):
-    """Docling conversion request for one durable immutable original."""
+    """Versioned conversion request for one durable immutable original."""
 
     artifact_content_id: UUID7
     scopes: Scopes
+    policy: str = "converter-v2"
 
 
 class ArtifactReindexJob(QueuePayload):

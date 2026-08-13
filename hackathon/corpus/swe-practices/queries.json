@@ -1,0 +1,42 @@
+[
+  {
+    "kind": "local",
+    "query": "What should a team do before suppressing a static analysis warning?",
+    "expected": ["improve the code or rule", "last resort", "tool limitation"]
+  },
+  {
+    "kind": "local",
+    "query": "How should a deployment process prevent one server from drifting?",
+    "expected": ["same artifact", "verify every target", "deployment identity"]
+  },
+  {
+    "kind": "local",
+    "query": "What evidence should be gathered before optimizing a slow workflow?",
+    "expected": ["representative workload", "baseline", "profile", "variance"]
+  },
+  {
+    "kind": "global",
+    "query": "What principles connect maintainability, testing, delivery, and observability?",
+    "expected": ["boundaries", "feedback", "artifact", "production evidence"]
+  },
+  {
+    "kind": "global",
+    "query": "Which engineering practices are mechanically enforceable and which require contextual judgment?",
+    "expected": ["dependency direction", "CI gates", "abstraction", "representative"]
+  },
+  {
+    "kind": "multihop",
+    "query": "How do modular boundaries make both testing and production diagnosis easier?",
+    "expected": ["replace external dependencies", "trace", "domain operation"]
+  },
+  {
+    "kind": "multihop",
+    "query": "Why do reproducible deployments and observability reinforce each other?",
+    "expected": ["deployment identity", "source", "artifact", "failure"]
+  },
+  {
+    "kind": "multihop",
+    "query": "How should profiling evidence change a refactoring plan?",
+    "expected": ["bottleneck", "shared work", "unrelated", "end-to-end"]
+  }
+]

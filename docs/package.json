@@ -5,14 +5,17 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build && node scripts/check-pages.mjs",
+    "brand": "node scripts/generate-brand.mjs",
+    "brand:check": "node scripts/generate-brand.mjs --check",
+    "build": "pnpm brand:check && astro build && node scripts/check-pages.mjs",
     "preview": "astro preview",
-    "check": "astro check",
+    "check": "pnpm brand:check && astro check",
     "check:pages": "node scripts/check-pages.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.41.3",
     "@astrojs/svelte": "^9.0.1",
+    "@logto/browser": "^3.0.13",
     "@tailwindcss/vite": "^4.3.3",
     "astro": "^7.1.1",
     "astro-d2": "^0.13.1",

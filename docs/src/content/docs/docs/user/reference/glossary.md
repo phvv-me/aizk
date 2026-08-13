@@ -70,7 +70,7 @@ these Findings. See [the graph](/docs/user/concepts/graph/).
 them. Adding an organization narrows a memory. See [Scopes](/docs/user/concepts/scopes/).
 
 **MCP** is the Model Context Protocol, the standard your agent speaks to reach aizk. It turns aizk
-into four tools. See [MCP tools](/docs/user/reference/tools/).
+into five tools. See [MCP tools](/docs/user/reference/tools/).
 
 **Ontology** is the vocabulary of entity kinds and relation kinds that extraction may use, which
 keeps the graph from renaming the same idea. See [the graph](/docs/user/concepts/graph/).

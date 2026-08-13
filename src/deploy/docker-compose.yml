@@ -63,6 +63,7 @@ x-aizk-runtime: &aizk-runtime
     AIZK_OBJECT_STORE_COMPRESSION_MIN_SAVINGS: ${AIZK_OBJECT_STORE_COMPRESSION_MIN_SAVINGS:-0.05}
     AIZK_OBJECT_STORE_INTERNAL_DOWNLOAD_LIFETIME_SECONDS: ${AIZK_OBJECT_STORE_INTERNAL_DOWNLOAD_LIFETIME_SECONDS:-300}
     AIZK_DOCLING_URL: http://docling:5001
+    AIZK_DOCLING_ARTIFACTS_PATH: /app/docling-models
     AIZK_DOCLING_API_KEY: ${AIZK_DOCLING_API_KEY:?set AIZK_DOCLING_API_KEY}
     AIZK_DOCLING_DOCUMENT_TIMEOUT: ${AIZK_DOCLING_DOCUMENT_TIMEOUT:-1800}
     AIZK_DOCLING_REQUEST_TIMEOUT: ${AIZK_DOCLING_REQUEST_TIMEOUT:-1860}
@@ -91,7 +92,7 @@ x-aizk-runtime: &aizk-runtime
 
 services:
   # Named volumes start owned by root. This one-shot service grants only the unprivileged Aizk
-  # runtime user access to its two writable directories, then exits before any server starts.
+  # runtime user access to the writable backup directory, then exits before any server starts.
   volume-init:
     <<: *aizk-runtime
     user: "0:0"
@@ -99,18 +100,19 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - >-
-        install -d -o 10001 -g 10001 -m 0700 /oauth /backups
-        && chown -R 10001:10001 /oauth /backups
-        && chmod 0700 /oauth /backups
+        install -d -o 10001 -g 10001 -m 0700 /backups
+        && chown -R 10001:10001 /backups
+        && chmod 0700 /backups
     env_file: []
     environment: {}
     volumes:
       - ${AIZK_BACKUP_VOLUME:-backups}:/backups
-      - ${AIZK_OAUTH_VOLUME:-oauth}:/oauth
     restart: "no"
 
   db:
     image: tensorchord/vchord-suite:pg18-latest@sha256:c6e5e77a1180199f91b040b6e85c6d10b0ded6d49fb614dfd2e7272ffb91af08
+    ports:
+      - 127.0.0.1:${AIZK_DB_PORT:-5433}:5432
     # The compose-level ${VAR:-default} substitutions below come from packages/aizk/.env through
     # the documented --env-file .env option. Compose anchors automatic discovery to this file's
     # deploy directory, so omitting that option would silently select these defaults instead.
@@ -271,6 +273,7 @@ services:
   # tesseract data it omits. `Dockerfile.docling` explains why that omission is invisible at
   # runtime and therefore has to be caught at build time.
   docling:
+    profiles: ["legacy-docling", "integration"]
     image: aizk-docling
     build:
       context: ../..
@@ -586,9 +589,7 @@ services:
       AIZK_TUNNEL_TOKEN: ""
       AIZK_MCP_HOST: 0.0.0.0
       AIZK_MCP_PORT: "8080"
-      FASTMCP_HOME: /oauth
-    volumes:
-      - ${AIZK_OAUTH_VOLUME:-oauth}:/oauth
+      FASTMCP_HOME: /tmp/fastmcp
     healthcheck:
       test: ["CMD", "curl", "-sS", "--max-time", "2", "-o", "/dev/null", "http://127.0.0.1:8080/mcp"]
       interval: 10s
@@ -834,8 +835,6 @@ services:
         condition: service_healthy
       clamav:
         condition: service_healthy
-      docling:
-        condition: service_healthy
       logto:
         condition: service_healthy
         required: false
@@ -843,6 +842,7 @@ services:
       <<: *aizk-runtime-environment
       AIZK_BACKUP_ENABLED: "1"
       AIZK_BACKUP_DIR: /backups
+      AIZK_CAPTION_API_KEY: ${AIZK_DEMO_OPENROUTER_API_KEY:-}
     volumes:
       - ${AIZK_BACKUP_VOLUME:-backups}:/backups
 
@@ -1173,4 +1173,3 @@ volumes:
   object-data:
   clamav-data:
   backups:
-  oauth:

@@ -4,10 +4,10 @@ Thanks for helping improve aizk.
 
 The full guides live in the docs and are the authority. This file is the short version.
 
-- [Development setup](https://aizk.phvv.me/docs/dev/contributing/setup/)
-- [Testing](https://aizk.phvv.me/docs/dev/contributing/testing/)
-- [Style and typing](https://aizk.phvv.me/docs/dev/contributing/style/)
-- [Releasing](https://aizk.phvv.me/docs/dev/contributing/release/)
+- [Development setup](docs/src/content/docs/docs/dev/contributing/setup.md)
+- [Testing](docs/src/content/docs/docs/dev/contributing/testing.md)
+- [Style and typing](docs/src/content/docs/docs/dev/contributing/style.md)
+- [Releasing](docs/src/content/docs/docs/dev/contributing/release.mdx)
 
 ## Setup
 

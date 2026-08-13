@@ -38,7 +38,9 @@ class Profiles:
     """In-memory nonsecret profile store."""
 
     def __init__(self) -> None:
-        self.current = ClientProfile(server="https://stored.example/mcp")
+        self.current = ClientProfile(
+            server="https://stored.example/mcp", client_id="public-client"
+        )
         self.saved: ClientProfile | None = None
 
     def load(self) -> ClientProfile:
@@ -159,7 +161,7 @@ def test_login_persists_only_after_remote_authentication(
     )
     subject = commands.ClientCommands(cast("commands.ProfileStore", profiles))
 
-    dbutil.run(subject.login("https://new.example/mcp", "none", "localhost", 9000, 14, False))
+    dbutil.run(subject.login("https://new.example/mcp", "none", "", "localhost", 9000, 14, False))
 
     assert login.await_args is not None
     assert login.await_args.args == (14,)
@@ -184,6 +186,7 @@ def test_login_reuses_stored_server_and_can_render_json(
         commands.ClientCommands(cast("commands.ProfileStore", profiles)).login(
             None,
             "oauth",
+            "public-client",
             "127.0.0.1",
             8912,
             30,

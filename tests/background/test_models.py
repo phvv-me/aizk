@@ -39,6 +39,9 @@ def test_payload_round_trips_exactly_the_fields_the_worker_decodes(
     decoded = payload_cls.decode(encoded)
     assert decoded == job
     assert decoded.scopes == frozenset({scope})
-    assert set(decoded.model_fields_set) == ({subject, "scopes"} if subject else {"scopes"})
+    fields = {subject, "scopes"} if subject else {"scopes"}
+    if payload_cls is ArtifactConversionJob:
+        fields.add("policy")
+    assert set(decoded.model_fields_set) == fields
     if subject:
         assert getattr(decoded, subject) == expected

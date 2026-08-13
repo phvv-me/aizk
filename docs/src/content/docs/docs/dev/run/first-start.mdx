@@ -1,9 +1,10 @@
 ---
-title: "First start"
-description: "From an empty host to a working deployment, secret by secret."
+title: "PostgreSQL first start"
+description: "From an empty host to a working self-hosted PostgreSQL deployment."
 ---
 
-This page takes a host that already has Docker and an NVIDIA runtime all the way to a deployment
+This page is for the self-hosted PostgreSQL profile. The AWS and CockroachDB Cloud deployment has
+its own [deployment page](/docs/dev/run/aws/). This guide takes a host that already has Docker and an NVIDIA runtime all the way to a deployment
 that answers a real recall. It helps to know which services exist from
 [Deployment topology](/docs/dev/run/topology/), and that the machine is big enough per
 [Hardware and cost](/docs/dev/run/hardware/).
@@ -60,7 +61,7 @@ explicitly. Follow the steps in order.
    | Application | Kind | Setting pair |
    |---|---|---|
    | Management API client | machine to machine, role carrying the Management API `all` permission | `AIZK_LOGTO_CLIENT_ID`, `AIZK_LOGTO_CLIENT_SECRET` |
-   | MCP OAuth upstream | traditional web, redirect is the aizk server callback | `AIZK_OAUTH_CLIENT_ID`, `AIZK_OAUTH_CLIENT_SECRET` |
+   | MCP clients | native public client, redirects are the fixed loopback callbacks used by supported clients | distribute its public client ID in client setup |
    | Browser app | traditional web, redirect is exactly `${AIZK_WEB_PUBLIC_URL}/auth/sign-in-callback` | `AIZK_WEB_CLIENT_ID`, `AIZK_WEB_CLIENT_SECRET` |
    | AIZK Admin | traditional web, redirect is exactly `${AIZK_ADMIN_PUBLIC_URL}/oauth2/callback` | `AIZK_ADMIN_CLIENT_ID`, `AIZK_ADMIN_CLIENT_SECRET` |
 
@@ -94,13 +95,13 @@ explicitly. Follow the steps in order.
 5. **Move the Logto console to its own hostname**, on its own, before anything else changes.
 
    Logto's console must own an origin, so it cannot live under a path on the operator console
-   host. Add a Cloudflare public hostname `console.phvv.me` pointing at `logto:3002`, set
-   `AIZK_LOGTO_ADMIN_ENDPOINT=https://console.phvv.me`, and recreate the `logto` service. Logto
+   host. Add a Cloudflare public hostname such as `console.example.com` pointing at `logto:3002`, set
+   `AIZK_LOGTO_ADMIN_ENDPOINT=https://console.example.com`, and recreate the `logto` service. Logto
    bakes that endpoint into the console's own redirect URIs, so a half-finished move locks the
    console out and the only fast repair is putting the old line back.
 
-6. **Add the two remaining Cloudflare hostnames**, `aizk.phvv.me` to `web:8081` and
-   `admin.phvv.me` to `web:8082`. Every public name is a first-level subdomain, which is what
+6. **Add the two remaining Cloudflare hostnames**, `aizk.example.com` to `web:8081` and
+   `admin.example.com` to `web:8082`. Every public name is a first-level subdomain, which is what
    keeps them inside the free Universal SSL certificate.
    [Deployment topology](/docs/dev/run/topology/) has the full routing table and explains the
    optional Cloudflare Access layer in front of the console.
@@ -148,7 +149,7 @@ matters, because it is a real retrieval through the real models rather than a pi
 
 <div class="not-content">
 
-- [PostgreSQL and storage](/docs/dev/run/postgres/) covers tuning before your data grows.
+- [PostgreSQL profile](/docs/dev/run/postgres/) covers tuning before your data grows.
 - [Backups and recovery](/docs/dev/run/backups/) should be set up on day one.
 - [Observability](/docs/dev/run/observability/) adds the logging profile and the queue doctor.
 - [The release gate](/docs/dev/run/release-gate/) is the checklist before real traffic.

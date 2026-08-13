@@ -4,7 +4,7 @@ import rls
 import sqlalchemy as sa
 from patos import sql
 from pydantic import UUID5
-from sqlalchemy import Table, Uuid
+from sqlalchemy import Boolean, Table, Uuid
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import CompoundSelect, ScalarSelect
@@ -14,7 +14,7 @@ from ...config import DatabaseBackend, settings
 from ..identity import User
 
 # Where each authority list sits in the CockroachDB `application_name` encoding.
-_ENCODED_POSITIONS = {"read": 2, "write": 3, "public": 4}
+_ENCODED_POSITIONS = {"read": 2, "write": 3, "public": 4, "operator": 5}
 
 
 class Standing:
@@ -44,6 +44,21 @@ class Standing:
             .render_derived()
         )
         return sa.func.array(select(values.c.value.cast(Uuid())).scalar_subquery())
+
+    @staticmethod
+    def operator() -> ColumnElement[bool]:
+        """Whether the transaction carrier says this caller is a platform operator."""
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            encoded = sa.func.nullif(
+                sa.func.split_part(
+                    sa.func.current_setting("application_name", True),
+                    "|",
+                    _ENCODED_POSITIONS["operator"],
+                ),
+                "",
+            )
+            return cast(ColumnElement[bool], encoded.cast(Boolean))
+        return cast(ColumnElement[bool], User.setting("operator"))
 
     @classmethod
     def counted(cls, scopes: ColumnElement[list[UUID5]]) -> ColumnElement[bool]:
@@ -116,12 +131,27 @@ class Scoped(sql.Model):
         writable = Standing.authority("write")
         public = Standing.authority("public")
         nonempty = sa.func.cardinality(scopes) > 0
+        scoped_read = sa.and_(
+            nonempty,
+            sa.or_(
+                scopes.op("<@")(readable),
+                sa.and_(
+                    sa.func.cardinality(scopes) == 1,
+                    scopes.op("<@")(public),
+                ),
+            ),
+        )
         if parent_name := cls.read_through:
             parent_id = cls.__table__.c[f"{parent_name}_id"]
             if settings.database_backend is DatabaseBackend.cockroachdb:
                 visible = getattr(sa.func, f"aizk_{parent_name}_visible")
-                read = visible(parent_id, scopes)
-                parent_scope = read
+                # The CockroachDB baseline enforces `(parent_id, scopes)` with a
+                # composite foreign key. Reading the already validated child scopes is
+                # therefore equivalent to probing the parent for every row, while it
+                # lets the inverted scope index drive scans instead of evaluating one
+                # correlated visibility function per child.
+                read = scoped_read
+                parent_scope = visible(parent_id, scopes)
             else:
                 parent = sa.table(
                     parent_name,
@@ -133,16 +163,7 @@ class Scoped(sql.Model):
                     select(parent.c.id, parent.c.scopes)
                 )
         else:
-            read = sa.and_(
-                nonempty,
-                sa.or_(
-                    scopes.op("<@")(readable),
-                    sa.and_(
-                        sa.func.cardinality(scopes) == 1,
-                        scopes.op("<@")(public),
-                    ),
-                ),
-            )
+            read = scoped_read
             parent_scope = sa.true()
         write = sa.and_(nonempty, scopes.op("<@")(writable), parent_scope)
         policies = [

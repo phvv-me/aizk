@@ -3,7 +3,7 @@ from .enums import Plan
 from .evidence import RecallEvidence
 from .lane import Lane, QueryContext
 from .result import Evidence, Provenance, RecallResult
-from .trace import RecallTrace, RecallTraceRow
+from .trace import RecallTiming, RecallTrace, RecallTraceRow
 
 __all__ = [
     "Candidate",
@@ -14,6 +14,7 @@ __all__ = [
     "QueryContext",
     "RecallEvidence",
     "RecallResult",
+    "RecallTiming",
     "RecallTrace",
     "RecallTraceRow",
 ]

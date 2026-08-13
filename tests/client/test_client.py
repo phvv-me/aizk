@@ -8,6 +8,7 @@ from typing import Literal, cast
 import dbutil
 import httpx
 import pytest
+from fastmcp import Client, FastMCP
 from fastmcp.client.client import CallToolResult
 from id_factory import uuid7
 from key_value.aio.stores.keyring import KeyringStore
@@ -91,8 +92,14 @@ def profile(auth: Literal["oauth", "none"] = "none") -> ClientProfile:
         {
             "server": "https://aizk.example/mcp",
             "auth": auth,
+            "client_id": "public-client" if auth == "oauth" else "",
         }
     )
+
+
+def test_oauth_profile_requires_its_public_client_id() -> None:
+    with pytest.raises(ValueError, match="requires client_id"):
+        ClientProfile(server="https://aizk.example/mcp")
 
 
 def status_report() -> StatusReport:
@@ -117,6 +124,41 @@ def status_report() -> StatusReport:
     )
 
 
+def test_fastmcp_four_structured_results_decode_from_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server = FastMCP("client-result-probe")
+    document = uuid7()
+
+    @server.tool
+    async def status(days: int = 30) -> StatusReport:
+        del days
+        return status_report()
+
+    @server.tool
+    async def keep(text: str) -> WriteResult:
+        del text
+        return WriteResult(id=document)
+
+    monkeypatch.setattr(
+        MemoryClient,
+        "connection",
+        lambda self, interactive=False: Client(server),
+    )
+    client = MemoryClient(profile())
+
+    async def exercise() -> tuple[StatusReport, WriteResult]:
+        current = await client.status()
+        written = await client.keep(KeepRequest(text="protocol four"))
+        assert isinstance(written, WriteResult)
+        return current, written
+
+    current, written = dbutil.run(exercise())
+
+    assert current == status_report()
+    assert written.id == document
+
+
 def test_oauth_defaults_to_the_system_keyring_without_a_file_fallback() -> None:
     client = MemoryClient(profile("oauth"))
 
@@ -130,7 +172,10 @@ def test_oauth_connections_are_explicitly_interactive_or_noninteractive() -> Non
     assert isinstance(client.oauth(interactive=False), NonInteractiveOAuth)
     assert type(client.oauth(interactive=True)) is not NonInteractiveOAuth
     assert isinstance(client.connection().transport.auth, NonInteractiveOAuth)
-    assert MemoryClient(profile()).connection().transport.auth is None
+    assert client.connection().mode == "2026-07-28"
+    unauthenticated = MemoryClient(profile()).connection()
+    assert unauthenticated.transport.auth is None
+    assert unauthenticated.mode == "2026-07-28"
     with pytest.raises(RuntimeError, match="storage is unavailable"):
         MemoryClient(profile()).oauth(interactive=False)
     with pytest.raises(LoginRequiredError):
@@ -151,6 +196,7 @@ def test_profile_store_round_trips_only_nonsecret_connection_preferences(
         {
             "server": "https://memory.example/mcp",
             "auth": "oauth",
+            "client_id": "public-client",
             "callback_host": "localhost",
             "callback_port": 9123,
         }
@@ -165,6 +211,7 @@ def test_profile_store_round_trips_only_nonsecret_connection_preferences(
         "auth",
         "callback_host",
         "callback_port",
+        "client_id",
         "scopes",
         "server",
     )

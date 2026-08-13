@@ -12,7 +12,7 @@ from obstore.store import S3Store
 from pydantic import UUID7
 from sqlmodel import select
 
-from aizk.artifacts import ArtifactReceipt
+from aizk.artifacts.models import ArtifactReceipt
 from aizk.background.schedule import run_worker
 from aizk.config import settings
 from aizk.integrations.clamav import MalwareRejectedError

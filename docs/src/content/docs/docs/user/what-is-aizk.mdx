@@ -109,9 +109,17 @@ this.
 
 ## Where it runs
 
-On your own hardware. One PostgreSQL database holds every byte, the language models run locally
-on your own GPUs, and nothing is sent to a vendor. If you turn it off, your memory is still a
-database file that you own.
+AIZK has two supported deployment profiles. Both keep documents, claims, vectors, temporal state,
+scopes and durable work in one SQL backend. Both expose the same five MCP tools.
+
+| Profile | Best fit | Storage and compute |
+|---|---|---|
+| CockroachDB Cloud | a compact distributed service on AWS | CockroachDB stores memory, S3 stores original files, and Lambda runs the public server and worker |
+| PostgreSQL | a private self-hosted installation | PostgreSQL with VectorChord stores memory, SeaweedFS stores original files, and local services run the model lanes |
+
+The profiles make different operational tradeoffs. The CockroachDB profile uses C-SPANN and a
+portable durable queue. The PostgreSQL profile uses VectorChord, BM25 and PgQueuer. Read
+[Database profiles](/docs/dev/run/databases/) before choosing one.
 
 ## What it is not
 
@@ -128,6 +136,7 @@ knowledge in them, not the filing.
 <div class="not-content">
 
 - [Quickstart](/docs/user/quickstart/) connects a client and stores your first memory.
+- [Database profiles](/docs/dev/run/databases/) compares the supported ways to run AIZK.
 - [Your first hour](/docs/user/first-hour/) walks from an empty memory to a shared, useful one.
 - [Glossary](/docs/user/reference/glossary/) defines every term these docs use.
 

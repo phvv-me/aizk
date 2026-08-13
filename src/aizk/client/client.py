@@ -82,12 +82,16 @@ class MemoryClient:
             token_storage=self.token_storage,
             callback_host=self.profile.callback_host,
             callback_port=self.profile.callback_port,
+            client_id=self.profile.client_id,
         )
 
     def connection(self, interactive: bool = False) -> Client[StreamableHttpTransport]:
         """Build one short MCP connection without silently opening a browser."""
         auth = self.oauth(interactive) if self.profile.auth == "oauth" else None
-        return Client(StreamableHttpTransport(str(self.profile.server), auth=auth))
+        return Client(
+            StreamableHttpTransport(str(self.profile.server), auth=auth),
+            mode="2026-07-28",
+        )
 
     async def login(self, days: int = 30) -> StatusReport:
         """Run interactive OAuth and prove the resulting session through `status`."""
@@ -109,7 +113,7 @@ class MemoryClient:
         )
 
     async def logout(self) -> None:
-        """Forget tokens, expiry, and dynamic registration for this server only."""
+        """Forget tokens and expiry for this server only."""
         if self.profile.auth == "oauth":
             await self.oauth(interactive=False).token_storage_adapter.clear()
 
@@ -126,7 +130,7 @@ class MemoryClient:
             await self.require_credentials()
         async with self.connection(interactive) as client:
             result = await client.call_tool("status", {"days": days})
-        return TypeAdapter(StatusReport).validate_python(result.data)
+        return TypeAdapter(StatusReport).validate_python(result.data, from_attributes=True)
 
     async def find(
         self,
@@ -160,7 +164,7 @@ class MemoryClient:
                 "keep",
                 request.tool_arguments(declaration),
             )
-        kept = _KEEP_RESULT.validate_python(result.data)
+        kept = _KEEP_RESULT.validate_python(result.data, from_attributes=True)
         if request.upload is None:
             if isinstance(kept, UploadTicketAccepted):
                 raise ProtocolError("server returned an upload ticket without an upload")
@@ -174,7 +178,7 @@ class MemoryClient:
         await self.require_credentials()
         async with self.connection() as client:
             result = await client.call_tool("share", request.tool_arguments())
-        return TypeAdapter(ShareResult).validate_python(result.data)
+        return TypeAdapter(ShareResult).validate_python(result.data, from_attributes=True)
 
     async def keep_files(
         self,

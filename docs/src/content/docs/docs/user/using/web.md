@@ -8,22 +8,22 @@ question memory cannot answer may reach the public web. This page is about that 
 and evidence see [Asking memory well](/docs/user/using/recall/), and for the full parameter list
 see [MCP tools](/docs/user/reference/tools/).
 
-Egress is off until an operator turns it on, and even then only people in one Logto organization
-can use it. If your `find` answers say nothing left the machine, that is the expected shape of a
-deployment that has not enabled it.
+Web egress is off until an operator turns it on, and even then only people in one Logto
+organization can use it. A receipt that says no web provider was contacted does not describe
+model egress. The active deployment may still use hosted embedding or planning endpoints.
 
 ## The order of the decision
 
-Memory always runs first and always for free. Only what memory cannot answer goes further.
+Memory always runs first. Only what memory cannot answer goes to the web path.
 
 ```text
   your question
         │
    memory retrieval, always
         │
-   enough good evidence ?      ──▶ yes, stop, nothing leaves
+   enough good evidence ?      ──▶ yes, stop before web search
         │
-   about your own world ?      ──▶ yes, stop, nothing leaves
+   about your own world ?      ──▶ yes, stop before web search
         │
    one local planner turn
    classify and rewrite together
@@ -31,13 +31,14 @@ Memory always runs first and always for free. Only what memory cannot answer goe
    sanitizer checks the rewrite
    pronouns, your own names, a detector
         │
-        ├──▶ any hit, stop, nothing leaves
+        ├──▶ any hit, stop before web search
         │
    search, fetch, cache, receipt
 ```
 
-Two branches end the call before any model runs at all. The first is that memory already answered.
-The second is the one that matters most, which is that the question names something you already
+Two branches end the web decision before its planning model runs. Retrieval may already have used
+the configured embedding endpoint. The first branch is that memory already answered. The second
+is that the question names something you already
 store and carries no word pointing at the public world. A question about your own notes, people,
 projects or machines is a question about your life, and it stops there.
 

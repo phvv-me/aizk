@@ -1,42 +1,12 @@
 ---
-type Tone = 'prompt' | 'body' | 'quote' | 'label' | 'ok' | 'muted' | 'gap';
-
-const transcript: { kind: Tone; text: string }[] = [
-  { kind: 'prompt', text: 'agent › aizk.remember(' },
-  { kind: 'body', text: '          text="We moved extraction to GLiNER2 because the LLM' },
-  { kind: 'body', text: '                lane cost 4.1s per chunk and GLiNER2 costs 0.3s' },
-  { kind: 'body', text: '                at the same grounding rate. #project: aizk",' },
-  { kind: 'body', text: '          scopes=["Book Club"])' },
-  { kind: 'ok', text: '✓ stored  019f7a2c…  →  scope { Book Club }' },
-  { kind: 'muted', text: '  queued  chunk → gate → extract → ground → consolidate' },
-  { kind: 'gap', text: '' },
-  { kind: 'prompt', text: 'agent › aizk.recall(query="why did we drop the LLM extractor?")' },
-  { kind: 'gap', text: '' },
-  { kind: 'label', text: '## Evidence' },
-  { kind: 'body', text: '- Source excerpt · scope Book Club' },
-  { kind: 'quote', text: '    We moved extraction to GLiNER2 because the LLM lane cost' },
-  { kind: 'quote', text: '    4.1s per chunk and GLiNER2 costs 0.3s at the same' },
-  { kind: 'quote', text: '    grounding rate.' },
-  { kind: 'body', text: '- Derived memory · scope Book Club' },
-  { kind: 'quote', text: '    [aizk, world] (uses) aizk uses GLiNER2 for extraction.' },
-  { kind: 'muted', text: '  1.4s · 6 of 2048 tokens · 3 lanes hit' },
-];
-
-const tone: Record<Tone, string> = {
-  prompt: 'text-base-content font-semibold',
-  body: 'text-base-content/80',
-  quote: 'text-base-content/60',
-  label: 'text-base-content font-semibold',
-  ok: 'text-base-content',
-  muted: 'text-base-content/45',
-  gap: '',
-};
+const site = (Astro.site?.origin ?? 'https://YOUR_AIZK_HOST').replace(/\/$/, '');
+const setupPrompt = `Set up AIZK for this project from ${site}`;
 ---
 
 <section class="border-base-300 border-b">
   <div class="mx-auto grid max-w-6xl gap-12 px-4 py-16 lg:grid-cols-2 lg:items-center lg:py-24">
     <div class="space-y-6">
-      <div class="badge badge-outline badge-sm font-mono">self-hosted · MCP native</div>
+      <div class="badge badge-outline badge-sm font-mono">sourced · scoped · MCP native</div>
       <h1
         class="text-4xl leading-[1.05] font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl"
         style="font-family: var(--font-brand)"
@@ -44,36 +14,49 @@ const tone: Record<Tone, string> = {
         One memory for you, your team and your agents
       </h1>
       <p class="text-base-content/70 max-w-xl text-lg text-pretty">
-        aizk keeps what you and your agents learn, returns it as sourced evidence when it is
-        asked for, and never lets a memory cross a boundary you did not choose. It runs on your
-        own hardware, on one PostgreSQL database, behind row level security that the database
-        itself enforces.
+        aizk keeps what you and your agents learn and brings it back with its source and sharing
+        boundary intact.
       </p>
       <div class="flex flex-wrap gap-3">
-        <a href="/docs/user/quickstart/" class="btn btn-primary">Start in five minutes</a>
-        <a href="/docs/" class="btn btn-outline">Read the docs</a>
+        <a href="/docs/" class="btn btn-primary">Read the docs</a>
+        <a href="https://github.com/phvv-me/aizk" class="btn btn-outline">View on GitHub</a>
       </div>
-      <dl class="text-base-content/60 flex flex-wrap gap-x-8 gap-y-2 font-mono text-xs">
-        <div><dt class="inline">recall p50</dt> <dd class="text-base-content inline">~0.7 s</dd></div>
-        <div><dt class="inline">tools</dt> <dd class="text-base-content inline">4</dd></div>
-        <div><dt class="inline">databases</dt> <dd class="text-base-content inline">1</dd></div>
-        <div><dt class="inline">licence</dt> <dd class="text-base-content inline">MIT</dd></div>
-      </dl>
     </div>
 
-    <!-- The transcript lines are longer than a phone, so this box scrolls on its own axis and the
-         page body never does. -->
-    <div
-      class="mockup-code border-base-300 bg-base-200 text-base-content w-full min-w-0 overflow-x-auto border text-xs"
-    >
-      <div class="border-base-300 text-base-content/50 mb-2 border-b px-4 pb-2 font-mono">
-        aizk · one round trip
+    <aside class="border-base-300 bg-base-200 border p-6 sm:p-8" aria-labelledby="quickstart-title">
+      <div class="mb-6">
+        <p class="text-primary mb-2 font-mono text-xs font-semibold uppercase tracking-widest">
+          Quickstart
+        </p>
+        <h2 id="quickstart-title" class="text-2xl font-semibold" style="font-family: var(--font-brand)">
+          Ask your agent
+        </h2>
       </div>
-      {
-        transcript.map((line) => (
-          <pre class={`px-4 ${tone[line.kind]}`} data-prefix=""><code>{line.text}</code></pre>
-        ))
-      }
-    </div>
+
+      <div class="space-y-4">
+        <p class="text-base-content/65 text-sm">
+          Send this instruction from the project where you want AIZK.
+        </p>
+        <pre class="border-base-300 bg-base-100 overflow-x-auto border p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap"><code data-setup-prompt>{setupPrompt}</code></pre>
+        <p class="text-base-content/65 text-sm">
+          Your agent handles setup and guides you through sign-in or account creation when needed.
+        </p>
+        <div class="flex flex-wrap items-center gap-4">
+          <button type="button" class="btn btn-primary btn-sm" data-copy-setup>Copy instruction</button>
+          <a href="/setup.md" class="link text-sm">Agent setup instructions</a>
+        </div>
+      </div>
+    </aside>
   </div>
 </section>
+
+<script>
+  const button = document.querySelector<HTMLButtonElement>('[data-copy-setup]');
+  const prompt = document.querySelector<HTMLElement>('[data-setup-prompt]');
+
+  button?.addEventListener('click', async () => {
+    if (!prompt) return;
+    await navigator.clipboard.writeText(prompt.textContent ?? '');
+    button.textContent = 'Copied';
+  });
+</script>

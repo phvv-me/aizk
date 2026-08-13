@@ -1,11 +1,13 @@
 ---
-title: "Deployment topology"
-description: "Every Compose service, what it does, and which profile starts it."
+title: "Self-hosted topology"
+description: "Every service in the PostgreSQL Compose deployment and which profile starts it."
 ---
 
-The whole deployment is one file, `src/deploy/docker-compose.yml`. This page walks it service by
-service, so it helps to have read the [System map](/docs/dev/architecture/system-map/) first and
-to know that aizk ships as three Python entrypoints on one image.
+This page covers the self-hosted PostgreSQL deployment in `src/deploy/docker-compose.yml`. The AWS
+and CockroachDB Cloud topology is documented separately on
+[AWS and CockroachDB Cloud](/docs/dev/run/aws/). It helps to read the
+[System map](/docs/dev/architecture/system-map/) first and know that AIZK ships three application
+roles on one image.
 
 ```d2
 direction: right
@@ -127,7 +129,7 @@ ingress still targets `web:8081`. Rename the service without carrying that alias
 tunnel breaks while every container still looks perfectly healthy.
 :::
 
-The same container serves a second site on 8082, the operator console on `admin.phvv.me`, which
+The same container serves a second site on 8082 for the operator console, which
 [The operator console](/docs/dev/run/console/) covers along with every public hostname the
 Cloudflare tunnel carries.
 
@@ -155,7 +157,7 @@ volumes onto a new project.
 Eight named volumes hold the state, `db-data`, `object-data`, `clamav-data`, `backups`, `oauth`,
 `loki-data`, `alloy-data` and `grafana-data`. Each one is also an environment variable, so a
 production host points them at absolute directories on the right disk.
-[PostgreSQL and storage](/docs/dev/run/postgres/) covers that layout and the ownership each one
+[PostgreSQL profile](/docs/dev/run/postgres/) covers that layout and the ownership each one
 needs.
 
 ## Startup order is enforced by healthchecks

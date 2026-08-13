@@ -29,6 +29,14 @@ _facts_first = (
     Lane.Kind.OVERVIEW,
     Lane.Kind.COMMUNITIES,
 )
+_sources_first = (
+    Lane.Kind.SOURCES,
+    Lane.Kind.COMMUNITIES,
+    Lane.Kind.FACTS,
+    Lane.Kind.WORKING_MEMORY,
+    Lane.Kind.PROFILE,
+    Lane.Kind.OVERVIEW,
+)
 
 
 class Plan(FrozenModel):
@@ -42,6 +50,8 @@ class Plan(FrozenModel):
 
     order: tuple[Lane.Kind, ...]
     communities: bool = False
+    entity_catalog: bool = True
+    neighbors: bool = True
     raptor: bool = False
     profiles: bool = True
     hops: int = 0
@@ -75,11 +85,15 @@ class Plan(FrozenModel):
     def maximal(cls) -> Plan:
         """The production plan, every lane on in facts-first order with the configured
         hops, read fresh so a changed setting takes effect immediately."""
+        graph = settings.recall_graph_expansion_enabled
         return cls(
-            order=_facts_first,
-            communities=True,
-            raptor=True,
-            hops=settings.multihop_max_hops,
+            order=_sources_first if settings.recall_sources_first else _facts_first,
+            communities=settings.recall_communities_enabled,
+            entity_catalog=settings.recall_entity_catalog_enabled,
+            neighbors=graph,
+            profiles=settings.recall_profiles_enabled,
+            raptor=settings.recall_raptor_enabled,
+            hops=settings.multihop_max_hops if graph else 0,
         )
 
     @classmethod
@@ -122,11 +136,16 @@ class Plan(FrozenModel):
         """
         priority = {kind: rank for rank, kind in enumerate(self.order)}
         lanes: list[Lane] = [
-            FactLane(priority=priority[Lane.Kind.FACTS], hops=self.hops),
+            FactLane(
+                priority=priority[Lane.Kind.FACTS],
+                hops=self.hops,
+                neighbors=self.neighbors,
+            ),
             SourceLane(priority=priority[Lane.Kind.SOURCES]),
-            EntityCatalogLane(priority=priority[Lane.Kind.SOURCES]),
             VectorLane(kind=Lane.Kind.WORKING_MEMORY, priority=priority[Lane.Kind.WORKING_MEMORY]),
         ]
+        if self.entity_catalog:
+            lanes.append(EntityCatalogLane(priority=priority[Lane.Kind.SOURCES]))
         if self.profiles:
             lanes.append(VectorLane(kind=Lane.Kind.PROFILE, priority=priority[Lane.Kind.PROFILE]))
         if self.communities:

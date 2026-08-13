@@ -1,25 +1,24 @@
 ---
 title: "The job system"
-description: "PgQueuer, the job types, the priorities, and how a cron pass fans out across scopes."
+description: "The two durable queue adapters, job types, priorities, recovery and scoped scheduling."
 ---
 
 Everything aizk does after a write has already returned happens through one durable queue. This
 page assumes you know what a [scope set](/docs/dev/identity/scope-sets/) is and that maintenance
 runs as the system user, which [Background work](/docs/dev/identity/background/) covers.
 
-## One database, no broker
+## One database, two queue adapters
 
-The queue is PgQueuer, which stores jobs in ordinary PostgreSQL tables and wakes workers with
-`LISTEN` and `NOTIFY`. We picked it over Celery, taskiq, or anything backed by Redis or RabbitMQ
-for one reason. A write and its follow-up job land in the same transaction, so there is no window
-where a chunk exists but its projection job was lost, and there is no second datastore to back up,
-secure and reason about. Everything already lives in one Postgres and the queue stays there too.
+The queue always lives in the selected SQL backend. AIZK needs no Redis, RabbitMQ or external
+workflow service. The PostgreSQL profile uses PgQueuer and its `LISTEN` and `NOTIFY` worker. The
+CockroachDB profile uses AIZK queue and event tables with a portable worker that claims rows with
+transactional locks. Both retain failures and deduplicate active work.
 
-`src/aizk/background/queue.py` wraps it. `Queue` is an async context manager over one asyncpg
-connection, `install_queue_schema()` creates PgQueuer's tables under an advisory lock and grants
-the app role only the objects PgQueuer reports installing, and `run_worker()` in `schedule.py`
-binds every job before calling `pg.run(batch_size=settings.queue_batch_size, ...)`, which defaults
-to 64 with four times that many concurrent tasks.
+`src/aizk/background/queue.py` owns both adapters behind `Queue`. On PostgreSQL,
+`install_queue_schema()` creates PgQueuer objects under an advisory lock. On CockroachDB, the main
+migration creates `queue_task` and `queue_event`. `run_worker()` selects PgQueuer or
+`PortableWorker` from `AIZK_DATABASE_BACKEND`. The Lambda worker uses a bounded batch of eight,
+while the self-hosted worker defaults to a larger continuous drain.
 
 ## What a job declares
 
@@ -86,7 +85,7 @@ A `SystemScheduledJob` runs once with no scope fan-out, because its work is not 
 | `CleanupJob` | `0 1 * * *` | trim queue history past 7 days, then `VACUUM (ANALYZE)` |
 | `BackupJob` | `0 2 * * *` | `scheduled_backup`, off unless `AIZK_BACKUP_ENABLED` |
 
-## Queue history is the largest table until it is trimmed
+## PostgreSQL queue history must be trimmed
 
 PgQueuer writes one `pgqueuer_log` row per finished job and nothing reads it for correctness, so a
 busy deployment turns it into the biggest table it owns. `CleanupJob.prune_pgqueuer_log` deletes
@@ -109,23 +108,19 @@ implementing `execute`, and adding those two settings. Nothing registers it by h
 
 ## Deduplication and holding
 
-Every enqueue passes a `dedupe_key`. `install_queue_schema` creates a partial unique index over
-that column restricted to the `queued`, `picked` and `failed` statuses, so a duplicate is rejected
-while a job is live or held but the same key is admitted again once the earlier run succeeded.
-`Queue.enqueue` catches PgQueuer's `DuplicateJobError` and returns `False` rather than raising,
-which is what lets `ChunkDispatchJob` sweep every pending chunk each minute without ever
-double-projecting one.
+Every enqueue passes a `dedupe_key`. Both schemas reject a duplicate while a job is queued,
+picked or failed, then admit the same key after the earlier run succeeds. `Queue.enqueue` returns
+`False` for the conflict rather than raising. This lets a recovery sweep revisit pending rows
+without double-projecting one.
 
 Keys are stable and boring. A chunk job uses `str(chunk.id)`, a conversion uses its content ID, a
 usage event uses its capture key, and a fan-out uses the job name joined to its sorted scopes.
 
-Failures are held rather than dropped. `QueueJob.bind` registers with `on_failure="hold"` and a
-`DatabaseRetryEntrypointExecutor` capped at `max_attempts`, so a job retries five times and then
-stays in the table with status `failed`. `Queue.requeue_failed` puts a bounded window of those back
-in flight, filtering by entrypoint inside the SQL so one noisy job type cannot crowd out another,
-and optionally capping how many terminal cycles a row may already have burned. That cap is why
-`ChunkRecoveryJob` retries automatically at most `chunk_recovery_max_cycles` times, which is 3,
-while an operator running the retry command may pass no cap at all.
+Failures are held rather than dropped. PgQueuer uses its database retry executor. The portable
+worker records attempts and the terminal error in AIZK tables. `Queue.requeue_failed` puts a
+bounded window back in flight and filters by entrypoint in SQL, so one noisy job type cannot hide
+another. Automatic chunk recovery caps terminal cycles, while an explicit operator retry can omit
+that cap.
 
 ## The loop
 
@@ -135,7 +130,7 @@ while an operator running the retry command may pass no cap at all.
   scope_roster (as owner)          enqueue chunk / conversion
          |                                    |
   one job per exact scope set                 |
-         +-------------->  pgqueuer queue  <---+
+         +-------------->   durable queue   <---+
                         (partial unique dedupe_key)
                                  |
                 worker picks the highest-priority ready job

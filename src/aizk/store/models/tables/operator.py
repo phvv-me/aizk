@@ -10,8 +10,7 @@ from sqlmodel import select
 
 from ....config import settings
 from ...engine import Session
-from ...identity import User
-from ...mixins import TableBase, Timestamped
+from ...mixins import Standing, TableBase, Timestamped
 
 
 class OperatorReading(StrEnum):
@@ -55,7 +54,7 @@ class OperatorSnapshot(Timestamped, TableBase, table=True):
         return (
             rls.Policy.select(
                 "operator_snapshot_read",
-                User.setting("operator"),
+                Standing.operator(),
                 roles=(settings.app_role,),
             ),
         )

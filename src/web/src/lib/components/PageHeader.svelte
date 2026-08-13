@@ -3,7 +3,7 @@
 </script>
 
 <svelte:head>
-  <title>{title} - AIZK</title>
+  <title>{title} · aizk</title>
 </svelte:head>
 
 <header class="mb-8 space-y-1">

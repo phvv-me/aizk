@@ -127,7 +127,7 @@ class Queue(FrozenModel):
     ) -> bool:
         """Persist one typed job and report whether deduplication admitted it."""
         if settings.database_backend is DatabaseBackend.cockroachdb:
-            async with User.system().owner as session:
+            async with User.system() as session:
                 admitted = await session.exec(
                     insert(QueueTask)
                     .values(
@@ -169,7 +169,7 @@ class Queue(FrozenModel):
         omit the cap.
         """
         if settings.database_backend is DatabaseBackend.cockroachdb:
-            async with User.system().owner as session:
+            async with User.system() as session:
                 statement = (
                     select(QueueTask)
                     .where(
@@ -222,7 +222,7 @@ class Queue(FrozenModel):
             QueueStatus.failed.value,
         )
         if settings.database_backend is DatabaseBackend.cockroachdb:
-            async with User.system().owner as session:
+            async with User.system() as session:
                 return tuple(
                     await session.exec(
                         select(QueueTask.payload).where(
@@ -243,7 +243,7 @@ class Queue(FrozenModel):
     async def snapshot(self) -> QueueSnapshot:
         """Read backend-neutral queue counts and operational timestamps."""
         if settings.database_backend is DatabaseBackend.cockroachdb:
-            async with User.system().owner as session:
+            async with User.system() as session:
                 portable_counts = dict(
                     (
                         await session.exec(

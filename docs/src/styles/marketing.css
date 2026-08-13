@@ -4,9 +4,8 @@
    defines can leak into a docs page, and the typography component is excluded
    because Starlight owns prose styling everywhere else.
 
-   The palette is the same monochrome brand as docs.css. Ink on paper in light,
-   chalk on black in dark, no accent hue anywhere, links told apart by weight
-   and underline rather than color. */
+   The palette uses indigo for product actions, quiet paper surfaces for content,
+   and gold only for small moments of emphasis. */
 
 @import 'tailwindcss';
 
@@ -22,18 +21,18 @@
   default: true;
   prefersdark: false;
   color-scheme: light;
-  --color-base-100: oklch(100% 0 0);
-  --color-base-200: oklch(97% 0 0);
-  --color-base-300: oklch(92% 0 0);
-  --color-base-content: oklch(14% 0 0);
-  --color-primary: oklch(14% 0 0);
-  --color-primary-content: oklch(100% 0 0);
-  --color-secondary: oklch(45% 0 0);
-  --color-secondary-content: oklch(100% 0 0);
-  --color-accent: oklch(27% 0 0);
-  --color-accent-content: oklch(100% 0 0);
-  --color-neutral: oklch(27% 0 0);
-  --color-neutral-content: oklch(97% 0 0);
+  --color-base-100: #ffffff;
+  --color-base-200: #f5f6ff;
+  --color-base-300: #e0e7ff;
+  --color-base-content: #1e1b4b;
+  --color-primary: #4f46e5;
+  --color-primary-content: #ffffff;
+  --color-secondary: #6366f1;
+  --color-secondary-content: #ffffff;
+  --color-accent: #fbbf24;
+  --color-accent-content: #1e1b4b;
+  --color-neutral: #1e1b4b;
+  --color-neutral-content: #eef2ff;
   --color-info: oklch(45% 0 0);
   --color-info-content: oklch(100% 0 0);
   --color-success: oklch(45% 0 0);
@@ -57,18 +56,18 @@
   default: false;
   prefersdark: true;
   color-scheme: dark;
-  --color-base-100: oklch(14% 0 0);
-  --color-base-200: oklch(18% 0 0);
-  --color-base-300: oklch(24% 0 0);
-  --color-base-content: oklch(96% 0 0);
-  --color-primary: oklch(96% 0 0);
-  --color-primary-content: oklch(14% 0 0);
-  --color-secondary: oklch(70% 0 0);
-  --color-secondary-content: oklch(14% 0 0);
-  --color-accent: oklch(85% 0 0);
-  --color-accent-content: oklch(14% 0 0);
-  --color-neutral: oklch(24% 0 0);
-  --color-neutral-content: oklch(96% 0 0);
+  --color-base-100: #111027;
+  --color-base-200: #1e1b4b;
+  --color-base-300: #312e81;
+  --color-base-content: #eef2ff;
+  --color-primary: #a5b4fc;
+  --color-primary-content: #1e1b4b;
+  --color-secondary: #818cf8;
+  --color-secondary-content: #111027;
+  --color-accent: #fbbf24;
+  --color-accent-content: #1e1b4b;
+  --color-neutral: #312e81;
+  --color-neutral-content: #eef2ff;
   --color-info: oklch(70% 0 0);
   --color-info-content: oklch(14% 0 0);
   --color-success: oklch(70% 0 0);

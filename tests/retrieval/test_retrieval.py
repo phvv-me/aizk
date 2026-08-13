@@ -12,10 +12,11 @@ from id_factory import uuid5, uuid5s, uuid7, uuid8
 from pydantic import UUID5, UUID7
 from sqlalchemy import Row, update
 from sqlalchemy.dialects import postgresql
+from sqlalchemy_cockroachdb.asyncpg import CockroachDBDialect_asyncpg
 from sqlmodel import select
 from sqlmodel.sql.expression import Select
 
-from aizk.config import settings
+from aizk.config import DatabaseBackend, settings
 from aizk.config.settings import Settings
 from aizk.ontology import Ontology, System
 from aizk.provenance import Stance
@@ -24,6 +25,7 @@ from aizk.retrieval import (
     Lane,
     Plan,
     QueryContext,
+    RecallTrace,
     recall,
     trace,
 )
@@ -185,6 +187,7 @@ def test_plan_presets_declare_and_compile_the_composed_query(
     facts = lanes[Lane.Kind.FACTS]
     assert isinstance(facts, FactLane)
     assert facts.hops == hops
+    assert facts.neighbors
     sql = str(statement_for(settings.embed_dim, plan).compile(dialect=postgresql.dialect()))
 
     assert "ordered_context" in sql
@@ -205,12 +208,61 @@ def test_plan_presets_declare_and_compile_the_composed_query(
         assert f"hop_{settings.multihop_max_hops}" in sql
 
 
+def test_maximal_plan_follows_the_deployment_recall_feature_switches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "recall_communities_enabled", False)
+    monkeypatch.setattr(settings, "recall_entity_catalog_enabled", False)
+    monkeypatch.setattr(settings, "recall_graph_expansion_enabled", False)
+    monkeypatch.setattr(settings, "recall_profiles_enabled", False)
+    monkeypatch.setattr(settings, "recall_raptor_enabled", False)
+    monkeypatch.setattr(settings, "recall_sources_first", True)
+
+    plan = Plan.maximal()
+    sql = str(statement_for(settings.embed_dim, plan).compile(dialect=postgresql.dialect()))
+
+    assert not plan.communities
+    assert not plan.entity_catalog
+    assert not plan.neighbors
+    assert not plan.profiles
+    assert not plan.raptor
+    assert plan.hops == 0
+    assert plan.order[0] is Lane.Kind.SOURCES
+    assert "entity_catalog" not in sql
+    assert "seed_entity" not in sql
+    assert "FROM profile" not in sql
+    assert "FROM community" not in sql
+    assert "mention_entity" not in sql
+
+
 def test_vector_lane_rejects_a_section_it_does_not_serve() -> None:
     lane = VectorLane(kind=Lane.Kind.FACTS, priority=0)
     context = QueryContext(dimensions=settings.embed_dim, fuzzy=False)
 
     with pytest.raises(ValueError, match="not a vector-only section"):
         lane(context)
+
+
+def test_cockroach_recall_routes_dense_surfaces_through_scoped_cspann(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+    build_recall_statement.cache_clear()
+    try:
+        sql = str(
+            statement_for(settings.embed_dim, Plan.maximal()).compile(
+                dialect=CockroachDBDialect_asyncpg()
+            )
+        )
+    finally:
+        build_recall_statement.cache_clear()
+
+    assert "aizk_private.cspann_scopes" in sql
+    assert "aizk_private.cspann_search" in sql
+    assert "chunk_cspann_candidate" in sql
+    assert "fact_cspann_candidate" in sql
+    assert "entity_cspann_candidate" in sql
+    assert "profile_cspann_candidate" in sql
 
 
 @pytest.mark.parametrize("preset", [Plan.focused, Plan.overview, Plan.multihop, Plan.maximal])
@@ -716,23 +768,60 @@ def test_recall_trace_preserves_access_history(
     fake_embedder: RecordingEmbedder,
     fake_reranker: list[list[str]],
     stub_entities: None,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     user = User.private(owner)
     vector = deterministic_vector("query:what holds", settings.embed_dim)
+    messages: list[str] = []
+    monkeypatch.setattr(settings, "profiling", True)
+    monkeypatch.setattr(
+        recall_module.logger,
+        "info",
+        lambda message, *args, **kwargs: messages.append(message),
+    )
 
-    async def probe() -> tuple[int, int]:
+    async def probe() -> tuple[RecallTrace, int]:
         fact_id = await seed_fact(user, "diagnostic fact", vector)
         diagnostic = await trace("what holds", user=user, token_budget=400)
         async with User.system().owner as opened:
             count = await opened.scalar(
                 select(Fact.Claim.access_count).where(Fact.Claim.id == fact_id)
             )
-        return diagnostic.selected, count
+        return diagnostic, count
 
-    selected, access_count = dbutil.run(probe())
+    diagnostic, access_count = dbutil.run(probe())
 
-    assert selected > 0
+    assert diagnostic.selected > 0
     assert access_count == 0
+    assert fake_reranker
+    assert diagnostic.timing.total_ms > 0
+    assert diagnostic.timing.database_ms > 0
+    assert diagnostic.timing.statement_rows == len(diagnostic.rows)
+    assert sum(diagnostic.timing.statement_lanes.values()) == len(diagnostic.rows)
+    assert sum(diagnostic.timing.selected_lanes.values()) == diagnostic.selected
+    assert "recall profile {}" in messages
+
+
+def test_recall_access_recording_can_be_disabled(
+    owner: UUID5 | UUID7,
+    fake_embedder: RecordingEmbedder,
+    fake_reranker: list[list[str]],
+    stub_entities: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = User.private(owner)
+    vector = deterministic_vector("query:what holds", settings.embed_dim)
+    monkeypatch.setattr(settings, "recall_access_recording_enabled", False)
+
+    async def probe() -> int:
+        fact_id = await seed_fact(user, "diagnostic fact", vector)
+        await recall("what holds", user=user, token_budget=400)
+        async with User.system().owner as opened:
+            return await opened.scalar(
+                select(Fact.Claim.access_count).where(Fact.Claim.id == fact_id)
+            )
+
+    assert dbutil.run(probe()) == 0
     assert fake_reranker
 
 
@@ -832,12 +921,19 @@ def test_reordered_preserves_merit_and_named_source_authority(
 
 
 @pytest.mark.parametrize(
-    ("enabled", "expected"),
-    [(True, ["ada", "git"]), (False, [])],
-    ids=["enabled", "disabled"],
+    ("graph", "seeding", "expected"),
+    [
+        (True, True, ["ada", "git"]),
+        (True, False, []),
+        (False, True, []),
+    ],
+    ids=["enabled", "seeding-disabled", "graph-disabled"],
 )
 def test_query_entity_seeding_controls_the_lowered_gate_names(
-    enabled: bool, expected: list[str], monkeypatch: pytest.MonkeyPatch
+    graph: bool,
+    seeding: bool,
+    expected: list[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
 
@@ -847,10 +943,11 @@ def test_query_entity_seeding_controls_the_lowered_gate_names(
         return ["ada", "git"]
 
     stub_gate(monkeypatch, named)
-    monkeypatch.setattr(settings, "graph_entity_seeding", enabled)
+    monkeypatch.setattr(settings, "recall_graph_expansion_enabled", graph)
+    monkeypatch.setattr(settings, "graph_entity_seeding", seeding)
 
     assert dbutil.run(recall_module.query_entities("who uses what")) == expected
-    assert calls == (["who uses what"] if enabled else [])
+    assert calls == (["who uses what"] if graph and seeding else [])
 
 
 def test_query_entities_seeds_without_an_ontology_or_a_database(

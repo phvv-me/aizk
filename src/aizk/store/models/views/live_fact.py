@@ -8,6 +8,7 @@ from pydantic import UUID5, UUID7, JsonValue
 from sqlalchemy import (
     ColumnElement,
     Float,
+    FromClause,
     Integer,
     and_,
     bindparam,
@@ -25,9 +26,10 @@ from sqlalchemy.sql.selectable import Select as SelectStatement
 from sqlmodel import select
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
+from ....config import DatabaseBackend, settings
 from ....provenance import EpistemicKind, Stance
 from ...mixins import ViewBase
-from ...vector import cosine_distance
+from ...vector import cosine_distance, scoped_vector_candidates
 from ..tables.fact import FactClaim, FactContent
 
 if TYPE_CHECKING:
@@ -181,26 +183,44 @@ class LiveFact(ViewBase):
         The materialized content cut isolates the vector index scan; live_fact then
         supplies visibility and access history in one join.
         """
-        fact_distance = cosine_distance(FactContent.embedding, context.vector)
-        dense_fact_content = (
-            select(
-                FactContent.id,
-                FactContent.subject_id,
-                FactContent.object_id,
-                fact_distance.label("distance"),
+        dense_source: FromClause
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            dense_source = scoped_vector_candidates("fact", context.vector, context.fusion_depth)
+            distance = dense_source.c.distance
+            statement = select(
+                cls.id,
+                cls.subject_id,
+                cls.object_id,
+                distance.label("distance"),
+            ).join(dense_source, dense_source.c.source_id == cls.id)
+        else:
+            fact_distance = cosine_distance(FactContent.embedding, context.vector)
+            dense_source = (
+                select(
+                    FactContent.id,
+                    FactContent.subject_id,
+                    FactContent.object_id,
+                    fact_distance.label("distance"),
+                )
+                .where(FactContent.embedding.is_not(None), fact_distance < context.floor)
+                .order_by(fact_distance)
+                .limit(context.fusion_depth)
+                .cte("dense_fact_content")
+                # prefix_with is SQLAlchemy's supported spelling for a MATERIALIZED CTE.
+                .prefix_with("MATERIALIZED")
             )
-            .where(FactContent.embedding.is_not(None), fact_distance < context.floor)
-            .order_by(fact_distance)
-            .limit(context.fusion_depth)
-            .cte("dense_fact_content")
-            # prefix_with is SQLAlchemy's supported spelling for a MATERIALIZED CTE.
-            .prefix_with("MATERIALIZED")
-        )
+            distance = dense_source.c.distance
+            statement = select(
+                cls.id,
+                dense_source.c.subject_id,
+                dense_source.c.object_id,
+                distance,
+            ).join(dense_source, dense_source.c.id == cls.content_id)
         last_seen = cls.last_accessed.coalesce(
             cls.recorded_from,
         )
         blended = (
-            dense_fact_content.c.distance
+            distance
             - bindparam("recall_recency_weight", type_=Float)
             * half_life_decay(
                 type_coerce(
@@ -212,14 +232,8 @@ class LiveFact(ViewBase):
             - bindparam("recall_frequency_weight", type_=Float) * log_frequency(cls.access_count)
         )
         return (
-            select(
-                cls.id,
-                dense_fact_content.c.subject_id,
-                dense_fact_content.c.object_id,
-                dense_fact_content.c.distance,
-            )
-            .add_columns(blended.label("blended"))
-            .join(dense_fact_content, dense_fact_content.c.id == cls.content_id)
+            statement.add_columns(blended.label("blended"))
+            .where(distance < context.floor)
             .order_by(blended)
             .limit(context.k)
             .cte("dense_fact")

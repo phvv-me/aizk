@@ -35,10 +35,10 @@ READY = Artifact.Content.State.ready
 
 class Processor:
     def __init__(self) -> None:
-        self.calls: list[tuple[UUID7, Scopes]] = []
+        self.calls: list[tuple[UUID7, Scopes, str]] = []
 
-    async def process(self, content_id: UUID7, scopes: Scopes) -> None:
-        self.calls.append((content_id, scopes))
+    async def process(self, content_id: UUID7, scopes: Scopes, policy: str) -> None:
+        self.calls.append((content_id, scopes, policy))
 
 
 class FakeQueue:
@@ -73,6 +73,10 @@ class FakeQueue:
         self.requeue_limits.append(limit)
         return 1
 
+    async def active_payloads(self, entrypoint: str) -> tuple[bytes, ...]:
+        assert entrypoint == DoclingConversionJob.entrypoint
+        return ()
+
 
 def test_conversion_job_delegates_the_durable_original_to_the_processor() -> None:
     processor = Processor()
@@ -84,7 +88,7 @@ def test_conversion_job_delegates_the_durable_original_to_the_processor() -> Non
 
     asyncio.run(job.handle(payload))
 
-    assert processor.calls == [(payload.artifact_content_id, payload.scopes)]
+    assert processor.calls == [(payload.artifact_content_id, payload.scopes, payload.policy)]
     assert job.entrypoint == "aizk_convert_artifact"
     assert job.priority == 75
     assert job.concurrency_limit == settings.docling_concurrency
@@ -310,6 +314,7 @@ def test_web_page_reconversion_requeues_converted_pages_and_nothing_else(
             media_type="text/html",
             source_uri="https://github.com/datahub-project/datahub",
             state=Artifact.Content.State.ready,
+            markdown="DataHub project page",
         )
         paper = await seed_artifact(
             owner,
@@ -318,6 +323,7 @@ def test_web_page_reconversion_requeues_converted_pages_and_nothing_else(
             media_type="application/pdf",
             source_uri="https://files.example/paper.pdf",
             state=Artifact.Content.State.ready,
+            markdown="Paper text",
         )
         uploaded = await seed_artifact(
             owner,
@@ -325,6 +331,7 @@ def test_web_page_reconversion_requeues_converted_pages_and_nothing_else(
             name="page.html",
             media_type="text/html",
             state=Artifact.Content.State.ready,
+            markdown="Uploaded page",
         )
         converting = await seed_artifact(
             owner,
@@ -333,6 +340,7 @@ def test_web_page_reconversion_requeues_converted_pages_and_nothing_else(
             media_type="text/html",
             source_uri="https://example.org/pending",
             state=Artifact.Content.State.processing,
+            markdown="Pending page",
         )
 
         async with ProductionQueue(dsn=settings.asyncpg_dsn) as queue:
@@ -343,8 +351,7 @@ def test_web_page_reconversion_requeues_converted_pages_and_nothing_else(
         assert await reconvert_web_pages(limit=10) == 1
         assert await reconvert_web_pages(limit=10) == 0
 
-        # A page still held by the queue is claimed again and its enqueue refused, which is not
-        # counted as new work while the state stays honest about the task that already exists.
+        # A page held by the queue remains ready and is not counted as new work.
         async with User.system().owner as session:
             held = await session.get(Artifact.Content, page.content.id)
             assert held is not None
@@ -357,7 +364,7 @@ def test_web_page_reconversion_requeues_converted_pages_and_nothing_else(
                 for stored in (page, paper, uploaded, converting)
             }
         assert states[page.content.id] is not None
-        assert states[page.content.id].state == Artifact.Content.State.queued
+        assert states[page.content.id].state == Artifact.Content.State.ready
         for untouched, expected in (
             (paper, Artifact.Content.State.ready),
             (uploaded, Artifact.Content.State.ready),
@@ -370,7 +377,7 @@ def test_web_page_reconversion_requeues_converted_pages_and_nothing_else(
 
 
 def test_reconversion_rejects_an_empty_budget() -> None:
-    sweep = ReconversionSweep(media_prefixes=("application/pdf",))
+    sweep = ReconversionSweep(media_prefixes=("application/pdf",), policy="test-v1")
     with pytest.raises(ValueError, match="positive"):
         asyncio.run(ArtifactReconversion(sweep).enqueue(0))
 
@@ -379,7 +386,7 @@ def test_a_worker_finishing_mid_sweep_keeps_its_ready_state(
     migrated_db: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The sweep commits `queued` before a task exists, so a fast worker is never overwritten."""
+    """The sweep leaves production ready while a fast worker handles its candidate."""
 
     async def run() -> None:
         await dbutil.reset_db()
@@ -391,6 +398,7 @@ def test_a_worker_finishing_mid_sweep_keeps_its_ready_state(
             media_type="text/html",
             source_uri="https://example.org/first",
             state=Artifact.Content.State.ready,
+            markdown="First page",
         )
         second = await seed_artifact(
             owner,
@@ -399,6 +407,7 @@ def test_a_worker_finishing_mid_sweep_keeps_its_ready_state(
             media_type="text/html",
             source_uri="https://example.org/second",
             state=Artifact.Content.State.ready,
+            markdown="Second page",
         )
 
         class CompletingQueue(FakeQueue):
@@ -415,7 +424,7 @@ def test_a_worker_finishing_mid_sweep_keeps_its_ready_state(
                     async with User.system().owner as session:
                         row = await session.get(Artifact.Content, payload.artifact_content_id)
                         assert row is not None
-                        assert row.state == Artifact.Content.State.queued
+                        assert row.state == Artifact.Content.State.ready
                         row.state = Artifact.Content.State.ready
                 return admitted
 
@@ -427,12 +436,12 @@ def test_a_worker_finishing_mid_sweep_keeps_its_ready_state(
             completed = await session.get(Artifact.Content, first.content.id)
             queued = await session.get(Artifact.Content, second.content.id)
         assert completed is not None and completed.state == Artifact.Content.State.ready
-        assert queued is not None and queued.state == Artifact.Content.State.queued
+        assert queued is not None and queued.state == Artifact.Content.State.ready
 
     dbutil.run(run())
 
 
-def test_scanned_reconversion_requeues_everything_ocr_read_whatever_its_source(
+def test_scanned_reconversion_selects_japanese_pdf_and_image_derivatives(
     migrated_db: None,
 ) -> None:
     async def run() -> None:
@@ -444,6 +453,7 @@ def test_scanned_reconversion_requeues_everything_ocr_read_whatever_its_source(
             name="scan.pdf",
             media_type="application/pdf",
             state=Artifact.Content.State.ready,
+            markdown="日本語の申請書です。",
         )
         photo = await seed_artifact(
             owner,
@@ -452,6 +462,7 @@ def test_scanned_reconversion_requeues_everything_ocr_read_whatever_its_source(
             media_type="image/png",
             source_uri="https://files.example/whiteboard.png",
             state=Artifact.Content.State.ready,
+            markdown="会議のホワイトボードです。",
         )
         page = await seed_artifact(
             owner,
@@ -460,6 +471,7 @@ def test_scanned_reconversion_requeues_everything_ocr_read_whatever_its_source(
             media_type="text/html",
             source_uri="https://example.org/page",
             state=Artifact.Content.State.ready,
+            markdown="日本語のウェブページです。",
         )
 
         async with ProductionQueue(dsn=settings.asyncpg_dsn) as queue:
@@ -476,7 +488,7 @@ def test_scanned_reconversion_requeues_everything_ocr_read_whatever_its_source(
             }
         for requeued in (scan, photo):
             row = states[requeued.content.id]
-            assert row is not None and row.state == Artifact.Content.State.queued
+            assert row is not None and row.state == Artifact.Content.State.ready
         untouched = states[page.content.id]
         assert untouched is not None and untouched.state == Artifact.Content.State.ready
 

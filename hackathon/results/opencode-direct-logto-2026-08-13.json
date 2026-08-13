@@ -1,0 +1,58 @@
+{
+  "tested_at": "2026-08-13T03:02:00Z",
+  "endpoint": "https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp",
+  "authentication": {
+    "provider": "Logto",
+    "public_client_id": "2yqsd1rbjsxxzkyrem1xv",
+    "client_secret": false,
+    "pkce": "passed",
+    "token_exchange": "passed",
+    "caller": "Maya Chen"
+  },
+  "isolation": {
+    "read_only_root": true,
+    "capabilities": [],
+    "no_new_privileges": true,
+    "process_limit": 256,
+    "memory_mib": 1024,
+    "cpus": 2,
+    "host_home_mounted": false,
+    "source_tree_mounted": false,
+    "docker_socket_mounted": false,
+    "aws_credentials_mounted": false,
+    "oauth_network": "host loopback callback only",
+    "mcp_network": "Docker bridge"
+  },
+  "current_release": {
+    "version": "1.18.18",
+    "image": "ghcr.io/anomalyco/opencode@sha256:f3e00f8e25500150373c817e24b13f2f08e2ccd4cafd53dc3ad4827d47863b6f",
+    "oauth": "passed",
+    "mcp": "failed",
+    "timeout_ms": 5000,
+    "observed_error": "Operation timed out after 5000ms",
+    "cause": "The release still uses the legacy MCP client and does not send the MCP 2026-07-28 envelope"
+  },
+  "pinned_release": {
+    "version": "1.18.8",
+    "image": "ghcr.io/anomalyco/opencode@sha256:bc4de2a82a5663c9bbc2f3be7cab2a5d7dd34f7af73b59b146aa34c054bf0525",
+    "mcp": "passed",
+    "protocol": "2026-07-28",
+    "agent_call": {
+      "model": "openrouter/auto",
+      "tool": "status",
+      "result": "Maya Chen with four Northstar organizations and idle processing"
+    }
+  },
+  "control_probe": {
+    "protocol": "2026-07-28",
+    "server_discover_ms": 624,
+    "tools_list_ms": 713,
+    "tools": [
+      "status",
+      "find",
+      "keep",
+      "report",
+      "share"
+    ]
+  }
+}

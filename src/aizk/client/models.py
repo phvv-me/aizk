@@ -18,9 +18,17 @@ class ClientProfile(FrozenModel):
 
     server: AnyHttpUrl
     auth: Literal["oauth", "none"] = "oauth"
+    client_id: str = ""
     callback_host: str = "127.0.0.1"
     callback_port: PositiveInt = 8912
     scopes: tuple[str, ...] = ("control", "offline_access", "openid")
+
+    @model_validator(mode="after")
+    def complete_oauth(self) -> Self:
+        """Require the public Logto client ID used by authorization code flow with PKCE."""
+        if self.auth == "oauth" and not self.client_id:
+            raise ValueError("OAuth client profile requires client_id")
+        return self
 
 
 class LocalUpload(FrozenModel):

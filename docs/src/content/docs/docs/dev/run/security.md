@@ -1,17 +1,16 @@
 ---
-title: "The security model"
-description: "What a deployment protects, what it trusts, and where it fails closed."
+title: "Self-hosted security model"
+description: "What the PostgreSQL Compose deployment protects, trusts and fails closed on."
 ---
 
-This page states what a production deployment protects, what it deliberately trusts, and where the
-guarantees stop. It assumes the single-host Compose deployment from
+This page covers the self-hosted PostgreSQL security model. The crAIZK serverless boundaries are
+documented on [AWS and CockroachDB Cloud](/docs/dev/run/aws/). This page assumes the Compose deployment from
 [Deployment topology](/docs/dev/run/topology/) and the scope model from
 [Scope sets in depth](/docs/dev/identity/scope-sets/).
 
 ## What is protected
 
-aizk holds private notes, shared sources, embeddings, the graph, temporal history, sessions and
-backups. Four goals follow from that.
+AIZK holds private notes, shared sources, embeddings, graph state and history. Four goals follow.
 
 - One caller never reads or alters another's private memory, and must stand in every scope on a
   shared row.

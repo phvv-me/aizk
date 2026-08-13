@@ -104,9 +104,8 @@ and the identity system disagreeing about who is on a team.
 
 ## The rule underneath
 
-The check is not a filter the application applies before returning results. PostgreSQL evaluates
-it on every row of every table, with the setting that would let the application bypass it turned
-off entirely.
+The check is not a filter the application applies before returning results. The selected SQL
+backend evaluates it on every protected row, and the application role cannot bypass it.
 
 The practical consequence is that a bug in aizk cannot leak a memory across a boundary. Code that
 forgets to filter returns nothing rather than returning everything. If you want the mechanics,

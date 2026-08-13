@@ -31,7 +31,7 @@ Twenty-nine top-level modules, grouped here by what they are for rather than by 
 | the write path | `extract/`, `artifacts/`, `serving/` | ingest, uploads, model clients |
 | derived knowledge | `graph/`, `ontology/` | extraction, grounding, communities, vocabulary |
 | the read path | `retrieval/` | lanes, fusion, reranking, packing, templates |
-| autonomy | `background/` | the PgQueuer wrapper, jobs, the scheduler |
+| autonomy | `background/` | queue adapters, jobs and the scheduler |
 | operations | `ops/`, `admin.py`, `backup.py`, `export.py`, `status.py` | doctor, probes, dumps, usage reports |
 | foundations | `config/`, `types.py`, `exceptions.py`, `provenance.py`, `common/` | settings and leaf vocabulary |
 | glue | `runtime.py`, `auth.py`, `storage.py`, `integrations/`, `usage.py` | composition, identity, bytes, sidecar clients |
@@ -40,9 +40,10 @@ A few of those deserve a sentence.
 
 `store/` is the largest and the most structured. `models/tables/` has one file per table,
 `models/views/` has the security-invoker views such as `live_fact.py`, `mixins/` assembles every
-table from reusable pieces, `ddl/` holds the custom SQLAlchemy DDL constructs for extensions,
-grants and views, `identity/` holds `User` and `Organization`, and `migrations/versions/` holds
-exactly two revisions, `0001_init` and `0002_durable_usage`.
+table from reusable pieces, `ddl/` holds custom SQLAlchemy DDL constructs for extensions, grants
+and views, and `identity/` holds `User` and `Organization`. `migrations/versions/` holds the
+PostgreSQL revision history. `migrations/cockroachdb/versions/` holds the fused CockroachDB
+baseline.
 
 `serving/` is where the model clients live, one subpackage per lane, so `embed/`, `rerank/`,
 `gate/`, `extract/` and `chunk/`. Every one of them talks to a container over HTTP and none of
@@ -62,10 +63,10 @@ tie back to the source text, `dedupe.py` and `consolidation.py` fold what surviv
 already known, and `communities.py`, `raptor.py`, `profiles.py`, `insight.py`, `decay.py`, `promote.py` and
 `reembed.py` are the scheduled passes.
 
-`background/` is small on purpose. `queue.py` wraps PgQueuer with the typed `QueueJob` and
-`QueuePayload` bases, `jobs/` holds the three job families for conversion, projection and
-maintenance, and `schedule.py` binds them all onto one worker and fans the scoped passes out over
-every distinct scope set that has stored memory.
+`background/` is small on purpose. `queue.py` selects PgQueuer for PostgreSQL or the portable
+queue for CockroachDB behind the typed `QueueJob` and `QueuePayload` bases. `jobs/` holds the job
+families for conversion, projection and maintenance. `schedule.py` binds them to a worker and fans
+scoped passes out over each exact scope set that has stored memory.
 
 ## The other three source trees
 
@@ -84,9 +85,10 @@ hand-edited. `src/routes/app/` has one directory per screen, and those directori
 user-facing renaming shows up, since findings are facts, subjects are entities and themes are
 communities. [The web app](/docs/dev/interfaces/web/) has the detail.
 
-`src/deploy/` is the deployment. `docker-compose.yml` defines every container, `Dockerfile` builds
-the runtime image, `Caddyfile` and `Caddyfile.docs` front the site, `initdb/roles.sh` creates the
-database roles, and `observability/` holds the Alloy, Loki and Grafana configuration.
+`src/deploy/` holds the container builds and Compose profile. `docker-compose.yml` defines the
+self-hosted services, `Dockerfile` builds both container and Lambda targets, and `cockroachdb/`
+holds the cloud database setup. `infra/aws/` declares the crAIZK ECR, Lambda, S3, Scheduler,
+Parameter Store, logging and budget resources.
 
 ## `docs/` and `tests/`
 

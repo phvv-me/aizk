@@ -1,32 +1,40 @@
 from collections.abc import Callable, Coroutine
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Protocol
 
 import httpx
 from fastmcp import FastMCP
 from fastmcp.exceptions import ResourceError, ToolError
 from fastmcp.resources import ResourceContent, ResourceResult
 from fastmcp.server.context import Context
+from fastmcp.server.http import build_resource_metadata_url
 from obstore.exceptions import BaseError as ObjectStoreError
 from patos import FrozenModel
-from pydantic import UUID5, UUID8, Field, StringConstraints
+from pydantic import UUID5, UUID8, AnyHttpUrl, Field, StringConstraints
+from starlette.requests import Request
+from starlette.responses import Response
 
-from ..artifacts.service import ArtifactIntake
 from ..artifacts.uploads import UploadBox, UploadGrantLimitError, UploadRequest
 from ..auth import Auth
 from ..background.wake import NoopWorkerWake, WorkerWake
 from ..config import Settings
 from ..exceptions import QuotaExceededError
 from ..integrations.clamav import MalwareRejectedError, MalwareUnavailableError
-from ..memory import Memory, ShareResult, WriteResult
+from ..memory import Memory, MemoryIntake, ShareResult, WriteResult
 from ..status import StatusReport
-from ..storage import ByteStore, IntegrityMismatch
+from ..storage import IntegrityMismatch
 from ..store import Artifact, Blob, Usage
 from ..store.identity import User
 from ..types import UUID7, ScopeNames
 from ..usage import annotate_operation
 from ..web import WebMode, WebSearch
-from .middleware import CallerRateLimit, IdentityMiddleware, bound_user, client_label
+from .middleware import (
+    CallerRateLimit,
+    IdentityMiddleware,
+    ModernProtocolOnly,
+    bound_user,
+    client_label,
+)
 from .models import KeepResult, UploadDeclaration, UploadTicketAccepted
 
 
@@ -40,6 +48,20 @@ class _ArtifactObject(FrozenModel):
     encoding: Blob.Encoding
     scopes: list[UUID5]
     media_type: str | None = None
+
+
+class ArtifactByteStore(Protocol):
+    """Read one authorized immutable artifact from the configured byte store."""
+
+    async def get(
+        self,
+        key: str,
+        *,
+        encoding: Blob.Encoding,
+        expected_size: int,
+        expected_hash: UUID8,
+        version: str | None = None,
+    ) -> bytes: ...
 
 
 class AizkMCP(FastMCP):
@@ -56,9 +78,9 @@ class AizkMCP(FastMCP):
     def __init__(
         self,
         auth: Auth,
-        store: ByteStore,
+        store: ArtifactByteStore,
         uploads: UploadBox,
-        intake: ArtifactIntake,
+        intake: MemoryIntake,
         config: Settings,
         name: str = "aizk",
         wake: WorkerWake | None = None,
@@ -71,7 +93,20 @@ class AizkMCP(FastMCP):
         self.settings = config
         self.wake = wake or NoopWorkerWake()
         self.websearch = web
-        super().__init__(name, auth=auth.provider())
+        provider = auth.provider()
+        super().__init__(name, auth=provider)
+        if provider is not None:
+            metadata_url = build_resource_metadata_url(AnyHttpUrl(config.mcp_resource_id))
+
+            @self.custom_route("/mcp", methods=["GET"], include_in_schema=False)
+            async def oauth_discovery(request: Request) -> Response:
+                """Challenge the side-effect-free OAuth discovery probe."""
+                del request
+                scopes = " ".join(sorted(config.logto_required_scopes))
+                challenge = f'Bearer scope="{scopes}", resource_metadata="{metadata_url}"'
+                return Response(status_code=401, headers={"WWW-Authenticate": challenge})
+
+        self.add_middleware(ModernProtocolOnly())
         self.add_middleware(IdentityMiddleware(auth))
         self.add_middleware(
             CallerRateLimit(max_requests_per_second=config.mcp_request_rate_per_second)

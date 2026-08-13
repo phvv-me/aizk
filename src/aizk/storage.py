@@ -13,6 +13,7 @@ from .store.models.tables.blob import Blob
 
 if TYPE_CHECKING:
     from obstore import GetOptions
+    from obstore.store import S3Config
 
 
 class ByteLimitExceeded(ValueError):
@@ -59,15 +60,29 @@ class IntegrityCheck(FrozenModel):
     error: str | None = None
 
 
-def s3_backend(endpoint: str, bucket: str, access_key: str, secret_key: str) -> S3Store:
-    """Build an S3-compatible backend with path-style URLs and SHA-256 upload checks."""
+def s3_backend(
+    endpoint: str | None,
+    bucket: str,
+    access_key: str,
+    secret_key: str,
+) -> S3Store:
+    """Build an S3 backend with SHA-256 checks and optional compatible-store settings.
+
+    Empty credentials deliberately stay absent so AWS Lambda can use the temporary
+    credentials from its execution role. Local S3-compatible services still provide
+    their explicit endpoint and static development credentials.
+    """
+    configuration: S3Config = {"checksum_algorithm": "SHA256"}
+    if endpoint is not None:
+        configuration["endpoint"] = endpoint
+    if access_key:
+        configuration["access_key_id"] = access_key
+    if secret_key:
+        configuration["secret_access_key"] = secret_key
     return S3Store(
         bucket,
-        endpoint=endpoint,
-        access_key_id=access_key,
-        secret_access_key=secret_key,
-        checksum_algorithm="SHA256",
-        client_options={"allow_http": endpoint.startswith("http://")},
+        config=configuration,
+        client_options={"allow_http": bool(endpoint and endpoint.startswith("http://"))},
     )
 
 

@@ -11,8 +11,8 @@ differs. The code is `src/aizk/api/` and it runs as its own process through
 ## Who it is for
 
 The API exists for the SvelteKit app and for nothing else. Agents talk MCP. That is why it is a
-separate process from the MCP server in `src/deploy/docker-compose.yml`, and why the two can scale
-independently while sharing one PostgreSQL upload capability table.
+separate process from the MCP server in the Compose profile. The AWS profile serves both surfaces
+from one public Lambda. Both use the same upload capability table in the active SQL backend.
 
 `AizkAPI.app()` assembles a plain FastAPI with explicit `add_api_route` calls rather than
 decorators, so the whole surface is one readable list.

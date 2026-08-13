@@ -15,7 +15,7 @@ of view, which [MCP tools](/docs/user/reference/tools/) covers. Here we look at
 per process from `Runtime.assemble`.
 
 Its constructor does four things in order. It calls `super().__init__(name, auth=auth.provider())`,
-adds `IdentityMiddleware`, adds `CallerRateLimit`, then registers four tools and one resource
+adds `IdentityMiddleware`, adds `CallerRateLimit`, then registers five tools and one resource
 template.
 
 The tools are not module-level functions. Each is built by a method that closes over
@@ -28,9 +28,10 @@ limit without a code change.
 | `status` | yes | caller authority plus durable usage and processing health |
 | `find` | no | visible evidence for one question, rendered as Markdown |
 | `keep` | yes | store text, preserve a URI original, or mint an upload ticket |
+| `report` | yes | send exact confusing or contradictory evidence to an operator-only scope |
 | `share` | yes | copy visible documents into one authorized destination |
 
-A user never hand-writes the MCP JSON. An agent harness reaches the four tools by name, like this.
+A user never hand-writes the MCP JSON. An agent harness reaches the five tools by name, like this.
 
 ```text
 aizk.status(days=30)
@@ -38,6 +39,7 @@ aizk.find(query="why did we switch extractors?", budget=2048)
 aizk.keep(text="reranker sidecar is back up", scopes=["Book Club"])
 aizk.keep(upload={"filename": "contract.pdf", "media_type": "application/pdf",
                       "size": 84213, "sha256": "..."})
+aizk.report(text="The settled claims in documents 0198... and 0199... contradict.")
 aizk.share(documents=["019820a1-..."], scopes=["Book Club"])
 ```
 
@@ -84,29 +86,21 @@ refill of `mcp_request_rate_per_second`, and held in an `OrderedDict` capped at 
 LRU eviction. This is burst control inside one process, not a durable quota. Tool calls and
 resource reads drain the same bucket.
 
-## The OAuth proxy
+## Direct Logto authorization
 
-`Auth.provider()` returns a FastMCP `OIDCProxy` pointed at the tenant's discovery document, or
-`None` when `logto_url` or `mcp_public_url` is unset, which is explicit local mode. Two of its
-arguments matter. `extra_authorize_params={"prompt": "consent"}` forces the consent screen, and
-`extra_token_params={"resource": settings.mcp_resource_id}` makes Logto mint a token whose audience
-is this server. Reference tokens live `oauth_reference_token_seconds`, which defaults to 31536000,
-one year.
+`Auth.provider()` returns a FastMCP `RemoteAuthProvider` that names the tenant issuer as the
+authorization server, or `None` when `logto_url` or `mcp_public_url` is unset, which is explicit
+local mode. AIZK serves only MCP and RFC 9728 protected-resource metadata. Logto serves discovery,
+authorization, tokens, and revocation.
 
-The proxy accepts dynamic client registration, so an MCP client that has never seen this
-deployment can register itself at `/register` without an operator minting credentials. That is
-what makes `claude mcp add` work against a fresh server.
+Each supported MCP client uses a pre-registered public Native application and authorization code
+flow with PKCE. The client ID is public configuration. There is no MCP client secret, dynamic
+registration database, reference-token layer, or server-side OAuth session to persist. The client
+requests `resource=settings.mcp_resource_id`, and AIZK accepts only a signed Logto token with that
+audience and the `control` scope.
 
-Registrations and token state have to outlive a restart or every client would have to log in
-again after a deploy. FastMCP writes them to a `FileTreeStore` wrapped in a
-`FernetEncryptionWrapper`, under `FASTMCP_HOME`, in a subdirectory named after a fingerprint of the
-derived encryption key. `src/deploy/docker-compose.yml` sets `FASTMCP_HOME=/oauth` and mounts a
-named volume there, which `volume-init` creates as mode 0700 owned by the runtime user. So a
-container restart or recreate keeps logins, and a change to the underlying key material lands in a
-different fingerprint directory and forces re-registration instead of failing.
-
-Caddy forwards the proxy's paths to this process explicitly, `/mcp`, both
-`.well-known` documents, `/authorize`, `/token`, `/register`, `/auth/callback` and `/consent`.
+Caddy forwards only `/mcp`, `/mcp/*`, and
+`/.well-known/oauth-protected-resource/mcp` to the MCP process.
 
 ## Errors are translated, never leaked
 

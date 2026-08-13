@@ -4,11 +4,12 @@ description: "Connect Codex to aizk over the same OAuth-protected endpoint."
 ---
 
 This page assumes you have an account on a running aizk deployment and know its address, which
-[Quickstart](/docs/user/quickstart/) covers. The examples use `https://aizk.phvv.me/mcp`, so swap in
-your own address everywhere it appears.
+[Quickstart](/docs/user/quickstart/) covers. Replace `YOUR_AIZK_HOST` below with the host for your
+deployment.
 
 Codex points at the same endpoint every other client uses and signs you in through the same browser
-flow. There is no client id, no client secret, and no shared token anywhere in the setup.
+flow. The deployment gives you a public client ID. It is not a credential, and PKCE protects the
+flow without a client secret or shared token.
 
 ## The configuration file
 
@@ -19,22 +20,25 @@ no secret.
 mcp_oauth_credentials_store = "file"
 mcp_oauth_callback_port = 8912
 
+[features]
+mcp_2026_07_28 = true
+
 [mcp_servers.aizk]
-url = "https://aizk.phvv.me/mcp"
+url = "https://YOUR_AIZK_HOST/mcp"
 auth = "oauth"
-oauth_resource = "https://aizk.phvv.me/mcp"
 scopes = ["control", "offline_access", "openid"]
+
+[mcp_servers.aizk.oauth]
+client_id = "YOUR_AIZK_CLIENT_ID"
 ```
 
-:::caution[oauth_resource must match exactly]
-`oauth_resource` has to match the endpoint character for character, trailing path included. A near
-miss produces a token aizk will not accept, and the failure looks like a login that succeeded and then
-did nothing.
-:::
+Codex `0.147.0` ships MCP `2026-07-28` behind the `mcp_2026_07_28` feature. aizk accepts only
+that current protocol, so this flag is required until Codex enables it by default.
 
-The three scopes are the ones aizk asks for. `control` is what actually grants use of the memory
-tools, `offline_access` is what lets Codex refresh without sending you back to the browser, and
-`openid` is what carries your identity.
+Codex derives the exact resource from the MCP endpoint. The scopes remain explicit because some
+serverless gateways rename the authentication challenge header. `control` grants use of the memory
+tools, `offline_access` lets Codex refresh without another browser login, and `openid` carries your
+identity.
 
 Then sign in once per machine.
 
@@ -47,10 +51,13 @@ confirmation, because a stored credential alone does not prove the server accept
 
 ## Why the callback port is fixed
 
-`mcp_oauth_callback_port = 8912` pins the loopback address the browser is sent to at the end of
-sign-in. That address belongs to Codex. It is not an aizk address and it is not part of the identity
-system. Codex opens a small listener on that port, the browser hands the authorization result to it,
-and the listener closes.
+The callback port pins the loopback redirect registered for the public Logto client. That address
+belongs to Codex. It is not an aizk address. Codex opens a small listener on that port, the browser
+hands the authorization result to it, and the listener closes.
+
+Codex appends one stable server-specific callback ID. Run `codex mcp login aizk` once and register
+the complete `redirect_uri` printed in its authorization URL with Logto. Registering only
+`http://127.0.0.1:8912/callback` is not enough.
 
 Knowing whose port it is tells you what to do when the browser and Codex are not on the same machine.
 Nothing on the server needs changing, and no new redirect has to be registered anywhere. The only

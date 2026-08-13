@@ -2,6 +2,8 @@ FROM debian:bookworm-slim
 
 ARG CCLOUD_VERSION=0.6.12
 ARG CCLOUD_SHA256=a0d26bd1dd2f904a8464cadb2f0c062afa8cb68b5aadd9717dd7109dc9ad61b2
+ARG COCKROACH_SQL_VERSION=26.2.5
+ARG COCKROACH_SQL_SHA256=1c4a903bbd02d327db860f1af206702bfb1276eb67728d6e0278835aa64636a7
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -10,8 +12,15 @@ RUN apt-get update \
        -o /tmp/ccloud.tar.gz \
     && echo "${CCLOUD_SHA256}  /tmp/ccloud.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/ccloud.tar.gz -C /usr/local/bin ./ccloud \
+    && curl -fsSL \
+       "https://binaries.cockroachdb.com/cockroach-sql-v${COCKROACH_SQL_VERSION}.linux-amd64.tgz" \
+       -o /tmp/cockroach-sql.tar.gz \
+    && echo "${COCKROACH_SQL_SHA256}  /tmp/cockroach-sql.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/cockroach-sql.tar.gz -C /usr/local/bin \
+       --strip-components=1 \
+       "cockroach-sql-v${COCKROACH_SQL_VERSION}.linux-amd64/cockroach-sql" \
     && useradd --uid 10001 --create-home --home-dir /state ccloud \
-    && rm -rf /var/lib/apt/lists/* /tmp/ccloud.tar.gz
+    && rm -rf /var/lib/apt/lists/* /tmp/ccloud.tar.gz /tmp/cockroach-sql.tar.gz
 
 ENV HOME=/state
 USER 10001:10001

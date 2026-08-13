@@ -24,7 +24,7 @@ async-lru = "<3,>=2.3"
 clamav-client = "<0.8,>=0.7.2"
 cyclopts = "<5,>=4.21"
 loguru = "<0.8,>=0.7.3"
-fastmcp = "<4,>=3.4.4"
+fastmcp = "==4.0.0b2"
 fastapi = "<1,>=0.128"
 networkx = "<4,>=3.6.1"
 openai = "<3,>=2.45"
@@ -48,6 +48,8 @@ opentelemetry-instrumentation-httpx = "<1,>=0.65b0"
 dateparser = "<2,>=1.4.1"
 jinja2 = "<4,>=3.1.6"
 tenacity = "<10,>=9.1.4"
+liteparse = "<3,>=2.11.1"
+pypandoc-binary = "<2,>=1.17"
 
 [pypi-dependencies.sqlalchemy]
 version = "<3,>=2.1.0b3"
@@ -55,7 +57,7 @@ extras = ["asyncio"]
 
 [pypi-dependencies.py-key-value-aio]
 version = "<0.5,>=0.4.5"
-extras = ["keyring"]
+extras = ["keyring", "s3"]
 
 [pypi-dependencies.pydantic-ai-slim]
 version = "<3,>=2.8"
@@ -68,6 +70,9 @@ extras = ["sql"]
 [pypi-dependencies.aizk]
 path = "../."
 editable = true
+
+[pypi-options]
+prerelease-mode = "allow"
 
 [pypi-options.dependency-overrides]
 sqlalchemy = ">=2.1.0b3,<3"
@@ -138,6 +143,9 @@ cwd = ".."
 cmd = "python -m infra.aws.app"
 cwd = ".."
 
+[tasks.infra-synth.env]
+CDK_OUTDIR = "cdk.out"
+
 [tasks.infra-test]
 cmd = "python -m pytest tests/deploy --no-cov"
 cwd = ".."
@@ -162,6 +170,6 @@ cmd = "sh -lc 'docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.ym
 cwd = ".."
 
 [tasks.ccloud-check]
-cmd = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud version"
+cmd = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud version && docker run --rm --entrypoint cockroach-sql aizk-cockroachdb-ccloud:0.6.12 --version"
 depends-on = ["ccloud-build"]
 cwd = ".."

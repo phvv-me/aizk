@@ -59,7 +59,7 @@ engine happened to find it.
 
 The split between private and shared memory is informed by
 [Collaborative Memory](https://arxiv.org/abs/2505.18279). aizk turns that paper's policy graph into
-one PostgreSQL-native scope lattice, where every row carries a sorted nonempty set of scope UUIDs
+one SQL-native scope lattice, where every row carries a sorted nonempty set of scope UUIDs
 and a reader has to stand in every member.
 [Scope sets in depth](/docs/dev/identity/scope-sets/) has the mechanics.
 
@@ -71,20 +71,20 @@ token claims without storing an identity or membership mirror at all.
 | Concern | Source | The aizk boundary |
 |---|---|---|
 | identity and organization authority | [Logto](https://logto.io/) | OIDC discovery, signed tokens, current org roles, no local identity tables |
-| OAuth protected MCP | [FastMCP](https://github.com/jlowin/fastmcp) | dynamic client registration and an OIDC proxy over persistent encrypted state |
-| database authorization | [PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html) and the house `rlsalchemy` package | forced policies on both content and scoped claims |
+| OAuth protected MCP | [FastMCP](https://github.com/jlowin/fastmcp) | protected-resource metadata and direct JWT verification against Logto |
+| database authorization | CockroachDB and PostgreSQL row security with the house `rlsalchemy` package | forced policies on both content and scoped claims |
 | multi-user memory model | [Collaborative Memory](https://arxiv.org/abs/2505.18279) | private, organization, and intersection scopes with immutable capture provenance |
 
 ## Infrastructure and model lanes
 
 | Responsibility | Project | Use in aizk |
 |---|---|---|
-| relational, temporal, lexical, vector, and policy execution | [PostgreSQL](https://www.postgresql.org/) | one durable state engine and the preferred place for filtering, ranking, hashing, and temporal logic |
-| vector index | [VectorChord](https://github.com/tensorchord/VectorChord) and [pgvector](https://github.com/pgvector/pgvector) | low-memory production vector search with a portable fallback |
+| relational, temporal, vector, and policy execution | [CockroachDB](https://www.cockroachlabs.com/) and [PostgreSQL](https://www.postgresql.org/) | two adapters over one durable memory model |
+| vector index | CockroachDB C-SPANN, [VectorChord](https://github.com/tensorchord/VectorChord) and [pgvector](https://github.com/pgvector/pgvector) | scoped native vector search for each database profile |
 | ORM and validation | [SQLModel](https://sqlmodel.tiangolo.com/), [SQLAlchemy](https://www.sqlalchemy.org/), [Pydantic](https://docs.pydantic.dev/) | typed models, PostgreSQL statements, and wire contracts |
-| durable jobs | [PgQueuer](https://github.com/JanBjorge/PgQueuer) | graph projection and scheduled passes without a bespoke workflow ledger |
+| durable jobs | [PgQueuer](https://github.com/JanBjorge/PgQueuer) and the AIZK portable queue | backend-specific workers with job state in the same SQL database as memory |
 | document conversion | [Docling](https://github.com/docling-project/docling) and [Docling Serve](https://github.com/docling-project/docling-serve) | private conversion of accepted bytes into structured JSON and normalized Markdown |
-| immutable object bytes | [SeaweedFS](https://github.com/seaweedfs/seaweedfs) and [obstore](https://github.com/developmentseed/obstore) | private S3-compatible storage behind opaque keys |
+| immutable object bytes | Amazon S3, [SeaweedFS](https://github.com/seaweedfs/seaweedfs) and [obstore](https://github.com/developmentseed/obstore) | private object storage behind opaque keys |
 | malware scanning | [ClamAV](https://docs.clamav.net/manual/Usage/ClamdProtocol.html) | fail-closed streaming scan before any object is persisted |
 | log collection, storage, inspection | [Grafana Alloy](https://grafana.com/docs/alloy/latest/), [Loki](https://grafana.com/docs/loki/latest/), [Grafana](https://grafana.com/docs/grafana/latest/) | labeled Docker logs, one bounded store, a loopback-only viewer |
 | log event vocabulary | [OpenTelemetry Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) | structured events while PostgreSQL stays the durable usage authority |
@@ -130,7 +130,7 @@ exactly the shape the artifact path takes.
 
 Cite the following as design done here rather than attributing it to one upstream paper.
 
-- Arbitrary nonempty scope sets with intersection visibility under forced PostgreSQL RLS.
+- Arbitrary nonempty scope sets with intersection visibility under forced database RLS.
 - Content-addressed graph content held separate from scoped bi-temporal claims.
 - Full-authority recall paired with one explicit write destination.
 - A source-preserving `share` that creates provenance-linked copies rather than moving a row.

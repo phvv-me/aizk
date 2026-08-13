@@ -6,8 +6,8 @@ from .coordination_lock import CoordinationLock
 from .document import Document
 from .entity import EntityClaim, EntityContent
 from .fact import FactClaim, FactContent
-from .operator import OperatorReading, OperatorSnapshot
 from .ontology import EntityKind, RelationKind, RelationPolicy
+from .operator import OperatorReading, OperatorSnapshot
 from .profile import Profile
 from .queue import QueueEvent, QueueSchedule, QueueTask
 from .quota import MonthlyQuotaCounter

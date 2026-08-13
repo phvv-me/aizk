@@ -8,23 +8,33 @@ import httpx
 import pytest
 from id_factory import uuid5, uuid7
 from patos import sql
-from pydantic import UUID7, UUID8
+from pydantic import UUID7, UUID8, JsonValue
 from sqlalchemy.exc import SQLAlchemyError
 
-from aizk.artifacts import (
+from aizk.artifacts.boilerplate import WebBoilerplateCleaner
+from aizk.artifacts.description import (
+    CaptionAttempt,
+    CaptionUsage,
+    DescribedArtifact,
+    FigureDescription,
+    ImageCaption,
+)
+from aizk.artifacts.models import (
     ArtifactDocument,
+    ArtifactReceipt,
+    ConvertedArtifact,
+    OriginalArtifact,
+    OriginalDescription,
+)
+from aizk.artifacts.repository import ArtifactRepository
+from aizk.artifacts.service import (
     ArtifactIntake,
     ArtifactIntegrity,
     ArtifactProcessor,
-    ArtifactReceipt,
-    ArtifactRepository,
-    OriginalArtifact,
-    OriginalDescription,
-    VisualModality,
-    WebBoilerplateCleaner,
+    ArtifactReindexer,
+    _resolve_markdown_links,
 )
-from aizk.artifacts.models import ConvertedArtifact
-from aizk.artifacts.service import ArtifactReindexer, _resolve_markdown_links
+from aizk.artifacts.visual import VisualModality
 from aizk.extract.ingest import TextIngestor, TextSource
 from aizk.integrations.clamav import ClamAVClient, CleanScan
 from aizk.integrations.docling import (
@@ -106,7 +116,11 @@ class Repository:
         self.original_value = original
         self.created: list[dict] = []
         self.states: list[tuple[UUID7, Scopes, Artifact.Content.State, str | None]] = []
-        self.conversions: list[tuple[OriginalArtifact, str, datetime]] = []
+        self.conversions: list[
+            tuple[OriginalArtifact, str, datetime, list[dict[str, JsonValue]]]
+        ] = []
+        self.candidates: list[tuple[OriginalArtifact, str, str, str | None]] = []
+        self.candidate_errors: list[tuple[OriginalArtifact, str, str]] = []
         self.converted_value: ConvertedArtifact | None = None
         self.indexings: list[tuple[UUID7, datetime]] = []
         self.fail_create = False
@@ -173,15 +187,40 @@ class Repository:
         self.integrity_checks = checks
         self.integrity_checked_at = checked_at
 
-    async def store_conversion(
+    async def record_candidate(
         self,
         user: User,
         original: OriginalArtifact,
         markdown: str,
-        indexed_at: datetime,
+        policy: str,
+        error: str | None = None,
     ) -> None:
         del user
-        self.conversions.append((original, markdown, indexed_at))
+        self.candidates.append((original, markdown, policy, error))
+
+    async def record_candidate_error(
+        self,
+        user: User,
+        original: OriginalArtifact,
+        policy: str,
+        error: str,
+    ) -> None:
+        del user
+        self.candidate_errors.append((original, policy, error))
+
+    async def promote_candidate(
+        self,
+        user: User,
+        original: OriginalArtifact,
+        policy: str,
+        indexed_at: datetime,
+        caption_metadata: list[dict[str, JsonValue]],
+    ) -> None:
+        del user
+        candidate = self.candidates[-1]
+        assert candidate[0] == original
+        assert candidate[2] == policy
+        self.conversions.append((original, candidate[1], indexed_at, caption_metadata))
 
     async def converted(
         self,
@@ -239,6 +278,48 @@ class Visual:
         del user
         self.events.append("visual")
         self.calls.append((document_id, original, content))
+
+
+class Description:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.calls: list[tuple[OriginalArtifact, bytes, str]] = []
+
+    async def enrich(
+        self,
+        original: OriginalArtifact,
+        content: bytes,
+        markdown: str,
+    ) -> DescribedArtifact:
+        self.events.append("description")
+        self.calls.append((original, content, markdown))
+        caption = ImageCaption(
+            text="The chart loss falls with expert count.",
+            requested_model="gemma",
+            model="gemma",
+            provider="CoreWeave",
+            elapsed_ms=10,
+            usage=CaptionUsage(prompt_tokens=2, completion_tokens=3, total_tokens=5),
+            attempts=(
+                CaptionAttempt(
+                    requested_model="gemma",
+                    attempt=1,
+                    elapsed_ms=10,
+                    status_code=200,
+                ),
+            ),
+        )
+        return DescribedArtifact(
+            markdown=f"{markdown.rstrip()}\n\n{caption.text}\n",
+            figures=(
+                FigureDescription(
+                    ordinal=0,
+                    image_sha256="a" * 64,
+                    media_type="image/png",
+                    caption=caption,
+                ),
+            ),
+        )
 
 
 def docling_response(markdown: str = "# Paper") -> DoclingResponse:
@@ -512,6 +593,47 @@ def test_processor_adds_image_enrichment_after_docling_and_before_projection(
     assert len(visual.calls) == 1
 
 
+def test_processor_describes_figures_before_text_embedding_and_persists_routing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = original()
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+    events: list[str] = []
+    description = Description(events)
+    submitted: list[TextSource] = []
+
+    async def ingest(ingestor: TextIngestor, text: TextSource) -> tuple[UUID7, bool]:
+        del ingestor
+        events.append("embedding")
+        submitted.append(text)
+        return uuid7(), True
+
+    async def enqueue(document_id: UUID7, scopes: Scopes) -> int:
+        del document_id, scopes
+        events.append("projection")
+        return 1
+
+    monkeypatch.setattr("aizk.artifacts.service.TextIngestor.ingest", ingest)
+    monkeypatch.setattr("aizk.artifacts.service.enqueue_document", enqueue)
+    processor = ArtifactProcessor(
+        cast(DoclingClient, Converter(docling_response("# Paper\n\nRaw figure"))),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+        description=description,
+    )
+
+    asyncio.run(processor.process(source.content_id, source.scopes))
+
+    assert events == ["description", "embedding", "projection"]
+    assert description.calls == [(source, b"original", "# Paper\n\nRaw figure\n")]
+    assert "The chart loss falls" in submitted[0].text
+    metadata = repository.conversions[0][3]
+    restored = FigureDescription.model_validate(metadata[0])
+    assert restored.caption.provider == "CoreWeave"
+    assert restored.caption.usage.total_tokens == 5
+
+
 def test_processor_stores_postgres_derivatives_and_makes_one_file_document_recallable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -615,6 +737,95 @@ def test_processor_strips_web_chrome_only_when_a_cleaner_is_configured(
     assert "[ Sign in ](https://github.com/login)" in repository.conversions[1][1]
 
 
+def test_reconversion_quarantines_layout_inflation_without_replacing_production() -> None:
+    current = "\n".join(["申請書の日本語本文です。"] * 20)
+    source = original().model_copy(update={"markdown": current})
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+    inflated = "\n".join([current] * 3)
+    processor = ArtifactProcessor(
+        cast(DoclingClient, Converter(docling_response(inflated))),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+    )
+
+    asyncio.run(processor.process(source.content_id, source.scopes, "japanese-ocr-v2"))
+
+    assert repository.conversions == []
+    assert repository.candidates[0][1] == f"{inflated}\n"
+    assert repository.candidates[0][2] == "japanese-ocr-v2"
+    assert (repository.candidates[0][3] or "").startswith("candidate length inflated 3.")
+    assert [state[2] for state in repository.states] == [
+        Artifact.Content.State.processing,
+        Artifact.Content.State.ready,
+    ]
+
+
+def test_failed_candidate_promotion_restores_the_live_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = original().model_copy(update={"markdown": "# Current production text"})
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+    ingested: list[str] = []
+
+    async def ingest(ingestor: TextIngestor, submitted: TextSource) -> tuple[UUID7, bool]:
+        del ingestor
+        ingested.append(submitted.text)
+        return uuid7(), True
+
+    async def reject_promotion(
+        user: User,
+        original: OriginalArtifact,
+        policy: str,
+        indexed_at: datetime,
+        caption_metadata: list[dict[str, JsonValue]],
+    ) -> None:
+        del user, original, policy, indexed_at, caption_metadata
+        raise SQLAlchemyError("promotion failed")
+
+    monkeypatch.setattr("aizk.artifacts.service.TextIngestor.ingest", ingest)
+    repository.promote_candidate = reject_promotion
+    processor = ArtifactProcessor(
+        cast(DoclingClient, Converter(docling_response("# Better candidate text"))),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+    )
+
+    with pytest.raises(SQLAlchemyError, match="promotion failed"):
+        asyncio.run(processor.process(source.content_id, source.scopes, "test-v2"))
+
+    assert "Better candidate" in ingested[0]
+    assert "Current production" in ingested[1]
+    assert repository.candidate_errors[0][1:] == ("test-v2", "promotion failed")
+    assert repository.states[-1][2] is Artifact.Content.State.ready
+
+
+def test_reconversion_rejection_preserves_the_live_derivative() -> None:
+    source = original().model_copy(update={"markdown": "# Current production text"})
+    storage, repository = Storage(), Repository(source)
+    storage.values[source.storage_key] = b"original"
+    response = DoclingResponse.model_validate(
+        {"document": {}, "status": "failure", "errors": [{"message": "unsupported"}]}
+    )
+    processor = ArtifactProcessor(
+        cast(DoclingClient, Converter(response)),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+    )
+
+    asyncio.run(processor.process(source.content_id, source.scopes, "test-v2"))
+
+    assert repository.candidate_errors[0][1] == "test-v2"
+    assert repository.states[-1][2] is Artifact.Content.State.ready
+
+    storage.fail_get = True
+    with pytest.raises(ByteLimitExceeded):
+        asyncio.run(processor.process(source.content_id, source.scopes, "test-v3"))
+    assert repository.candidate_errors[-1][1:] == ("test-v3", "too large")
+    assert repository.states[-1][2] is Artifact.Content.State.ready
+
+
 def test_processor_keeps_metadata_recallable_and_marks_conversion_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -704,12 +915,13 @@ def test_processor_persists_conversion_database_errors_as_a_failed_state() -> No
         user: User,
         original: OriginalArtifact,
         markdown: str,
-        indexed_at: datetime,
+        policy: str,
+        error: str | None = None,
     ) -> None:
-        del user, original, markdown, indexed_at
+        del user, original, markdown, policy, error
         raise SQLAlchemyError("unsupported Unicode escape sequence")
 
-    repository.store_conversion = reject_markdown
+    repository.record_candidate = reject_markdown
     processor = ArtifactProcessor(
         cast(DoclingClient, Converter(docling_response())),
         cast(ByteStore, storage),

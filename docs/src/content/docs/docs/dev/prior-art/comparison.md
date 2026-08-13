@@ -84,7 +84,7 @@ current-state memory surface in this cell.
 | temporal facts | temporal graph | memory updates | no | valid and recorded ranges |
 | consolidation | model-driven | add, update, delete | no | rules first, model on ambiguity |
 | speaker semantics in a group | limited | user namespace | no | author snapshot and epistemic kind |
-| authorization | application layer | application layer | no | forced PostgreSQL RLS |
+| authorization | application layer | application layer | no | forced database RLS |
 | overlapping scopes | no | no | no | arbitrary nonempty scope sets |
 | retrieval | graph and text | vector | community summaries | typed hybrid plan and graph lanes |
 | local operation | service oriented | optional | batch oriented | PostgreSQL plus local model lanes |

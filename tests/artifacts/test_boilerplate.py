@@ -2,7 +2,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from aizk.artifacts import MarkdownBlock, WebBoilerplateCleaner
+from aizk.artifacts.boilerplate import MarkdownBlock, WebBoilerplateCleaner
 
 # A GitHub project page as Docling converts it, with the header menu, the saved-search dialog,
 # the file list, the sidebar and the footer wrapped around the README a reader came for.

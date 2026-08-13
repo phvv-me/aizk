@@ -85,8 +85,6 @@ _COMPLETE_LOGTO = {
     "logto_client_secret": "secret",
     "mcp_public_url": "https://aizk.test",
     "api_public_url": "https://api.aizk.test",
-    "oauth_client_id": "oauth-client",
-    "oauth_client_secret": "oauth-secret",
 }
 _LOGTO_DEPENDENCIES = tuple(name for name in _COMPLETE_LOGTO if name != "logto_url")
 _COMPLETE_WEB = {
@@ -154,6 +152,22 @@ def test_an_external_extraction_endpoint_must_carry_a_credential() -> None:
         Settings(llm_url="https://openrouter.ai/api/v1", llm_api_key="")
     assert Settings(llm_url="https://openrouter.ai/api/v1", llm_api_key="sk-or-v1-x").llm_api_key
     assert Settings(llm_url="http://vllm-llm:8000/v1", llm_api_key="").llm_url
+
+
+def test_captioning_requires_its_own_key_and_orders_unique_models() -> None:
+    with pytest.raises(ValidationError, match="caption_api_key"):
+        Settings(_env_file=None, caption_enabled=True)
+
+    config = Settings(
+        _env_file=None,
+        caption_enabled=True,
+        caption_api_key="demo-key",
+        caption_primary_model="primary",
+        caption_fallback_models=("primary", "fallback"),
+    )
+
+    assert config.caption_models == ("primary", "fallback")
+    assert config.model_dump(mode="json")["caption_api_key"] == "**********"
 
 
 @pytest.mark.parametrize("minimum_savings", [-0.01, 1.0])

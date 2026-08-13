@@ -1,17 +1,16 @@
 ---
 title: "Row level security"
-description: "How the scope-set lattice becomes forced PostgreSQL policy on every table."
+description: "How the scope-set lattice becomes forced database policy on every protected table."
 ---
 
-aizk does not filter rows in Python. Every scoped read and write is decided by PostgreSQL under
-forced row security, so a missing `WHERE` clause in application code cannot leak anything. This
-page assumes you know what a [scope set](/docs/dev/identity/scope-sets/) is and can read a
-`CREATE POLICY` statement.
+AIZK does not rely on Python to enforce row visibility. Every scoped read and write is decided by
+the active SQL backend under forced row security, so a missing application filter cannot widen a
+result. This page assumes you know what a [scope set](/docs/dev/identity/scope-sets/) is and can
+read a `CREATE POLICY` statement.
 
 :::note[Where this comes from]
-Enforcing tenancy inside
-[PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html) rather
-than in application code is standard PostgreSQL. Splitting private from shared memory is informed
+Enforcing tenancy inside row security rather than application code is standard SQL database
+practice. Splitting private from shared memory is informed
 by [Collaborative Memory](https://arxiv.org/abs/2505.18279). The arbitrary nonempty scope-set
 lattice with intersection visibility is aizk's own, as noted at
 [References and lineage](/docs/dev/prior-art/references/).
@@ -21,7 +20,7 @@ lattice with intersection visibility is aizk's own, as noted at
 
 ```text
   async with user  ─▶  app-role transaction opens
-                            │  SET LOCAL app.scopes = {read, write, public}
+                            │  bind {read, write, public}
                             ▼
                     SELECT ... FROM document
                             │  scope_read policy runs
@@ -155,14 +154,16 @@ Policies name `roles=(settings.app_role,)` explicitly, and `app_role` is read fr
 `database_url` username rather than hardcoded, so a deployment that renames the role keeps its
 policies pointed at it.
 
-## Caller standing travels as a GUC
+## Caller standing travels through the adapter
 
-`User` subclasses `rls.Context` with `prefix="app"`, so its `scopes` field becomes the
-transaction-local setting `app.scopes`, serialized as JSON and written with `set_config` at
-`after_begin`. The policy reads it back with `current_setting('app.scopes', true)`, casts to
-`jsonb`, picks the `read`, `write` or `public` key, and turns the JSON array into a native
-`uuid[]` with `jsonb_array_elements_text`. Both sides of that contract come from the same class,
-so a renamed field cannot drift away from the predicate that reads it.
+`User` carries readable, writable and public scope sets. The PostgreSQL adapter writes them into
+transaction-local `app` settings. The CockroachDB adapter serializes the same authority into a
+transaction-local `application_name` value that the policies parse. Both values disappear at the
+end of the transaction, so a pooled connection cannot carry one caller into the next request.
+
+The policy shape remains the same. A readable row has a nonempty scope set contained in the
+caller's readable set, with a narrow exception for a public single-scope row. A writable row has
+a nonempty scope set contained in the writable set.
 
 One more listener in `src/aizk/store/events.py` catches the case where nobody opened a user
 transaction at all. Any ORM statement touching a protected table without a user in

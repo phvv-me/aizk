@@ -15,19 +15,19 @@ Read any page on its own in ten minutes or less. When a page needs an idea it do
 links the one page that does instead of explaining it twice.
 
 <Diagram
-  title="You keep and find through one agent, everything lands in one database, and Logto decides who reads what"
+  title="You keep and find through one agent, one SQL store keeps the memory, and Logto decides who reads what"
   nodes={[
     { id: 'agent', label: 'your agent', col: 0, row: 1 },
     { id: 'write', label: 'write path', col: 1, row: 0 },
     { id: 'read', label: 'read path', col: 1, row: 2 },
-    { id: 'db', label: 'PostgreSQL', col: 2, row: 1, emphasis: true },
+    { id: 'db', label: 'SQL store', col: 2, row: 1, emphasis: true },
     { id: 'passes', label: 'autonomous passes', col: 3, row: 1 },
     { id: 'logto', label: 'Logto', col: 2, row: 2.2 },
   ]}
   edges={[
     { from: 'agent', to: 'write', label: 'keep' },
     { from: 'write', to: 'db' },
-    { from: 'db', to: 'read', label: 'recall' },
+    { from: 'db', to: 'read', label: 'find' },
     { from: 'read', to: 'agent', label: 'evidence' },
     { from: 'passes', to: 'db', label: 'enrich' },
     { from: 'logto', to: 'db', label: 'who reads what', dashed: true },
@@ -39,6 +39,8 @@ links the one page that does instead of explaining it twice.
 <CardGrid>
   <LinkCard title="What aizk is" href="/docs/user/what-is-aizk/" description="The shortest complete explanation, in plain language." />
   <LinkCard title="Quickstart" href="/docs/user/quickstart/" description="Connect a client and store your first memory in five minutes." />
+  <LinkCard title="Database profiles" href="/docs/dev/run/databases/" description="Choose CockroachDB Cloud or self-hosted PostgreSQL without changing the memory model." />
+  <LinkCard title="Live AWS deployment" href="/docs/dev/run/aws/" description="How this site, app, MCP server and worker run on AWS with CockroachDB Cloud." />
   <LinkCard title="Your first hour" href="/docs/user/first-hour/" description="A guided walk from an empty memory to a shared, useful one." />
   <LinkCard title="Glossary" href="/docs/user/reference/glossary/" description="Every term these docs use, defined once." />
 </CardGrid>
@@ -49,7 +51,7 @@ links the one page that does instead of explaining it twice.
   <LinkCard title="Sources and derived knowledge" href="/docs/user/concepts/sources/" description="Why only one of the two kinds of stored thing is authoritative." />
   <LinkCard title="Scopes" href="/docs/user/concepts/scopes/" description="Who can read a memory, expressed as a set rather than a permission list." />
   <LinkCard title="Time and history" href="/docs/user/concepts/time/" description="When something was true, when aizk learned it, and how corrections keep the past." />
-  <LinkCard title="Evidence and provenance" href="/docs/user/concepts/evidence/" description="What recall gives back, and why it is never an answer." />
+  <LinkCard title="Evidence and provenance" href="/docs/user/concepts/evidence/" description="What find gives back, and why it is never an answer." />
 </CardGrid>
 
 ## Build on it
@@ -57,7 +59,7 @@ links the one page that does instead of explaining it twice.
 <CardGrid>
   <LinkCard title="System map" href="/docs/dev/architecture/system-map/" description="Every moving part on one interactive diagram." />
   <LinkCard title="The data model" href="/docs/dev/store/data-model/" description="The content and claim union behind the whole store." />
-  <LinkCard title="How recall runs" href="/docs/dev/read/overview/" description="The seven steps between a question and its evidence." />
+  <LinkCard title="How find runs" href="/docs/dev/read/overview/" description="The seven steps between a question and its evidence." />
   <LinkCard title="Development setup" href="/docs/dev/contributing/setup/" description="A working checkout, a database and the model lanes." />
 </CardGrid>
 
@@ -65,7 +67,8 @@ links the one page that does instead of explaining it twice.
 
 <CardGrid>
   <LinkCard title="Hardware and cost" href="/docs/dev/run/hardware/" description="What it takes to run, and how model choices move that number." />
-  <LinkCard title="First start" href="/docs/dev/run/first-start/" description="From an empty host to a working deployment." />
+  <LinkCard title="PostgreSQL first start" href="/docs/dev/run/first-start/" description="From an empty host to a working self-hosted deployment." />
+  <LinkCard title="AWS and CockroachDB Cloud" href="/docs/dev/run/aws/" description="The exact architecture and deployment path used by crAIZK." />
   <LinkCard title="The security model" href="/docs/dev/run/security/" description="What a deployment protects, trusts, and fails closed on." />
   <LinkCard title="Backups and recovery" href="/docs/dev/run/backups/" description="What is backed up and what restoring really restores." />
 </CardGrid>

@@ -956,7 +956,11 @@ def test_readings_are_kept_apart_rather_than_overwriting_each_other(
     monkeypatch.setattr(ops.snapshot, "doctor", AsyncMock(return_value=_diagnosed()))
     monkeypatch.setattr(ops.snapshot, "platform_usage", AsyncMock(return_value=_aggregated()))
 
-    async def run() -> tuple[ops.StoredHealth | None, ops.StoredDoctor | None, ops.StoredUsage | None]:
+    async def run() -> tuple[
+        ops.StoredHealth | None,
+        ops.StoredDoctor | None,
+        ops.StoredUsage | None,
+    ]:
         for job in (ops.HealthSnapshotJob(), ops.DoctorSnapshotJob(), ops.UsageSnapshotJob()):
             await job.execute()
         async with operator() as session:

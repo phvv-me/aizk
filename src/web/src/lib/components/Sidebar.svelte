@@ -19,7 +19,6 @@
     MessageCircleQuestion,
     Network,
     Settings,
-    Sparkles,
     type Icon as IconType
   } from '@lucide/svelte';
   import type { Me } from '$lib/api';
@@ -65,9 +64,13 @@
 
 <header class="border-sidebar-border bg-sidebar sticky top-0 z-30 border-b md:hidden">
   <div class="flex h-14 items-center justify-between px-4">
-    <a href={brandHref} class="flex items-center gap-2 font-semibold tracking-tight">
-      <Sparkles class="text-primary size-5" aria-hidden="true" />
-      AIZK
+    <a
+      href={brandHref}
+      class="flex items-center gap-2 font-semibold tracking-tight"
+      style="font-family: var(--font-brand)"
+    >
+      <img src="/favicon.svg" alt="" class="size-6" />
+      aizk
     </a>
     <details class="group relative">
       <summary
@@ -146,9 +149,10 @@
   <a
     href={brandHref}
     class="flex items-center gap-2 px-5 py-5 text-lg font-semibold tracking-tight"
+    style="font-family: var(--font-brand)"
   >
-    <Sparkles class="text-primary size-5" aria-hidden="true" />
-    AIZK
+    <img src="/favicon.svg" alt="" class="size-7" />
+    aizk
   </a>
   <nav class="flex-1 space-y-6 overflow-y-auto px-3 py-2" aria-label="Sections">
     {#each sections as section (section.label)}

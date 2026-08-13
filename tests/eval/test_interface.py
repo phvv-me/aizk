@@ -123,7 +123,8 @@ class RecordingEvaluation:
     async def scale(
         self, sizes: tuple[int, ...], k: int, repeats: int, recall_p95_ms: float
     ) -> Rendered:
-        assert (sizes, k, repeats, recall_p95_ms) == ((10, 20), 3, 4, 50.0)
+        assert sizes in {(10,), (10, 20)}
+        assert (k, repeats, recall_p95_ms) == (3, 4, 50.0)
         return Rendered(text="scale")
 
 
@@ -143,6 +144,7 @@ def test_cli_maps_strings_to_typed_evaluation_arguments(
     assert command.extraction("cases.jsonl", "extractor", "gliner") == "extraction"
     assert command.groupmem("corpus", "Lab", "temporal", 2, 3, 4, False, True) == "groupmem"
     assert command.scale("10,20", 3, 4, 50.0) == "scale"
+    assert command.scale(10, 3, 4, 50.0) == "scale"
     # the certainty cell needs no model and no database, so it runs the real corpus here
     assert command.certainty().startswith("certainty n=46")
 

@@ -15,7 +15,7 @@ architecture note. It assumes you have read
 ## Agentic first
 
 The primary caller is an agent, not a person. The MCP server is the interface that gets designed
-first, and it exposes four tools, `status`, `find`, `keep` and `share`, plus one resource
+first, and it exposes five tools, `status`, `find`, `keep`, `report` and `share`, plus one resource
 for reading an exact artifact revision. That is the whole surface, and it is deliberately small
 enough that a model can hold it in working memory without a per-tool prompt.
 
@@ -35,16 +35,17 @@ rule that keeps the codebase small enough to hold in your head.
 | document conversion | Docling |
 | malware scanning | ClamAV |
 | object storage | SeaweedFS, reached through `obstore` |
-| vector search | VectorChord inside PostgreSQL |
-| job queuing | PgQueuer, on the same PostgreSQL |
-| model serving | vLLM |
+| vector search | C-SPANN on CockroachDB or VectorChord on PostgreSQL |
+| job queuing | the portable CockroachDB queue or PgQueuer on PostgreSQL |
+| model serving | an OpenAI-compatible hosted endpoint or vLLM |
 | chunking | `chonkie` |
 | the MCP protocol | FastMCP |
 | row level security machinery | the house `rls` package |
 
-The one model server we write is `src/services/gliner/app.py`, and only because GLiNER has no
-vLLM-compatible image. When you are tempted to write a client, a queue or an index, the default
-answer is that one already exists and the work is choosing it.
+The PostgreSQL profile includes one model server in `src/services/gliner/app.py` because GLiNER has
+no vLLM-compatible image. The CockroachDB profile adds a small queue adapter because PgQueuer uses
+PostgreSQL behavior CockroachDB does not provide. [Database profiles](/docs/dev/run/databases/)
+owns the exact boundary.
 
 ## The eight rules and what actually enforces them
 

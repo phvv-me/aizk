@@ -33,8 +33,8 @@ dependencies = [
     "clamav-client>=0.7.2,<0.8",
     "cyclopts>=4.21,<5",
     "loguru>=0.7.3,<0.8",
-    "fastmcp>=3.4.4,<4",
-    "py-key-value-aio[keyring]>=0.4.5,<0.5",
+    "fastmcp==4.0.0b2",
+    "py-key-value-aio[keyring,s3]>=0.4.5,<0.5",
     "fastapi>=0.128,<1",
     "networkx>=3.6.1,<4",
     "openai>=2.45,<3",
@@ -60,11 +60,22 @@ dependencies = [
     "dateparser>=1.4.1,<2",
     "jinja2>=3.1.6,<4",
     "tenacity>=9.1.4,<10",
+    "liteparse>=2.11.1,<3",
+    "pypandoc-binary>=1.17,<2",
+]
+
+[project.optional-dependencies]
+heavy-converter = [
+    "docling-slim[format-pdf,models-local]>=2.115,<3",
+    "opencv-python-headless>=4.13,<5",
+    "rtree>=1.4,<2",
+    "scipy>=1.18,<2",
 ]
 
 [project.scripts]
 aizk = "aizk.cli:main"
 aizk-eval = "eval.launcher:main"
+aizk-ocr-probe = "eval.ocr:main"
 
 # Dev-only Python deps (PEP 735). chefe reads this group into the pixi dev env, and the built
 # wheel never carries it. The checkers ride their latest releases now that the sqlmodel `Select`
@@ -139,6 +150,7 @@ packages = ["src/aizk", "src/eval"]
 # both require 2.1 for its CREATE VIEW construct, so the whole workspace resolves there and this
 # one stale cap is the only thing an override has to step over. Drop this when they ship 2.1.
 override-dependencies = ["sqlalchemy>=2.1.0b3,<3"]
+constraint-dependencies = ["fastmcp-slim==4.0.0b2"]
 
 [tool.ruff]
 line-length = 99
@@ -309,6 +321,9 @@ manager = "npm"
 [tool.chefe.nodejs.dev.deps]
 aws-cdk = ">=2.200, <3"
 
+[tool.chefe.python]
+prerelease-mode = "allow"
+
 [tool.chefe.python.dependency-overrides]
 sqlalchemy = ">=2.1.0b3,<3"
 
@@ -323,13 +338,13 @@ lint = { run = "ruff check . && ruff format --check ." }
 lint-imports = "lint-imports"
 typecheck = { run = "pyrefly check --python-interpreter-path \"$CONDA_PREFIX/bin/python\" && ty check --python \"$CONDA_PREFIX\" --exit-zero-on-warning && mypy src/aizk src/eval" }
 test = { run = "python -m pytest -n 4 --dist loadscope --benchmark-disable --cov-fail-under=0 && COVERAGE_CORE=pytrace python -m pytest 'tests/graph/test_build.py::test_write_graph_slice_retries_a_transient_db_conflict' -o addopts='--import-mode=importlib' --cov=aizk --cov-append --cov-report=term-missing" }
-infra-synth = { run = "python -m infra.aws.app" }
+infra-synth = { run = "python -m infra.aws.app", env = { CDK_OUTDIR = "cdk.out" } }
 infra-test = { run = "python -m pytest tests/deploy --no-cov" }
 infra-check = { depends = ["infra-synth", "infra-test"] }
 infra-bootstrap = { run = "cdk bootstrap --app 'python -m infra.aws.app'" }
 infra-deploy = { run = "cdk deploy --app 'python -m infra.aws.app'" }
 ccloud-build = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml build ccloud" }
 ccloud = { run = "sh -lc 'docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud \"$@\"' --" }
-ccloud-check = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud version", depends = [
+ccloud-check = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud version && docker run --rm --entrypoint cockroach-sql aizk-cockroachdb-ccloud:0.6.12 --version", depends = [
     "ccloud-build",
 ] }

@@ -1,6 +1,7 @@
 import os
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 
@@ -12,37 +13,58 @@ def enabled(value: str) -> bool:
 
 @dataclass(frozen=True)
 class DeploymentConfig:
-    """Values that shape one isolated alpha stack without carrying secrets."""
+    """Values that shape one isolated staging stack without carrying secrets."""
 
-    name: str = "aizk-cockroachdb"
+    name: str = "craizk-staging"
     region: str = "ap-southeast-1"
     deploy_compute: bool = False
     image_digest: str = ""
-    public_url: str = "https://aizk.phvv.me"
-    logto_url: str = "https://replace.logto.app"
-    logto_client_id: str = "replace-logto-management-client"
-    oauth_client_id: str = "replace-logto-mcp-client"
+    public_url: str | None = None
+    logto_url: str | None = None
+    logto_client_id: str = ""
+    spa_client_id: str = "rdxzy3laahdnyp1mgxndf"
     billing_email: str = ""
-    emergency_budget_usd: int = 10
-    database_url_parameter: str = "/aizk/cockroachdb/database-url"
-    admin_database_url_parameter: str = "/aizk/cockroachdb/admin-database-url"
-    openrouter_key_parameter: str = "/aizk/openrouter/api-key"
-    logto_client_secret_parameter: str = "/aizk/logto/management-client-secret"
-    oauth_client_secret_parameter: str = "/aizk/logto/mcp-client-secret"
+    monthly_budget_usd: int = 10
+    db_null_pool: bool = False
+    recall_access_recording_enabled: bool = False
+    recall_communities_enabled: bool = True
+    recall_entity_catalog_enabled: bool = True
+    recall_graph_expansion_enabled: bool = True
+    recall_profiles_enabled: bool = False
+    recall_raptor_enabled: bool = False
+    recall_sources_first: bool = True
+    database_url_parameter: str = "/craizk/staging/database-url"
+    admin_database_url_parameter: str = "/craizk/staging/admin-database-url"
+    openrouter_key_parameter: str = "/craizk/staging/openrouter-api-key"
+    logto_client_secret_parameter: str = "/craizk/staging/logto-management-client-secret"
 
     def __post_init__(self) -> None:
         if self.deploy_compute and _DIGEST.fullmatch(self.image_digest) is None:
             raise ValueError("compute deployment requires a lowercase 64 character image digest")
-        if self.deploy_compute and any(
-            "replace" in value
-            for value in (
+        if self.monthly_budget_usd <= 0:
+            raise ValueError("monthly budget must be positive")
+        if self.public_url is not None and urlsplit(self.public_url).path not in {"", "/"}:
+            raise ValueError("public_url must be an origin without a path")
+        if self.logto_enabled and not all(
+            (
                 self.public_url,
                 self.logto_url,
                 self.logto_client_id,
-                self.oauth_client_id,
+                self.spa_client_id,
             )
         ):
-            raise ValueError("compute deployment requires real public and Logto configuration")
+            raise ValueError("Logto deployment requires every public and client setting")
+
+    @property
+    def logto_enabled(self) -> bool:
+        """Report whether the public application authentication boundary is configured."""
+        return any(
+            (
+                self.public_url,
+                self.logto_url,
+                self.logto_client_id,
+            )
+        )
 
     @classmethod
     def from_environment(cls) -> DeploymentConfig:
@@ -53,12 +75,26 @@ class DeploymentConfig:
             region=get("AIZK_AWS_REGION", cls.region),
             deploy_compute=enabled(get("AIZK_AWS_DEPLOY_COMPUTE", "false")),
             image_digest=get("AIZK_AWS_IMAGE_DIGEST", ""),
-            public_url=get("AIZK_AWS_PUBLIC_URL", cls.public_url),
-            logto_url=get("AIZK_AWS_LOGTO_URL", cls.logto_url),
-            logto_client_id=get("AIZK_AWS_LOGTO_CLIENT_ID", cls.logto_client_id),
-            oauth_client_id=get("AIZK_AWS_OAUTH_CLIENT_ID", cls.oauth_client_id),
+            public_url=get("AIZK_AWS_PUBLIC_URL") or None,
+            logto_url=get("AIZK_AWS_LOGTO_URL") or None,
+            logto_client_id=get("AIZK_AWS_LOGTO_CLIENT_ID", ""),
+            spa_client_id=get("AIZK_AWS_SPA_CLIENT_ID", cls.spa_client_id),
             billing_email=get("AIZK_AWS_BILLING_EMAIL", ""),
-            emergency_budget_usd=int(get("AIZK_AWS_EMERGENCY_BUDGET_USD", "10")),
+            monthly_budget_usd=int(get("AIZK_AWS_MONTHLY_BUDGET_USD", "10")),
+            db_null_pool=enabled(get("AIZK_AWS_DB_NULL_POOL", "false")),
+            recall_access_recording_enabled=enabled(
+                get("AIZK_AWS_RECALL_ACCESS_RECORDING_ENABLED", "false")
+            ),
+            recall_communities_enabled=enabled(get("AIZK_AWS_RECALL_COMMUNITIES_ENABLED", "true")),
+            recall_entity_catalog_enabled=enabled(
+                get("AIZK_AWS_RECALL_ENTITY_CATALOG_ENABLED", "true")
+            ),
+            recall_graph_expansion_enabled=enabled(
+                get("AIZK_AWS_RECALL_GRAPH_EXPANSION_ENABLED", "true")
+            ),
+            recall_profiles_enabled=enabled(get("AIZK_AWS_RECALL_PROFILES_ENABLED", "false")),
+            recall_raptor_enabled=enabled(get("AIZK_AWS_RECALL_RAPTOR_ENABLED", "false")),
+            recall_sources_first=enabled(get("AIZK_AWS_RECALL_SOURCES_FIRST", "true")),
             database_url_parameter=get(
                 "AIZK_AWS_DATABASE_URL_PARAMETER", cls.database_url_parameter
             ),
@@ -71,9 +107,5 @@ class DeploymentConfig:
             logto_client_secret_parameter=get(
                 "AIZK_AWS_LOGTO_CLIENT_SECRET_PARAMETER",
                 cls.logto_client_secret_parameter,
-            ),
-            oauth_client_secret_parameter=get(
-                "AIZK_AWS_OAUTH_CLIENT_SECRET_PARAMETER",
-                cls.oauth_client_secret_parameter,
             ),
         )

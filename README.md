@@ -10,36 +10,92 @@
   <a href="https://aizk.phvv.me/docs"><img src="https://img.shields.io/badge/docs-aizk.phvv.me-4F46E5" alt="Docs"></a>
 </p>
 
-Memory your agents actually keep. aizk is a self-hosted AI Zettelkasten for people, teams, and MCP agents.
+Memory your agents can keep, question, and share. AIZK is a self-hosted AI Zettelkasten for
+people, teams, and MCP agents.
 
-## How it works
+> **Warning** AIZK is early `0.0.x` software. Its interfaces and schema may still change.
 
-You tell aizk something and it remembers it for good. Text, files, and public HTTPS sources become an entity-and-fact knowledge graph addressed by meaning, so the same thing learned twice never duplicates. When you ask a question, aizk ranks the evidence you are allowed to see and answers with its sources.
+## What it does
 
-- **One SQL database owns everything** that matters, including the graph, metadata, temporal state, and job queue. PostgreSQL provides the full local stack. CockroachDB provides the portable cloud path with its native vector index and durable queue.
-- **Row level security is the boundary.** Private notes, shared projects, and overlapping groups are separated at the database, not in application code, so memory never crosses where it should not.
-- **Files stay immutable.** Original bytes live in private S3-compatible storage, scanned and converted, and recall stays text-first until you ask for the exact original.
-- **It speaks MCP.** Claude or any MCP client calls `recall`, `remember`, and `share` directly. A web dashboard over the same service shows what each account can see.
+AIZK turns authored notes, public web sources, and uploaded files into sourced evidence that an
+agent can retrieve later. It preserves the original source beside a temporal entity and fact graph,
+then returns the evidence a caller is allowed to read instead of hiding provenance inside a summary.
 
-## Quickstart
+- **One database owns queryable state.** PostgreSQL powers the complete self-hosted stack.
+  CockroachDB provides the serverless cloud path with Distributed Vector Indexing.
+- **Row level security is the boundary.** Private notes and shared organizations are separated by
+  policies in the database rather than filters in request handlers.
+- **Sources remain authoritative.** Derived facts, themes, profiles, and summaries can be rebuilt
+  from the material that produced them.
+- **Files keep their original bytes.** Uploads are scanned, converted, and recalled as text until a
+  caller explicitly asks for the stored artifact.
+- **Modern MCP is the public agent interface.** Clients negotiate MCP `2026-07-28` and receive the
+  five tools `status`, `find`, `keep`, `report`, and `share`.
 
-One command brings up PostgreSQL, object storage, malware scanning, document conversion, the model lanes, and the hardened aizk image as a migration service, an MCP server, a background worker, and the dashboard.
+## Run the local stack
+
+The full deployment needs Docker with the NVIDIA container runtime. Copy the committed environment
+template, give each required secret its own value, and start the stack.
 
 ```sh
+cp src/deploy/.env.example .env
 docker compose --env-file .env -f src/deploy/docker-compose.yml up -d
 ```
 
-Then call it from any MCP client.
+The [first start guide](docs/src/content/docs/docs/dev/run/first-start.mdx) explains every required
+value, service, and health check. The smaller
+[development setup](docs/src/content/docs/docs/dev/contributing/setup.md) runs the test suite with
+only PostgreSQL and in-process model doubles.
+
+## Call the MCP server
+
+The private local endpoint is `http://localhost:8080/mcp`. This example uses the same FastMCP client
+and protocol version exercised by the test suite.
 
 ```python
+import asyncio
+
 from fastmcp import Client
 
-async with Client("http://localhost:8080/mcp") as client:
-    await client.call_tool("remember", {"text": "aizk runs entirely on local hardware."})
-    result = await client.call_tool("recall", {"query": "where does aizk run?"})
-    print(result.data)
+
+async def main() -> None:
+    client = Client("http://localhost:8080/mcp", mode="2026-07-28")
+    async with client:
+        await client.call_tool("keep", {"text": "# Deployment\n\nAIZK runs locally."})
+        result = await client.call_tool("find", {"query": "Where does AIZK run?", "web": "off"})
+        print(result.data)
+
+
+asyncio.run(main())
 ```
 
-Full explanation, deployment, and the engine internals at [aizk.phvv.me/docs](https://aizk.phvv.me/docs).
+The [quickstart](docs/src/content/docs/docs/user/quickstart.md) covers authenticated clients and the
+[tool reference](docs/src/content/docs/docs/user/reference/tools.mdx) documents every argument and
+privacy receipt.
 
-The isolated CockroachDB profile uses OpenRouter for Qwen3 embeddings and DeepSeek extraction without changing the existing local deployment. Its setup and cost-bounded AWS CDK path live in [`src/deploy/cockroachdb`](src/deploy/cockroachdb) and [`infra/aws`](infra/aws).
+## Deployment paths
+
+- [`src/deploy`](src/deploy) contains the complete PostgreSQL, model, artifact, identity, browser,
+  and observability stack.
+- [`src/deploy/cockroachdb`](src/deploy/cockroachdb) contains the isolated CockroachDB and Lambda
+  emulator profile.
+- [`infra/aws`](infra/aws) contains the cost-bounded AWS CDK deployment.
+- [`docs`](docs) contains the complete user, operator, architecture, evaluation, and contribution
+  documentation and can be built locally.
+
+## Development
+
+`chefe` owns the environment and every verification task.
+
+```sh
+uv tool install "chefe>=0.0.25"
+chefe install
+chefe run lint
+chefe run lint-imports
+chefe run typecheck
+chefe run test
+chefe run infra-check
+```
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing the project. Security reports follow
+[SECURITY.md](SECURITY.md). AIZK is licensed under [Apache 2.0](LICENSE).

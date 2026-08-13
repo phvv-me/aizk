@@ -11,10 +11,9 @@ The questions that come up in the first week, answered plainly. This page assume
 No. aizk never scans a disk, a repository, or a folder. It holds exactly what was handed to it through
 `keep` and nothing else.
 
-The boundary is one step further out, though. Your agent can read your files and decides what to send,
-so the rule that actually protects you is the one in your own agent instructions, which
-[Claude Code](/docs/user/clients/claude-code/) writes out, including the line about never storing
-secrets. aizk enforces nothing about what your agent hands it.
+Your agent can read files and decides what to send, so the practical boundary is in its
+instructions. [Claude Code](/docs/user/clients/claude-code/) provides a safe starting point,
+including the rule against secrets. AIZK cannot prevent an agent from sending sensitive text.
 
 ## What happens if I delete something?
 
@@ -28,9 +27,10 @@ your agent can do from a chat.
 
 ## Can I get my data out?
 
-Yes. Everything you can see exports to a plain JSONL file, sources and chunks and derived knowledge
-together, and preserved originals come back byte for byte. Underneath it all is one PostgreSQL database that you own. The one catch is that the export is an
-operator command today rather than a button, so a copy means asking whoever runs the deployment.
+Yes. Everything you can see exports to a plain JSONL file, including sources, chunks and derived
+knowledge. Preserved originals come back byte for byte. The active SQL backend holds the memory,
+while the configured object store holds original file bytes. The export is an operator command
+today rather than a button, so a copy means asking whoever runs the deployment.
 
 ## Why did recall not find my note?
 
@@ -78,12 +78,14 @@ is trapped in one project, while aizk answers across everything you can see at o
 The concession is that for a small project, files plus grep are simpler and faster. aizk earns its
 setup once memory has to cross projects, people, or years. See [Scopes](/docs/user/concepts/scopes/).
 
-## Does the model see my private memory?
+## Does a model provider see my private memory?
 
-The models aizk itself runs, for embedding and extraction, run on the deployment's own hardware. Your
-text is not sent to a model vendor by aizk.
+It depends on the deployment profile. The self-hosted PostgreSQL profile runs its model lanes on
+the deployment hardware by default. The crAIZK AWS demo uses hosted endpoints for text embedding,
+captions and extraction, so accepted content reaches those providers. Ask the operator which
+profile and providers are active before storing sensitive material.
 
-Your assistant is a different matter. When your agent calls `find`, the evidence enters that agent's
+Your assistant is a second boundary. When your agent calls `find`, the evidence enters that agent's
 context, and if the agent is hosted then that text travels to its provider like everything else in the
 conversation. aizk does not change what your assistant does with what it reads, so if that matters for
 a note, the decision belongs at the point of asking.

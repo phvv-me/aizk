@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 
 from patos import FrozenModel
-from pydantic import UUID5, UUID7, NonNegativeInt, PositiveInt
+from pydantic import UUID5, UUID7, Field, NonNegativeFloat, NonNegativeInt, PositiveInt
 
 from .candidate import Candidate
 from .lane import Lane
@@ -19,6 +19,22 @@ class RecallTraceRow(FrozenModel):
     source_title: str | None = None
 
 
+class RecallTiming(FrozenModel):
+    """Wall time for each externally meaningful phase of one recall."""
+
+    total_ms: NonNegativeFloat = 0.0
+    embedding_ms: NonNegativeFloat = 0.0
+    entity_detection_ms: NonNegativeFloat = 0.0
+    database_ms: NonNegativeFloat = 0.0
+    rerank_ms: NonNegativeFloat = 0.0
+    packing_ms: NonNegativeFloat = 0.0
+    access_recording_ms: NonNegativeFloat = 0.0
+    statement_rows: NonNegativeInt = 0
+    selected_rows: NonNegativeInt = 0
+    statement_lanes: dict[str, NonNegativeInt] = Field(default_factory=dict)
+    selected_lanes: dict[str, NonNegativeInt] = Field(default_factory=dict)
+
+
 class RecallTrace(FrozenModel):
     """A diagnostic account of one recall without strengthening surfaced facts."""
 
@@ -26,6 +42,7 @@ class RecallTrace(FrozenModel):
     budget: PositiveInt
     selected: NonNegativeInt
     rows: tuple[RecallTraceRow, ...]
+    timing: RecallTiming = RecallTiming()
 
     @classmethod
     def build(
@@ -36,6 +53,7 @@ class RecallTrace(FrozenModel):
         ranked: Sequence[Candidate],
         kept: Sequence[Candidate],
         scores: Mapping[UUID5 | UUID7 | None, float],
+        timing: RecallTiming | None = None,
     ) -> RecallTrace:
         """Build the trace from the three explicit retrieval phases."""
         merit_positions = {id(candidate): rank for rank, candidate in enumerate(ranked, 1)}
@@ -44,6 +62,7 @@ class RecallTrace(FrozenModel):
             query=query,
             budget=budget,
             selected=len(kept),
+            timing=timing or RecallTiming(),
             rows=tuple(
                 RecallTraceRow(
                     statement_rank=rank,
@@ -83,6 +102,15 @@ class RecallTrace(FrozenModel):
         lines = [
             f"query  {self.query}",
             f"budget {self.budget}  selected {self.selected} of {len(self.rows)}",
+            (
+                f"timing {self.timing.total_ms:.1f} ms total  "
+                f"embed {self.timing.embedding_ms:.1f}  "
+                f"entities {self.timing.entity_detection_ms:.1f}  "
+                f"database {self.timing.database_ms:.1f}  "
+                f"rerank {self.timing.rerank_ms:.1f}  "
+                f"pack {self.timing.packing_ms:.1f}  "
+                f"access {self.timing.access_recording_ms:.1f}"
+            ),
         ]
         for row in sorted(self.rows, key=lambda item: item.merit_rank):
             score = "unscored" if row.score is None else f"{row.score:.6f}"

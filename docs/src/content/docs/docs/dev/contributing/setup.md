@@ -45,20 +45,21 @@ chefe install
 `[dependency-groups].dev` into `.chefe/pixi.toml` and solves one environment from them. CI runs the
 exact same two commands, so a green local gate means a green CI gate.
 
-## The sibling house packages
+## The house packages
 
-Three house packages sit under aizk and matter when you change them.
+Three independently published house packages sit below aizk in the dependency graph and matter
+when you change them.
 
 `patos` supplies the typed base models and the `patos.sql` column primitives that every store model
 is built from. `rlsalchemy` is the row level security engine, and note that the distribution is
 named `rlsalchemy` while the import is `rls`, which trips people up once each. `mainboard` supplies
 the hardware probe and the profiler.
 
-In a standalone aizk checkout, `[tool.chefe.sources]` routes all three to the `main` branch of their
-git repositories, because PyPI lags their source at the same version number. The practical
-consequence is ordering. If a change needs a new `rls` behavior, push `rls` first, then push aizk,
-or CI resolves the old HEAD and fails on something that works locally. Inside the monorepo the same
-three are editable path dependencies, so an edit is live immediately with no push at all.
+In a standalone aizk checkout, `pyproject.toml` and `uv.lock` resolve the exact published versions.
+The production image installs those same artifacts, so a green standalone gate tests the dependency
+graph that ships. Inside the life monorepo the root `chefe.toml` replaces them with editable path
+dependencies, which makes a sibling change live immediately. Publish that dependency and bump its
+pin before expecting a standalone checkout or image to contain the new behavior.
 
 ## A database
 

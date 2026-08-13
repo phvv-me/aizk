@@ -7,7 +7,8 @@ from patos import sql
 from pydantic import UUID7
 from sqlmodel import select
 
-from aizk.artifacts import DirectImageEnricher, OriginalArtifact, VisualModality
+from aizk.artifacts.models import OriginalArtifact
+from aizk.artifacts.visual import DirectImageEnricher, VisualModality
 from aizk.config import settings
 from aizk.serving.embed import EmbedImage, ImageBytes
 from aizk.store import Artifact, Blob, Chunk, Document

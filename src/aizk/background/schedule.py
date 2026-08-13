@@ -2,6 +2,7 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from loguru import logger
+from openai import OpenAIError
 from pydantic import UUID5
 from sqlmodel.sql.expression import Select
 
@@ -50,6 +51,19 @@ async def scope_roster() -> list[Scopes]:
         return sorted(keys, key=lambda scopes: sorted(scopes))
 
 
+async def _load_ontology() -> None:
+    """Load the worker catalog and degrade only missing ontology similarity vectors."""
+    async with User.system() as session:
+        try:
+            await Ontology.refresh(session)
+        except OpenAIError as error:
+            logger.warning(
+                "ontology kind embeddings unavailable, worker using exact ontology names only. {}",
+                error,
+            )
+            await Ontology.load(session)
+
+
 def portable_worker(runtime: Runtime, batch_size: int | None = None) -> PortableWorker:
     """Assemble the CockroachDB worker with every queue and schedule callback."""
     batch = batch_size or settings.queue_batch_size
@@ -78,8 +92,7 @@ async def run_worker_once(runtime: Runtime, batch_size: int | None = None) -> in
     """Drain one CockroachDB batch and due schedule wave for serverless invocation."""
     if settings.database_backend is not DatabaseBackend.cockroachdb:
         raise RuntimeError("serverless queue draining requires CockroachDB")
-    async with User.system() as session:
-        await Ontology.refresh(session)
+    await _load_ontology()
     worker = portable_worker(runtime, batch_size)
     await worker.install_schedules()
     return await worker.run_once()
@@ -88,8 +101,7 @@ async def run_worker_once(runtime: Runtime, batch_size: int | None = None) -> in
 async def run_worker(runtime: Runtime, batch_size: int | None = None) -> None:
     """Run the autonomous engine, draining on-write jobs and firing the scheduled passes."""
     batch = batch_size or settings.queue_batch_size
-    async with User.system() as session:
-        await Ontology.refresh(session)
+    await _load_ontology()
     if settings.database_backend is DatabaseBackend.cockroachdb:
         await portable_worker(runtime, batch_size).run()
         return

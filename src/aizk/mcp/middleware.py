@@ -9,6 +9,7 @@ from fastmcp.server.context import Context
 from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from fastmcp.server.middleware.rate_limiting import RateLimitError, TokenBucketRateLimiter
 from fastmcp.tools import ToolResult
+from mcp.shared.exceptions import MCPError
 from pydantic import UUID5, BaseModel
 
 from ..auth import Auth
@@ -56,15 +57,15 @@ async def bound_user(context: Context) -> User | None:
 
 
 def client_label(context: Context) -> str | None:
-    """The harness on the other end, from the MCP initialize handshake.
+    """The harness on the other end, from this request's client metadata.
 
     Kept with what the caller wrote so an operator debugging the graph can ask which
     client produced a class of facts, the way `derived_by` answers which model did.
-    A session that never completed a handshake names nothing.
+    A client that names nothing produces no label.
     """
     if (params := context.session.client_params) is None:
         return None
-    return f"{params.clientInfo.name}/{params.clientInfo.version}"
+    return f"{params.client_info.name}/{params.client_info.version}"
 
 
 def request_context[ParamsT](context: MiddlewareContext[ParamsT]) -> Context:
@@ -119,6 +120,32 @@ class IdentityMiddleware(Middleware):
             Usage.Event.Operation.artifact_read,
             resource_reply_size,
         )
+
+
+class ModernProtocolOnly(Middleware):
+    """Reject requests that do not use AIZK's current MCP revision."""
+
+    protocol_version = "2026-07-28"
+
+    async def on_message[ParamsT, ResultT](
+        self,
+        context: MiddlewareContext[ParamsT],
+        call_next: CallNext[ParamsT, ResultT],
+    ) -> ResultT:
+        fastmcp_context = request_context(context)
+        if fastmcp_context.request_context is None:
+            return await call_next(context)
+        requested = fastmcp_context.request_context.protocol_version
+        if requested != self.protocol_version:
+            raise MCPError(
+                code=mt.UNSUPPORTED_PROTOCOL_VERSION,
+                message=f"AIZK requires MCP {self.protocol_version}",
+                data=mt.UnsupportedProtocolVersionErrorData(
+                    supported=[self.protocol_version],
+                    requested=requested,
+                ).model_dump(),
+            )
+        return await call_next(context)
 
 
 class CallerRateLimit(Middleware):

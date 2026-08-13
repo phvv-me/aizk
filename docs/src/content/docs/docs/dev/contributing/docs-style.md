@@ -4,7 +4,7 @@ description: "The rules every page here follows, including the ten minute ceilin
 ---
 
 These documents are code. They live in `docs/src/content/docs/docs/`, they build with the site,
-and a check in the build fails the whole thing when a page breaks one of the three mechanical
+and a check in the build fails the whole thing when a page breaks one of the four mechanical
 rules below. This page is the contract, and it applies to every page in both halves.
 
 ## The four rules the build enforces
@@ -14,8 +14,8 @@ rules below. This page is the contract, and it applies to every page in both hal
 ```text
   page.md ──▶ strip frontmatter, code fences, tables, html
                        │
-                       ├──▶ words > 1600 ?           ──▶ fail, split the page
-                       ├──▶ no mermaid, d2, text
+                       ├──▶ words > 980 ?            ──▶ fail, split the page
+                       ├──▶ no D2, text
                        │    or component ?           ──▶ fail, add a diagram
                        ├──▶ em dash, colon or
                        │    semicolon in prose ?     ──▶ fail, rewrite the sentence
@@ -23,14 +23,14 @@ rules below. This page is the contract, and it applies to every page in both hal
                             no built page serves ?   ──▶ fail, fix the link
 ```
 
-**Ten minutes, no exceptions.** The budget is 1,600 words of prose, which at 200 words a minute
-is eight minutes and leaves room for the code and diagrams that also cost a reader time. Going
+**Ten-minute ceiling.** The budget is 980 words of prose, which leaves room for code and
+diagrams. Going
 over is a signal that the page holds two subjects. Split it and link the halves rather than
 trimming sentences until it squeaks under.
 
 **Every page carries a diagram.** A page with no picture is usually a page that is listing
-rather than explaining. Mermaid, D2, hand-drawn ASCII art in a fenced block, or an interactive
-component all count.
+rather than explaining. D2, hand-drawn ASCII art in a fenced block, or an interactive component
+all count. Mermaid is rejected because it depends on client-side rendering.
 
 **Every internal link resolves.** The check reads the built HTML, so a link to a page that was
 renamed fails the build rather than reaching a reader.
@@ -79,13 +79,19 @@ is a good example. The user page explains that naming two organizations makes a 
 overlap can read, and the developer page explains the sorted `uuid[]` column, the GIN index and
 the policies that enforce it.
 
+## File extensions
+
+Use `.md` for plain Markdown, including frontmatter, tables, fenced code, Starlight directives and
+ordinary HTML. Use `.mdx` only when a page imports a component or renders JSX. The extension tells
+the next editor which parser features the page needs.
+
 ## Diagrams
 
 Pick by what the picture has to do.
 
 | Need | Use |
 |---|---|
-| flow, sequence, state, decision | mermaid |
+| flow, sequence, state, decision | a `Diagram` component or ASCII |
 | tables with columns, nested containers | D2 through `astro-d2` |
 | something that should look like a terminal | ASCII art in a ` ```text ` block |
 | a map worth clicking through | a Svelte component mounted `client:only="svelte"` |

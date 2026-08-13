@@ -4,22 +4,22 @@ description: "Connect Claude Code to aizk, including the headless and remote cas
 ---
 
 This page assumes you have an account on a running aizk deployment and know its address. If you do
-not, [Quickstart](/docs/user/quickstart/) covers getting one. Every command below uses
-`https://aizk.phvv.me/mcp` as the example address, so swap in your own.
+not, [Quickstart](/docs/user/quickstart/) covers getting one. Replace `YOUR_AIZK_HOST` below with
+the host for your deployment.
 
 import Diagram from '../../../../../components/Diagram.astro';
 
-You never handle a client id, a client secret, or a shared token. aizk registers Claude Code the first
-time it connects, and you sign in as yourself in a browser.
+Your deployment gives you a public client ID. It is safe to keep in configuration and has no client
+secret. Claude Code uses PKCE, and you sign in as yourself in a browser.
 
 <Diagram
-  title="The sign-in handshake, from the first connect to four tools ready"
+  title="The sign-in handshake, from the first connect to five tools ready"
   nodes={[
     { id:'connect', label:'Claude Code connects', col:0, row:0 },
-    { id:'register', label:'aizk registers the client', col:0, row:1 },
+    { id:'register', label:'Claude selects the public client', col:0, row:1 },
     { id:'signin', label:'you sign in a browser', col:0, row:2 },
     { id:'token', label:'token exchange', col:0, row:3 },
-    { id:'ready', label:'four tools ready', col:0, row:4, emphasis:true },
+    { id:'ready', label:'five tools ready', col:0, row:4, emphasis:true },
   ]}
   edges={[
     { from:'connect', to:'register' },
@@ -34,7 +34,8 @@ time it connects, and you sign in as yourself in a browser.
 The shortest personal setup puts aizk in Claude Code's user scope, so every project you open has it.
 
 ```sh
-claude mcp add --scope user --transport http --callback-port 8912 aizk https://aizk.phvv.me/mcp
+claude mcp add --scope user --transport http --client-id YOUR_AIZK_CLIENT_ID \
+  --callback-port 8912 aizk https://YOUR_AIZK_HOST/mcp
 claude mcp login aizk
 ```
 
@@ -72,7 +73,11 @@ For a team repository, commit the server entry so nobody has to remember the `ad
   "mcpServers": {
     "aizk": {
       "type": "http",
-      "url": "https://aizk.phvv.me/mcp"
+      "url": "https://YOUR_AIZK_HOST/mcp",
+      "oauth": {
+        "clientId": "YOUR_AIZK_CLIENT_ID",
+        "callbackPort": 8912
+      }
     }
   }
 }

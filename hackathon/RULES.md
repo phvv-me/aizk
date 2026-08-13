@@ -1,0 +1,88 @@
+# Official rules and compliance
+
+Checked on August 13, 2026 against the
+[official Devpost rules](https://cockroachdb-ai.devpost.com/rules) and
+[event page](https://cockroachdb-ai.devpost.com/).
+
+The submission period runs from June 30, 2026 at 10 AM EDT through August 18, 2026 at 5 PM EDT.
+The deadline is August 19 at 6 AM JST. The repository and working project must remain available
+through the end of judging.
+
+## Required build
+
+The entry must be a newly created agentic application that uses CockroachDB as its persistent
+memory layer and runs on AWS. Every named integration must do real work. The project must use at
+least two approved CockroachDB tools and at least one AWS service.
+
+Approved CockroachDB tools include CockroachDB Cloud Managed MCP, Distributed Vector Indexing,
+the ccloud CLI, and the CockroachDB Agent Skills repository. Approved AWS services include Lambda,
+Bedrock, ECS, EKS, S3, SageMaker, and other services that power the agent environment.
+
+## Current compliance
+
+| Requirement | Current evidence | Status |
+|---|---|---|
+| Entrant eligibility | Japan is not listed among excluded territories. The entrant must confirm age and Devpost account eligibility before submission. | Manual confirmation pending |
+| New project during the submission period | The first AIZK commit is dated July 3, 2026. The CockroachDB and AWS profile begins on July 23. | Ready |
+| Public repository | `https://github.com/phvv-me/aizk` is public. | Ready |
+| Open source license | GitHub recognizes the committed Apache 2.0 license. | Ready |
+| Agentic application | The modern MCP server exposes `status`, `find`, `keep`, `report`, and `share` with direct Logto verification. | Ready |
+| CockroachDB persistent memory | Documents, graph claims, temporal state, scopes, vectors, usage, and the durable queue use CockroachDB. | Cloud smoke passed |
+| Distributed Vector Indexing | C-SPANN powers the private scoped vector projection and the live cloud plan selected it in 7 milliseconds. | Ready in cloud |
+| ccloud CLI | The pinned CLI authenticates, inspects the cluster, and manages SQL users. | Ready, final deployment transcript pending |
+| Managed MCP | The official server has been authenticated and used for cluster inspection. | Ready, final read-only transcript pending |
+| AWS service | Two deployed Lambda functions serve the product and queue work. Private S3 stores original artifacts. EventBridge Scheduler wakes recovery work. | Cloud smoke passed |
+| Meaningful integration | The Logto protected Function URL completed modern discovery, all five tool discovery, private S3 upload, extraction, recall, and identity resolution against CockroachDB Cloud. | Cloud smoke passed |
+| Working demo URL | The stable AWS Function URL serves the site, docs, browser UI, API, and MCP to invited Logto users. The public Native Codex client has no secret and reaches an accepted Logto sign-in request. | Ready for interactive rehearsal |
+| Public example material | Six curated public SWE reference notes exercise source, graph, community, and multihop recall in CockroachDB Cloud. They are the frozen demo corpus pending a final reference review. | Partial |
+| Setup and run instructions | Product setup and local Lambda rehearsal are documented. A clean external rehearsal remains. | Partial |
+| Pre-existing work disclosure | [DISCLOSURE.md](DISCLOSURE.md) records shared code and development dates. | Ready |
+| Authorized third-party use | Dependencies, hosted services, and public data sources are identified in the disclosure. Final corpus terms still need review. | Partial |
+| English video under three minutes | [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md) targets two minutes and forty-five seconds. | Pending recording |
+| Video shows the project and memory layer working | The shot plan includes MCP writes, C-SPANN recall, the CockroachDB console, and Lambda. | Pending recording |
+
+The entry does not claim the CockroachDB Agent Skills repository because it is not part of the
+application or operator workflow.
+
+## Submission deliverables
+
+- A public source repository with all source, dependencies, example configuration, setup, and run
+  instructions
+- A working project URL that judges can test
+- A written description of features and functionality
+- The CockroachDB tools used and how each one matters
+- The AWS services used and how each one matters
+- An English demonstration video hosted on YouTube or Vimeo and shorter than three minutes
+- Footage showing both the application and the CockroachDB memory layer working
+- An optional architecture diagram
+- Honest disclosure of incorporated pre-existing code or work
+
+## Judging criteria
+
+The five criteria have equal weight.
+
+| Criterion | Question the submission must answer |
+|---|---|
+| Agentic Memory Design | Does CockroachDB have a meaningful production role as persistent agent memory? |
+| Technological Implementation | Is the CockroachDB integration sound software engineering? |
+| Real-World Impact | Could this improve a real user or workflow? |
+| Product Readiness | Is it secure, observable, and scalable? |
+| Creativity and Originality | Is the idea or application genuinely novel? |
+
+## Release gate
+
+The dated execution order and detailed acceptance criteria live in [PLAN.md](PLAN.md).
+
+- [x] Deploy one clean CockroachDB Cloud database from the current baseline
+- [x] Deploy the Lambda image and invoke setup successfully
+- [x] Load the bounded public SWE rehearsal corpus through the deployed MCP endpoint
+- [x] Confirm extraction drains without retained queue failures
+- [x] Capture cold and warm recall latency from AWS
+- [x] Capture a redacted C-SPANN query plan from CockroachDB Cloud
+- [x] Run `status`, `keep`, and `find` as the judge-visible Maya identity
+- [ ] Verify the public demo without a local credential or private network
+- [ ] Rehearse setup from a clean clone using only committed instructions
+- [ ] Record screenshots with no secret, private note, or unrelated deployment visible
+- [ ] Record and publish the English video under three minutes
+- [ ] Open the video and demo from a signed-out browser
+- [ ] Complete every Devpost field and submit before August 19 at 6 AM JST

@@ -65,13 +65,14 @@ installs the PgQueuer schema. It holds the owner credential and exits. `server`,
 `worker` all declare `service_completed_successfully` on it, so no request path ever starts
 against an older schema than the one it was built for.
 
-There are eight revisions in `src/aizk/store/migrations/versions/`, running from `0001_init` to
-`0008_storage_footprint`. [Migrations and DDL](/docs/dev/store/migrations/) explains why the initial
-one is fused rather than a long chain.
+The PostgreSQL history currently has fourteen revisions in `src/aizk/store/migrations/versions/`.
+The CockroachDB profile uses one fused baseline in
+`src/aizk/store/migrations/cockroachdb/versions/`. [Migrations and DDL](/docs/dev/store/migrations/)
+explains why the cloud profile starts from one migration rather than replaying PostgreSQL history.
 
 :::danger[Never `down -v` during an upgrade]
-It removes the named volumes, which takes the database, the object store, the ClamAV signatures
-and the OAuth state with it. It is also the only way to make PostgreSQL re-run `initdb/roles.sh`,
+It removes the named volumes, which takes the database, the object store, and the ClamAV signatures
+with it. It is also the only way to make PostgreSQL re-run `initdb/roles.sh`,
 so reach for it only when that is exactly what you want.
 :::
 
@@ -83,15 +84,8 @@ reconciles every role with the current `.env`, so it is the tool for the databas
 replaced that file through an rsync deployment, recreate the `db` container before running it,
 because a live bind mount keeps the old inode.
 
-:::caution[Rotating `AIZK_OAUTH_CLIENT_SECRET` logs everyone out]
-FastMCP stores dynamic client registrations and upstream Logto tokens in the persistent `/oauth`
-volume, encrypted with keys derived from that client secret. Change it and the derived keys are
-invalid, so every MCP client has to sign in again. It is not reversible by restarting. Treat it
-as a deliberate full session reset and schedule it with the people who will have to re-authorize.
-:::
-
 The web session secret is separate and independent by validation. `Settings` rejects it when it
-is shorter than 32 bytes or equal to the web, Management API or OAuth client secret.
+is shorter than 32 bytes or equal to the web or Management API client secret.
 
 ## The order that works
 

@@ -14,9 +14,9 @@ from .models import (
     Entity,
     Explorer,
     Fact,
+    Knowledge,
     OperatorReading,
     OperatorSnapshot,
-    Knowledge,
     Profile,
     Relation,
     SessionItem,
@@ -25,13 +25,15 @@ from .models import (
     UsageEvent,
     Watermark,
 )
+from .security import RLSVerifier
 
 _catalog = rls.Catalog(TableBase.mapper_registry)
+_rls_verifier = RLSVerifier(_catalog)
 
 
 def verify_rls(connection: Connection) -> list[str]:
     """Report drift from Aizk's complete row security declaration."""
-    return _catalog.verify(connection)
+    return _rls_verifier.verify(connection)
 
 
 __all__ = [

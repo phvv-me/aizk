@@ -1,0 +1,86 @@
+{
+  "tested_at": "2026-08-12T11:34:00Z",
+  "endpoint": "https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp",
+  "server_image_digest": "sha256:c9439db4051ce7ecdf7e4f57cfe17afae711a60675ee0985c0bf7916ea170d34",
+  "client": {
+    "name": "Codex CLI",
+    "version": "0.147.0",
+    "model": "gpt-5.6-luna",
+    "local_image_digest": "sha256:79106b78300303d2ffe5c1d555dbc414fba85536b0b887ac57c5771628a585e6",
+    "base_image": "node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436"
+  },
+  "isolation": {
+    "user": "node",
+    "read_only_root": true,
+    "capabilities": [],
+    "no_new_privileges": true,
+    "process_limit": 256,
+    "memory_mib": 1024,
+    "cpus": 2,
+    "host_home_mounted": false,
+    "source_tree_mounted": false,
+    "docker_socket_mounted": false,
+    "aws_credentials_mounted": false,
+    "codex_auth_file": "read only",
+    "workspace": "read only disposable files"
+  },
+  "authentication": {
+    "dynamic_client_registration": "passed through external PKCE bootstrap",
+    "oauth": "passed through external PKCE bootstrap",
+    "codex_native_oauth": "blocked by AWS response header remapping",
+    "aws_observed_header": "x-amzn-Remapped-www-authenticate",
+    "required_header": "WWW-Authenticate",
+    "mcp_bearer": "passed through environment only",
+    "caller": "Maya Chen"
+  },
+  "protocol": {
+    "version": "2026-07-28",
+    "codex_feature": "mcp_2026_07_28",
+    "feature_default_in_client": false
+  },
+  "workflow": [
+    {
+      "tool": "status",
+      "duration_ms": 16976,
+      "result": "authenticated Maya Chen with four Northstar organizations and idle processing",
+      "usage": {
+        "input_tokens": 53329,
+        "cached_input_tokens": 45056,
+        "output_tokens": 313,
+        "reasoning_output_tokens": 145
+      }
+    },
+    {
+      "tool": "keep",
+      "duration_ms": 18461,
+      "document_id": "019ff5bf-c172-756e-9a76-08ea9c2c8b1d",
+      "usage": {
+        "input_tokens": 52288,
+        "cached_input_tokens": 45056,
+        "output_tokens": 331,
+        "reasoning_output_tokens": 139
+      }
+    },
+    {
+      "tool": "find",
+      "duration_ms": 37332,
+      "web": "off",
+      "fresh": false,
+      "result": "the newly kept note was the first evidence item",
+      "usage": {
+        "input_tokens": 68407,
+        "cached_input_tokens": 59136,
+        "output_tokens": 727,
+        "reasoning_output_tokens": 392
+      }
+    }
+  ],
+  "usage_total": {
+    "input_tokens": 174024,
+    "cached_input_tokens": 149248,
+    "output_tokens": 1371,
+    "reasoning_output_tokens": 676,
+    "cost_usd": null,
+    "cost_note": "The rehearsal used an existing ChatGPT Codex sign-in, so no API cost was reported."
+  }
+}

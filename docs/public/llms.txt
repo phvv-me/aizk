@@ -1,0 +1,11 @@
+# aizk
+
+aizk is shared, sourced memory for people, teams and agents.
+
+To connect an agent to this deployment, read `/setup.md` and follow it.
+
+The reusable operating skill is `/aizk/SKILL.md`.
+
+The repository instruction block is `/aizk/AGENTS.md`.
+
+Product and developer documentation starts at `/docs/`.

@@ -1,14 +1,9 @@
 :8081 {
 	encode zstd gzip
 
-	# FastMCP's OIDCProxy mounts the full OAuth authorization server surface here, verified
-	# route by route against the running server container: the two well-known metadata
-	# documents, `/authorize`, `/token`, `/register`, `/revoke`, its own `/auth/callback`
-	# (distinct from the SvelteKit app's `/auth/sign-in-callback` under `@app` below), and
-	# `/consent`. The well-known document itself advertises `revocation_endpoint` at
-	# `/revoke`, so a route table missing it silently 404s the one path a spec-compliant
-	# OAuth client needs to revoke a token, which is exactly what this list used to do.
-	@mcp path /mcp /mcp/* /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource/mcp /authorize /token /register /revoke /auth/callback /consent
+	# AIZK serves MCP and its protected-resource metadata. Logto owns authorization,
+	# token, revocation, and client registration endpoints on the tenant origin.
+	@mcp path /mcp /mcp/* /.well-known/oauth-protected-resource/mcp
 	handle @mcp {
 		reverse_proxy server:8080
 	}

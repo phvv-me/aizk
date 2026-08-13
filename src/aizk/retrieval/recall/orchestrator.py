@@ -1,5 +1,7 @@
 import asyncio
-from collections.abc import Hashable
+from collections import Counter
+from collections.abc import Awaitable, Hashable
+from time import perf_counter
 from typing import cast
 
 from loguru import logger
@@ -14,12 +16,26 @@ from ...serving.gate import GateClient
 from ...store import Fact
 from ...store.identity import User
 from ...types import Scopes
-from ..models import Candidate, Plan, QueryContext, RecallEvidence, RecallTrace
+from ..models import Candidate, Plan, QueryContext, RecallEvidence, RecallTiming, RecallTrace
 from ..packing import deduplicate, pack
 from ..rerank import MeritOrder, merit_order
 from .program import build_recall_statement
 
 _speaker_query_template = "{query}\nThe asking speaker is {label}."
+
+
+async def _timed[Result](name: str, operation: Awaitable[Result]) -> tuple[Result, float]:
+    """Await one recall phase under a matching mainboard span and wall clock."""
+    started_at = perf_counter()
+    with span(name):
+        result = await operation
+    return result, (perf_counter() - started_at) * 1000
+
+
+async def _record_accesses(user: User, accessed: list[UUID7]) -> None:
+    """Record the surfaced facts in one caller-bound transaction."""
+    async with user as session:
+        await Fact.Claim.record_access(session, accessed)
 
 
 async def query_entities(query: str) -> list[str]:
@@ -30,7 +46,7 @@ async def query_entities(query: str) -> list[str]:
     An off `graph_entity_seeding` skips the gate call entirely and seeds nothing, the
     diagnostic plan study's seeding ablation lever.
     """
-    if not settings.graph_entity_seeding:
+    if not settings.recall_graph_expansion_enabled or not settings.graph_entity_seeding:
         return []
     return await GateClient.from_settings(settings).named_entities(query)
 
@@ -159,14 +175,20 @@ async def _execute(
     restriction shapes the SQL and rides in the statement cache key rather than being
     applied to whatever the lane happened to return.
     """
+    started_at = perf_counter()
     resolved = plan if plan is not None else Plan.maximal()
     search_query = (
         _speaker_query_template.format(query=query, label=user.label) if user.label else query
     )
-    embedded, named = await asyncio.gather(
-        EmbedClient.from_settings(settings).embed([search_query], mode="query"),
-        query_entities(query),
+    embedded_result, entity_result = await asyncio.gather(
+        _timed(
+            "recall_embedding",
+            EmbedClient.from_settings(settings).embed([search_query], mode="query"),
+        ),
+        _timed("recall_entity_detection", query_entities(query)),
     )
+    embedded, embedding_ms = embedded_result
+    named, entity_detection_ms = entity_result
     [vector] = embedded
     context = QueryContext(
         dimensions=len(vector), fuzzy=settings.graph_mention_fuzzy, owned=scopes is not None
@@ -174,24 +196,50 @@ async def _execute(
     restriction: dict[str, StatementValue] = (
         {} if scopes is None else {"qscopes": [str(scope) for scope in sorted(scopes)]}
     )
-    rows = await user.exec[Candidate](
-        build_recall_statement(cast("Hashable", context), cast("Hashable", resolved)),
-        qvec=vector,
-        qtext=search_query,
-        qentities=named,
-        k=k,
-        **restriction,
+    rows, database_ms = await _timed(
+        "recall_database",
+        user.exec[Candidate](
+            build_recall_statement(cast("Hashable", context), cast("Hashable", resolved)),
+            qvec=vector,
+            qtext=search_query,
+            qentities=named,
+            k=k,
+            **restriction,
+        ),
     )
-    ranking = await merit_order(rows, query)
-    kept = tuple(pack(deduplicate(ranking.candidates), token_budget))
-    if record_access and (
-        accessed := [candidate.fact_id for candidate in kept if candidate.fact_id is not None]
+    ranking, rerank_ms = await _timed("recall_rerank", merit_order(rows, query))
+    packing_started_at = perf_counter()
+    with span("recall_packing"):
+        kept = tuple(pack(deduplicate(ranking.candidates), token_budget))
+    packing_ms = (perf_counter() - packing_started_at) * 1000
+    access_recording_ms = 0.0
+    if (
+        settings.recall_access_recording_enabled
+        and record_access
+        and (
+            accessed := [candidate.fact_id for candidate in kept if candidate.fact_id is not None]
+        )
     ):
-        async with user as session:
-            await Fact.Claim.record_access(session, accessed)
+        _, access_recording_ms = await _timed(
+            "recall_access_recording", _record_accesses(user, accessed)
+        )
+    timing = RecallTiming(
+        total_ms=(perf_counter() - started_at) * 1000,
+        embedding_ms=embedding_ms,
+        entity_detection_ms=entity_detection_ms,
+        database_ms=database_ms,
+        rerank_ms=rerank_ms,
+        packing_ms=packing_ms,
+        access_recording_ms=access_recording_ms,
+        statement_rows=len(rows),
+        selected_rows=len(kept),
+        statement_lanes=dict(Counter(candidate.lane.value for candidate in rows)),
+        selected_lanes=dict(Counter(candidate.lane.value for candidate in kept)),
+    )
+    if settings.profiling:
+        logger.info("recall profile {}", timing.model_dump_json())
     logger.info(
-        "recall {query!r} selected {kept} candidates within the {budget} token budget",
-        query=query,
+        "recall selected {kept} candidates within the {budget} token budget",
         kept=len(kept),
         budget=token_budget,
     )
@@ -206,5 +254,6 @@ async def _execute(
             ranking.candidates,
             kept,
             ranking.scores,
+            timing,
         ),
     )

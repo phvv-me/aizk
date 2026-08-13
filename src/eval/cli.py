@@ -173,7 +173,7 @@ class EvaluationCLI:
 
     def scale(
         self,
-        sizes: str = "1000,10000",
+        sizes: str | int = "1000,10000",
         k: int = 8,
         repeats: int = 10,
         recall_p95_ms: float = 200.0,
@@ -182,7 +182,7 @@ class EvaluationCLI:
         """Measure the scaling curve in the dedicated evaluation database."""
         report = asyncio.run(
             Evaluation().scale(
-                tuple(int(size) for size in sizes.split(",")),
+                tuple(int(size) for size in str(sizes).split(",")),
                 k,
                 repeats,
                 recall_p95_ms,

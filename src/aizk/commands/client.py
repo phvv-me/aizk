@@ -36,13 +36,15 @@ class ClientCommands:
     def profile(self, server: str | None = None) -> ClientProfile:
         """Resolve an explicit server or the profile selected during login."""
         if server is not None:
-            return ClientProfile(server=_URL.validate_python(server))
+            selected = self.profiles.load()
+            return selected.model_copy(update={"server": _URL.validate_python(server)})
         return self.profiles.load()
 
     async def login(
         self,
         server: str | None,
         auth: Literal["oauth", "none"],
+        client_id: str,
         callback_host: str,
         callback_port: int,
         days: int,
@@ -55,6 +57,7 @@ class ClientCommands:
         profile = ClientProfile(
             server=_URL.validate_python(server),
             auth=auth,
+            client_id=client_id,
             callback_host=callback_host,
             callback_port=callback_port,
         )
@@ -282,6 +285,7 @@ async def login(
     server: str | None = None,
     *,
     auth: Literal["oauth", "none"] = "oauth",
+    client_id: str = "",
     callback_host: str = "127.0.0.1",
     callback_port: int = 8912,
     days: int = 30,
@@ -291,6 +295,7 @@ async def login(
     await ClientCommands().login(
         server,
         auth,
+        client_id,
         callback_host,
         callback_port,
         days,

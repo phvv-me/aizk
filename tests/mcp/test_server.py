@@ -1,6 +1,5 @@
 import hashlib
 from datetime import UTC, datetime, time
-from pathlib import Path
 from typing import cast, get_type_hints
 from unittest.mock import AsyncMock
 
@@ -10,9 +9,8 @@ import mcp.types as mt
 import mcp_probe
 import pytest
 from fastmcp import Client
-from fastmcp import settings as fastmcp_settings
 from fastmcp.exceptions import ToolError
-from fastmcp.server.auth.oidc_proxy import OIDCProxy
+from fastmcp.server.auth import RemoteAuthProvider
 from fastmcp.server.context import Context
 from fastmcp.tools import FunctionTool
 from hypothesis import given
@@ -20,11 +18,12 @@ from hypothesis import strategies as st
 from id_factory import uuid5, uuid7
 from mcp_probe import USER_TOOLS, build_server, context_for, tools_of
 from obstore.exceptions import PermissionDeniedError
-from pydantic import UUID5, UUID7, AnyHttpUrl, SecretStr, TypeAdapter, ValidationError
+from pydantic import UUID5, UUID7, AnyHttpUrl, TypeAdapter, ValidationError
+from starlette.testclient import TestClient
 
 import aizk.memory as memory_module
 from aizk.api.app import AizkAPI
-from aizk.artifacts import ArtifactReceipt
+from aizk.artifacts.models import ArtifactReceipt
 from aizk.artifacts.service import ArtifactIntake
 from aizk.artifacts.uploads import InertIntake, UploadBox, UploadGrantLimitError, UploadRequest
 from aizk.auth import Auth
@@ -185,30 +184,10 @@ def test_server_requires_identity_context() -> None:
 
 
 def test_init_wires_a_verifier_and_the_rate_limit_on_the_configured_http_transport(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "logto_url", AnyHttpUrl("https://auth.test"))
     monkeypatch.setattr(settings, "mcp_public_url", AnyHttpUrl("https://aizk.test"))
-    monkeypatch.setattr(settings, "oauth_client_id", "oauth-client")
-    monkeypatch.setattr(settings, "oauth_client_secret", SecretStr("oauth-secret"))
-    monkeypatch.setattr(fastmcp_settings, "home", tmp_path)
-    monkeypatch.setattr(
-        httpx,
-        "get",
-        lambda url, **kwargs: httpx.Response(
-            200,
-            json={
-                "issuer": "https://auth.test/oidc",
-                "authorization_endpoint": "https://auth.test/oidc/auth",
-                "jwks_uri": "https://auth.test/oidc/jwks",
-                "token_endpoint": "https://auth.test/oidc/token",
-                "response_types_supported": ["code"],
-                "subject_types_supported": ["public"],
-                "id_token_signing_alg_values_supported": ["ES384"],
-            },
-            request=httpx.Request("GET", str(url)),
-        ),
-    )
     probe = AizkMCP(
         Auth(),
         mcp_probe.runtime.store,
@@ -218,8 +197,25 @@ def test_init_wires_a_verifier_and_the_rate_limit_on_the_configured_http_transpo
         name="probe",
     )
 
-    assert isinstance(probe.auth, OIDCProxy)
+    assert isinstance(probe.auth, RemoteAuthProvider)
     assert any(isinstance(mw, CallerRateLimit) for mw in probe.middleware)
+    with TestClient(probe.http_app(path="/mcp", stateless_http=True)) as client:
+        discovery = client.get("/mcp")
+        metadata = client.get("/.well-known/oauth-protected-resource/mcp")
+
+    assert discovery.status_code == 401
+    assert discovery.headers["www-authenticate"] == (
+        'Bearer scope="control", '
+        'resource_metadata="https://aizk.test/.well-known/oauth-protected-resource/mcp"'
+    )
+    assert metadata.status_code == 200
+    assert metadata.json() == {
+        "resource": "https://aizk.test/mcp",
+        "authorization_servers": ["https://auth.test/oidc"],
+        "scopes_supported": ["control", "offline_access", "openid"],
+        "resource_name": "AIZK",
+        "bearer_methods_supported": ["header"],
+    }
 
 
 @pytest.mark.parametrize("budget", [2000, None], ids=["explicit", "default"])

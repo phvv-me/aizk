@@ -21,6 +21,7 @@ class FactLane(Lane):
 
     kind: Lane.Kind = Lane.Kind.FACTS
     hops: int = 0
+    neighbors: bool = True
 
     def __call__(self, context: QueryContext) -> LaneSelect:
         """The fact candidates: dense seeds, neighbors, and the optional graph walk.
@@ -34,10 +35,9 @@ class FactLane(Lane):
             "Select[tuple[UUID7, float]]",
             select(dense_facts.c.id, dense_facts.c.blended.label("ordering")),
         )
-        parts: list[Select[tuple[UUID7, float]]] = [
-            seed_part,
-            Fact.Live.neighbors(dense_facts, context),
-        ]
+        parts: list[Select[tuple[UUID7, float]]] = [seed_part]
+        if self.neighbors:
+            parts.append(Fact.Live.neighbors(dense_facts, context))
         if self.hops:
             seeds = Entity.seed_mass(dense_facts, context)
             parts.append(Fact.Live.connected(Fact.Live.diffused(seeds, self.hops)))

@@ -1,0 +1,97 @@
+{
+  "date": "2026-08-12",
+  "deployment": "AWS Lambda in ap-southeast-1 with CockroachDB Cloud 26.2.5",
+  "stack": {
+    "name": "AizkCockroachdb",
+    "status": "UPDATE_COMPLETE",
+    "image_digest": "sha256:c9d3a7df72e01ed4df144126149df6cd72aa784b9259bd5543a732ca46b880af",
+    "mcp_memory_mb": 2048,
+    "mcp_timeout_seconds": 60,
+    "mcp_warm_rate_minutes": 5,
+    "worker_recovery_rate_minutes": 15,
+    "null_connection_pool": false,
+    "s3_used": false
+  },
+  "corpus": {
+    "documents": 6,
+    "source_bytes": 11941,
+    "facts": 40,
+    "entities": 19,
+    "communities": 4
+  },
+  "profile": {
+    "access_recording": false,
+    "communities": true,
+    "entity_catalog": true,
+    "graph_expansion": true,
+    "profiles": false,
+    "raptor": false,
+    "reranker": false,
+    "sources_first": true
+  },
+  "ingestion": {
+    "documents": 6,
+    "elapsed_seconds": 47.581,
+    "keep_p50_ms": 2532.178,
+    "keep_p95_ms": 26904.549,
+    "first_cold_keep_ms": 34977.5,
+    "warm_keep_p50_ms": 2493.3,
+    "queue_final": {
+      "pending": 0,
+      "running": 0,
+      "failed": 0
+    }
+  },
+  "recall": {
+    "queries": 8,
+    "samples": 16,
+    "expectations_matched_lexically": 26,
+    "expectations_total": 29,
+    "lexical_expectation_coverage": 0.8966,
+    "expectations_matched_after_manual_semantic_audit": 29,
+    "lambda_find_p50_ms": 2148.748,
+    "lambda_find_p95_ms": 11270.786,
+    "cold_first_find_ms": 32684.516,
+    "warm_lambda_find_p50_ms": 2138.609,
+    "warm_lambda_find_p95_ms": 3162.756,
+    "internal_warm_total_p50_ms": 1972.847,
+    "embedding_warm_p50_ms": 468.883,
+    "database_warm_p50_ms": 1553.596,
+    "database_warm_range_ms": [
+      1460.414,
+      1690.476
+    ]
+  },
+  "connection_reuse_comparison": {
+    "null_pool_warm_find_p50_ms": 2801.196,
+    "one_connection_pool_warm_find_p50_ms": 2138.609,
+    "null_pool_database_p50_ms": 2075.207,
+    "one_connection_pool_database_p50_ms": 1553.596
+  },
+  "database_inventory": {
+    "documents_total": 7,
+    "chunks_total": 8,
+    "facts_total": 40,
+    "entities_total": 19,
+    "communities_total": 4,
+    "scoped_vectors_total": 71,
+    "row_security_forced": true,
+    "app_admin_role_grants": 0,
+    "cspann_execution_ms": 7,
+    "cspann_estimated_ru": 3.499
+  },
+  "lambda_observability": {
+    "mcp_max_memory_used_mb": 500,
+    "worker_max_memory_used_mb": 540,
+    "errors": 0,
+    "throttles": 0,
+    "log_error_matches": 0
+  },
+  "notes": [
+    "The three lexical misses were wording variants whose returned passages still answered the question.",
+    "The cloud query set matched the local 26 of 29 lexical score exactly.",
+    "Warm end-to-end recall is faster than the roughly 3.4 second pgAIZK reference point.",
+    "The 32.68 second post-deployment call includes process initialization that the five-minute warm schedule normally pays before a user request.",
+    "C-SPANN itself took 7 ms, while the composed CockroachDB stage remains the next optimization target."
+  ]
+}

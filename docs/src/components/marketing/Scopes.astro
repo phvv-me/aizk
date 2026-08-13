@@ -26,8 +26,9 @@ const lattice = `                       ┌────────────�
       <p class="text-base-content/70">
         Every row in aizk carries the set of organizations it belongs to. Reading requires
         standing in all of them, so naming two organizations produces a cell that only people
-        in both can reach. Nothing here is an application-level check that a bug could skip.
-        PostgreSQL evaluates the rule itself, on every table, with row level security forced on.
+        in both can reach. Nothing here is only an application-level check that a bug could skip.
+        The selected SQL backend evaluates the rule on every protected table with row level
+        security forced on.
       </p>
       <ul class="text-base-content/70 space-y-2 text-sm">
         <li>

@@ -1,7 +1,10 @@
 import math
 import uuid
 from collections import defaultdict
+from collections.abc import Iterator
 from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock
 
 import dbutil
 import numpy as np
@@ -11,10 +14,12 @@ from hypothesis import given
 from hypothesis import strategies as st
 from id_factory import uuid5s
 from pydantic import UUID5
+from sqlalchemy.sql.elements import TextClause
 
-from aizk.config import settings
+from aizk.config import DatabaseBackend, settings
 from aizk.serving.gate import GateClient
 from aizk.store import Chunk, Document, Entity, Fact
+from aizk.store.engine import Database, Session
 from aizk.store.identity import User
 from eval.scale import (
     CHUNKS_PER_DOC,
@@ -30,6 +35,7 @@ from eval.scale import (
     find_knees,
     index_id,
     run_scale_benchmark,
+    storage_footprint,
     unit_vector,
 )
 
@@ -173,6 +179,39 @@ def test_lane_latency_timed_reads_three_ascending_percentiles() -> None:
 
     assert lane.name == "vector"
     assert 0.0 <= lane.p50_ms <= lane.p95_ms <= lane.p99_ms
+
+
+def test_cockroach_storage_footprint_counts_primary_and_secondary_ranges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RangeRows:
+        def __init__(self, size: int) -> None:
+            self.size = size
+
+        def __iter__(self) -> Iterator[SimpleNamespace]:
+            return iter((SimpleNamespace(range_size=self.size),))
+
+    statements: list[str] = []
+    sizes = iter((100, 40) * 8)
+
+    async def execute(statement: TextClause) -> RangeRows:
+        statements.append(str(statement))
+        return RangeRows(next(sizes))
+
+    owner_session = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+    scope = AsyncMock()
+    scope.__aenter__.return_value = owner_session
+    owner = SimpleNamespace(session=lambda user: scope)
+    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+    monkeypatch.setattr(Database, "owner", classmethod(lambda cls: owner))
+    session = cast("Session", SimpleNamespace(user=User.system()))
+
+    assert dbutil.run(storage_footprint(session)) == (800, 480)
+    assert len(statements) == 16
+    assert statements[-2:] == [
+        'SHOW RANGES FROM TABLE "aizk_private"."scoped_vector" WITH DETAILS',
+        'SHOW RANGES FROM INDEX "aizk_private"."scoped_vector"@"scoped_vector_pkey" WITH DETAILS',
+    ]
 
 
 @st.composite

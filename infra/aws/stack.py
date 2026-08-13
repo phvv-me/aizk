@@ -7,37 +7,29 @@ from aws_cdk import (
     Duration,
     Environment,
     RemovalPolicy,
-    SecretValue,
     Stack,
     Tags,
 )
-from aws_cdk import aws_apigatewayv2 as gateway
 from aws_cdk import aws_budgets as budgets
-from aws_cdk import aws_cloudwatch as cloudwatch
-from aws_cdk import aws_cloudwatch_actions as cloudwatch_actions
 from aws_cdk import aws_ecr as ecr
-from aws_cdk import aws_events as events
-from aws_cdk import aws_events_targets as targets
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
-from aws_cdk import aws_lambda_event_sources as event_sources
 from aws_cdk import aws_logs as logs
-from aws_cdk import aws_sns as sns
-from aws_cdk import aws_sns_subscriptions as subscriptions
-from aws_cdk.aws_apigatewayv2_authorizers import HttpJwtAuthorizer
-from aws_cdk.aws_apigatewayv2_integrations import HttpLambdaIntegration
+from aws_cdk import aws_s3 as s3
+from aws_cdk import aws_scheduler as scheduler
 from constructs import Construct
 
 from .config import DeploymentConfig
 
 
 class AizkAwsStack(Stack):
-    """Deploy the bounded Lambda alpha around an external CockroachDB Basic cluster."""
+    """Deploy one bounded Lambda staging service around CockroachDB Cloud."""
 
     def __init__(self, scope: Construct, construct_id: str, config: DeploymentConfig) -> None:
         super().__init__(scope, construct_id, env=Environment(region=config.region))
         self.config = config
         self.repository = self._repository()
+        self.artifact_bucket = self._artifact_bucket()
         self._outputs()
         if config.deploy_compute:
             self._runtime()
@@ -63,92 +55,115 @@ class AizkAwsStack(Stack):
         )
         return repository
 
+    def _artifact_bucket(self) -> s3.Bucket:
+        bucket = s3.Bucket(
+            self,
+            "ArtifactBucket",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            enforce_ssl=True,
+            object_ownership=s3.ObjectOwnership.BUCKET_OWNER_ENFORCED,
+            lifecycle_rules=[
+                s3.LifecycleRule(
+                    abort_incomplete_multipart_upload_after=Duration.days(1),
+                )
+            ],
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+        return bucket
+
     def _runtime(self) -> None:
         shared = self._shared_environment()
         worker = self._image_function(
             "Worker",
-            command="aizk.commands.aws.worker_handler",
+            command="aizk.commands.aws_worker.worker_handler",
             memory=2048,
             timeout=840,
-            concurrency=1,
             environment=shared
             | {
-                "AIZK_ADMIN_DATABASE_URL": self._secret(self.config.admin_database_url_parameter),
                 "AIZK_QUEUE_BATCH_SIZE": "8",
             },
+            parameters=self._shared_parameters()
+            | {"AIZK_ADMIN_DATABASE_URL": self.config.admin_database_url_parameter},
         )
+        public_environment = shared | {"AIZK_WORKER_FUNCTION_NAME": worker.function_name}
+        if self.config.logto_enabled:
+            public_environment |= self._logto_environment()
         public = self._image_function(
             "Mcp",
-            command="aizk.commands.aws.mcp_handler",
-            memory=1024,
-            timeout=25,
-            concurrency=2,
-            environment=shared
-            | {
-                "AIZK_LOGTO_CLIENT_ID": self.config.logto_client_id,
-                "AIZK_LOGTO_CLIENT_SECRET": self._secret(
-                    self.config.logto_client_secret_parameter
-                ),
-                "AIZK_OAUTH_CLIENT_ID": self.config.oauth_client_id,
-                "AIZK_OAUTH_CLIENT_SECRET": self._secret(
-                    self.config.oauth_client_secret_parameter
-                ),
-                "AIZK_MCP_PUBLIC_URL": self.config.public_url,
-                "AIZK_WORKER_FUNCTION_NAME": worker.function_name,
-            },
+            command="aizk.commands.aws_mcp.mcp_handler",
+            memory=2048,
+            timeout=60,
+            environment=public_environment,
+            parameters=self._shared_parameters()
+            | (self._logto_parameters() if self.config.logto_enabled else {}),
         )
+        self._grant_artifacts(worker)
+        self._grant_artifacts(public)
         worker.grant_invoke(public)
-        setup = self._image_function(
-            "Setup",
-            command="aizk.commands.aws.setup_handler",
-            memory=1024,
-            timeout=300,
-            concurrency=1,
-            environment=shared
-            | {"AIZK_ADMIN_DATABASE_URL": self._secret(self.config.admin_database_url_parameter)},
+        self._schedules(worker, public)
+        self._budget()
+        endpoint = public.add_function_url(
+            auth_type=(
+                lambda_.FunctionUrlAuthType.NONE
+                if self.config.logto_enabled
+                else lambda_.FunctionUrlAuthType.AWS_IAM
+            ),
+            invoke_mode=lambda_.InvokeMode.BUFFERED,
         )
-        events.Rule(
-            self,
-            "WorkerRecovery",
-            schedule=events.Schedule.rate(Duration.minutes(15)),
-            targets=[
-                cast(
-                    "events.IRuleTarget",
-                    targets.LambdaFunction(
-                        cast("lambda_.IFunction", worker),
-                        max_event_age=Duration.minutes(15),
-                        retry_attempts=1,
-                    ),
-                )
-            ],
+        CfnOutput(self, "McpUrl", value=f"{endpoint.url}mcp")
+        CfnOutput(self, "WorkerFunctionName", value=worker.function_name)
+
+    def _grant_artifacts(self, function: lambda_.DockerImageFunction) -> None:
+        function.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["s3:GetBucketLocation", "s3:ListBucket"],
+                resources=[self.artifact_bucket.bucket_arn],
+                conditions={"StringLike": {"s3:prefix": ["objects/*"]}},
+            )
         )
-        api = self._api(public)
-        self._observability(api, public, worker, setup)
-        self._cost_controls(public, worker)
-        CfnOutput(self, "McpUrl", value=f"{api.api_endpoint}/mcp")
-        CfnOutput(self, "SetupFunctionName", value=setup.function_name)
+        function.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "s3:AbortMultipartUpload",
+                    "s3:DeleteObject",
+                    "s3:GetObject",
+                    "s3:ListMultipartUploadParts",
+                    "s3:PutObject",
+                ],
+                resources=[self.artifact_bucket.arn_for_objects("objects/*")],
+            )
+        )
 
     def _shared_environment(self) -> dict[str, str]:
-        provider = '{"provider":{"zdr":true,"data_collection":"deny"}}'
         return {
+            "FASTMCP_HOME": "/tmp/fastmcp",
             "AIZK_DATABASE_BACKEND": "cockroachdb",
-            "AIZK_DATABASE_URL": self._secret(self.config.database_url_parameter),
             "AIZK_AUTO_SETUP": "false",
-            "AIZK_DB_NULL_POOL": "true",
+            "AIZK_DB_NULL_POOL": str(self.config.db_null_pool).lower(),
             "AIZK_DB_POOL_SIZE": "1",
             "AIZK_DB_POOL_MAX_OVERFLOW": "0",
             "AIZK_EMBED_URL": "https://openrouter.ai/api/v1",
-            "AIZK_EMBED_API_KEY": self._secret(self.config.openrouter_key_parameter),
             "AIZK_EMBED_MODEL": "qwen/qwen3-embedding-8b",
             "AIZK_EMBED_DIM": "1024",
-            "AIZK_EMBED_EXTRA_BODY": provider,
+            "AIZK_EMBED_EXTRA_BODY": (
+                '{"provider":{"order":["DeepInfra"],"allow_fallbacks":false}}'
+            ),
             "AIZK_LLM_URL": "https://openrouter.ai/api/v1",
-            "AIZK_LLM_API_KEY": self._secret(self.config.openrouter_key_parameter),
             "AIZK_LLM_MODEL": "deepseek/deepseek-v4-flash-0731",
-            "AIZK_LLM_EXTRA_BODY": provider,
-            "AIZK_LOGTO_URL": self.config.logto_url,
-            "AIZK_REQUIRE_AUTH": "true",
-            "AIZK_ARTIFACT_INGEST_ENABLED": "false",
+            "AIZK_LLM_EXTRA_BODY": (
+                '{"reasoning":{"enabled":false},"session_id":"aizk-extractor"}'
+            ),
+            "AIZK_OBJECT_STORE_BUCKET": self.artifact_bucket.bucket_name,
+            "AIZK_OBJECT_STORE_AWS_NATIVE": "true",
+            "AIZK_OBJECT_STORE_UPLOAD_BYTE_LIMIT": "4194304",
+            "AIZK_OBJECT_STORE_USER_BYTE_LIMIT": "1073741824",
+            "AIZK_ARTIFACT_INGEST_ENABLED": "true",
+            "AIZK_ARTIFACT_MALWARE_SCAN_ENABLED": "false",
+            "AIZK_API_PUBLIC_URL": self.config.public_url or "",
+            "AIZK_SPA_CLIENT_ID": self.config.spa_client_id,
+            "AIZK_STATIC_ROOT": "/var/task/static",
+            "AIZK_CAPTION_ENABLED": "true",
             "AIZK_RERANK_ENABLED": "false",
             "AIZK_EXTRACT_BACKEND": "llm",
             "AIZK_EXTRACTION_GATE_ENABLED": "false",
@@ -158,7 +173,7 @@ class AizkAwsStack(Stack):
             "AIZK_ARTIFACT_DISPATCH_ENABLED": "false",
             "AIZK_ARTIFACT_INTEGRITY_ENABLED": "false",
             "AIZK_CHUNK_RECOVERY_ENABLED": "false",
-            "AIZK_COMMUNITIES_ENABLED": "false",
+            "AIZK_COMMUNITIES_ENABLED": "true",
             "AIZK_DECAY_ENABLED": "false",
             "AIZK_DEDUP_ENABLED": "false",
             "AIZK_INSIGHT_ENABLED": "false",
@@ -167,10 +182,48 @@ class AizkAwsStack(Stack):
             "AIZK_RAPTOR_ENABLED": "false",
             "AIZK_SESSION_PROMOTE_ENABLED": "false",
             "AIZK_LOG_JSON": "true",
+            "AIZK_PROFILING": "true",
+            "AIZK_RECALL_ACCESS_RECORDING_ENABLED": str(
+                self.config.recall_access_recording_enabled
+            ).lower(),
+            "AIZK_RECALL_COMMUNITIES_ENABLED": str(self.config.recall_communities_enabled).lower(),
+            "AIZK_RECALL_ENTITY_CATALOG_ENABLED": str(
+                self.config.recall_entity_catalog_enabled
+            ).lower(),
+            "AIZK_RECALL_GRAPH_EXPANSION_ENABLED": str(
+                self.config.recall_graph_expansion_enabled
+            ).lower(),
+            "AIZK_RECALL_PROFILES_ENABLED": str(self.config.recall_profiles_enabled).lower(),
+            "AIZK_RECALL_RAPTOR_ENABLED": str(self.config.recall_raptor_enabled).lower(),
+            "AIZK_RECALL_SOURCES_FIRST": str(self.config.recall_sources_first).lower(),
             "AIZK_MONTHLY_TOTAL_OPERATION_LIMIT": "10000",
             "AIZK_MONTHLY_USER_OPERATION_LIMIT": "500",
             "AIZK_MONTHLY_TOTAL_REMEMBER_LIMIT": "1000",
             "AIZK_MONTHLY_USER_REMEMBER_LIMIT": "50",
+        }
+
+    def _logto_environment(self) -> dict[str, str]:
+        if self.config.public_url is None or self.config.logto_url is None:
+            raise RuntimeError("validated Logto configuration is incomplete")
+        return {
+            "AIZK_LOGTO_URL": self.config.logto_url,
+            "AIZK_LOGTO_MANAGEMENT_RESOURCE": f"{self.config.logto_url.rstrip('/')}/api",
+            "AIZK_LOGTO_CLIENT_ID": self.config.logto_client_id,
+            "AIZK_MCP_PUBLIC_URL": self.config.public_url,
+            "AIZK_REQUIRE_AUTH": "true",
+        }
+
+    def _shared_parameters(self) -> dict[str, str]:
+        return {
+            "AIZK_DATABASE_URL": self.config.database_url_parameter,
+            "AIZK_CAPTION_API_KEY": self.config.openrouter_key_parameter,
+            "AIZK_EMBED_API_KEY": self.config.openrouter_key_parameter,
+            "AIZK_LLM_API_KEY": self.config.openrouter_key_parameter,
+        }
+
+    def _logto_parameters(self) -> dict[str, str]:
+        return {
+            "AIZK_LOGTO_CLIENT_SECRET": self.config.logto_client_secret_parameter,
         }
 
     def _image_function(
@@ -180,8 +233,8 @@ class AizkAwsStack(Stack):
         command: str,
         memory: int,
         timeout: int,
-        concurrency: int,
         environment: Mapping[str, str],
+        parameters: Mapping[str, str],
     ) -> lambda_.DockerImageFunction:
         name = f"{self.config.name}-{construct_id.lower()}"
         log_group = logs.LogGroup(
@@ -191,7 +244,7 @@ class AizkAwsStack(Stack):
             retention=logs.RetentionDays.ONE_WEEK,
             removal_policy=RemovalPolicy.DESTROY,
         )
-        return lambda_.DockerImageFunction(
+        function = lambda_.DockerImageFunction(
             self,
             construct_id,
             function_name=name,
@@ -203,245 +256,93 @@ class AizkAwsStack(Stack):
             architecture=lambda_.Architecture.X86_64,
             memory_size=memory,
             timeout=Duration.seconds(timeout),
-            reserved_concurrent_executions=concurrency,
-            environment=dict(environment),
+            environment=dict(environment)
+            | {
+                "AIZK_AWS_PARAMETER_ENV": json.dumps(
+                    parameters,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            },
             log_group=log_group,
             logging_format=lambda_.LoggingFormat.JSON,
         )
-
-    def _api(self, public: lambda_.DockerImageFunction) -> gateway.HttpApi:
-        integration = HttpLambdaIntegration("McpIntegration", cast("lambda_.IFunction", public))
-        api = gateway.HttpApi(
-            self,
-            "Api",
-            api_name=self.config.name,
-            default_integration=integration,
-            create_default_stage=True,
-        )
-        authorizer = HttpJwtAuthorizer(
-            "LogtoAuthorizer",
-            f"{self.config.logto_url.rstrip('/')}/oidc",
-            jwt_audience=[f"{self.config.public_url.rstrip('/')}/mcp"],
-        )
-        api.add_routes(
-            path="/mcp",
-            methods=[gateway.HttpMethod.ANY],
-            integration=integration,
-            authorizer=authorizer,
-            authorization_scopes=["control"],
-        )
-        stage = api.default_stage
-        if stage is None:
-            raise RuntimeError("HTTP API did not create its default stage")
-        resource = stage.node.default_child
-        if not isinstance(resource, gateway.CfnStage):
-            raise TypeError("HTTP API default stage has an unexpected resource")
-        resource.default_route_settings = gateway.CfnStage.RouteSettingsProperty(
-            throttling_burst_limit=2,
-            throttling_rate_limit=2,
-        )
-        access_logs = logs.LogGroup(
-            self,
-            "ApiAccessLogs",
-            log_group_name=f"/aws/apigateway/{self.config.name}",
-            retention=logs.RetentionDays.ONE_WEEK,
-            removal_policy=RemovalPolicy.DESTROY,
-        )
-        access_logs.add_to_resource_policy(
-            iam.PolicyStatement(
-                actions=["logs:CreateLogStream", "logs:PutLogEvents"],
-                principals=[
-                    cast(
-                        "iam.IPrincipal",
-                        iam.ServicePrincipal("apigateway.amazonaws.com"),
-                    )
-                ],
-                resources=[f"{access_logs.log_group_arn}:*"],
+        parameter_arns = [
+            self.format_arn(
+                service="ssm",
+                resource="parameter",
+                resource_name=name.removeprefix("/"),
             )
-        )
-        resource.access_log_settings = gateway.CfnStage.AccessLogSettingsProperty(
-            destination_arn=access_logs.log_group_arn,
-            format=json.dumps(
-                {
-                    "requestId": "$context.requestId",
-                    "routeKey": "$context.routeKey",
-                    "status": "$context.status",
-                    "responseLatencyMs": "$context.responseLatency",
-                    "integrationLatencyMs": "$context.integrationLatency",
-                    "integrationError": "$context.integrationErrorMessage",
-                },
-                separators=(",", ":"),
-            ),
-        )
-        return api
-
-    def _observability(
-        self,
-        api: gateway.HttpApi,
-        public: lambda_.DockerImageFunction,
-        worker: lambda_.DockerImageFunction,
-        setup: lambda_.DockerImageFunction,
-    ) -> None:
-        """Alert on failed requests, failed work, and a silent recovery schedule."""
-        topic = sns.Topic(self, "OperationsAlerts", display_name="AIZK operations alerts")
-        if self.config.billing_email:
-            topic.add_subscription(
-                cast(
-                    "sns.ITopicSubscription",
-                    subscriptions.EmailSubscription(self.config.billing_email),
-                )
-            )
-
-        alarms = (
-            cloudwatch.Alarm(
-                self,
-                "McpErrors",
-                alarm_description="The public AIZK Lambda returned an error.",
-                metric=public.metric_errors(period=Duration.minutes(5), statistic="Sum"),
-                threshold=1,
-                evaluation_periods=1,
-                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-            ),
-            cloudwatch.Alarm(
-                self,
-                "WorkerErrors",
-                alarm_description="The durable AIZK queue worker returned an error.",
-                metric=worker.metric_errors(period=Duration.minutes(15), statistic="Sum"),
-                threshold=1,
-                evaluation_periods=1,
-                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-            ),
-            cloudwatch.Alarm(
-                self,
-                "WorkerScheduleSilent",
-                alarm_description="No AIZK worker invocation was observed for thirty minutes.",
-                metric=worker.metric_invocations(
-                    period=Duration.minutes(30),
-                    statistic="Sum",
-                ),
-                threshold=1,
-                evaluation_periods=1,
-                comparison_operator=cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-                treat_missing_data=cloudwatch.TreatMissingData.BREACHING,
-            ),
-            cloudwatch.Alarm(
-                self,
-                "WorkerNearTimeout",
-                alarm_description="An AIZK worker used over thirteen of its fourteen minutes.",
-                metric=worker.metric_duration(
-                    period=Duration.minutes(15),
-                    statistic="Maximum",
-                ),
-                threshold=Duration.minutes(13).to_milliseconds(),
-                evaluation_periods=1,
-                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-            ),
-            cloudwatch.Alarm(
-                self,
-                "SetupErrors",
-                alarm_description="The explicitly invoked AIZK database setup failed.",
-                metric=setup.metric_errors(period=Duration.minutes(5), statistic="Sum"),
-                threshold=1,
-                evaluation_periods=1,
-                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-            ),
-            cloudwatch.Alarm(
-                self,
-                "ApiServerErrors",
-                alarm_description="API Gateway returned a server error before or after Lambda.",
-                metric=cloudwatch.Metric(
-                    namespace="AWS/ApiGateway",
-                    metric_name="5xx",
-                    dimensions_map={"ApiId": api.api_id, "Stage": "$default"},
-                    period=Duration.minutes(5),
-                    statistic="Sum",
-                ),
-                threshold=1,
-                evaluation_periods=1,
-                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
-            ),
-        )
-        for alarm in alarms:
-            alarm.add_alarm_action(
-                cast(
-                    "cloudwatch.IAlarmAction",
-                    cloudwatch_actions.SnsAction(cast("sns.ITopic", topic)),
-                )
-            )
-
-    def _cost_controls(
-        self,
-        public: lambda_.DockerImageFunction,
-        worker: lambda_.DockerImageFunction,
-    ) -> None:
-        topic = sns.Topic(self, "EmergencyCostStop")
-        topic.add_to_resource_policy(
-            iam.PolicyStatement(
-                actions=["sns:Publish"],
-                principals=[cast("iam.IPrincipal", iam.ServicePrincipal("budgets.amazonaws.com"))],
-                resources=[topic.topic_arn],
-            )
-        )
-        breaker_log = logs.LogGroup(
-            self,
-            "CostCircuitBreakerLogs",
-            log_group_name=f"/aws/lambda/{self.config.name}-cost-stop",
-            retention=logs.RetentionDays.ONE_WEEK,
-            removal_policy=RemovalPolicy.DESTROY,
-        )
-        breaker = lambda_.Function(
-            self,
-            "CostCircuitBreaker",
-            runtime=lambda_.Runtime.PYTHON_3_14,
-            handler="index.handler",
-            code=lambda_.Code.from_inline(
-                "import boto3, os\n"
-                "def handler(event, context):\n"
-                "    client = boto3.client('lambda')\n"
-                "    for name in os.environ['FUNCTIONS'].split(','):\n"
-                "        client.put_function_concurrency("
-                "FunctionName=name, ReservedConcurrentExecutions=0)\n"
-                "    return {'stopped': len(os.environ['FUNCTIONS'].split(','))}\n"
-            ),
-            timeout=Duration.seconds(30),
-            memory_size=128,
-            function_name=f"{self.config.name}-cost-stop",
-            environment={"FUNCTIONS": f"{public.function_name},{worker.function_name}"},
-            log_group=breaker_log,
-        )
-        breaker.add_to_role_policy(
-            iam.PolicyStatement(
-                actions=["lambda:PutFunctionConcurrency"],
-                resources=[public.function_arn, worker.function_arn],
-            )
-        )
-        breaker.add_event_source(event_sources.SnsEventSource(cast("sns.ITopic", topic)))
-        subscribers = [
-            budgets.CfnBudget.SubscriberProperty(
-                address=topic.topic_arn,
-                subscription_type="SNS",
-            )
+            for name in sorted(set(parameters.values()))
         ]
-        if self.config.billing_email:
-            subscribers.append(
+        function.add_to_role_policy(
+            iam.PolicyStatement(actions=["ssm:GetParameters"], resources=parameter_arns)
+        )
+        return function
+
+    def _schedules(
+        self,
+        worker: lambda_.DockerImageFunction,
+        public: lambda_.DockerImageFunction,
+    ) -> None:
+        role = iam.Role(
+            self,
+            "WorkerSchedulerRole",
+            assumed_by=cast(
+                iam.IPrincipal,
+                iam.ServicePrincipal("scheduler.amazonaws.com"),
+            ),
+        )
+        worker.grant_invoke(role)
+        public.grant_invoke(role)
+        scheduler.CfnSchedule(
+            self,
+            "WorkerRecovery",
+            flexible_time_window=scheduler.CfnSchedule.FlexibleTimeWindowProperty(mode="OFF"),
+            name=f"{self.config.name}-worker-recovery",
+            schedule_expression="rate(15 minutes)",
+            state="ENABLED",
+            target=scheduler.CfnSchedule.TargetProperty(
+                arn=worker.function_arn,
+                role_arn=role.role_arn,
+                input='{"kind":"worker"}',
+                retry_policy=scheduler.CfnSchedule.RetryPolicyProperty(
+                    maximum_event_age_in_seconds=900,
+                    maximum_retry_attempts=2,
+                ),
+            ),
+        )
+        scheduler.CfnSchedule(
+            self,
+            "McpWarm",
+            flexible_time_window=scheduler.CfnSchedule.FlexibleTimeWindowProperty(mode="OFF"),
+            name=f"{self.config.name}-mcp-warm",
+            schedule_expression="rate(5 minutes)",
+            state="ENABLED",
+            target=scheduler.CfnSchedule.TargetProperty(
+                arn=public.function_arn,
+                role_arn=role.role_arn,
+                input='{"kind":"warm"}',
+                retry_policy=scheduler.CfnSchedule.RetryPolicyProperty(
+                    maximum_event_age_in_seconds=300,
+                    maximum_retry_attempts=0,
+                ),
+            ),
+        )
+
+    def _budget(self) -> None:
+        subscribers = (
+            [
                 budgets.CfnBudget.SubscriberProperty(
                     address=self.config.billing_email,
                     subscription_type="EMAIL",
                 )
-            )
-        budgets.CfnBudget(
-            self,
-            "EmergencyBudget",
-            budget=budgets.CfnBudget.BudgetDataProperty(
-                budget_name=f"{self.config.name}-emergency",
-                budget_type="COST",
-                time_unit="MONTHLY",
-                budget_limit=budgets.CfnBudget.SpendProperty(
-                    amount=self.config.emergency_budget_usd,
-                    unit="USD",
-                ),
-            ),
-            notifications_with_subscribers=[
+            ]
+            if self.config.billing_email
+            else []
+        )
+        notifications = (
+            [
                 budgets.CfnBudget.NotificationWithSubscribersProperty(
                     notification=budgets.CfnBudget.NotificationProperty(
                         comparison_operator="GREATER_THAN",
@@ -449,14 +350,33 @@ class AizkAwsStack(Stack):
                         threshold=threshold,
                         threshold_type="PERCENTAGE",
                     ),
-                    subscribers=subscribers if threshold == 100 else subscribers[-1:],
+                    subscribers=subscribers,
                 )
-                for threshold in ((10, 30, 50, 100) if self.config.billing_email else (100,))
-            ],
+                for threshold in (10, 30, 50, 100)
+            ]
+            if subscribers
+            else None
         )
-
-    def _secret(self, parameter_name: str) -> str:
-        return SecretValue.ssm_secure(parameter_name).unsafe_unwrap()
+        budgets.CfnBudget(
+            self,
+            "MonthlyBudget",
+            budget=budgets.CfnBudget.BudgetDataProperty(
+                budget_name=f"{self.config.name}-monthly",
+                budget_type="COST",
+                time_unit="MONTHLY",
+                budget_limit=budgets.CfnBudget.SpendProperty(
+                    amount=self.config.monthly_budget_usd,
+                    unit="USD",
+                ),
+                cost_types=budgets.CfnBudget.CostTypesProperty(
+                    include_credit=False,
+                    include_refund=False,
+                    use_blended=False,
+                ),
+            ),
+            notifications_with_subscribers=notifications,
+        )
 
     def _outputs(self) -> None:
         CfnOutput(self, "EcrRepositoryUrl", value=self.repository.repository_uri)
+        CfnOutput(self, "ArtifactBucketName", value=self.artifact_bucket.bucket_name)

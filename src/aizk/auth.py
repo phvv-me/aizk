@@ -1,6 +1,5 @@
 from async_lru import alru_cache
-from fastmcp.server.auth import AccessToken, AuthProvider, TokenVerifier
-from fastmcp.server.auth.oidc_proxy import OIDCProxy
+from fastmcp.server.auth import AccessToken, AuthProvider, RemoteAuthProvider, TokenVerifier
 from fastmcp.server.auth.providers.jwt import JWTVerifier
 from fastmcp.server.dependencies import get_access_token
 from loguru import logger
@@ -22,7 +21,7 @@ class Caller(FrozenModel):
 class Auth(TokenVerifier):
     """Bridge Logto OAuth identity into Aizk's PostgreSQL authorization context.
 
-    Public requests use FastMCP's OAuth proxy and a verified Logto resource token.
+    Public requests use Logto directly and present a verified Logto resource token.
     Current organizations, roles, and permissions come from Logto on each short cache window, so
     Aizk never stores a second identity or membership database. The browser API verifies its
     raw bearer tokens through this same verifier and required-scope policy.
@@ -37,26 +36,20 @@ class Auth(TokenVerifier):
         )
 
     def provider(self) -> AuthProvider | None:
-        """Return the Logto-backed OAuth proxy, or no provider in explicit local mode."""
+        """Advertise Logto as the authorization server, or disable auth in local mode."""
         if self.settings.logto_url is None or self.settings.mcp_public_url is None:
             return None
-        resource = self.settings.mcp_resource_id
-        provider = OIDCProxy(
-            config_url=f"{self.client.issuer}/.well-known/openid-configuration",
-            client_id=self.settings.oauth_client_id,
-            client_secret=self.settings.oauth_client_secret.get_secret_value(),
+        return RemoteAuthProvider(
             token_verifier=self,
+            authorization_servers=[self.client.issuer],
             base_url=self.settings.mcp_public_url,
             resource_base_url=self.settings.mcp_public_url,
-            extra_authorize_params={"prompt": "consent"},
-            extra_token_params={"resource": resource},
-            fastmcp_access_token_expiry_seconds=self.settings.oauth_reference_token_seconds,
-            token_expiry_threshold_seconds=60,
+            scopes_supported=sorted(
+                self.settings.oauth_scopes | self.settings.logto_required_scopes
+            ),
+            challenge_scopes=sorted(self.settings.logto_required_scopes),
+            resource_name="AIZK",
         )
-        provider.update_default_scopes(
-            sorted(self.settings.oauth_scopes | self.settings.logto_required_scopes)
-        )
-        return provider
 
     @alru_cache(maxsize=8)
     async def get_verifiers(self) -> tuple[JWTVerifier, ...]:
@@ -74,7 +67,6 @@ class Auth(TokenVerifier):
                 algorithm=algorithm,
                 required_scopes=self.required_scopes,
                 audience=self.settings.mcp_resource_id,
-                http_client=self.client.http,
             )
             for algorithm in discovery.signing_algorithms
         )

@@ -1,11 +1,13 @@
 import asyncio
+from decimal import Decimal
 from time import perf_counter
+from typing import cast as typing_cast
 
 import httpx
 from openai import OpenAIError
 from patos import FrozenOpenModel
 from pydantic import JsonValue, ValidationError
-from sqlalchemy import func, true
+from sqlalchemy import ColumnElement, Numeric, cast, func, true
 from sqlalchemy.exc import DBAPIError
 from sqlmodel import select
 
@@ -57,6 +59,12 @@ _MAIN_TABLES = (
     "session_item",
     "usage_event",
 )
+
+
+def _byte_sum(column: ColumnElement[int]) -> ColumnElement[Decimal]:
+    """Sum byte counts with a numeric zero accepted by PostgreSQL and CockroachDB."""
+    return typing_cast(ColumnElement[Decimal], func.coalesce(func.sum(column), cast(0, Numeric())))
+
 
 _SERVING_ENDPOINTS = (
     ("embed", settings.embed_url, "models", settings.embed_model),
@@ -263,7 +271,7 @@ async def usage_health() -> tuple[
     logical = (
         select(
             Artifact.Content.id.count().label("originals"),
-            Blob.size.sum(default=0).label("logical_bytes"),
+            _byte_sum(Blob.size).label("logical_bytes"),
         )
         .join(Blob, Blob.id == Artifact.Content.blob_id)
         .subquery()
@@ -271,8 +279,8 @@ async def usage_health() -> tuple[
     physical = (
         select(
             Blob.id.count().label("physical_blobs"),
-            Blob.size.sum(default=0).label("original_bytes"),
-            Blob.stored_size.sum(default=0).label("stored_bytes"),
+            _byte_sum(Blob.size).label("original_bytes"),
+            _byte_sum(Blob.stored_size).label("stored_bytes"),
             Blob.id.count().filter(Blob.integrity_checked_at.is_(None)).label("unverified_blobs"),
         )
         .add_columns(
@@ -303,7 +311,7 @@ async def usage_health() -> tuple[
         select(
             Artifact.Content.scopes,
             Artifact.Content.id.count().label("artifact_revisions"),
-            Blob.size.sum(default=0).label("logical_bytes"),
+            _byte_sum(Blob.size).label("logical_bytes"),
         )
         .join(Blob, Blob.id == Artifact.Content.blob_id)
         .group_by(Artifact.Content.scopes)

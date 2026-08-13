@@ -77,12 +77,19 @@ class OriginalArtifact(FrozenModel):
     size: int
     source_uri: str | None
     companion_text: Prose = None
+    markdown: Prose = None
+    conversion_policy: str | None = None
     observed_at: datetime | None = None
     expires_at: datetime | None = None
     storage_key: str
     storage_version: str | None = None
     storage_hash: UUID8
     storage_encoding: Blob.Encoding = Blob.Encoding.identity
+
+    @property
+    def converted(self) -> bool:
+        """Whether this revision already has a production derivative to preserve."""
+        return self.markdown is not None
 
 
 class ConvertedArtifact(FrozenModel):

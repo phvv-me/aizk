@@ -19,6 +19,7 @@ def model_lanes() -> tuple[str, ...]:
     """The vLLM lanes this deployment hosts, which excludes extraction when it is external."""
     return _LOCAL_LANES if settings.llm_is_external else (*_LOCAL_LANES, _EXTRACTION_LANE)
 
+
 # One query per host measurement rather than a combined regex match, so a single field stays
 # readable in the merge below instead of a label match against a second series.
 _HOST_QUERIES = {

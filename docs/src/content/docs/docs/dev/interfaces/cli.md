@@ -14,7 +14,7 @@ code is `src/aizk/cli.py`, `src/aizk/commands/` and `src/aizk/admin.py`.
 ```text
   aizk
    ├── auth login | logout | status     ── talks MCP over the network
-   ├── recall | remember | share | status
+   ├── find | keep | share | status
    │
    └── admin ...                        ── talks to PostgreSQL and Logto directly
         ├── health
@@ -33,7 +33,7 @@ code is `src/aizk/cli.py`, `src/aizk/commands/` and `src/aizk/admin.py`.
 ```
 
 The client half is what a person installs. It holds no database credential and reaches a server
-only through the four MCP tools, so anything it can do, an agent could also do. The admin half is
+only through the five MCP tools, so anything it can do, an agent could also do. The admin half is
 what an operator runs next to the deployment, and it needs credentials the client half never sees.
 
 `main()` catches `FileNotFoundError`, `PermissionError`, `ProtocolError`, `ValidationError`,
@@ -47,7 +47,7 @@ model rather than a rendered summary.
 
 | Command | What it calls |
 |---|---|
-| `aizk auth login [server]` | interactive OAuth, then `status` to prove the session |
+| `aizk auth login [server] --client-id ID` | public-client PKCE login, then `status` to prove the session |
 | `aizk auth logout` | clears this server's OAuth material only |
 | `aizk auth status` | validates stored credentials without opening a browser |
 | `aizk find [query]` | the `find` tool, reading stdin when the argument is absent |
@@ -64,7 +64,7 @@ root. Tokens go to the system keyring through `KeyringStore`, never to that file
 ever touches the upload.
 
 ```text
-  CLI ──▶ MCP server    remember(upload={filename, media_type, size, sha256})
+  CLI ──▶ MCP server    keep(upload={filename, media_type, size, sha256})
   MCP server ──▶ CLI    UploadTicketAccepted{status, upload_url, expires_seconds}
   CLI ──▶ HTTP API      PUT upload_url, raw bytes, no Authorization header
   HTTP API ──▶ CLI      ArtifactReceipt
@@ -73,7 +73,7 @@ ever touches the upload.
 The declaration is made before any bytes move, so an oversized or duplicate file is refused
 cheaply. The ticket is one-time and short-lived, and `MemoryClient.upload` streams the file in one
 megabyte chunks with a plain `httpx` client rather than the authenticated one. Passing several
-paths loops the whole exchange once per file and returns a `RememberBatchResult`.
+paths loops the whole exchange once per file and returns a `KeepBatchResult`.
 
 :::caution[10 MiB is the practical limit]
 Two size limits apply and they are far apart. The application ceiling is

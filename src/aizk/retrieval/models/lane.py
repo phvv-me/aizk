@@ -12,8 +12,9 @@ from sqlalchemy.sql.selectable import Select
 from sqlalchemy.sql.type_api import TypeEngine
 from sqlmodel import select
 
+from ...config import DatabaseBackend, settings
 from ...provenance import Stance
-from ...store.vector import cosine_distance, embedding_vector
+from ...store.vector import cosine_distance, embedding_vector, scoped_vector_candidates
 
 if TYPE_CHECKING:
     from patos.sql import Expr
@@ -196,6 +197,7 @@ class Lane(FrozenModel, abc.ABC):
 
     def by_vector(
         self,
+        projection: str,
         embedding: Expr[list[float] | None],
         line: ColumnElement[str],
         evidence_id: ColumnElement[UUID5 | UUID7],
@@ -207,16 +209,32 @@ class Lane(FrozenModel, abc.ABC):
         floor: ColumnElement[float],
     ) -> LaneSelect:
         """This lane ranked by embedding distance, floored, ordered, and limited."""
-        distance = cosine_distance(embedding, vector)
+        if settings.database_backend is DatabaseBackend.cockroachdb:
+            candidates = scoped_vector_candidates(projection, vector, limit)
+            candidate_distance = candidates.c.distance
+            return (
+                self.row(
+                    evidence_id=evidence_id,
+                    ordering=candidate_distance,
+                    line=line,
+                    scopes=scopes,
+                    created_by=created_by,
+                )
+                .join(candidates, candidates.c.source_id == evidence_id)
+                .where(*guards, candidate_distance < floor)
+                .order_by(candidate_distance)
+                .limit(limit)
+            )
+        vector_distance = cosine_distance(embedding, vector)
         return (
             self.row(
                 evidence_id=evidence_id,
-                ordering=distance,
+                ordering=vector_distance,
                 line=line,
                 scopes=scopes,
                 created_by=created_by,
             )
-            .where(embedding.is_not(None), *guards, distance < floor)
-            .order_by(distance)
+            .where(embedding.is_not(None), *guards, vector_distance < floor)
+            .order_by(vector_distance)
             .limit(limit)
         )

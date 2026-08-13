@@ -1,0 +1,10 @@
+mcp_oauth_credentials_store = "file"
+mcp_oauth_callback_port = 8912
+suppress_unstable_features_warning = true
+
+[features]
+mcp_2026_07_28 = true
+
+[mcp_servers.aizk]
+url = "https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp"
+bearer_token_env_var = "CRAIZK_MCP_TOKEN"

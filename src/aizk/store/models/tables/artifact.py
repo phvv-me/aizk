@@ -3,9 +3,9 @@ from enum import auto
 from typing import TYPE_CHECKING, ClassVar, cast
 
 from patos import sql
-from pydantic import UUID5, UUID7, UUID8
+from pydantic import UUID5, UUID7, UUID8, JsonValue
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint, false, or_
-from sqlmodel import Relationship, select
+from sqlmodel import Field, Relationship, select
 from sqlmodel.sql.expression import Select
 
 from ....exceptions import NotVisibleError
@@ -85,6 +85,15 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
     )
     companion_text = sql.Nullable(str)
     markdown = sql.Nullable(str)
+    caption_metadata: list[dict[str, JsonValue]] = Field(
+        default_factory=list,
+        sa_type=sql.TypedJSONB,
+        sa_column_kwargs={"server_default": "[]"},
+    )
+    conversion_policy = sql.Field(str | None, default=None, index=True)
+    candidate_markdown = sql.Nullable(str)
+    candidate_policy = sql.Field(str | None, default=None, index=True)
+    candidate_error = sql.Nullable(str)
     indexed_at = sql.Nullable(datetime)
     observed_at = sql.Nullable(datetime)
     expires_at = sql.Nullable(datetime)

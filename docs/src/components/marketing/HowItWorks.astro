@@ -7,16 +7,16 @@ const nodes = [
   { id: 'write', label: 'write path', col: 0, row: 1, href: '/docs/dev/write/intake/' },
   { id: 'read', label: 'read path', col: 2, row: 1, href: '/docs/dev/read/overview/' },
   { id: 'graph', label: 'gate → extract → ground', col: 0, row: 2, href: '/docs/dev/write/extraction/' },
-  { id: 'store', label: 'one PostgreSQL', col: 1, row: 3, emphasis: true, href: '/docs/dev/store/data-model/' },
+  { id: 'store', label: 'AIZK memory', col: 1, row: 3, emphasis: true, href: '/docs/user/what-is-aizk/' },
   { id: 'passes', label: 'autonomous passes', col: 0, row: 4, href: '/docs/dev/passes/jobs/' },
   { id: 'evidence', label: 'sourced evidence', col: 2, row: 4, href: '/docs/user/concepts/evidence/' },
 ];
 
 const edges = [
-  { from: 'client', to: 'write', label: 'remember' },
+  { from: 'client', to: 'write', label: 'keep' },
   { from: 'write', to: 'graph' },
   { from: 'graph', to: 'store' },
-  { from: 'client', to: 'read', label: 'recall' },
+  { from: 'client', to: 'read', label: 'find' },
   { from: 'store', to: 'read' },
   { from: 'read', to: 'evidence' },
   { from: 'store', to: 'passes', label: 'project' },
@@ -31,7 +31,7 @@ const edges = [
         How it works
       </h2>
       <p class="text-base-content/70">
-        Writing and reading are two paths across one database. Tap any box to jump to the part of
+        Writing and reading are two paths through the same memory. Tap any box to jump to the part of
         the docs that explains it.
       </p>
     </div>

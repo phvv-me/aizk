@@ -14,11 +14,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from ..background.jobs.projection import enqueue_document
 from ..config import settings
 from ..extract.ingest import TextIngestor, TextSource
-from ..integrations.clamav import ClamAVClient
+from ..integrations.clamav import ContentScanner
+from ..integrations.converter import ArtifactConverter
 from ..integrations.docling import (
     ArtifactBytes,
     ArtifactReader,
-    DoclingClient,
     DoclingConversionError,
     DoclingOutput,
     DoclingUnreadableFormatError,
@@ -38,6 +38,7 @@ from ..store.models.tables import ArtifactContent
 from ..types import ScopeNames, Scopes
 from ..usage import annotate_operation
 from .boilerplate import WebBoilerplateCleaner
+from .description import ArtifactDescriptionEnricher, CaptionError
 from .formats import FormatPolicy
 from .models import (
     ArtifactDocument,
@@ -47,7 +48,8 @@ from .models import (
     OriginalArtifact,
     OriginalDescription,
 )
-from .repository import ArtifactRepository
+from .quality import MarkdownQualityGate
+from .repository import ArtifactRepository, StorageQuotaExceeded
 from .visual import ArtifactVisualEnricher
 
 _INLINE_LINK = re.compile(r"(?P<prefix>!?\[[^\]\n]*\]\()(?P<destination><[^>\n]+>|[^)\s\n]+)")
@@ -89,7 +91,7 @@ class ArtifactIntake:
     def __init__(
         self,
         reader: ArtifactReader,
-        scanner: ClamAVClient,
+        scanner: ContentScanner,
         storage: ByteStore,
         repository: ArtifactRepository,
         enqueuer: ArtifactEnqueuer,
@@ -163,7 +165,7 @@ class ArtifactIntake:
                 ),
                 target,
             )
-        except SQLAlchemyError:
+        except SQLAlchemyError, StorageQuotaExceeded:
             await self.storage.delete(stored.key)
             raise
         await self.enqueuer.enqueue(receipt.content_id, target)
@@ -199,21 +201,33 @@ class ArtifactProcessor:
 
     def __init__(
         self,
-        converter: DoclingClient,
+        converter: ArtifactConverter,
         storage: ByteStore,
         repository: ArtifactRepository,
         visual: ArtifactVisualEnricher | None = None,
         cleaner: WebBoilerplateCleaner | None = None,
+        description: ArtifactDescriptionEnricher | None = None,
+        quality: MarkdownQualityGate | None = None,
     ) -> None:
         self.converter = converter
         self.storage = storage
         self.repository = repository
         self.visual = visual
+        self.description = description
         self.cleaner = cleaner
+        self.quality = quality or MarkdownQualityGate()
 
-    async def process(self, content_id: UUID7, scopes: Scopes) -> None:
+    async def process(
+        self,
+        content_id: UUID7,
+        scopes: Scopes,
+        policy: str = "converter-v2",
+    ) -> None:
         """Convert one original and make its text recallable before marking it ready."""
         user = User.system(scopes)
+        original: OriginalArtifact | None = None
+        content: bytes | None = None
+        candidate_attempted = False
         await self.repository.set_state(
             user,
             content_id,
@@ -247,6 +261,7 @@ class ArtifactProcessor:
                     content,
                     Artifact.Content.State.unreadable,
                     error,
+                    policy,
                 )
                 return
             except DoclingConversionError as error:
@@ -258,16 +273,46 @@ class ArtifactProcessor:
                     content,
                     Artifact.Content.State.failed,
                     error,
+                    policy,
                 )
                 return
             markdown = self.declutter(output.markdown, original)
-            await self.repository.store_conversion(user, original, markdown, datetime.now(UTC))
+            caption_metadata = []
+            if self.description is not None:
+                described = await self.description.enrich(original, content, markdown)
+                markdown = described.markdown
+                caption_metadata = described.metadata()
+            assessment = self.quality.assess(original.markdown, markdown)
+            await self.repository.record_candidate(
+                user,
+                original,
+                markdown,
+                policy,
+                assessment.reason,
+            )
+            if not assessment.accepted:
+                await self.repository.set_state(
+                    user,
+                    content_id,
+                    scopes,
+                    Artifact.Content.State.ready,
+                )
+                return
+
+            candidate_attempted = True
             await self.index(
                 user,
                 original,
                 Artifact.Content.State.ready,
                 content,
                 markdown,
+            )
+            await self.repository.promote_candidate(
+                user,
+                original,
+                policy,
+                datetime.now(UTC),
+                caption_metadata,
             )
             await self.repository.set_state(
                 user,
@@ -277,19 +322,42 @@ class ArtifactProcessor:
             )
         except (
             ByteLimitExceeded,
+            CaptionError,
             DoclingConversionError,
             IntegrityMismatch,
             SQLAlchemyError,
             ValueError,
             httpx.HTTPStatusError,
         ) as error:
-            await self.repository.set_state(
-                user,
-                content_id,
-                scopes,
-                Artifact.Content.State.failed,
-                str(error)[:1024],
-            )
+            if original is not None and original.converted:
+                if candidate_attempted and content is not None:
+                    await self.index(
+                        user,
+                        original,
+                        Artifact.Content.State.ready,
+                        content,
+                        original.markdown,
+                    )
+                await self.repository.record_candidate_error(
+                    user,
+                    original,
+                    policy,
+                    str(error),
+                )
+                await self.repository.set_state(
+                    user,
+                    content_id,
+                    scopes,
+                    Artifact.Content.State.ready,
+                )
+            else:
+                await self.repository.set_state(
+                    user,
+                    content_id,
+                    scopes,
+                    Artifact.Content.State.failed,
+                    str(error)[:1024],
+                )
             raise
 
     async def reject(
@@ -301,6 +369,7 @@ class ArtifactProcessor:
         content: bytes,
         state: ArtifactContent.State,
         error: DoclingConversionError,
+        policy: str,
     ) -> None:
         """Keep one metadata-only document recallable and stamp Docling's final verdict.
 
@@ -308,6 +377,20 @@ class ArtifactProcessor:
         leaves it for good (`unreadable`), and the stored `error` keeps Docling's own reason
         visible either way.
         """
+        if original.converted:
+            await self.repository.record_candidate_error(
+                user,
+                original,
+                policy,
+                str(error),
+            )
+            await self.repository.set_state(
+                user,
+                content_id,
+                scopes,
+                Artifact.Content.State.ready,
+            )
+            return
         await self.index(user, original, state, content)
         await self.repository.set_state(user, content_id, scopes, state, str(error))
 

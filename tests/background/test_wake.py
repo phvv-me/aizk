@@ -24,7 +24,7 @@ def test_lambda_worker_wake_invokes_asynchronously() -> None:
     client.invoke.assert_called_once_with(
         FunctionName="aizk-worker",
         InvocationType="Event",
-        Payload=b"{}",
+        Payload=b'{"kind":"worker"}',
     )
 
 

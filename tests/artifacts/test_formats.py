@@ -15,7 +15,6 @@ READABLE = (
     ("image/tiff", b"MM\x00*\x00\x00\x00\x08"),
     ("image/bmp", b"BM\x36\x00\x00\x00"),
     ("image/webp", b"RIFF\x24\x00\x00\x00WEBPVP8 "),
-    ("audio/wav", b"RIFF\x24\x00\x00\x00WAVEfmt "),
     ("application/epub+zip", b"PK\x03\x04\x14\x00"),
     (
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -110,6 +109,5 @@ def test_any_authored_text_is_storable_as_a_note(text: str) -> None:
 
 def test_the_supported_set_is_exactly_what_the_deployment_can_open() -> None:
     assert "application/pdf" in policy.supported
-    assert "audio/wav" in policy.supported
     # aizk has no video reader today, so video is refused rather than stored blind.
     assert not any(media.startswith("video/") for media in policy.supported)
