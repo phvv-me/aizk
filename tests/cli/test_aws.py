@@ -320,6 +320,7 @@ def test_lambda_observability_is_installed_only_once(
 
 def test_lambda_mcp_accepts_only_the_modern_protocol(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     complete = replace(fake_runtime(), auth=Auth())
     runtime = McpRuntime(
@@ -384,6 +385,7 @@ def test_lambda_mcp_accepts_only_the_modern_protocol(
         "assemble",
         classmethod(lambda cls, config: runtime),
     )
+    monkeypatch.setattr(mcp_mod.settings, "static_root", tmp_path)
     monkeypatch.setattr(mcp_mod.Database, "app", lambda: complete.database)
     monkeypatch.setattr(mcp_mod, "instrument", lambda database: None)
     mcp_mod.mcp_application.cache_clear()
