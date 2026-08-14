@@ -33,7 +33,6 @@ chonkie = "<2,>=1.7"
 identify = "<3,>=2.6.19"
 python-slugify = "<9,>=8.0.4"
 inflection = "<0.6,>=0.5.1"
-rlsalchemy = "==0.5.1"
 mainboard = "==0.0.9"
 pgqueuer = "<2,>=1.1.1"
 croniter = "<7,>=6.2.4"
@@ -67,6 +66,10 @@ extras = ["openai"]
 version = "==0.0.12"
 extras = ["sql"]
 
+[pypi-dependencies.rlsalchemy]
+path = "../../rls"
+editable = true
+
 [pypi-dependencies.aizk]
 path = "../."
 editable = true
@@ -74,8 +77,8 @@ editable = true
 [pypi-options]
 prerelease-mode = "allow"
 
-[pypi-options.dependency-overrides]
-sqlalchemy = ">=2.1.0b3,<3"
+[pypi-options.dependency-overrides.sqlalchemy]
+path = "../../sqlalchemy"
 
 [feature.dev.pypi-dependencies]
 fire = "<0.8,>=0.7.1"

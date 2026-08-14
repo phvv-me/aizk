@@ -45,7 +45,7 @@ dependencies = [
     "python-slugify>=8.0.4,<9",
     "inflection>=0.5.1,<0.6",
     "patos[sql]==0.0.12",
-    "rlsalchemy==0.5.1",
+    "rlsalchemy>=0.6.0,<0.7",
     "mainboard==0.0.9",
     "pgqueuer>=1.1.1,<2",
     "croniter>=6.2.4,<7",
@@ -325,13 +325,12 @@ aws-cdk = ">=2.200, <3"
 prerelease-mode = "allow"
 
 [tool.chefe.python.dependency-overrides]
-sqlalchemy = ">=2.1.0b3,<3"
+sqlalchemy = { path = "../sqlalchemy" }
 
-# No `[tool.chefe.sources]`. The three house packages used to resolve from git main here while
-# the built image installed the working tree over the top, so the environment the gates ran and
-# the environment production ran were never the same artifact and nothing said so. They now come
-# from PyPI at the exact versions pinned above, like every other dependency, which is the only
-# arrangement where a green suite is evidence about the code that ships.
+[tool.chefe.sources]
+# Temporary source validation keeps published dependency metadata versioned while the development
+# environment exercises the exact local RLSAlchemy implementation.
+rlsalchemy = { provider = "path", path = "../rls", editable = true }
 
 [tool.chefe.tasks]
 lint = { run = "ruff check . && ruff format --check ." }

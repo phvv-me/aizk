@@ -1,10 +1,14 @@
 import dbutil
 import pytest
-import rls
 from rls.alembic import AlterRLSOp
 from rls.alembic.autogen import compare_rls
-from rls.ddl import RLSAction, RLSStatement
 from sqlalchemy import MetaData
+from sqlalchemy.dialects.postgresql import (
+    CreatePolicy,
+    DisableRowLevelSecurity,
+    DropPolicy,
+    Policy,
+)
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.schema import ExecutableDDLElement
@@ -55,15 +59,14 @@ def test_comparator_replaces_drift_as_one_complete_transition() -> None:
     operations = dbutil.run(
         compare_under_mutation(
             (
-                RLSStatement(Document.__table__, RLSAction.drop, name="scope_read"),
-                RLSStatement(
-                    Document.__table__,
-                    RLSAction.create,
-                    policy=rls.CompiledPolicy(
-                        name="extra_undeclared",
-                        command=rls.Command.select,
+                DropPolicy(Policy("rls_select", Document.__table__), if_exists=True),
+                CreatePolicy(
+                    Policy(
+                        "extra_undeclared",
+                        Document.__table__,
+                        command="SELECT",
                         using="true",
-                    ),
+                    )
                 ),
             )
         )
@@ -73,20 +76,18 @@ def test_comparator_replaces_drift_as_one_complete_transition() -> None:
     assert document.after is not None
     assert {policy.name for policy in document.before.policies} == {
         "extra_undeclared",
-        "scope_insert",
-        "scope_update",
+        "rls_insert",
+        "rls_update",
     }
     assert {policy.name for policy in document.after.policies} == {
-        "scope_read",
-        "scope_insert",
-        "scope_update",
+        "rls_select",
+        "rls_insert",
+        "rls_update",
     }
 
 
 def test_comparator_bootstraps_a_table_that_lost_row_security() -> None:
-    operations = dbutil.run(
-        compare_under_mutation((RLSStatement(Document.__table__, RLSAction.disable),))
-    )
+    operations = dbutil.run(compare_under_mutation((DisableRowLevelSecurity(Document.__table__),)))
     document = next(operation for operation in operations if operation.table_name == "document")
     assert document.after is not None
 

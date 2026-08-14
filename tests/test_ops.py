@@ -28,6 +28,7 @@ from aizk.ops import EndpointHealth
 from aizk.retrieval import Candidate, Lane
 from aizk.status import UsageSummary
 from aizk.store import Artifact, Blob, Chunk, OperatorReading, OperatorSnapshot, Usage
+from aizk.store.backend import DatabaseRole
 from aizk.store.engine import Session
 from aizk.store.identity import User
 from aizk.usage import UsageAccountingJob, UsageCapture
@@ -235,8 +236,8 @@ class FakeDatabaseAdapter:
     def __init__(self, engine: FakeEngine) -> None:
         self.fake_engine = engine
 
-    def engine(self, url: str | URL, app_role: bool) -> FakeEngine:
-        del url, app_role
+    def engine(self, url: str | URL, role: DatabaseRole) -> FakeEngine:
+        del url, role
         return self.fake_engine
 
 
@@ -258,7 +259,7 @@ def test_alembic_config_and_head_read_the_packaged_migrations() -> None:
     script = output.getvalue()
     assert "CREATE TABLE document" in script
     assert "FORCE ROW LEVEL SECURITY" in script
-    assert "CREATE POLICY scope_read" in script
+    assert "CREATE POLICY rls_select" in script
 
 
 def test_alembic_config_preserves_percent_encoded_cloud_urls(
@@ -480,7 +481,7 @@ def test_setup_is_idempotent_on_a_ready_database(
 
     async def body() -> ops.SetupReport:
         report = await ops.setup()
-        assert await ops.queue_schema_present() is True
+        assert await ops.has_queue_schema() is True
         return report
 
     report = dbutil.run(body())
@@ -490,11 +491,21 @@ def test_setup_is_idempotent_on_a_ready_database(
     assert tokenizer_checks == 1
 
 
+@pytest.mark.parametrize(
+    "violations",
+    [[], ["artifact policy drifted"]],
+    ids=["valid", "drifted"],
+)
 def test_cockroach_setup_uses_its_migrations_and_skips_postgres_services(
     migrated_db: None,
     monkeypatch: pytest.MonkeyPatch,
+    violations: list[str],
 ) -> None:
     monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
+    assert (
+        ops.provision._database_provisioning().drop_database('"aizk"')
+        == 'DROP DATABASE IF EXISTS "aizk" CASCADE'
+    )
     calls: list[str] = []
 
     async def current() -> str:
@@ -513,6 +524,10 @@ def test_cockroach_setup_uses_its_migrations_and_skips_postgres_services(
     async def install_queue() -> None:
         calls.append("queue")
 
+    async def verify_row_security() -> list[str]:
+        calls.append("verify")
+        return violations
+
     async def grant() -> None:
         calls.append("grant")
 
@@ -524,14 +539,21 @@ def test_cockroach_setup_uses_its_migrations_and_skips_postgres_services(
         raise AssertionError("PostgreSQL-only setup ran for CockroachDB")
 
     monkeypatch.setattr(ops.provision, "alembic_current", current)
-    monkeypatch.setattr(ops.provision, "queue_schema_present", queue_present)
+    monkeypatch.setattr(ops.provision, "has_queue_schema", queue_present)
     monkeypatch.setattr(ops.provision, "run_alembic", migrate)
+    monkeypatch.setattr(ops.provision, "row_security_violations", verify_row_security)
     monkeypatch.setattr(ops.provision, "install_queue_schema", install_queue)
     monkeypatch.setattr(ops.provision, "grant_app_role_privileges", grant)
     monkeypatch.setattr(ops.provision, "alembic_head", lambda config: "0001")
     monkeypatch.setattr(ops.provision.Ontology, "refresh", classmethod(refresh))
     monkeypatch.setattr(ops.provision, "ensure_bm25_tokenizer", postgres_only)
     monkeypatch.setattr(ops.provision, "enable_query_stats", postgres_only)
+
+    if violations:
+        with pytest.raises(RuntimeError, match="artifact policy drifted"):
+            dbutil.run(ops.setup())
+        assert calls == ["migrate", "verify"]
+        return
 
     report = dbutil.run(ops.setup())
 
@@ -540,7 +562,7 @@ def test_cockroach_setup_uses_its_migrations_and_skips_postgres_services(
         migrated_to="0001",
         queue_installed=True,
     )
-    assert calls == ["migrate", "queue", "grant", "ontology"]
+    assert calls == ["migrate", "verify", "queue", "grant", "ontology"]
 
 
 def test_reset_recreates_only_the_configured_database_then_runs_setup(
@@ -608,9 +630,9 @@ def test_setup_installs_the_queue_on_a_fresh_database(migrated_db: None) -> None
         )
         await dbutil.admin_exec("DROP TYPE IF EXISTS pgqueuer_status CASCADE")
         await dbutil.admin_exec("DROP FUNCTION IF EXISTS fn_pgqueuer_changed CASCADE")
-        assert await ops.queue_schema_present() is False
+        assert await ops.has_queue_schema() is False
         report = await ops.setup()
-        assert await ops.queue_schema_present() is True
+        assert await ops.has_queue_schema() is True
         return report
 
     report = dbutil.run(body())

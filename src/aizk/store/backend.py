@@ -1,43 +1,42 @@
 import abc
 import ssl
+from enum import StrEnum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import UUID5
-from sqlalchemy import NullPool, bindparam, func
-from sqlalchemy.engine import URL, Connection, make_url
+from sqlalchemy import NullPool
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.orm import Session as OrmSession
-from sqlalchemy.orm import SessionTransaction
-from sqlmodel import select
 
 from ..config import DatabaseBackend, settings
 
 if TYPE_CHECKING:
     from .identity import User
 
-_AUTHORITY_INFO = "aizk.cockroach_authority"
-
 type ConnectArgs = dict[str, ssl.SSLContext | bool | str | dict[str, str]]
+
+
+class DatabaseRole(StrEnum):
+    """Choose tenant-isolated application access or schema-owner maintenance."""
+
+    app = auto()
+    owner = auto()
 
 
 class DatabaseAdapter(abc.ABC):
     """Own the database-specific engine and transaction context behavior."""
 
-    @abc.abstractmethod
-    def engine(self, url: str | URL, app_role: bool) -> AsyncEngine:
-        """Build one role-specific asynchronous engine."""
-
-    @abc.abstractmethod
-    def configure_session(self, session: OrmSession, user: User) -> None:
-        """Attach caller authority for every transaction opened by `session`."""
-
     @staticmethod
-    def pooled_engine(url: str | URL, app_role: bool, connect_args: ConnectArgs) -> AsyncEngine:
+    def pooled_engine(
+        url: str | URL,
+        role: DatabaseRole,
+        connect_args: ConnectArgs,
+    ) -> AsyncEngine:
         """Build the shared pool shape around one backend's own connection arguments."""
         if settings.db_null_pool:
             return create_async_engine(url, connect_args=connect_args, poolclass=NullPool)
-        if not app_role:
+        if role is DatabaseRole.owner:
             return create_async_engine(url, connect_args=connect_args)
         return create_async_engine(
             url,
@@ -47,13 +46,17 @@ class DatabaseAdapter(abc.ABC):
             pool_pre_ping=False,
         )
 
+    def configure_session(self, session: OrmSession, user: User) -> None:
+        """Attach caller authority for every transaction opened by `session`."""
+        session.info.update(user.info())
+
+    @abc.abstractmethod
+    def engine(self, url: str | URL, role: DatabaseRole) -> AsyncEngine:
+        """Build one role-specific asynchronous engine."""
+
 
 class PostgreSQLAdapter(DatabaseAdapter):
     """Preserve VectorChord and custom-setting behavior for PostgreSQL."""
-
-    def engine(self, url: str | URL, app_role: bool) -> AsyncEngine:
-        pinned: ConnectArgs = {"server_settings": self.server_settings()} if app_role else {}
-        return self.pooled_engine(url, app_role, pinned)
 
     @staticmethod
     def server_settings() -> dict[str, str]:
@@ -69,17 +72,15 @@ class PostgreSQLAdapter(DatabaseAdapter):
             "bm25_catalog.bm25_limit": str(settings.bm25_limit),
         }
 
-    def configure_session(self, session: OrmSession, user: User) -> None:
-        session.info.update(user.info())
+    def engine(self, url: str | URL, role: DatabaseRole) -> AsyncEngine:
+        pinned: ConnectArgs = (
+            {"server_settings": self.server_settings()} if role is DatabaseRole.app else {}
+        )
+        return self.pooled_engine(url, role, pinned)
 
 
 class CockroachDBAdapter(DatabaseAdapter):
-    """Carry RLS authority through CockroachDB's supported `application_name` setting."""
-
-    def engine(self, url: str | URL, app_role: bool) -> AsyncEngine:
-        normalized, ssl_config = self.cloud_connection(url)
-        connect_args: ConnectArgs = {} if ssl_config is None else {"ssl": ssl_config}
-        return self.pooled_engine(normalized, app_role, connect_args)
+    """Build CockroachDB engines while sharing RLSAlchemy's context transport."""
 
     @staticmethod
     def cloud_connection(
@@ -110,19 +111,10 @@ class CockroachDBAdapter(DatabaseAdapter):
         context.check_hostname = mode == "verify-full"
         return normalized, context
 
-    def configure_session(self, session: OrmSession, user: User) -> None:
-        def array(permission: frozenset[UUID5]) -> str:
-            return "{" + ",".join(str(scope) for scope in sorted(permission)) + "}"
-
-        session.info[_AUTHORITY_INFO] = "|".join(
-            (
-                "aizk",
-                array(user.scopes.read),
-                array(user.scopes.write),
-                array(user.scopes.public),
-                str(user.operator).lower(),
-            )
-        )
+    def engine(self, url: str | URL, role: DatabaseRole) -> AsyncEngine:
+        normalized, ssl_config = self.cloud_connection(url)
+        connect_args: ConnectArgs = {} if ssl_config is None else {"ssl": ssl_config}
+        return self.pooled_engine(normalized, role, connect_args)
 
 
 def database_adapter() -> DatabaseAdapter:
@@ -134,25 +126,3 @@ def database_adapter() -> DatabaseAdapter:
             return CockroachDBAdapter()
         case _:
             raise ValueError(f"unsupported database backend {settings.database_backend}")
-
-
-def bind_cockroach_authority(
-    session: OrmSession,
-    transaction: SessionTransaction,
-    connection: Connection,
-) -> None:
-    """Bind one transaction-local CockroachDB RLS authority document."""
-    del transaction
-    authority = session.info.get(_AUTHORITY_INFO)
-    if not isinstance(authority, str):
-        return
-    connection.execute(
-        select(
-            func.set_config(
-                "application_name",
-                bindparam("aizk_cockroach_authority"),
-                True,
-            )
-        ),
-        {"aizk_cockroach_authority": authority},
-    )

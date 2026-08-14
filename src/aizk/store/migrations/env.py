@@ -11,7 +11,7 @@ from aizk.config import DatabaseBackend, settings
 
 # Importing the store maps models and attaches their RLS declarations.
 from aizk.store import TableBase
-from aizk.store.backend import database_adapter
+from aizk.store.backend import DatabaseRole, database_adapter
 from alembic import context
 from alembic.runtime.environment import IncludeNameFn, IncludeObjectFn
 
@@ -107,7 +107,7 @@ async def run_migrations_online() -> None:
     url = config.get_main_option("sqlalchemy.url")
     if url is None:
         raise RuntimeError("Alembic requires sqlalchemy.url")
-    connectable = database_adapter().engine(url, False)
+    connectable = database_adapter().engine(url, DatabaseRole.owner)
     async with connectable.begin() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()

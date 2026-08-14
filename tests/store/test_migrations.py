@@ -130,9 +130,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                                     ]
                                 },
                             )
-                        )
-                        .tuples()
-                        .all()
+                        ).all()
                     )
                     chunk_check = (
                         await connection.execute(
@@ -140,7 +138,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                                 "SELECT pg_get_expr(polwithcheck, polrelid) "
                                 "FROM pg_policy "
                                 "WHERE polrelid = 'chunk'::regclass "
-                                "AND polname = 'scope_insert'"
+                                "AND polname = 'rls_insert'"
                             )
                         )
                     ).scalar_one()

@@ -4,8 +4,8 @@
 # attachment guard, and the least-authority upload ticket. The purge migrations 0005 and 0006
 # only deleted rows from an already-empty table, so they leave no schema trace here.
 #
-# Fresh installs and CI build the whole schema from this file. The crimson production database
-# is already migrated to the old 0006 head with an identical schema, so it is reconciled not by
+# Fresh installs and CI build the whole schema from this file. Existing production databases
+# are already migrated to the old 0006 head with an identical schema, so they are reconciled not by
 # re-running anything but by restamping it onto this revision:
 #     alembic stamp 0001_init   (equivalently: UPDATE alembic_version SET version_num='0001_init')
 # Revision ID 0001_init
@@ -262,16 +262,6 @@ _SCOPED_TABLES = {
 _CONTENT_TABLES = ("entity_content", "fact_content")
 
 
-def _scope_authority(standing: sa.ColumnElement, permission: str) -> sa.ColumnElement:
-    """Turn one JSON scope permission into a native PostgreSQL UUID array."""
-    values = (
-        sa.func.jsonb_array_elements_text(standing.op("->")(permission))
-        .table_valued("value")
-        .render_derived()
-    )
-    return sa.func.array(select(sa.cast(values.c.value, sa.Uuid())).scalar_subquery())
-
-
 def scoped_rls(
     table_name: str,
     mutable: bool,
@@ -285,8 +275,7 @@ def scoped_rls(
         *(sa.column(f"{read_through}_id", sa.Uuid()),) if read_through else (),
     )
     scopes = table.c.scopes
-    standing = rls.current_setting("scopes", JSONB(), prefix="app")
-    writable = _scope_authority(standing, "write")
+    writable = rls.current_setting("scopes.write", ARRAY(sa.Uuid()), prefix="app")
     nonempty = sa.func.cardinality(scopes) > 0
     if read_through:
         parent = sa.table(
@@ -298,8 +287,8 @@ def scoped_rls(
         read = parent_id.in_(select(parent.c.id))
         parent_scope = sa.tuple_(parent_id, scopes).in_(select(parent.c.id, parent.c.scopes))
     else:
-        readable = _scope_authority(standing, "read")
-        public = _scope_authority(standing, "public")
+        readable = rls.current_setting("scopes.read", ARRAY(sa.Uuid()), prefix="app")
+        public = rls.current_setting("scopes.public", ARRAY(sa.Uuid()), prefix="app")
         read = sa.and_(
             nonempty,
             sa.or_(
@@ -313,13 +302,20 @@ def scoped_rls(
         parent_scope = sa.true()
     write = sa.and_(nonempty, scopes.op("<@")(writable), parent_scope)
     policies = [
-        rls.Policy.select("scope_read", read, roles=(APP_ROLE,)),
-        rls.Policy.insert("scope_insert", write, roles=(APP_ROLE,)),
+        rls.Policy.select(read, name="scope_read", roles=(APP_ROLE,)),
+        rls.Policy.insert(write, name="scope_insert", roles=(APP_ROLE,)),
     ]
     if mutable:
-        policies.append(rls.Policy.update("scope_update", write, write, roles=(APP_ROLE,)))
+        policies.append(
+            rls.Policy.update(
+                write,
+                check=write,
+                name="scope_update",
+                roles=(APP_ROLE,),
+            )
+        )
     if deletable:
-        policies.append(rls.Policy.delete("scope_delete", write, roles=(APP_ROLE,)))
+        policies.append(rls.Policy.delete(write, name="scope_delete", roles=(APP_ROLE,)))
     return rls.RLSState.declared(tuple(policies))
 
 
@@ -331,11 +327,11 @@ def content_rls(table_name: str) -> rls.RLSState:
     return rls.RLSState.declared(
         (
             rls.Policy.select(
-                "content_read",
                 content.c.id.in_(select(claim.c.content_id)),
+                name="content_read",
                 roles=(APP_ROLE,),
             ),
-            rls.Policy.insert("content_insert", sa.true(), roles=(APP_ROLE,)),
+            rls.Policy.insert(sa.true(), name="content_insert", roles=(APP_ROLE,)),
         )
     )
 
@@ -347,11 +343,11 @@ def blob_rls() -> rls.RLSState:
     return rls.RLSState.declared(
         (
             rls.Policy.select(
-                "blob_read",
                 blob.c.id.in_(select(content.c.blob_id)),
+                name="blob_read",
                 roles=(APP_ROLE,),
             ),
-            rls.Policy.insert("blob_insert", sa.true(), roles=(APP_ROLE,)),
+            rls.Policy.insert(sa.true(), name="blob_insert", roles=(APP_ROLE,)),
         )
     )
 
@@ -360,10 +356,9 @@ def upload_capability_rls() -> rls.RLSState:
     """Compile the scope lattice for the single-use capability store: read, insert, delete."""
     table = sa.table("upload_capability", sa.column("scopes", ARRAY(sa.Uuid())))
     scopes = table.c.scopes
-    standing = rls.current_setting("scopes", JSONB(), prefix="app")
-    readable = _scope_authority(standing, "read")
-    writable = _scope_authority(standing, "write")
-    public = _scope_authority(standing, "public")
+    readable = rls.current_setting("scopes.read", ARRAY(sa.Uuid()), prefix="app")
+    writable = rls.current_setting("scopes.write", ARRAY(sa.Uuid()), prefix="app")
+    public = rls.current_setting("scopes.public", ARRAY(sa.Uuid()), prefix="app")
     nonempty = sa.func.cardinality(scopes) > 0
     read = sa.and_(
         nonempty,
@@ -375,9 +370,9 @@ def upload_capability_rls() -> rls.RLSState:
     write = sa.and_(nonempty, scopes.op("<@")(writable), sa.true())
     return rls.RLSState.declared(
         (
-            rls.Policy.select("scope_read", read, roles=(APP_ROLE,)),
-            rls.Policy.insert("scope_insert", write, roles=(APP_ROLE,)),
-            rls.Policy.delete("scope_delete", write, roles=(APP_ROLE,)),
+            rls.Policy.select(read, name="scope_read", roles=(APP_ROLE,)),
+            rls.Policy.insert(write, name="scope_insert", roles=(APP_ROLE,)),
+            rls.Policy.delete(write, name="scope_delete", roles=(APP_ROLE,)),
         )
     )
 
@@ -459,13 +454,12 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  standing jsonb := coalesce(nullif(current_setting('app.scopes', true), ''), '{}')::jsonb;
-  readable uuid[] := ARRAY(
-    SELECT value::uuid FROM jsonb_array_elements_text(standing -> 'read')
-  );
-  shareable uuid[] := ARRAY(
-    SELECT value::uuid FROM jsonb_array_elements_text(standing -> 'public')
-  );
+  readable uuid[] := coalesce(
+    nullif(current_setting('app.scopes.read', true), ''), '{}'
+  )::uuid[];
+  shareable uuid[] := coalesce(
+    nullif(current_setting('app.scopes.public', true), ''), '{}'
+  )::uuid[];
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM artifact_content WHERE blob_id = target_blob) THEN
     RETURN true;

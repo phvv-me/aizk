@@ -57,9 +57,8 @@ class ClaimedContent(sql.Model):
         )
         return (
             rls.Policy.select(
-                "content_read",
                 readable,
                 roles=(settings.app_role,),
             ),
-            rls.Policy.insert("content_insert", sa.true(), roles=(settings.app_role,)),
+            rls.Policy.insert(sa.true(), roles=(settings.app_role,)),
         )

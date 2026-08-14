@@ -1,23 +1,21 @@
 from contextlib import AsyncExitStack
-from enum import StrEnum, auto
 from functools import cache
 from types import TracebackType
-from typing import Self
+from typing import TYPE_CHECKING, Self, cast
 
-from sqlalchemy import event
+import rls
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
 )
-from sqlalchemy.orm import Session as OrmSession
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from ..config import settings
 from ..exceptions import NoTenantContext
-from .backend import bind_cockroach_authority, database_adapter
-from .identity import User
+from .backend import DatabaseRole, database_adapter
 
-event.listen(OrmSession, "after_begin", bind_cockroach_authority)
+if TYPE_CHECKING:
+    from .identity import User
 
 
 class Session(AsyncSession):
@@ -27,16 +25,9 @@ class Session(AsyncSession):
     def user(self) -> User:
         """Return this transaction's caller."""
         user = self.info.get("user")
-        if not isinstance(user, User):
+        if not isinstance(user, rls.Context):
             raise NoTenantContext("database session has no user")
-        return user
-
-
-class DatabaseRole(StrEnum):
-    """Choose forced tenant isolation or RLS-bypassing schema-owner maintenance."""
-
-    app = auto()
-    owner = auto()
+        return cast("User", user)
 
 
 class SessionScope:
@@ -48,6 +39,7 @@ class SessionScope:
         self,
         factory: async_sessionmaker[Session],
         user: User,
+        *,
         transactional: bool,
     ) -> None:
         self.factory = factory
@@ -112,12 +104,6 @@ class Database:
         """Return the privileged migration and maintenance engine that bypasses RLS."""
         return cls(DatabaseRole.owner)
 
-    def _build_engine(self) -> AsyncEngine:
-        """Build this role's async engine and connection pool."""
-        app_role = self.role is DatabaseRole.app
-        url = settings.database_url if app_role else settings.admin_database_url
-        return database_adapter().engine(url, app_role)
-
     def session(self, user: User) -> SessionScope:
         """Open a caller-bound session for sequential transaction scopes."""
         return SessionScope(self._sessions, user, transactional=False)
@@ -125,3 +111,10 @@ class Database:
     def transaction(self, user: User) -> SessionScope:
         """Run one transaction as the given caller under this database role."""
         return SessionScope(self._sessions, user, transactional=True)
+
+    def _build_engine(self) -> AsyncEngine:
+        """Build this role's async engine and connection pool."""
+        url = (
+            settings.database_url if self.role is DatabaseRole.app else settings.admin_database_url
+        )
+        return database_adapter().engine(url, self.role)

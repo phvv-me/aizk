@@ -131,7 +131,7 @@ def test_blob_rejects_invalid_integrity_metadata(field: str, value: UUID5 | int 
 def test_blob_is_readable_and_mintable_but_immutable() -> None:
     policies = Blob.__rls__()
     assert {policy.command for policy in policies} == {rls.Command.select, rls.Command.insert}
-    assert {policy.name for policy in policies} == {"blob_read", "blob_insert"}
+    assert {policy.resolved_name for policy in policies} == {"rls_select", "rls_insert"}
 
 
 def test_blob_rejects_a_stored_representation_larger_than_its_original() -> None:

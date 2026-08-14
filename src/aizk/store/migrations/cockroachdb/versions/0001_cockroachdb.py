@@ -41,6 +41,29 @@ def mapped_tables() -> tuple[Table, ...]:
     )
 
 
+def _legacy_rls(table: Table, state: rls.RLSState) -> rls.RLSState:
+    """Keep the original policy names frozen into this baseline revision."""
+    if table.name == "operator_snapshot":
+        prefixes = {"select": "operator_snapshot"}
+    elif table.name == "blob":
+        prefixes = {"select": "blob", "insert": "blob"}
+    elif table.name in {"entity_content", "fact_content"}:
+        prefixes = {"select": "content", "insert": "content"}
+    else:
+        prefixes = {command.value: "scope" for command in rls.Command}
+    suffixes = {"select": "read"}
+    policies = tuple(
+        policy.model_copy(
+            update={
+                "name": f"{prefixes[policy.command.value]}_"
+                f"{suffixes.get(policy.command.value, policy.command.value)}"
+            }
+        )
+        for policy in state.policies
+    )
+    return state.model_copy(update={"policies": policies})
+
+
 def _optimize_storage(tables: tuple[Table, ...]) -> tuple[str, ...]:
     """Isolate large embeddings and remove source ANN indexes replaced by C-SPANN."""
     embedded = tuple(table.name for table in tables if "embedding" in table.c)
@@ -166,7 +189,14 @@ def upgrade() -> None:
     catalog = TableBase.metadata.info.get("rls")
     if not isinstance(catalog, rls.Catalog):
         raise RuntimeError("mapped metadata has no RLS catalog")
-    catalog.create_all(connection)
+    for protected_table in catalog.protected:
+        state = catalog.state(protected_table)
+        if state is None:
+            raise RuntimeError(f"protected table {protected_table.name} has no RLS state")
+        for statement in rls.apply_statements(
+            protected_table, _legacy_rls(protected_table, state)
+        ):
+            connection.execute(statement)
     op.execute(
         CreateView(
             Fact.Live.__view_select__(),
@@ -194,7 +224,7 @@ def downgrade() -> None:
         state = catalog.state(table)
         if state is None:
             raise RuntimeError(f"protected table {table.name} has no RLS state")
-        for statement in rls.drop_statements(table, state):
+        for statement in rls.drop_statements(table, _legacy_rls(table, state)):
             connection.execute(statement)
     for function in (
         "aizk_document_visible(UUID, UUID[])",

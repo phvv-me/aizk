@@ -4,7 +4,7 @@ import rls
 import sqlalchemy as sa
 from patos import sql
 from pydantic import UUID5
-from sqlalchemy import Boolean, Table, Uuid
+from sqlalchemy import Table, Uuid
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.sql.selectable import CompoundSelect, ScalarSelect
@@ -12,9 +12,6 @@ from sqlmodel import select
 
 from ...config import DatabaseBackend, settings
 from ..identity import User
-
-# Where each authority list sits in the CockroachDB `application_name` encoding.
-_ENCODED_POSITIONS = {"read": 2, "write": 3, "public": 4, "operator": 5}
 
 
 class Standing:
@@ -28,36 +25,11 @@ class Standing:
     @staticmethod
     def authority(permission: str) -> ColumnElement[list[UUID5]]:
         """Resolve one permission's scope ids from the transaction-local caller context."""
-        if settings.database_backend is DatabaseBackend.cockroachdb:
-            encoded = sa.func.nullif(
-                sa.func.split_part(
-                    sa.func.current_setting("application_name", True),
-                    "|",
-                    _ENCODED_POSITIONS[permission],
-                ),
-                "",
-            )
-            return cast(ColumnElement[list[UUID5]], encoded.cast(ARRAY(Uuid())))
-        values = (
-            sa.func.jsonb_array_elements_text(User.setting("scopes").op("->")(permission))
-            .table_valued("value")
-            .render_derived()
-        )
-        return sa.func.array(select(values.c.value.cast(Uuid())).scalar_subquery())
+        return cast(ColumnElement[list[UUID5]], User.setting(f"scopes.{permission}"))
 
     @staticmethod
     def operator() -> ColumnElement[bool]:
         """Whether the transaction carrier says this caller is a platform operator."""
-        if settings.database_backend is DatabaseBackend.cockroachdb:
-            encoded = sa.func.nullif(
-                sa.func.split_part(
-                    sa.func.current_setting("application_name", True),
-                    "|",
-                    _ENCODED_POSITIONS["operator"],
-                ),
-                "",
-            )
-            return cast(ColumnElement[bool], encoded.cast(Boolean))
         return cast(ColumnElement[bool], User.setting("operator"))
 
     @classmethod
@@ -78,7 +50,7 @@ class Standing:
             .where(borrowed.c.scope != sa.all_(cls.authority("write")))
             .scalar_subquery()
         )
-        return ~scopes.op("<@")(unwritable)
+        return ~scopes.bool_op("<@")(unwritable)
 
     @classmethod
     def owned_total(cls, table: Table, *restrictions: ColumnElement[bool]) -> ScalarSelect[int]:
@@ -167,13 +139,11 @@ class Scoped(sql.Model):
             parent_scope = sa.true()
         write = sa.and_(nonempty, scopes.op("<@")(writable), parent_scope)
         policies = [
-            rls.Policy.select("scope_read", read, roles=(settings.app_role,)),
-            rls.Policy.insert("scope_insert", write, roles=(settings.app_role,)),
+            rls.Policy.select(read, roles=(settings.app_role,)),
+            rls.Policy.insert(write, roles=(settings.app_role,)),
         ]
         if cls.mutable:
-            policies.append(
-                rls.Policy.update("scope_update", write, write, roles=(settings.app_role,))
-            )
+            policies.append(rls.Policy.update(write, check=write, roles=(settings.app_role,)))
         if cls.deletable:
-            policies.append(rls.Policy.delete("scope_delete", write, roles=(settings.app_role,)))
+            policies.append(rls.Policy.delete(write, roles=(settings.app_role,)))
         return tuple(policies)

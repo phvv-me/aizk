@@ -15,6 +15,7 @@ from sqlalchemy import (
     true,
     union_all,
 )
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import UnaryExpression
 from sqlalchemy.sql.selectable import CTE
@@ -133,7 +134,7 @@ class Entity:
                 live.c.scopes,
             )
             .add_columns(live.c.created_by)
-            .distinct(live.c.type, live.c.name, live.c.scopes)
+            .ext(distinct_on(live.c.type, live.c.name, live.c.scopes))
             .order_by(live.c.type, live.c.name, live.c.scopes, live.c.id)
             .cte("unique_live_entity")
         )

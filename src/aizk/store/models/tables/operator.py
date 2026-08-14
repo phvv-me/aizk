@@ -53,7 +53,6 @@ class OperatorSnapshot(Timestamped, TableBase, table=True):
         """
         return (
             rls.Policy.select(
-                "operator_snapshot_read",
                 Standing.operator(),
                 roles=(settings.app_role,),
             ),

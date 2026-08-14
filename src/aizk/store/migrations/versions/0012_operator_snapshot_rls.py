@@ -25,8 +25,8 @@ def _operator_rls() -> rls.RLSState:
     return rls.RLSState.declared(
         (
             rls.Policy.select(
-                "operator_snapshot_read",
                 standing,
+                name="operator_snapshot_read",
                 roles=(settings.app_role,),
             ),
         )

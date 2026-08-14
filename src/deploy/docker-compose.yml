@@ -134,9 +134,10 @@ services:
     # committed .env.example) still starts clean on every field's own default.
     # the image's own CMD (`docker inspect tensorchord/vchord-suite:pg18-latest`) already carries
     # shared_preload_libraries and search_path, and a compose `command:` replaces CMD outright
-    # rather than appending to it, so both are repeated here verbatim alongside the request GUC.
-    # User is the only request context and Pydantic serializes `User.scopes` into `app.scopes`.
-    # The empty server default stays fail closed before a session binds User.
+    # rather than appending to it, so both are repeated here verbatim.
+    # User is the only request context. RLSAlchemy flattens its typed fields into transaction-local
+    # settings such as `app.scopes.read`. They remain absent until a caller is bound, so forced
+    # RLS fails closed.
     command:
       - postgres
       - -c
@@ -149,8 +150,6 @@ services:
       - shared_preload_libraries=vchord,vchord_bm25,vector,pg_tokenizer,pg_stat_statements
       - -c
       - search_path="$$user", public, bm25_catalog, tokenizer_catalog
-      - -c
-      - app.scopes=
       - -c
       - shared_buffers=${AIZK_PG_SHARED_BUFFERS:-16GB}
       - -c

@@ -49,15 +49,15 @@ outright, so the suite's own settings are repeated verbatim alongside ours.
 ```
 shared_preload_libraries=vchord,vchord_bm25,vector,pg_tokenizer,pg_stat_statements
 search_path="$user", public, bm25_catalog, tokenizer_catalog
-app.scopes=
 ```
 
 `pg_stat_statements` rides along so query statistics come from the catalog view rather than an
 ad-hoc `EXPLAIN ANALYZE`, and `admin database setup` runs the matching
 `CREATE EXTENSION IF NOT EXISTS`. A preloaded library only takes effect on the next server start.
 
-`app.scopes` is the request context. Its empty server default is deliberate, because a session
-that has not bound a caller sees nothing rather than everything.
+The request context lives in transaction-local `app.scopes.read`, `app.scopes.write`,
+`app.scopes.public` and `app.operator` settings. They have no server default. A session that has
+not bound a caller therefore sees nothing rather than everything.
 
 ## Tuning assumes a 256 GB host
 

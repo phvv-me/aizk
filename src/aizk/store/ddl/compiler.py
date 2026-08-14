@@ -1,7 +1,6 @@
 from collections.abc import Callable
 from typing import cast
 
-from rls.ddl import RLSStatement
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.compiler import compiles
@@ -40,28 +39,6 @@ def compile_create_extension(
     """Compile idempotent extension creation."""
     del kwargs
     return f"CREATE EXTENSION IF NOT EXISTS {compiler.preparer.quote(element.name)}"
-
-
-@compiles(RLSStatement, "cockroachdb")
-def compile_cockroach_rls(
-    element: RLSStatement,
-    compiler: DDLCompiler,
-    **kwargs: bool,
-) -> str:
-    """Compile PostgreSQL-compatible row security DDL for CockroachDB."""
-    del kwargs
-    quote = compiler.preparer.quote
-    policy = element.policy
-    raw_name = policy.name if policy is not None else element.name
-    return element.action.value.format(
-        table=compiler.preparer.format_table(element.table),
-        name=quote(raw_name) if raw_name is not None else "",
-        mode="PERMISSIVE" if policy is not None and policy.permissive else "RESTRICTIVE",
-        command=policy.command.sql if policy is not None else "",
-        roles=", ".join(quote(role) for role in policy.roles) if policy is not None else "",
-        using=f" USING ({policy.using})" if policy is not None and policy.using else "",
-        check=f" WITH CHECK ({policy.check})" if policy is not None and policy.check else "",
-    )
 
 
 @compiles(CreateView)

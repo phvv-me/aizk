@@ -26,12 +26,14 @@ def test_scoped_declarations_cover_each_table_with_the_canonical_commands() -> N
         rls.Command.insert,
         rls.Command.update,
     }
-    assert {policy.name for policy in policies} == {
-        "scope_read",
-        "scope_insert",
-        "scope_update",
+    assert {policy.resolved_name for policy in policies} == {
+        "rls_select",
+        "rls_insert",
+        "rls_update",
     }
-    assert {policy.name for policy in Fact.Claim.__rls__()} == {policy.name for policy in policies}
+    assert {policy.resolved_name for policy in Fact.Claim.__rls__()} == {
+        policy.resolved_name for policy in policies
+    }
 
 
 def test_live_schema_forces_rls_with_no_violations() -> None:

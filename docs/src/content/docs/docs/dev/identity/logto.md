@@ -100,7 +100,7 @@ making them. Everything after those two lines is identical.
   Auth ──▶ Logto          read subject standing, cached 60s
   Logto ──▶ Auth          organizations, roles, public catalog
   Auth                    derive uuid5 subject and scope ids
-  Auth ──▶ PostgreSQL     SET LOCAL app.scopes
+  Auth ──▶ PostgreSQL     SET LOCAL typed app.scopes.* and app.operator settings
   PostgreSQL ──▶ Client   only the rows the policies admit
 ```
 

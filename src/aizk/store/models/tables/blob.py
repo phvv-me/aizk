@@ -95,9 +95,8 @@ class Blob(Id, CreatedAt, TableBase, table=True):
         )
         return (
             rls.Policy.select(
-                "blob_read",
                 readable,
                 roles=(settings.app_role,),
             ),
-            rls.Policy.insert("blob_insert", sa.true(), roles=(settings.app_role,)),
+            rls.Policy.insert(sa.true(), roles=(settings.app_role,)),
         )

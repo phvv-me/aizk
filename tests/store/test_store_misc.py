@@ -6,39 +6,41 @@ from typing import cast
 
 import dbutil
 import pytest
+import rls
 from id_factory import uuid5, uuid8
 from patos.sql import CosineHalfvec
 from pydantic import UUID5, ValidationError
-from rls import Catalog, Command, CompiledPolicy, RLSState
-from rls.ddl import RLSAction, RLSStatement
+from rls import Catalog
 from sqlalchemy import ColumnElement, Integer, MetaData, Table, Uuid, any_, column, delete
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import (
+    ARRAY,
+    CreatePolicy,
+    DropPolicy,
+    EnableRowLevelSecurity,
+    Policy,
+)
 from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
-from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session as OrmSession
-from sqlalchemy.orm import SessionTransaction
 from sqlalchemy_cockroachdb.asyncpg import CockroachDBDialect_asyncpg
 from sqlmodel import select
 
 import aizk.store.backend as backend
-import aizk.store.security as security
 from aizk.config import DatabaseBackend, settings
 from aizk.exceptions import NoTenantContext
 from aizk.retrieval.models.lane import QueryContext
 from aizk.store import Chunk, Document, Entity, Fact, TableBase, id_array
 from aizk.store.backend import (
     CockroachDBAdapter,
+    DatabaseRole,
     PostgreSQLAdapter,
-    bind_cockroach_authority,
     database_adapter,
 )
 from aizk.store.ddl import CreateView, DropView, Grant, GrantTarget, postgresql_sql
-from aizk.store.engine import Database, DatabaseRole, Session
+from aizk.store.engine import Database, Session
 from aizk.store.identity import User
 from aizk.store.migrations.cockroachdb import scoped_cspann
 from aizk.store.mixins.scoped import Scoped, Standing
 from aizk.store.mixins.view import ViewBase
-from aizk.store.security import RLSVerifier
 from aizk.store.vector import CosineVector, cosine_distance, scoped_vector_candidates
 
 
@@ -82,19 +84,20 @@ def test_view_ddl_without_options_uses_native_sqlalchemy_rendering() -> None:
 def test_cockroach_ddl_quotes_grants_views_and_row_security() -> None:
     dialect = CockroachDBDialect_asyncpg()
     table = Table("private items", MetaData())
-    policy = CompiledPolicy(
-        name="scope read",
-        command=Command.select,
+    policy = Policy(
+        "scope read",
+        table,
+        command="ALL",
         using="true",
         check="true",
-        roles=("app role",),
+        roles="app role",
         permissive=False,
     )
     statements = (
         Grant(GrantTarget.table, "private items", "app role", ("SELECT", "UPDATE")),
-        RLSStatement(table, RLSAction.create, policy=policy),
-        RLSStatement(table, RLSAction.enable),
-        RLSStatement(table, RLSAction.drop, name="scope read"),
+        CreatePolicy(policy),
+        EnableRowLevelSecurity(table),
+        DropPolicy(policy, if_exists=True),
     )
     rendered = [str(statement.compile(dialect=dialect)) for statement in statements]
 
@@ -107,11 +110,7 @@ def test_cockroach_ddl_quotes_grants_views_and_row_security() -> None:
     assert "WITH (check_option)" in str(view.compile(dialect=dialect))
 
 
-def test_cockroach_operator_policy_uses_the_session_carrier(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
-
+def test_cockroach_operator_policy_uses_the_shared_context_setting() -> None:
     rendered = str(
         Standing.operator().compile(
             dialect=CockroachDBDialect_asyncpg(),
@@ -119,77 +118,13 @@ def test_cockroach_operator_policy_uses_the_session_carrier(
         )
     )
 
-    assert "split_part" in rendered
-    assert "application_name" in rendered
+    assert "current_setting" in rendered
+    assert "app.operator" in rendered
     assert " AS BOOLEAN" in rendered
-    assert ", 5)" in rendered
     assert "SELECT" not in rendered
 
 
-def test_cockroach_rls_verifier_accepts_deparser_casts_and_reports_open_tables() -> None:
-    managed = Table("managed_items", MetaData())
-    unmanaged = Table("open_items", managed.metadata)
-    empty = Table("empty_items", managed.metadata)
-    declared_policy = CompiledPolicy(
-        name="scope_read",
-        command=Command.select,
-        using="cardinality(scopes) > CAST(0 AS INT8) "
-        "AND current_setting('app:::uid'::STRING, true) <> ''",
-    )
-    live_policy = declared_policy.model_copy(
-        update={
-            "using": "((cardinality(scopes) > 0:::INT8) AND "
-            "(current_setting('app:::uid':::STRING, true) <> '':::STRING))"
-        }
-    )
-    declared = {managed: RLSState(policies=(declared_policy,))}
-    live = {
-        managed: RLSState(policies=(live_policy,)),
-        unmanaged: RLSState(
-            policies=(CompiledPolicy(name="unexpected", command=Command.select, using="true"),)
-        ),
-        empty: RLSState(enabled=False, forced=False),
-    }
-    catalog = cast(
-        Catalog,
-        SimpleNamespace(
-            tables=(managed, unmanaged, empty),
-            state=declared.get,
-            inspect=lambda connection: live,
-            verify=lambda connection: ["postgres delegated"],
-        ),
-    )
-    verifier = RLSVerifier(catalog)
-    postgres = cast(Connection, SimpleNamespace(dialect=postgresql_dialect()))
-    cockroach = cast(
-        Connection,
-        SimpleNamespace(
-            dialect=CockroachDBDialect_asyncpg(),
-            execute=lambda statement: [
-                ("public", "managed_items", "scope_read", "permissive"),
-                ("public", "open_items", "unexpected", "permissive"),
-            ],
-        ),
-    )
-
-    assert verifier.verify(postgres) == ["postgres delegated"]
-    assert verifier.verify(cockroach) == ["open_items has undeclared row level security"]
-
-
-def test_cockroach_policy_translation_preserves_quoted_triple_colons() -> None:
-    clause = "'a'':::b':::STRING || \"a\"\":::b\":::STRING || $$c:::d$$:::STRING"
-
-    assert security._CockroachPolicy.postgres_casts(clause) == (
-        "'a'':::b'::STRING || \"a\"\":::b\"::STRING || $$c:::d$$::STRING"
-    )
-    declared = security._CockroachPolicy(
-        name="visible", command=Command.select, using="aizk_visible(id)"
-    )
-    reflected = declared.model_copy(update={"using": "public.aizk_visible(id)"})
-    assert declared.matches(reflected, "items")
-
-
-def test_cockroach_migrations_are_one_native_revision() -> None:
+def test_cockroach_migrations_keep_native_base_and_incremental_retirement() -> None:
     versions = (
         Path(__file__).parents[2]
         / "src"
@@ -200,7 +135,10 @@ def test_cockroach_migrations_are_one_native_revision() -> None:
         / "versions"
     )
 
-    assert [path.name for path in versions.glob("[0-9]*.py")] == ["0001_cockroachdb.py"]
+    assert sorted(path.name for path in versions.glob("[0-9]*.py")) == [
+        "0001_cockroachdb.py",
+        "0002_policy_names.py",
+    ]
 
 
 def test_scoped_cspann_function_keeps_authority_outside_the_ann_query() -> None:
@@ -244,13 +182,13 @@ def test_scoped_cspann_creation_reasserts_security_definer(
     assert max(statements.index(statement) for statement in altered) < min(trigger_positions)
 
 
-def test_database_adapters_build_pools_and_bind_cockroach_authority(
+def test_database_adapters_build_pools_and_share_rls_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     postgresql = PostgreSQLAdapter()
     cockroach = CockroachDBAdapter()
     monkeypatch.setattr(settings, "db_null_pool", True)
-    null_engine = postgresql.engine(settings.database_url, app_role=True)
+    null_engine = postgresql.engine(settings.database_url, DatabaseRole.app)
     assert null_engine.pool.__class__.__name__ == "NullPool"
     null_engine.sync_engine.dispose()
 
@@ -264,8 +202,8 @@ def test_database_adapters_build_pools_and_bind_cockroach_authority(
     assert postgresql.server_settings()["vchordrq.prefilter"] == "off"
 
     monkeypatch.setattr(settings, "db_null_pool", False)
-    owner_engine = postgresql.engine(settings.admin_database_url, app_role=False)
-    pooled_engine = cockroach.engine(settings.database_url, app_role=True)
+    owner_engine = postgresql.engine(settings.admin_database_url, DatabaseRole.owner)
+    pooled_engine = cockroach.engine(settings.database_url, DatabaseRole.app)
     assert owner_engine.pool.__class__.__name__ != "NullPool"
     assert pooled_engine.pool.__class__.__name__ != "NullPool"
     owner_engine.sync_engine.dispose()
@@ -275,20 +213,12 @@ def test_database_adapters_build_pools_and_bind_cockroach_authority(
     user = User.authorized(uuid5(), read=(read_scope,), write=(uuid5(),), public=(uuid5(),))
     session = OrmSession()
     cockroach.configure_session(session, user)
-    connection = cast(Connection, RecordingConnection())
-    bind_cockroach_authority(session, cast("SessionTransaction", None), connection)
-    recorder = cast(RecordingConnection, connection)
-    assert recorder.parameters is not None
-    assert str(read_scope) in recorder.parameters["aizk_cockroach_authority"]
-    assert recorder.parameters["aizk_cockroach_authority"].endswith("|false")
-
-    untouched = RecordingConnection()
-    bind_cockroach_authority(
-        OrmSession(),
-        cast("SessionTransaction", None),
-        cast(Connection, untouched),
+    assert rls.has_context(session)
+    context = next(
+        value for value in session.info.values() if isinstance(value, rls.SessionContext)
     )
-    assert untouched.parameters is None
+    assert ("app.scopes.read", f'{{"{read_scope}"}}') in context.settings
+    assert ("app.operator", "false") in context.settings
 
     monkeypatch.setattr(settings, "database_backend", DatabaseBackend.postgresql)
     assert isinstance(database_adapter(), PostgreSQLAdapter)
@@ -367,17 +297,6 @@ def test_cockroach_cloud_urls_reject_unknown_ssl_modes() -> None:
         )
 
 
-class RecordingConnection:
-    """Record one SQLAlchemy execution without opening a database connection."""
-
-    def __init__(self) -> None:
-        self.parameters: dict[str, str] | None = None
-
-    def execute(self, statement, parameters: dict[str, str]) -> None:
-        del statement
-        self.parameters = parameters
-
-
 def test_portable_vectors_and_chunk_retrieval_compile_for_cockroach(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -447,14 +366,25 @@ def test_ownership_counting_reads_each_backend_carrier_of_the_caller_standing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Counting drops a row held entirely in unwritable public scopes, on either backend."""
-    native = str(Standing.counted(Document.scopes).compile(dialect=postgresql_dialect()))
-    assert "jsonb_array_elements_text" in native
+    native = str(
+        Standing.counted(Document.scopes).compile(
+            dialect=postgresql_dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert "current_setting" in native
+    assert "app.scopes.public" in native
+    assert "app.scopes.write" in native
     assert "NOT (document.scopes <@ array(" in native
-    assert "!= ALL (array(" in native
+    assert "!= ALL (" in native
 
     monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
-    portable = str(Standing.counted(Document.scopes).compile(dialect=CockroachDBDialect_asyncpg()))
-    assert portable.count("split_part(current_setting") == 2
+    portable = str(
+        Standing.counted(Document.scopes).compile(
+            dialect=CockroachDBDialect_asyncpg(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert portable.count("current_setting") == 2
+    assert "application_name" not in portable
     assert "NOT (document.scopes <@ array(" in portable
 
 

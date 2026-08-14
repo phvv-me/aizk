@@ -23,7 +23,7 @@ lattice with intersection visibility is aizk's own, as noted at
                             │  bind {read, write, public}
                             ▼
                     SELECT ... FROM document
-                            │  scope_read policy runs
+                            │  rls_select policy runs
                             ▼
                     cardinality(scopes) > 0
                             │
@@ -49,13 +49,13 @@ the schema inherits it. It always emits two policies and conditionally two more.
 
 ```python
 policies = [
-    rls.Policy.select("scope_read", read, roles=(settings.app_role,)),
-    rls.Policy.insert("scope_insert", write, roles=(settings.app_role,)),
+    rls.Policy.select(read, roles=(settings.app_role,)),
+    rls.Policy.insert(write, roles=(settings.app_role,)),
 ]
 if cls.mutable:
-    policies.append(rls.Policy.update("scope_update", write, write, roles=(settings.app_role,)))
+    policies.append(rls.Policy.update(write, check=write, roles=(settings.app_role,)))
 if cls.deletable:
-    policies.append(rls.Policy.delete("scope_delete", write, roles=(settings.app_role,)))
+    policies.append(rls.Policy.delete(write, roles=(settings.app_role,)))
 ```
 
 `mutable` and `deletable` are `ClassVar` booleans on the model, both defaulting to false. That
@@ -156,10 +156,9 @@ policies pointed at it.
 
 ## Caller standing travels through the adapter
 
-`User` carries readable, writable and public scope sets. The PostgreSQL adapter writes them into
-transaction-local `app` settings. The CockroachDB adapter serializes the same authority into a
-transaction-local `application_name` value that the policies parse. Both values disappear at the
-end of the transaction, so a pooled connection cannot carry one caller into the next request.
+`User` carries readable, writable and public scope sets. RLSAlchemy flattens them into the same
+transaction-local `app` settings on PostgreSQL and CockroachDB. The values disappear at the end
+of the transaction, so a pooled connection cannot carry one caller into the next request.
 
 The policy shape remains the same. A readable row has a nonempty scope set contained in the
 caller's readable set, with a narrow exception for a public single-scope row. A writable row has

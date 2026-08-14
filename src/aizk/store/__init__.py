@@ -1,5 +1,4 @@
 import rls
-from sqlalchemy.engine import Connection
 
 from ..exceptions import NoTenantContext
 from . import events as events
@@ -25,15 +24,8 @@ from .models import (
     UsageEvent,
     Watermark,
 )
-from .security import RLSVerifier
 
-_catalog = rls.Catalog(TableBase.mapper_registry)
-_rls_verifier = RLSVerifier(_catalog)
-
-
-def verify_rls(connection: Connection) -> list[str]:
-    """Report drift from Aizk's complete row security declaration."""
-    return _rls_verifier.verify(connection)
+verify_rls = rls.Catalog(TableBase.mapper_registry).verify
 
 
 __all__ = [

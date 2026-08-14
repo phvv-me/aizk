@@ -8,7 +8,7 @@ from sqlmodel import select
 from ..config import settings
 from ..status import UsagePoint, UsageSummary
 from ..store import Usage
-from ..store.backend import database_adapter
+from ..store.backend import DatabaseRole, database_adapter
 from .reports import ActorUsage, ScopeUsage
 
 _PERIODS = (7, 30, 90, 365)
@@ -59,7 +59,7 @@ async def platform_usage() -> PlatformUsage:
         .join(targets, true())
         .group_by(targets.c.scope_id)
     )
-    admin = database_adapter().engine(settings.admin_database_url, False)
+    admin = database_adapter().engine(settings.admin_database_url, DatabaseRole.owner)
     try:
         async with admin.connect() as connection:
             periods = [
