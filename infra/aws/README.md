@@ -53,9 +53,7 @@ docker buildx build \
   --target lambda \
   --build-arg AIZK_DOCS_SITE_URL="$AIZK_AWS_PUBLIC_URL" \
   --build-arg AIZK_DOCS_MCP_CLIENT_ID="$AIZK_DEMO_MCP_CLIENT_ID" \
-  --build-context patos=../patos \
-  --build-context rls=../rls \
-  --build-context mainboard=../mainboard \
+  --build-context sqlalchemy=../sqlalchemy \
   -f src/deploy/Dockerfile \
   -t "$ECR_REPOSITORY:$IMMUTABLE_TAG" \
   --push \

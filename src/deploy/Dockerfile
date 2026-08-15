@@ -134,6 +134,17 @@ USER 10001:10001
 ENTRYPOINT ["python", "-m", "pytest"]
 CMD ["tests/integration/test_artifact_stack.py", "-m", "integration and artifact_stack", "--no-cov"]
 
+# AIZK exercises the proposed PostgreSQL row security API before it is available in an upstream
+# SQLAlchemy release. Keep the release image on the exact reviewed fork used by the Chefe workspace.
+FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS sqlalchemy-build
+WORKDIR /src
+COPY --from=sqlalchemy . /tmp/sqlalchemy
+RUN test -f /tmp/sqlalchemy/pyproject.toml \
+    && grep -q CreatePolicy /tmp/sqlalchemy/lib/sqlalchemy/dialects/postgresql/__init__.py \
+    && DISABLE_SQLALCHEMY_CEXT=1 uvx --from build pyproject-build \
+       --wheel --outdir /tmp/sqlalchemy-dist /tmp/sqlalchemy \
+    && rm -rf /tmp/sqlalchemy
+
 # The AWS target uses the managed Python runtime interface and the same source and dependency
 # graph as the local image. Lambda selects the MCP, worker, or setup handler through an image
 # command override, so one immutable digest serves all three functions.
@@ -142,6 +153,13 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 WORKDIR ${LAMBDA_TASK_ROOT}
 COPY pyproject.toml uv.lock README.md ./
 RUN uv sync --frozen --no-dev --no-install-project
+COPY --from=sqlalchemy-build /tmp/sqlalchemy-dist /tmp/sqlalchemy-dist
+RUN uv pip uninstall --python .venv sqlalchemy \
+    && .venv/bin/python -m zipfile -e /tmp/sqlalchemy-dist/*.whl \
+       .venv/lib/python3.14/site-packages \
+    && .venv/bin/python -c \
+       "from sqlalchemy.dialects.postgresql import CreatePolicy, DropPolicy, Policy" \
+    && rm -rf /tmp/sqlalchemy-dist
 COPY src ./src
 COPY --from=docs-build /app/dist ./static
 RUN uv pip install --python .venv --reinstall --no-deps .

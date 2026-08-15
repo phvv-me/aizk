@@ -118,6 +118,8 @@ services:
       context: ../../..
       dockerfile: src/deploy/Dockerfile
       target: lambda
+      additional_contexts:
+        sqlalchemy: ../../../../sqlalchemy
     environment: *aizk-env
     ports:
       - 127.0.0.1:${AIZK_COCKROACH_LAMBDA_MCP_PORT:-9090}:8080
