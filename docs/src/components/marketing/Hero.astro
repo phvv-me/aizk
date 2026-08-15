@@ -1,6 +1,5 @@
 ---
-const site = (Astro.site?.origin ?? 'https://YOUR_AIZK_HOST').replace(/\/$/, '');
-const setupPrompt = `Set up AIZK for this project from ${site}`;
+import SetupChooser from '../SetupChooser.astro';
 ---
 
 <section class="border-base-300 border-b">
@@ -33,30 +32,7 @@ const setupPrompt = `Set up AIZK for this project from ${site}`;
         </h2>
       </div>
 
-      <div class="space-y-4">
-        <p class="text-base-content/65 text-sm">
-          Send this instruction from the project where you want AIZK.
-        </p>
-        <pre class="border-base-300 bg-base-100 overflow-x-auto border p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap"><code data-setup-prompt>{setupPrompt}</code></pre>
-        <p class="text-base-content/65 text-sm">
-          Your agent handles setup and guides you through sign-in or account creation when needed.
-        </p>
-        <div class="flex flex-wrap items-center gap-4">
-          <button type="button" class="btn btn-primary btn-sm" data-copy-setup>Copy instruction</button>
-          <a href="/setup.md" class="link text-sm">Agent setup instructions</a>
-        </div>
-      </div>
+      <SetupChooser />
     </aside>
   </div>
 </section>
-
-<script>
-  const button = document.querySelector<HTMLButtonElement>('[data-copy-setup]');
-  const prompt = document.querySelector<HTMLElement>('[data-setup-prompt]');
-
-  button?.addEventListener('click', async () => {
-    if (!prompt) return;
-    await navigator.clipboard.writeText(prompt.textContent ?? '');
-    button.textContent = 'Copied';
-  });
-</script>

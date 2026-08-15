@@ -3,11 +3,12 @@ title: "OpenCode"
 description: "Connect OpenCode to aizk over the same OAuth-protected endpoint."
 ---
 
-This page assumes you have an account on a running aizk deployment and know its address, which
-[Quickstart](/docs/user/quickstart/) covers. Replace `YOUR_AIZK_HOST` below with the host for your
-deployment.
+This page uses the address and public OAuth client of the AIZK deployment serving it. If you have
+not connected yet, [Quickstart](/docs/user/quickstart/) lets you choose OpenCode and ask it to
+complete the whole setup.
 
 import Diagram from '../../../../../components/Diagram.astro';
+import ClientConfig from '../../../../../components/ClientConfig.astro';
 
 OpenCode is the shortest of the three client setups. One committed file, one sign-in command, and one
 command for when something looks wrong.
@@ -23,24 +24,7 @@ connect to an AIZK server that accepts only the modern protocol. Pin `1.18.8` an
 
 OpenCode reads its servers from `opencode.json` in the project root.
 
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "mcp": {
-    "aizk": {
-      "type": "remote",
-      "url": "https://YOUR_AIZK_HOST/mcp",
-      "oauth": {
-        "clientId": "YOUR_AIZK_CLIENT_ID",
-        "scope": "control offline_access openid",
-        "callbackPort": 8912,
-        "redirectUri": "http://127.0.0.1:8912/callback"
-      },
-      "enabled": true
-    }
-  }
-}
-```
+<ClientConfig client="opencode" />
 
 `"type": "remote"` is the field that matters. aizk is not a local process OpenCode starts, it is an
 HTTP endpoint OpenCode talks to, and the remote type is what carries the OAuth handshake. The file

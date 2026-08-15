@@ -2,9 +2,9 @@ import type { APIRoute } from 'astro';
 
 export const prerender = true;
 
-const site = (import.meta.env.SITE ?? 'https://YOUR_AIZK_HOST').replace(/\/$/, '');
+const site = (import.meta.env.SITE ?? 'https://aizk.example.com').replace(/\/$/, '');
 const endpoint = `${site}/mcp`;
-const clientId = import.meta.env.AIZK_DOCS_MCP_CLIENT_ID ?? 'YOUR_AIZK_CLIENT_ID';
+const clientId = import.meta.env.AIZK_DOCS_MCP_CLIENT_ID ?? 'PUBLIC_AIZK_CLIENT_ID';
 
 const instructions = `# Set up AIZK
 

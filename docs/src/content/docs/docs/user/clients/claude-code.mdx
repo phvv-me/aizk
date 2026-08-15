@@ -3,11 +3,12 @@ title: "Claude Code"
 description: "Connect Claude Code to aizk, including the headless and remote cases."
 ---
 
-This page assumes you have an account on a running aizk deployment and know its address. If you do
-not, [Quickstart](/docs/user/quickstart/) covers getting one. Replace `YOUR_AIZK_HOST` below with
-the host for your deployment.
+This page uses the address and public OAuth client of the AIZK deployment serving it. If you have
+not connected yet, [Quickstart](/docs/user/quickstart/) lets you choose Claude Code and ask it to
+complete the whole setup.
 
 import Diagram from '../../../../../components/Diagram.astro';
+import ClientConfig from '../../../../../components/ClientConfig.astro';
 
 Your deployment gives you a public client ID. It is safe to keep in configuration and has no client
 secret. Claude Code uses PKCE, and you sign in as yourself in a browser.
@@ -33,11 +34,7 @@ secret. Claude Code uses PKCE, and you sign in as yourself in a browser.
 
 The shortest personal setup puts aizk in Claude Code's user scope, so every project you open has it.
 
-```sh
-claude mcp add --scope user --transport http --client-id YOUR_AIZK_CLIENT_ID \
-  --callback-port 8912 aizk https://YOUR_AIZK_HOST/mcp
-claude mcp login aizk
-```
+<ClientConfig client="claude-code" />
 
 The second command opens a browser, you sign in, and the browser hands the result back to Claude Code
 on port 8912. Pinning that port with `--callback-port` is not required locally, but it makes the
@@ -68,20 +65,7 @@ callback port. [Codex](/docs/user/clients/codex/) has no equivalent and does nee
 
 For a team repository, commit the server entry so nobody has to remember the `add` command.
 
-```json
-{
-  "mcpServers": {
-    "aizk": {
-      "type": "http",
-      "url": "https://YOUR_AIZK_HOST/mcp",
-      "oauth": {
-        "clientId": "YOUR_AIZK_CLIENT_ID",
-        "callbackPort": 8912
-      }
-    }
-  }
-}
-```
+<ClientConfig client="claude-code" shared />
 
 That file holds no credential and is safe to commit. Each person still runs `claude mcp login aizk`
 once on their own machine, and each person's memory stays their own. Sharing a repository does not

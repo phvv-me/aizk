@@ -1,0 +1,83 @@
+---
+title: "Quickstart"
+description: "Choose an agent and make your first memory in about five minutes."
+---
+
+import SetupChooser from '../../../../components/SetupChooser.astro';
+
+This page configures itself for the AIZK deployment serving it. You do not need to copy a host,
+find a public client ID or create an account before you begin. Your agent reads the exact setup
+instructions from this website and guides you through browser sign-in or account creation.
+
+```text
+  1  choose      pick the agent you are using
+                        │
+  2  ask         send it the deployment-aware setup instruction
+                        │
+  3  verify      let the agent sign in and call status
+                        │
+  4  remember    keep one useful note and find it again
+```
+
+## 1. Choose your agent
+
+<SetupChooser />
+
+The instruction points the agent back to the current website. The machine-readable setup page
+supplies this deployment's MCP endpoint, public OAuth client and repository guidance. Nothing in
+the prompt is tied to the crAIZK demonstration or to somebody else's self-hosted deployment.
+
+## 2. Complete sign-in
+
+Your agent adds the MCP server without replacing existing project instructions. It then opens the
+Logto sign-in page. Sign in if you already have an account, or choose account creation and complete
+email verification if you do not.
+
+When the browser flow finishes, ask the agent to call `status`. A successful response returns your
+identity and the organizations you can use. It also confirms the five tools named `status`, `find`,
+`keep`, `report` and `share` are ready.
+
+If the browser never comes back, or the client says it is signed out, use
+[Sign-in troubleshooting](/docs/user/clients/troubleshooting/).
+
+## 3. Store your first memory
+
+Tell your agent something worth keeping. The agent calls `keep` with self-contained Markdown, and
+the first level-one heading becomes the title that `find` shows later.
+
+```python
+aizk.keep(
+    text="""# Retrieval reranker choice
+
+We kept the cross-encoder reranker on by default. Turning it off saved 40 ms and cost more in
+answer quality than the latency was worth."""
+)
+```
+
+No organization is named, so the note stays private. Dates, tags and sharing remain empty unless
+you provide them. [Writing memory well](/docs/user/using/remember/) explains the choices once you
+have a few notes.
+
+## 4. Ask for it back
+
+```python
+aizk.find(query="why is the reranker on by default?")
+```
+
+AIZK returns evidence rather than a finished answer. Your agent reads the relevant source excerpt,
+checks where it came from and answers in its own words. [Evidence and
+provenance](/docs/user/concepts/evidence/) explains the labels on every result.
+
+:::tip[Good habit]
+Write fewer and better notes, then ask one focused question at a time.
+:::
+
+## Next
+
+<div class="not-content">
+
+- [Your first hour](/docs/user/first-hour/) takes this from one note to a memory a team can use.
+- [Writing memory well](/docs/user/using/remember/) covers what belongs in a note.
+- [MCP tools](/docs/user/reference/tools/) is the exact contract for all five tools.
+
+</div>

@@ -1,0 +1,130 @@
+---
+const site = (Astro.site?.origin ?? 'https://aizk.example.com').replace(/\/$/, '');
+const clients = [
+  {
+    id: 'claude-code',
+    label: 'Claude Code',
+    href: '/docs/user/clients/claude-code/',
+  },
+  {
+    id: 'codex',
+    label: 'Codex',
+    href: '/docs/user/clients/codex/',
+  },
+  {
+    id: 'opencode',
+    label: 'OpenCode',
+    href: '/docs/user/clients/opencode/',
+  },
+].map((client) => ({
+  ...client,
+  prompt: `Set up AIZK for this project from ${site}. I use ${client.label}. Follow the setup instructions from that site and guide me through sign-in or account creation.`,
+}));
+---
+
+<div class="setup-chooser">
+  <p class="setup-intro">Choose the agent you are using, then send it the instruction.</p>
+  <div class="setup-options">
+    {
+      clients.map((client, index) => (
+        <details name="aizk-client" open={index === 0}>
+          <summary>{client.label}</summary>
+          <div class="setup-panel">
+            <pre><code>{client.prompt}</code></pre>
+            <div class="setup-actions">
+              <button type="button" data-copy={client.prompt}>Copy instruction</button>
+              <a href={client.href}>Manual setup</a>
+              <a href="/setup.md">Agent instructions</a>
+            </div>
+          </div>
+        </details>
+      ))
+    }
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(button.dataset.copy ?? '');
+      button.textContent = 'Copied';
+    });
+  });
+</script>
+
+<style>
+  .setup-chooser {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .setup-intro {
+    margin: 0;
+    color: color-mix(in srgb, currentColor 70%, transparent);
+  }
+
+  .setup-options {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  details {
+    border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+    background: color-mix(in srgb, currentColor 4%, transparent);
+  }
+
+  summary {
+    cursor: pointer;
+    padding: 0.75rem 1rem;
+    font-weight: 700;
+  }
+
+  details[open] summary {
+    color: #315dff;
+    border-bottom: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  }
+
+  .setup-panel {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem;
+  }
+
+  pre {
+    max-width: 100%;
+    margin: 0;
+    overflow-x: auto;
+    padding: 1rem;
+    background: color-mix(in srgb, currentColor 8%, transparent);
+    white-space: pre-wrap;
+  }
+
+  code {
+    font-size: 0.8rem;
+    line-height: 1.6;
+  }
+
+  .setup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1rem;
+  }
+
+  button {
+    border: 1px solid #315dff;
+    padding: 0.5rem 0.75rem;
+    background: #315dff;
+    color: white;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+  }
+
+  a {
+    color: inherit;
+    font-size: 0.875rem;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+</style>
