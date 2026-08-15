@@ -1,0 +1,26 @@
+---
+const site = (Astro.site?.origin ?? 'https://aizk.example.com').replace(/\/$/, '');
+---
+
+<dl class="deployment-endpoints">
+  <dt>Public site</dt>
+  <dd><code>{site}/</code></dd>
+  <dt>MCP endpoint</dt>
+  <dd><code>{site}/mcp</code></dd>
+</dl>
+
+<style>
+  .deployment-endpoints {
+    display: grid;
+    gap: 0.4rem;
+  }
+
+  dt {
+    font-weight: 700;
+  }
+
+  dd {
+    margin: 0 0 0.75rem;
+    overflow-wrap: anywhere;
+  }
+</style>

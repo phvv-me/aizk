@@ -154,5 +154,4 @@ public AIZK URL are complete. Partial authentication configuration fails synthes
 /craizk/staging/logto-management-client-secret
 ```
 
-The current staging MCP URL is
-`https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp`.
+The staging MCP URL is `$AIZK_AWS_PUBLIC_URL/mcp`.

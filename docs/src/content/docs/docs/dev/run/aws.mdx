@@ -4,17 +4,12 @@ description: "How this crAIZK website, app, MCP server and worker run on AWS wit
 ---
 
 import Diagram from '../../../../../components/Diagram.astro';
+import DeploymentEndpoints from '../../../../../components/DeploymentEndpoints.astro';
 
 This public site is part of the crAIZK hackathon deployment. The same AWS origin serves the
 landing page, these docs, the browser app and the MCP endpoint.
 
-**Public site**
-
-`https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/`
-
-**MCP endpoint**
-
-`https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp`
+<DeploymentEndpoints />
 
 Use the origin printed above for the website and MCP endpoint. Other AIZK deployments are separate
 systems with their own users and memory.
