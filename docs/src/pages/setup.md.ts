@@ -114,7 +114,7 @@ the status check succeeded.
 export const GET: APIRoute = () =>
   new Response(instructions, {
     headers: {
-      'content-type': 'text/markdown; charset=utf-8',
+      'content-type': 'text/plain; charset=utf-8',
       'cache-control': 'public, max-age=300',
     },
   });

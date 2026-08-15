@@ -75,11 +75,14 @@ const maxX = Math.max(...boxes.map((b) => b.x + b.w));
 const minY = Math.min(...boxes.map((b) => b.y));
 const maxY = Math.max(...boxes.map((b) => b.y + b.h));
 const M = 16;
-const vb = `${minX - M} ${minY - M} ${maxX - minX + 2 * M} ${maxY - minY + 2 * M}`;
+const viewBoxWidth = maxX - minX + 2 * M;
+const viewBoxHeight = maxY - minY + 2 * M;
+const vb = `${minX - M} ${minY - M} ${viewBoxWidth} ${viewBoxHeight}`;
+const renderedWidth = Math.min(736, Math.ceil(viewBoxWidth * 1.2));
 const uid = `d${Math.abs([...title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7))}`;
 ---
 
-<figure class="aizk-diagram not-content">
+<figure class="aizk-diagram not-content" style={`--aizk-diagram-width: ${renderedWidth}px`}>
   <svg viewBox={vb} role="img" aria-label={title} preserveAspectRatio="xMidYMid meet">
     <title>{title}</title>
     <defs>
@@ -139,6 +142,7 @@ const uid = `d${Math.abs([...title].reduce((h, c) => (h * 31 + c.charCodeAt(0)) 
 <style>
   .aizk-diagram {
     margin: 1.5rem auto;
+    width: min(100%, var(--aizk-diagram-width));
     max-width: 46rem;
   }
   .aizk-diagram svg {

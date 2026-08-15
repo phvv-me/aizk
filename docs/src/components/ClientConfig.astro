@@ -1,4 +1,6 @@
 ---
+import { Code } from '@astrojs/starlight/components';
+
 interface Props {
   client: 'claude-code' | 'codex' | 'opencode';
   shared?: boolean;
@@ -11,7 +13,9 @@ const clientId = import.meta.env.AIZK_DOCS_MCP_CLIENT_ID ?? 'PUBLIC_AIZK_CLIENT_
 
 const configurations = {
   'claude-code': shared
-    ? `{
+    ? {
+        lang: 'json',
+        code: `{
   "mcpServers": {
     "aizk": {
       "type": "http",
@@ -22,11 +26,17 @@ const configurations = {
       }
     }
   }
-}`
-    : `claude mcp add --scope user --transport http --client-id ${clientId} \\
+}`,
+      }
+    : {
+        lang: 'sh',
+        code: `claude mcp add --scope user --transport http --client-id ${clientId} \\
   --callback-port 8912 aizk ${endpoint}
 claude mcp login aizk`,
-  codex: `mcp_oauth_credentials_store = "file"
+      },
+  codex: {
+    lang: 'toml',
+    code: `mcp_oauth_credentials_store = "file"
 mcp_oauth_callback_port = 8912
 
 [features]
@@ -39,7 +49,10 @@ scopes = ["control", "offline_access", "openid"]
 
 [mcp_servers.aizk.oauth]
 client_id = "${clientId}"`,
-  opencode: `{
+  },
+  opencode: {
+    lang: 'json',
+    code: `{
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "aizk": {
@@ -55,13 +68,10 @@ client_id = "${clientId}"`,
     }
   }
 }`,
+  },
 };
+
+const configuration = configurations[client];
 ---
 
-<pre class="client-config"><code>{configurations[client]}</code></pre>
-
-<style>
-  .client-config {
-    white-space: pre-wrap;
-  }
-</style>
+<Code code={configuration.code} lang={configuration.lang} />

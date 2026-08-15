@@ -1,5 +1,6 @@
 ---
-import SetupChooser from '../SetupChooser.astro';
+const site = (Astro.site?.origin ?? 'https://aizk.example.com').replace(/\/$/, '');
+const setupCommand = `setup ${site}/setup.md`;
 ---
 
 <section class="border-base-300 border-b">
@@ -32,7 +33,8 @@ import SetupChooser from '../SetupChooser.astro';
         </h2>
       </div>
 
-      <SetupChooser />
+      <p class="text-base-content/70 mb-4 text-sm">Paste this into Claude Code, Codex, or OpenCode.</p>
+      <pre class="border-base-300 bg-base-100 overflow-x-auto border p-4"><code>{setupCommand}</code></pre>
     </aside>
   </div>
 </section>

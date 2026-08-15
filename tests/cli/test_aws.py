@@ -267,6 +267,7 @@ def test_aws_surface_routes_configuration_api_and_static_directories(tmp_path: P
     nested.mkdir(parents=True)
     (static / "index.html").write_text("home")
     (static / "asset.txt").write_text("asset")
+    (static / "setup.md").write_text("agent setup")
     (nested / "index.html").write_text("guide")
     mcp = Starlette(routes=[Route("/{path:path}", lambda request: PlainTextResponse("mcp"))])
     api = Starlette(routes=[Route("/{path:path}", lambda request: PlainTextResponse("api"))])
@@ -278,6 +279,7 @@ def test_aws_surface_routes_configuration_api_and_static_directories(tmp_path: P
         guide = client.get("/guide")
         home = client.get("/")
         asset = client.get("/asset.txt")
+        setup = client.get("/setup.md")
 
     assert set(configuration.json()) == {
         "logtoEndpoint",
@@ -291,6 +293,8 @@ def test_aws_surface_routes_configuration_api_and_static_directories(tmp_path: P
     assert guide.text == "guide"
     assert home.text == "home"
     assert asset.text == "asset"
+    assert setup.text == "agent setup"
+    assert setup.headers["content-type"] == "text/plain; charset=utf-8"
 
 
 def test_lambda_mcp_warm_event_builds_the_cached_application(

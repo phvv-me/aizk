@@ -5,7 +5,7 @@ from typing import cast
 
 from mangum import Mangum
 from mangum.types import LambdaContext
-from starlette.responses import JSONResponse
+from starlette.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -60,6 +60,14 @@ class AwsSurface:
             await self.mcp(scope, receive, send)
             return
         candidate = (self.static_root / path.lstrip("/")).resolve()
+        if (
+            candidate.is_relative_to(self.static_root)
+            and candidate.suffix == ".md"
+            and candidate.is_file()
+        ):
+            response = FileResponse(candidate, media_type="text/plain")
+            await response(scope, receive, send)
+            return
         if candidate.is_relative_to(self.static_root) and candidate.is_dir():
             static_scope = dict(scope)
             static_scope["path"] = f"{path.rstrip('/')}/index.html"
