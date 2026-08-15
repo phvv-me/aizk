@@ -21,10 +21,6 @@ work through the transition, backfill in bounded batches, validate the result, s
 remove the old structure only after rollback is no longer needed. Migration safety includes
 compatibility, data movement, validation, observability, and recovery.
 
-Sources retained in pgAIZK include `Open SWE Book`, document
-`019f7b62-b4d0-77dc-8bf2-75bd924529a9`, and Pedro Valois's `Meteng contextual rule source and
-backend audit`, document `019f841b-57ea-7754-8470-66cc1386314c`.
-
 Public references
 
 - [Google SRE guidance for canarying releases](https://sre.google/workbook/canarying-releases/)

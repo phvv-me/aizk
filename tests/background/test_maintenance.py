@@ -14,7 +14,7 @@ from pgqueuer.models import Schedule
 from sqlmodel.sql.expression import Select
 
 import aizk.background.jobs.maintenance as jobs_mod
-from aizk.artifacts.service import ArtifactIntake, ArtifactIntegrity
+from aizk.artifacts.service import ArtifactIntake, ArtifactIntegrity, ArtifactRetirement
 from aizk.background.jobs.maintenance import (
     ArtifactDispatchJob,
     ArtifactIntegrityJob,
@@ -178,6 +178,28 @@ def test_artifact_integrity_runs_as_one_system_cron(monkeypatch: pytest.MonkeyPa
     assert reports == [
         (settings.artifact_integrity_batch_size, settings.artifact_integrity_interval_days)
     ]
+
+
+def test_nightly_cleanup_collects_reader_safe_artifact_layouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    class Retirement:
+        async def collect(self, limit: int) -> SimpleNamespace:
+            calls.append(limit)
+            return SimpleNamespace(deleted=2, reclaimed=512, failed=0)
+
+    async def fake_prune(self: CleanupJob) -> int:
+        return 0
+
+    services = fake_artifact_services(retirement=cast("ArtifactRetirement", Retirement()))
+    monkeypatch.setattr(settings, "database_backend", jobs_mod.DatabaseBackend.cockroachdb)
+    monkeypatch.setattr(CleanupJob, "prune_portable_history", fake_prune)
+
+    asyncio.run(CleanupJob.assemble(fake_runtime(artifacts=services)).execute())
+
+    assert calls == [settings.object_store_retirement_batch_size]
 
 
 class GateSession:

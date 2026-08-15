@@ -240,7 +240,22 @@ class CleanupJob(SystemScheduledJob):
     deliberate `VACUUM FULL`.
     """
 
+    model_config = cast(
+        "ConfigDict", {**FrozenModel.model_config, "arbitrary_types_allowed": True}
+    )
+
+    services: ArtifactServices | None = None
+
+    @classmethod
+    def assemble(cls, runtime: Runtime) -> Self:
+        return cls(services=runtime.artifacts)
+
     async def execute(self) -> None:
+        retirement = None
+        if self.services is not None:
+            retirement = await self.services.retirement.collect(
+                settings.object_store_retirement_batch_size
+            )
         if settings.database_backend is DatabaseBackend.cockroachdb:
             removed = await self.prune_portable_history()
         else:
@@ -248,6 +263,14 @@ class CleanupJob(SystemScheduledJob):
                 removed = await self.prune_pgqueuer_log(queue.connection)
                 await queue.connection.execute("VACUUM (ANALYZE)")
         logger.info("nightly cleanup removed {} queue history rows", removed)
+        if retirement is not None:
+            logger.info(
+                "nightly artifact retirement deleted {} objects, reclaimed {} bytes, "
+                "and failed {}",
+                retirement.deleted,
+                retirement.reclaimed,
+                retirement.failed,
+            )
 
     async def prune_pgqueuer_log(self, connection: asyncpg.Connection) -> int:
         """Delete pgqueuer's completed-job log past retention in bounded batches.

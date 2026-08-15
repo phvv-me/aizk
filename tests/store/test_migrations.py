@@ -108,6 +108,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                                         "upload_capability",
                                         "usage_event",
                                         "monthly_quota_counter",
+                                        "object_retirement",
                                     ]
                                 },
                             )
@@ -127,6 +128,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                                         "blob",
                                         "upload_capability",
                                         "usage_event",
+                                        "object_retirement",
                                     ]
                                 },
                             )
@@ -171,6 +173,7 @@ def test_single_init_migration_builds_the_full_schema_and_forces_rls() -> None:
                     "upload_capability",
                     "usage_event",
                     "monthly_quota_counter",
+                    "object_retirement",
                 }
                 assert all(forced.values())
                 # The unread derivatives are gone and the re-chunk cursor stands beside the

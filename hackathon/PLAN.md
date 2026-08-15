@@ -52,7 +52,7 @@ remain open.
 | Cloud corpus and benchmark | Ready for rehearsal | Six public notes produced 40 facts, 19 entities, four communities, 29 of 29 semantically complete answers, and a 2.14 second warm median |
 | Judge identity and access | Ready for final rehearsal | Maya Chen completed direct OAuth and the live flow. Her secure SSM demo-directory entry is current |
 | Screenshots and video | In progress | A privacy-reviewed nine minute walkthrough shows live onboarding, OAuth, write, processing, recall, console, AWS and CockroachDB evidence. Final narration, short edit and captions remain |
-| Devpost entry | Manual confirmation pending | Eligibility, account standing, draft, and final submit need Pedro |
+| Devpost entry | Manual confirmation pending | Eligibility, account standing, draft, and final submit need the project owner |
 
 ## Remaining critical path
 
@@ -89,7 +89,7 @@ Keep the following work out of the submission critical path.
 - Visual embedding and new multimodal infrastructure
 - TencentDB Agent Memory follow-up research
 - A custom domain
-- Production pgAIZK changes or production memory
+- Changes to any separate production deployment or its memory
 - A large corpus or an embedding model comparison
 - New retrieval features that are not needed for the demo story
 
@@ -111,7 +111,7 @@ Target completion is August 15 at noon JST.
 - [x] Run every test and infrastructure check once more from the exact submitted commit
 - [ ] Run the local Lambda workload once from a clean database after the gates pass
 - [x] Keep the existing dated local baselines. No superseding local result is needed
-- [x] Have Pedro approve and commit the coherent release candidate
+- [x] Have the project owner approve and commit the coherent release candidate
 - [x] Push the release candidate and confirm GitHub checks pass on `main`
 
 Acceptance requires a clean release candidate with every required gate green. The working tree may
@@ -124,7 +124,7 @@ Target completion is August 14 at 3 PM JST.
 - [x] Make Distributed Vector Indexing and ccloud the two required CockroachDB tools for the submission
 - [x] Skip the optional Managed MCP screenshot because its daily reauthorization adds no required evidence
 - [x] Inspect cluster health, schema, indexes, and current migration state through ccloud
-- [x] Treat ccloud identifier `8876833f-f3a1-48e4-abe4-103bddc6e62f` as the operator identifier
+- [x] Record the current ccloud operator identifier outside the public repository
 - [x] Keep the unrelated Managed MCP identifier out of instructions and screenshots
 - [x] Add pinned AWS CLI 2.36.20 to chefe and expose the commands used by the deployment guide
 - [x] Verify AWS caller identity and selected account without printing credentials
@@ -136,7 +136,7 @@ Target completion is August 14 at 3 PM JST.
 
 The current ccloud cluster is named `aizk-cockroachdb`, runs CockroachDB 26.2.5 on AWS Singapore,
 and reports serverless state `CREATED`. Its ccloud identifier is
-`8876833f-f3a1-48e4-abe4-103bddc6e62f`. The earlier identifier supplied for Managed MCP was
+The exact operator identifier is intentionally omitted. The earlier identifier supplied for Managed MCP was
 different and must not be assumed to name the same resource.
 
 ## P0 prepare the cloud database
@@ -155,8 +155,8 @@ Target completion is August 14 at 6 PM JST.
 - [x] Run one restricted application write and read through the hosted MCP endpoint
 - [x] Capture a redacted schema inventory for later evidence
 
-Acceptance requires the current staging database to match the single baseline, work with the
-restricted application identity, and retain only the approved public demonstration corpus.
+Acceptance requires the current staging database to match the single baseline and work with the
+restricted application identity. It must retain only the approved public demonstration corpus.
 
 ## P0 deploy the AWS environment
 
@@ -168,7 +168,7 @@ Target completion is August 13 at 8 PM JST.
 - [x] Push one immutable image and record its digest
 - [x] Store both database URLs and the OpenRouter key in SSM SecureString
 - [x] Store the Logto management secret after its application exists
-- [x] Create the crAIZK Logto management application, public Native MCP application, and browser SPA
+- [x] Create the crAIZK Logto management application and browser SPA, plus the public Native MCP application
 - [x] Configure the `control` scope and the required OAuth audience
 - [x] Confirm the direct AWS Function URL deployment sequence
 - [x] Protect the pre-Logto endpoint with AWS IAM
@@ -187,8 +187,8 @@ Target completion is August 13 at 8 PM JST.
 - [x] Delete the obsolete confidential OAuth application and SSM secret
 - [x] Deploy final image `sha256:1f99af4ef0eb88d59550c72626fa58e28a01fa94dfd1a4cf0a5ac3d406cde04b`
 
-The deployment must use the AWS assigned Function URL. It must not reuse `aizk.phvv.me` or any
-pgAIZK endpoint.
+The deployment must use the AWS assigned Function URL. It must not reuse any separate production
+endpoint.
 
 ## P2 optional cloud verification automation
 
@@ -262,7 +262,7 @@ Target completion is August 16 at noon JST.
 
 - [x] Create the nonprivate Maya Chen demonstration identity
 - [x] Give it the demo-only Northstar organizations and current minimum application permissions
-- [x] Keep production pgAIZK and personal scopes out of its visible memory
+- [x] Keep separate production deployments and personal scopes out of its visible memory
 - [x] Write exact direct Logto Codex connection instructions
 - [x] Include the AWS assigned MCP URL, account instructions, expected source, and expected query
 - [x] Refresh and verify Maya's secure SSM demo-directory password after the recording rehearsal
@@ -270,7 +270,7 @@ Target completion is August 16 at noon JST.
 - [ ] Test from a network that is not the development machine
 - [x] Verify the exact public commit from a clean Docker clone using only committed files
 - [x] Confirm the repository, docs, demo, and video need no local path or private DNS
-- [x] Confirm the Maya account signs in directly without email approval from Pedro
+- [x] Confirm the fictional demo account signs in directly without owner approval
 - [ ] Verify rate limits allow the complete judge flow twice
 
 Acceptance requires a new tester to finish the story in under five minutes without asking a
@@ -288,7 +288,7 @@ Target completion is August 16 at 8 PM JST.
 - [x] Capture ccloud cluster inspection with no connection string
 - [x] Skip the optional Managed MCP inspection because required operator evidence is complete
 - [x] Export the final architecture diagram at a readable resolution
-- [ ] Select and crop the final Devpost screenshots from the privacy-reviewed 1080p footage
+- [x] Select, crop, and inspect the final Devpost gallery from the privacy-reviewed 1080p footage
 - [x] Check the complete walkthrough for credentials, account identifiers, unrelated stacks, and private data
 - [x] Keep the current branded social thumbnail
 - [x] Link every numerical claim in `SUBMISSION.md` to a dated result file
@@ -317,12 +317,12 @@ Target completion is August 17 at 8 PM JST.
 
 Create the draft by August 14. Finish it by August 17 at 10 PM JST.
 
-- [ ] Pedro confirms age, country, Devpost account standing, and entrant eligibility
+- [ ] The project owner confirms age, country, Devpost account standing, and entrant eligibility
 - [ ] Create the project draft before cloud work is finished
 - [ ] Enter the title, elevator pitch, category, repository, and current documentation URL
 - [ ] Fill every narrative field from `SUBMISSION.md`
 - [x] Prepare copy identifying Distributed Vector Indexing and ccloud as the required tools
-- [x] Prepare copy explaining the meaningful role of each CockroachDB tool
+- [x] Prepare copy explaining the concrete role of each CockroachDB tool
 - [x] Prepare copy identifying Lambda and the supporting AWS services actually deployed
 - [x] Prepare copy explaining CockroachDB as persistent memory rather than a side database
 - [ ] Add the architecture diagram
@@ -350,7 +350,7 @@ Target completion is August 18 at noon JST.
 - [ ] Verify all screenshots and logs are free of secrets and private data
 - [ ] Confirm the ten dollar gross-cost budget remains active. Email notification is optional
 - [ ] Confirm the service can remain online through September 16 at 6 AM JST
-- [ ] Pedro performs the final submission by August 18 at 6 PM JST
+- [ ] The project owner performs the final submission by August 18 at 6 PM JST
 - [ ] Reopen the submitted project page and verify all links after submission
 
 ## Daily timeline
@@ -373,7 +373,7 @@ Target completion is August 18 at noon JST.
 ### August 12 at 8 PM
 
 Continue only if the release baseline is green, the cluster is inspectable, AWS identity works, and
-the Logto and SSM inputs are available. Escalate missing credentials to Pedro immediately.
+the Logto and SSM inputs are available. Escalate missing credentials to the project owner immediately.
 
 ### August 14 at 6 PM
 
@@ -383,15 +383,15 @@ Continue to media production only if a judge can authenticate and complete `stat
 ### August 15 at 10 PM
 
 Freeze the architecture only if requests stay below the API limit, queue failures are zero, and
-the evidence contains a real C-SPANN plan. Use the local numbers honestly if cloud measurements are
-too small, but never present them as cloud performance.
+the evidence contains a real C-SPANN plan. Use local numbers with their exact conditions if cloud
+measurements are too small, but never present them as cloud performance.
 
 ### August 17 at 10 PM
 
-The video, demo URL, repository, and narrative must all exist. August 18 is for verification and
-submission only.
+The video, demo URL, repository, and narrative must all exist. August 18 is only for verification
+and submission.
 
-## Pedro decisions and manual actions
+## Owner decisions and manual actions
 
 - [x] Skip optional Managed MCP reauthorization because the required evidence is complete
 - [x] Confirm the AWS account
@@ -434,7 +434,8 @@ Managed MCP, corpus expansion, OCR, and new features remain optional.
 
 ## Definition of done
 
-crAIZK is done when a signed-out judge can open the submitted instructions, connect to the AWS
-assigned MCP URL, authenticate with the supplied nonprivate account, keep a public memory, observe
-durable CockroachDB and Lambda work, retrieve grounded evidence with C-SPANN involved, inspect the
-public repository and short video, and reproduce the documented result without Pedro intervening.
+crAIZK is done when a signed-out judge can follow the submitted instructions and connect to the AWS
+assigned MCP URL. The supplied nonprivate account must authenticate without owner intervention. The
+judge can then keep a public memory while CockroachDB and Lambda complete the durable work. A later
+`find` must retrieve grounded evidence through C-SPANN, with the public repository and short video
+completing the story.

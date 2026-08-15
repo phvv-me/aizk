@@ -5,25 +5,25 @@ description: "Which mechanism came from which paper, and which are ours."
 
 aizk is a mix of published memory mechanisms, open source infrastructure, product comparisons, and
 work designed here. This page records which is which, so a reader can trace any behavior back to
-either a paper or a deliberate choice. A citation on this page does not mean aizk copied an
-implementation, and it does not mean the cited project endorses aizk. Every code path named here
+either a paper or a deliberate choice. A citation on this page does not mean aizk copied its
+code, and it does not mean the cited project endorses aizk. Every code path named here
 was checked against the tree.
 
 ## How to read the map
 
 ```text
-  published work ──adopted, follows the design closely──▶ shipped mechanism
-  published work ──adapted, idea kept, shape changed────▶ shipped mechanism
+  published work ──adopted, follows the design closely──▶ implemented mechanism
+  published work ──adapted, idea kept, shape changed────▶ implemented mechanism
   published work ┄┄compared, no code┄┄▶ product boundary
   published work ┄┄workflow, no runtime┄┄▶ how we change the code
-  designed for aizk ──original──▶ shipped mechanism
+  designed for aizk ──original──▶ implemented mechanism
 ```
 
 | Label | Meaning |
 |---|---|
-| adopted | the shipped mechanism follows the cited design closely |
+| adopted | the implemented mechanism follows the cited design closely |
 | adapted | the source supplied the idea and aizk changed its shape |
-| compared | the source helped define a product boundary but supplied no implementation |
+| compared | the source helped define a product boundary but supplied no code |
 | workflow | the source influenced how the code is changed or checked |
 | original | the mechanism was designed for aizk and is not claimed from the cited systems |
 
@@ -51,9 +51,9 @@ was checked against the tree.
 Paths in that table are relative to `src/`. RAPTOR supports hierarchical summaries, GraphRAG
 supports community summaries, HippoRAG supports associative graph retrieval, and GAM and A-MEM
 support consolidated representations. None of them argues that the agent on the other side of the
-API should ever see a lane name. The three public provenance classes are therefore an interface
-choice made here, based on what a consumer needs in order to judge evidence rather than on how the
-engine happened to find it.
+API should ever see a lane name. The three public provenance classes are an interface choice made
+here, based on what a consumer needs to judge evidence rather than on how the
+engine found it.
 
 ## Sharing and identity
 
@@ -124,7 +124,7 @@ exactly the shape the artifact path takes.
 |---|---|---|
 | [The PARA Method](https://fortelabs.com/blog/para/) | Projects are finite outcomes and Areas are ongoing responsibilities | Areas and Projects are ontology entities rather than folders |
 | [Second Brain and Zettelkasten](https://zettelkasten.de/posts/building-a-second-brain-and-zettelkasten/) | PARA gives action context while a Zettelkasten gives atomic durable knowledge | one maintained brief per Area or Project, with atomic notes tagged into it |
-| the author's own Zettelkasten structure notes | `#project` and `#area` identify structure notes | key-value source tags name an exact entity of any live ontology kind and imply no status or access |
+| the project's earlier Zettelkasten conventions | `#project` and `#area` identify structure notes | key-value source tags name an exact entity of any live ontology kind and imply no status or access |
 
 ## What is original to aizk
 

@@ -158,102 +158,142 @@ class OpenRouterImageCaptioner:
             {"type": "text", "text": text},
         ]
         for model in self.models:
-            for attempt in range(1, self.attempts + 1):
-                started_at = perf_counter()
-                try:
-                    response = await self.http.post(
-                        "chat/completions",
-                        json={
-                            "model": model,
-                            "messages": [{"role": "user", "content": payload_content}],
-                            "max_tokens": self.max_tokens,
-                            "temperature": 0,
-                            "provider": {"data_collection": "allow"},
-                        },
-                    )
-                except httpx.RequestError as request_error:
-                    attempts.append(
-                        CaptionAttempt(
-                            requested_model=model,
-                            attempt=attempt,
-                            elapsed_ms=(perf_counter() - started_at) * 1000,
-                            error=type(request_error).__name__,
-                        )
-                    )
-                    if attempt < self.attempts:
-                        await self.backoff(attempt)
-                    continue
-                elapsed_ms = (perf_counter() - started_at) * 1000
-                if response.is_success:
-                    try:
-                        parsed = _OpenRouterResponse.model_validate(response.json())
-                        caption = parsed.choices[0].message.content
-                        if caption is None or not caption.strip():
-                            raise ValueError("provider returned an empty caption")
-                    except ValueError as parse_error:
-                        attempts.append(
-                            CaptionAttempt(
-                                requested_model=model,
-                                attempt=attempt,
-                                elapsed_ms=elapsed_ms,
-                                status_code=response.status_code,
-                                error=str(parse_error)[:256],
-                            )
-                        )
-                        if attempt < self.attempts:
-                            await self.backoff(attempt)
-                        continue
-                    attempts.append(
-                        CaptionAttempt(
-                            requested_model=model,
-                            attempt=attempt,
-                            elapsed_ms=elapsed_ms,
-                            status_code=response.status_code,
-                        )
-                    )
-                    return ImageCaption(
-                        text=caption.strip(),
-                        requested_model=model,
-                        model=parsed.model,
-                        provider=parsed.provider,
-                        elapsed_ms=elapsed_ms,
-                        usage=CaptionUsage.model_validate(parsed.usage.model_dump()),
-                        attempts=tuple(attempts),
-                    )
-                provider_error = self.error_message(response)
-                attempts.append(
-                    CaptionAttempt(
-                        requested_model=model,
-                        attempt=attempt,
-                        elapsed_ms=elapsed_ms,
-                        status_code=response.status_code,
-                        error=provider_error,
-                    )
-                )
-                logger.warning(
-                    "image caption model={} attempt={} status={} error={}",
-                    model,
-                    attempt,
-                    response.status_code,
-                    provider_error,
-                )
-                retryable = (
-                    response.status_code in _RETRYABLE_STATUS or response.status_code >= 500
-                )
-                if retryable and attempt < self.attempts:
-                    await self.backoff(attempt)
-                    continue
-                if response.status_code == 404 or retryable:
-                    break
-                raise CaptionError(
-                    "image caption request failed with HTTP"
-                    f" {response.status_code} because {provider_error}"
-                )
+            if caption := await self._caption_with_model(model, payload_content, attempts):
+                return caption
         summary = ", ".join(
             f"{attempt.requested_model} HTTP {attempt.status_code or 'network'}"
             for attempt in attempts
         )
         raise CaptionError(f"every image caption route failed after {summary}")
+
+    async def _caption_with_model(
+        self,
+        model: str,
+        payload_content: list[dict[str, JsonValue]],
+        attempts: list[CaptionAttempt],
+    ) -> ImageCaption | None:
+        """Try one model route and return its caption or allow the next route."""
+        for attempt in range(1, self.attempts + 1):
+            started_at = perf_counter()
+            try:
+                response = await self.http.post(
+                    "chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": payload_content}],
+                        "max_tokens": self.max_tokens,
+                        "temperature": 0,
+                        "provider": {"data_collection": "allow"},
+                    },
+                )
+            except httpx.RequestError as request_error:
+                attempts.append(
+                    CaptionAttempt(
+                        requested_model=model,
+                        attempt=attempt,
+                        elapsed_ms=(perf_counter() - started_at) * 1000,
+                        error=type(request_error).__name__,
+                    )
+                )
+                if attempt < self.attempts:
+                    await self.backoff(attempt)
+                continue
+            elapsed_ms = (perf_counter() - started_at) * 1000
+            if response.is_success:
+                caption = await self._successful_caption(
+                    response,
+                    model,
+                    attempt,
+                    elapsed_ms,
+                    attempts,
+                )
+                if caption is not None:
+                    return caption
+                continue
+            provider_error = self.error_message(response)
+            attempts.append(
+                CaptionAttempt(
+                    requested_model=model,
+                    attempt=attempt,
+                    elapsed_ms=elapsed_ms,
+                    status_code=response.status_code,
+                    error=provider_error,
+                )
+            )
+            logger.warning(
+                "image caption model={} attempt={} status={} error={}",
+                model,
+                attempt,
+                response.status_code,
+                provider_error,
+            )
+            retryable = response.status_code in _RETRYABLE_STATUS or response.status_code >= 500
+            if retryable and attempt < self.attempts:
+                await self.backoff(attempt)
+                continue
+            if response.status_code == 404 or retryable:
+                return None
+            raise CaptionError(
+                "image caption request failed with HTTP"
+                f" {response.status_code} because {provider_error}"
+            )
+        return None
+
+    async def _successful_caption(
+        self,
+        response: httpx.Response,
+        model: str,
+        attempt: int,
+        elapsed_ms: float,
+        attempts: list[CaptionAttempt],
+    ) -> ImageCaption | None:
+        """Validate one successful response and record malformed answers for retry."""
+        try:
+            parsed = _OpenRouterResponse.model_validate(response.json())
+            caption = parsed.choices[0].message.content
+        except ValueError as parse_error:
+            attempts.append(
+                CaptionAttempt(
+                    requested_model=model,
+                    attempt=attempt,
+                    elapsed_ms=elapsed_ms,
+                    status_code=response.status_code,
+                    error=str(parse_error)[:256],
+                )
+            )
+            if attempt < self.attempts:
+                await self.backoff(attempt)
+            return None
+        if caption is None or not caption.strip():
+            attempts.append(
+                CaptionAttempt(
+                    requested_model=model,
+                    attempt=attempt,
+                    elapsed_ms=elapsed_ms,
+                    status_code=response.status_code,
+                    error="provider returned an empty caption",
+                )
+            )
+            if attempt < self.attempts:
+                await self.backoff(attempt)
+            return None
+        attempts.append(
+            CaptionAttempt(
+                requested_model=model,
+                attempt=attempt,
+                elapsed_ms=elapsed_ms,
+                status_code=response.status_code,
+            )
+        )
+        return ImageCaption(
+            text=caption.strip(),
+            requested_model=model,
+            model=parsed.model,
+            provider=parsed.provider,
+            elapsed_ms=elapsed_ms,
+            usage=CaptionUsage.model_validate(parsed.usage.model_dump()),
+            attempts=tuple(attempts),
+        )
 
     async def backoff(self, attempt: int) -> None:
         """Pause by one bounded exponential interval before a same-model retry."""

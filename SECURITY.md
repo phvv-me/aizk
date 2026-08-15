@@ -2,7 +2,7 @@
 
 If you find a security issue in aizk, please avoid public disclosure until it is triaged.
 
-Report issues to contact@phvv.me with:
+Use the repository's private security advisory form and include:
 
 - affected version or commit
 - reproduction steps

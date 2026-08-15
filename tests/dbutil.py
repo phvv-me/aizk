@@ -14,6 +14,7 @@ from aizk.store.identity import User
 
 # App-owned tables in dependency-safe truncation order
 _APP_TABLES = (
+    "object_retirement",
     "artifact_content",
     "artifact",
     "blob",

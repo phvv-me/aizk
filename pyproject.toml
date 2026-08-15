@@ -9,7 +9,7 @@ description = "A self-hosted multi-tenant memory engine that turns a Zettelkaste
 readme = "README.md"
 requires-python = ">=3.14"
 license = "Apache-2.0"
-authors = [{ name = "Pedro Valois", email = "contact@phvv.me" }]
+authors = [{ name = "AIZK contributors" }]
 keywords = ["aizk"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -134,8 +134,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://aizk.phvv.me"
-Documentation = "https://aizk.phvv.me/docs"
+Homepage = "https://github.com/phvv-me/aizk"
+Documentation = "https://github.com/phvv-me/aizk/tree/main/docs"
 Repository = "https://github.com/phvv-me/aizk"
 Issues = "https://github.com/phvv-me/aizk/issues"
 

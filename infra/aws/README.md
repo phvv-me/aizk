@@ -3,7 +3,7 @@
 This CDK stack deploys the isolated crAIZK staging profile in AWS Singapore. CockroachDB Cloud
 remains external to the AWS account. One Logto protected Lambda Function URL serves the product
 site, documentation, browser application, HTTP API, and modern MCP endpoint. It
-never reuses `aizk.phvv.me` or the pgAIZK deployment.
+never reuses another AIZK deployment or its identity boundary.
 
 ## Live shape
 

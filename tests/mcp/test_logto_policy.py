@@ -376,7 +376,7 @@ def test_policy_lists_managed_roles_with_their_assignments() -> None:
     state = LogtoState.clean()
     state.roles.append({"id": "role-old", "name": "aizk-editor", "type": "User"})
     state.role_users = {
-        "role-admin": [{"id": "user-1", "name": "Pedro Valois", "primaryEmail": "pedro@test"}]
+        "role-admin": [{"id": "user-1", "name": "Maya Chen", "primaryEmail": "maya@example.com"}]
     }
     fake = FakeLogto(state)
 
@@ -387,7 +387,7 @@ def test_policy_lists_managed_roles_with_their_assignments() -> None:
         ("aizk-editor", False, False),
         (settings.logto_user_role, True, True),
     ]
-    assert [member.primary_email for member in report.roles[0].members] == ["pedro@test"]
+    assert [member.primary_email for member in report.roles[0].members] == ["maya@example.com"]
     assert report.roles[2].members == ()
     assert fake.calls == []
 

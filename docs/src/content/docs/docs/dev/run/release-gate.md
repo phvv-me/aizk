@@ -90,18 +90,17 @@ rather than inherited from an earlier document.
 
 ## Accepted gaps
 
-:::caution[Two items are accepted gaps, not passes]
-Record them as known and accepted rather than quietly skipping them.
+:::caution[Record deployment-specific gaps]
+The repository cannot verify host encryption or external object backups. Record them explicitly
+for the deployment being released.
 :::
 
-The dedicated PostgreSQL device is not LUKS encrypted, and the reference host has no TPM
-available for unattended unlock. [PostgreSQL and storage](/docs/dev/run/postgres/) explains the
-two honest designs. Until one is chosen, sensitive data on this deployment is protected by host
-access control and not by encryption at rest.
+Verify block encryption and its reboot recovery path. [PostgreSQL and
+storage](/docs/dev/run/postgres/) explains passphrase, TPM, and network-bound unlock designs.
 
-Object-store backup is manual. PostgreSQL archives preserve every hash, derivative and piece of
-artifact metadata, but not the original bytes, so a restore without a matching SeaweedFS copy
-gives you a memory that knows about files it can no longer open.
+Verify object-store backups separately. PostgreSQL archives preserve hashes, derivatives, and
+artifact metadata, but not original bytes. A restore without the matching object backup leaves
+file records whose originals cannot be opened.
 
 ## What changed from the old checklist
 

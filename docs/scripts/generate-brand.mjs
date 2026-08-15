@@ -5,11 +5,18 @@ import { fileURLToPath } from 'node:url';
 
 import sharp from 'sharp';
 
+import { vectors } from './brand-spec.mjs';
+
 const docs = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const project = resolve(docs, '..');
 const assets = join(docs, 'src', 'assets');
 const checking = process.argv.includes('--check');
 const manifestPath = join(assets, 'brand-manifest.json');
+
+const vectorSources = Object.entries(vectors).map(([name, content]) => [
+  join(assets, name),
+  Buffer.from(content),
+]);
 
 const vectorCopies = [
   ['icon.svg', join(assets, 'favicon.svg')],
@@ -21,12 +28,13 @@ const rasterExports = [
   ['icon.svg', join(assets, 'icon-512.png'), 512, 512],
   ['icon.svg', join(docs, 'public', 'apple-touch-icon.png'), 180, 180],
   ['icon.svg', join(project, 'src', 'web', 'static', 'apple-touch-icon.png'), 180, 180],
-  ['logo.svg', join(assets, 'logo.png'), 1120, 400],
+  ['logo.svg', join(assets, 'logo.png'), 1200, 400],
   ['banner.svg', join(assets, 'banner.png'), 2560, 640],
   ['social-card.svg', join(assets, 'social-card.png'), 1200, 630],
   ['social-card.svg', join(docs, 'public', 'social-card.png'), 1200, 630],
   ['social-card.svg', join(project, 'src', 'web', 'static', 'social-card.png'), 1200, 630],
-  ['social-card.svg', join(project, 'hackathon', 'thumbnail.png'), 1200, 630],
+  ['thumbnail.svg', join(project, 'hackathon', 'thumbnail.png'), 1800, 1200],
+  ['thumbnail.svg', join(project, 'hackathon', 'media', 'thumbnail-devpost.png'), 1800, 1200],
 ];
 
 async function synchronize(target, expected) {
@@ -46,6 +54,10 @@ function digest(content) {
 
 function targetName(target) {
   return relative(project, target);
+}
+
+for (const [target, expected] of vectorSources) {
+  await synchronize(target, expected);
 }
 
 for (const [source, target] of vectorCopies) {

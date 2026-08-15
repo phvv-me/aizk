@@ -49,7 +49,7 @@ the public references that informed them. They do not preserve or reproduce the 
 papers, or websites as uploaded artifacts. The recorded demo adds one short original Project Atlas
 note solely to show a live write and differently worded recall.
 
-Private production memory from pgAIZK, Japanese scans, and third-party PDFs are excluded from
+Private production memory, private scans, and third-party PDFs are excluded from
 crAIZK. The larger 87-document AIZK documentation corpus remains local reproducibility evidence and
 is not part of the final cloud demo corpus.
 

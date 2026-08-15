@@ -28,8 +28,8 @@ mistake, because the shared word is context and the shared problem is not.
 
 ## The aspect model, and why aizk splits differently
 
-Their entity is a URN plus a set of aspects that version independently, with relationships as
-named edges declared by foreign keys inside those aspects and traversable both ways. The reason
+Their entity is a URN plus a set of aspects that version independently. Foreign keys inside the
+aspects declare relationships that can be followed in either direction. The reason
 aspects version separately is that different facets of an asset are updated by different
 producers at different times, so one schema change should not invalidate an ownership record.
 
@@ -40,7 +40,7 @@ content changing. DataHub's seam is between facets of one asset, aizk's is betwe
 and its standing, and neither generalises into the other. Worth knowing when someone asks why
 aizk does not simply adopt an established metadata model.
 
-## Their incident model is thinner than our own pipeline
+## Their incident model is thinner than aizk's ingestion pipeline
 
 This is the useful finding, and it arrived while designing agent authored bug reports for aizk.
 
@@ -48,12 +48,11 @@ DataHub tracks incidents against assets with two states, active and resolved, an
 title and description, raised through the API, the UI or an automation, and resolved with a
 message. That is a good fit for a catalogue where an incident is an operational flag on a table.
 
-It is markedly less than a report gets for free by passing through aizk's ordinary path. A report
-stored as a source becomes chunks with entities and facts, carries provenance back to the exact
-sentence, sits on the bi-temporal spine so a fix is a validity boundary rather than a status
-field, and inherits stance so a report that says maybe reads as hedged. Recurrence stops being a
-field somebody remembers to set and becomes a question about history, which is the difference
-between asking whether the flag is on and asking when this last stopped being true.
+That is less information than a report gains through aizk's ordinary path. A stored report becomes
+searchable chunks with extracted entities and facts. Each result retains provenance to the exact
+sentence. Its history records a fix as the end of a validity range, while statement kind preserves
+whether the report was certain or tentative. Recurrence then becomes a query over history rather
+than a field somebody must remember to set.
 
 So the conclusion for aizk is to extract reports rather than store them flat, and DataHub is the
 evidence for it rather than the model to copy.
@@ -62,25 +61,24 @@ evidence for it rather than the model to copy.
 
 In DataHub's documentation MCP means Metadata Change Proposal, the event that carries a metadata
 write through their system, and it appears throughout their architecture pages. DataHub also
-ships a Model Context Protocol server. Both meanings live in the same docs under the same three
+provides a Model Context Protocol server. Both meanings live in the same docs under the same three
 letters, and aizk uses the second exclusively. Anyone reading their architecture material beside
 ours needs to know that, because the two MCPs are unrelated and the confusion is silent.
 
 ## Worth copying, cheaply
 
 `llms.txt`. DataHub publishes one at `docs.datahub.com/llms.txt`, a single plain page that names
-every documentation entry point with a sentence about each so an agent can navigate the site
+every documentation entry point with a sentence about each so an agent can find the right page
 without crawling it. aizk publishes documentation to the same readers and does not have one. It
 costs one generated page and it makes the docs answerable by the agents that are the primary
 audience, which is a better return than any feature on their list.
 
 Their agent surface is worth watching for a second reason. DataHub exposes its metadata to
-assistants over MCP and ships an agent context kit and prebuilt skills, which makes it a peer on
-the protocol rather than a competitor on the substance. A lab already running DataHub for its
-warehouse and aizk for its memory would be two MCP servers on one client, and nothing about
-either design prevents that. No work is proposed here, it is only worth knowing the shape.
+assistants over MCP and provides an agent context kit with prebuilt skills. A client can use
+DataHub for warehouse metadata and aizk for memory as separate MCP servers. This is a
+compatibility observation, not planned integration work.
 
 ## Sources
 
-Read on 2026-08-07 from `docs.datahub.com/llms.txt`, the metadata model page and the incidents
-page. Their Cloud only features are marked as such in their docs and are not considered here.
+This comparison uses `docs.datahub.com/llms.txt`, the metadata model page, and the incidents page.
+Features identified as Cloud only in their documentation are not considered here.

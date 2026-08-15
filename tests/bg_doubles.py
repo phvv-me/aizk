@@ -11,7 +11,7 @@ from pgqueuer.types import OnFailure
 from pydantic import UUID5, UUID7
 
 from aizk.artifacts.configured import ArtifactServices
-from aizk.artifacts.service import ArtifactIntake, ArtifactIntegrity
+from aizk.artifacts.service import ArtifactIntake, ArtifactIntegrity, ArtifactRetirement
 from aizk.artifacts.uploads import UploadBox
 from aizk.auth import Auth
 from aizk.background.jobs.conversion import DoclingConversionJob, MarkdownReindexJob
@@ -48,6 +48,7 @@ def fake_artifact_services(
     intake: ArtifactIntake | None = None,
     conversion: RecordingConversion | None = None,
     integrity: ArtifactIntegrity | None = None,
+    retirement: ArtifactRetirement | None = None,
     reindex: RecordingConversion | None = None,
 ) -> ArtifactServices:
     """Build an artifact service container around whatever fakes a test provides."""
@@ -56,6 +57,7 @@ def fake_artifact_services(
         conversion=cast("DoclingConversionJob", conversion or RecordingConversion()),
         reindex=cast("MarkdownReindexJob", reindex or RecordingConversion()),
         integrity=cast("ArtifactIntegrity", integrity),
+        retirement=cast("ArtifactRetirement", retirement),
         reader=cast("ArtifactReader", None),
         converter=cast("DoclingClient", None),
         scanner=cast("ClamAVClient", None),

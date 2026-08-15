@@ -53,8 +53,8 @@ class Profiles:
 
 def report(
     *,
-    label: str | None = "Pedro",
-    username: str | None = "pedro",
+    label: str | None = "Maya",
+    username: str | None = "maya",
     stages: tuple[StageEstimate, ...] = (),
 ) -> StatusReport:
     """Build one complete status response for terminal rendering."""
@@ -168,7 +168,7 @@ def test_login_persists_only_after_remote_authentication(
     assert profiles.saved is not None
     assert str(profiles.saved.server) == "https://new.example/mcp"
     assert profiles.saved.callback_port == 9000
-    assert "signed in as Pedro" in capsys.readouterr().out
+    assert "signed in as Maya" in capsys.readouterr().out
 
 
 def test_login_reuses_stored_server_and_can_render_json(
@@ -235,7 +235,7 @@ def test_logout_clears_credentials_and_renders_both_modes(
                 status=report(),
             ),
             False,
-            "authenticated as Pedro",
+            "authenticated as Maya",
         ),
         (
             AuthenticationStatus(

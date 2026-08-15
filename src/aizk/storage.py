@@ -1,13 +1,13 @@
 import asyncio
 import secrets
 from compression import zstd
-from datetime import timedelta
-from typing import TYPE_CHECKING
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Self
 
 from obstore import sign_async
 from obstore.store import ObjectStoreMethods, S3Store
 from patos import FrozenFlexModel, FrozenModel, sql
-from pydantic import UUID7, UUID8, Field
+from pydantic import UUID7, UUID8, Field, model_validator
 
 from .store.models.tables.blob import Blob
 
@@ -50,13 +50,24 @@ class StoredObject(FrozenModel):
     size: int
     stored_size: int
     encoding: Blob.Encoding
+    encoding_level: int | None = None
+    version: str | None = None
+
+
+class RetiredObject(FrozenModel):
+    """One obsolete immutable layout waiting out every authorized reader."""
+
+    id: UUID7
+    key: str
+    stored_size: int
+    delete_after: datetime
     version: str | None = None
 
 
 class IntegrityCheck(FrozenModel):
-    """Record one completed object verification without exposing its storage key."""
+    """Bind one verification result to the exact stored layout that was read."""
 
-    id: UUID7
+    observed: StoredObject
     error: str | None = None
 
 
@@ -98,10 +109,18 @@ class ByteStore(FrozenFlexModel):
     backend: ObjectStoreMethods
     upload_byte_limit: int
     internal_download_lifetime: timedelta
+    retirement_grace: timedelta = timedelta(hours=1)
     compression_enabled: bool = True
     compression_level: int = 9
     compression_min_savings: float = 0.05
     signer: S3Store | None = None
+
+    @model_validator(mode="after")
+    def safe_retirement_grace(self) -> Self:
+        """Keep replaced keys alive beyond every direct URL issued for them."""
+        if self.retirement_grace <= self.internal_download_lifetime:
+            raise ValueError("retirement_grace must exceed internal_download_lifetime")
+        return self
 
     async def put(self, data: bytes) -> StoredBytes:
         """Store a bounded original with adaptive lossless Zstandard encoding."""
@@ -218,6 +237,7 @@ __all__ = [
     "DownloadUnavailable",
     "IntegrityMismatch",
     "IntegrityCheck",
+    "RetiredObject",
     "StoredBytes",
     "StoredObject",
     "s3_backend",

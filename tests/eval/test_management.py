@@ -121,7 +121,7 @@ def test_management_benchmark_finds_source_rank_and_preserves_authority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner = uuid5()
-    user = User.authorized(owner, read=(owner,), write=(owner,), label="Pedro")
+    user = User.authorized(owner, read=(owner,), write=(owner,), label="Maya")
     calls = 0
 
     async def recall(

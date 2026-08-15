@@ -84,7 +84,7 @@ rather than moving it.
 `share` takes one destination and either document IDs or a question that selects them.
 
 ```text
-aizk.share(documents=["019b2d0a-1d42-7d6e-a9aa-8f8443ec6f4a"], scopes=["Book Club"])
+aizk.share(documents=["document-id"], scopes=["Book Club"])
 ```
 
 The IDs are the ones `keep` returned, and also the ones `find` prints under every piece of

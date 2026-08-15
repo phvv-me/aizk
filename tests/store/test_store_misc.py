@@ -138,6 +138,7 @@ def test_cockroach_migrations_keep_native_base_and_incremental_retirement() -> N
     assert sorted(path.name for path in versions.glob("[0-9]*.py")) == [
         "0001_cockroachdb.py",
         "0002_policy_names.py",
+        "0003_object_retirement.py",
     ]
 
 

@@ -117,7 +117,7 @@ CI is deliberately not a different thing. It installs chefe, runs `chefe install
 lint, the import contracts, typecheck, and `chefe run test` against a real PostgreSQL service
 container using the same VectorChord image on the same port 5433, with the same restricted
 `aizk_app` role bootstrapped over the wire because a service container cannot mount
-`initdb/roles.sh`. macOS runners carry no service containers, so the suite is a Linux job for now.
+`initdb/roles.sh`. The suite runs on Linux because the macOS runners provide no service containers.
 
 ## Next
 

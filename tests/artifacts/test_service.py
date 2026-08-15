@@ -37,6 +37,7 @@ from aizk.artifacts.service import (
 from aizk.artifacts.visual import VisualModality
 from aizk.extract.ingest import TextIngestor, TextSource
 from aizk.integrations.clamav import ClamAVClient, CleanScan
+from aizk.integrations.converter import ArtifactConverter
 from aizk.integrations.docling import (
     ArtifactBytes,
     ArtifactReader,
@@ -183,9 +184,10 @@ class Repository:
         self,
         checks: tuple[IntegrityCheck, ...],
         checked_at: datetime,
-    ) -> None:
+    ) -> tuple[IntegrityCheck, ...]:
         self.integrity_checks = checks
         self.integrity_checked_at = checked_at
+        return checks
 
     async def record_candidate(
         self,
@@ -523,8 +525,10 @@ def test_integrity_pass_records_valid_and_failed_objects_without_exposing_keys()
     report = asyncio.run(integrity.verify(limit=2, interval_days=30))
 
     assert report.model_dump() == {"checked": 2, "valid": 1, "failed": 1}
-    assert repository.integrity_checks[0] == IntegrityCheck(id=valid_id)
-    assert repository.integrity_checks[1].id == missing_id
+    assert repository.integrity_checks[0] == IntegrityCheck(
+        observed=repository.integrity_objects[0]
+    )
+    assert repository.integrity_checks[1].observed.id == missing_id
     assert repository.integrity_checks[1].error == "FileNotFoundError: objects/missing"
     assert repository.integrity_checked_at is not None
 
@@ -546,6 +550,57 @@ def original() -> OriginalArtifact:
         storage_key="objects/original",
         storage_hash=sql.uuid8(content),
     )
+
+
+def test_processor_retries_a_stale_compaction_pointer_through_the_current_layout() -> None:
+    source = original()
+    current = source.model_copy(
+        update={
+            "storage_key": "objects/current-layout",
+            "storage_version": "current-version",
+        }
+    )
+    storage = Storage()
+    storage.values[current.storage_key] = b"original"
+    repository = Repository(current)
+    processor = ArtifactProcessor(
+        cast(ArtifactConverter, None),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, repository),
+    )
+
+    refreshed, content = asyncio.run(
+        processor.read_original(
+            User.system(source.scopes),
+            source,
+            source.content_id,
+            source.scopes,
+        )
+    )
+
+    assert refreshed == current
+    assert content == b"original"
+    assert storage.versions == ["current-version"]
+
+
+def test_processor_preserves_an_error_when_the_storage_pointer_is_current() -> None:
+    source = original()
+    storage = Storage()
+    processor = ArtifactProcessor(
+        cast(ArtifactConverter, None),
+        cast(ByteStore, storage),
+        cast(ArtifactRepository, Repository(source)),
+    )
+
+    with pytest.raises(FileNotFoundError, match="objects/original"):
+        asyncio.run(
+            processor.read_original(
+                User.system(source.scopes),
+                source,
+                source.content_id,
+                source.scopes,
+            )
+        )
 
 
 def test_processor_adds_image_enrichment_after_docling_and_before_projection(
@@ -972,7 +1027,8 @@ def test_docling_rejection_keeps_a_metadata_document_without_retrying(
 def test_docling_policy_refusal_is_marked_unreadable_and_never_retried(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression test for the crimson incident group A (binary and archive originals):
+    """Cover binary and archive originals from the object store regression case.
+
     Docling's own policy check refuses these deterministically, so a retry only repeats the
     same verdict, and the processor records a state the retry query stops offering back."""
     source = original().model_copy(
@@ -1015,9 +1071,10 @@ def test_docling_policy_refusal_is_marked_unreadable_and_never_retried(
 def test_group_b_regression_html_originals_convert_once_docling_sees_the_extension(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Regression test for the crimson incident group B: an html original stored under a
-    display name with no extension, like the real `artifact` and `35531` rows, came back
-    Docling `skipped` until the real `DoclingClient` renamed the wire copy before sending it.
+    """Cover extensionless HTML from the object store regression case.
+
+    A display name with no extension comes back as Docling `skipped` until the real
+    `DoclingClient` renames the wire copy before sending it.
 
     The mock transport plays Docling's own real behavior, keyed on the sent filename alone,
     so this proves the fix through the real client rather than a test double that never saw

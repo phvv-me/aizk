@@ -3,13 +3,13 @@
 @plugin '@tailwindcss/typography';
 
 :root {
-  --background: oklch(0.992 0.006 275);
-  --foreground: oklch(0.208 0.03 262);
+  --background: #fffaf1;
+  --foreground: #17223b;
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.208 0.03 262);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.208 0.03 262);
-  --primary: #4f46e5;
+  --primary: #315dff;
   --primary-foreground: oklch(0.984 0.003 248);
   --secondary: oklch(0.955 0.007 248);
   --secondary-foreground: oklch(0.279 0.035 260);
@@ -21,8 +21,8 @@
   --destructive-foreground: oklch(0.984 0.003 248);
   --border: oklch(0.917 0.008 255);
   --input: oklch(0.917 0.008 255);
-  --ring: #4f46e5;
-  --sidebar: #f5f6ff;
+  --ring: #315dff;
+  --sidebar: #f4e8d0;
   --sidebar-foreground: oklch(0.32 0.03 260);
   --sidebar-border: oklch(0.917 0.008 255);
   --series-1: #2a78d6;
@@ -35,14 +35,14 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #111027;
+    --background: #10182b;
     --foreground: oklch(0.955 0.005 248);
-    --card: #1b193e;
+    --card: #17223b;
     --card-foreground: oklch(0.955 0.005 248);
     --popover: oklch(0.215 0.018 262);
     --popover-foreground: oklch(0.955 0.005 248);
-    --primary: #a5b4fc;
-    --primary-foreground: #1e1b4b;
+    --primary: #a9c5ff;
+    --primary-foreground: #17223b;
     --secondary: oklch(0.27 0.02 260);
     --secondary-foreground: oklch(0.955 0.005 248);
     --muted: oklch(0.27 0.02 260);
@@ -53,8 +53,8 @@
     --destructive-foreground: oklch(0.175 0.015 262);
     --border: oklch(0.3 0.02 260);
     --input: oklch(0.3 0.02 260);
-    --ring: #a5b4fc;
-    --sidebar: #171534;
+    --ring: #a9c5ff;
+    --sidebar: #17223b;
     --sidebar-foreground: oklch(0.87 0.012 255);
     --sidebar-border: oklch(0.27 0.02 260);
     --series-1: #3987e5;

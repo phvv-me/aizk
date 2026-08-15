@@ -30,6 +30,16 @@ def memory_store(limit: int = 1024) -> ByteStore:
     )
 
 
+def test_retirement_grace_exceeds_every_issued_download_lifetime() -> None:
+    with pytest.raises(ValueError, match="retirement_grace"):
+        ByteStore(
+            backend=MemoryStore(),
+            upload_byte_limit=1024,
+            internal_download_lifetime=timedelta(hours=1),
+            retirement_grace=timedelta(hours=1),
+        )
+
+
 def test_settings_define_the_bounded_object_store_contract() -> None:
     configured = Settings(
         object_store_endpoint="https://objects.test",

@@ -4,8 +4,8 @@ description: "What the self-hosted PostgreSQL backup covers, what restoring brin
 ---
 
 A backup is only as good as the last time somebody restored it. This page applies to the
-self-hosted PostgreSQL profile. The crAIZK AWS demo currently disables application-managed
-backups and relies on CockroachDB Cloud and S3 service controls. This page covers what
+self-hosted PostgreSQL profile. The crAIZK AWS demo disables application-managed backups and
+relies on CockroachDB Cloud and S3 service controls. This page covers what
 `src/aizk/backup.py` actually writes, what a restore brings back, and the several things it does
 not. It assumes you know the role split from
 [PostgreSQL profile](/docs/dev/run/postgres/).
@@ -62,7 +62,7 @@ normalized Markdown and Docling JSON, and the durable usage ledger.
 
 ```sh
 docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker \
-  aizk admin database restore /backups/aizk-2026-07-17.dump
+  aizk admin database restore /backups/aizk.dump
 ```
 
 `restore_database` streams the archive into `pg_restore` with `--exit-on-error` and

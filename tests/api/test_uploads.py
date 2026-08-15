@@ -76,7 +76,7 @@ def test_mint_issues_one_capability_claimable_exactly_once(settings: Settings) -
         user_id,
         read=(user_id, organization),
         write=(user_id, organization),
-        name="Pedro Valois",
+        name="Maya Chen",
         organizations=(
             OrganizationStanding(
                 id=organization,
@@ -97,7 +97,7 @@ def test_mint_issues_one_capability_claimable_exactly_once(settings: Settings) -
     # The restored caller is least-authority: writable to exactly the resolved target
     # scope, carrying no read table or organization directory beyond it.
     assert ticket.user.id == user.id
-    assert ticket.user.name == "Pedro Valois"
+    assert ticket.user.name == "Maya Chen"
     assert ticket.target == frozenset({organization})
     assert ticket.user.scopes.write == frozenset({organization})
     assert ticket.user.scopes.read == frozenset({organization})

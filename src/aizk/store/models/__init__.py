@@ -5,6 +5,7 @@ from .tables import (
     Chunk,
     Community,
     Document,
+    ObjectRetirement,
     OperatorReading,
     OperatorSnapshot,
     Profile,
@@ -33,5 +34,6 @@ __all__ = [
     "UsageEvent",
     "OperatorReading",
     "OperatorSnapshot",
+    "ObjectRetirement",
     "Watermark",
 ]

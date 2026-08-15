@@ -65,8 +65,8 @@ installs the PgQueuer schema. It holds the owner credential and exits. `server`,
 `worker` all declare `service_completed_successfully` on it, so no request path ever starts
 against an older schema than the one it was built for.
 
-The PostgreSQL history currently has fourteen revisions in `src/aizk/store/migrations/versions/`.
-The CockroachDB profile uses one fused baseline in
+The PostgreSQL history lives in `src/aizk/store/migrations/versions/`. The CockroachDB profile uses
+one fused baseline in
 `src/aizk/store/migrations/cockroachdb/versions/`. [Migrations and DDL](/docs/dev/store/migrations/)
 explains why the cloud profile starts from one migration rather than replaying PostgreSQL history.
 

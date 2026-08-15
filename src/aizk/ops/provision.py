@@ -82,11 +82,13 @@ class _CockroachDBProvisioning(_DatabaseProvisioning):
 
 def _database_provisioning() -> _DatabaseProvisioning:
     """Build the configured schema lifecycle strategy."""
-    strategies = {
-        DatabaseBackend.postgresql: _PostgreSQLProvisioning,
-        DatabaseBackend.cockroachdb: _CockroachDBProvisioning,
-    }
-    return strategies[settings.database_backend]()
+    match settings.database_backend:
+        case DatabaseBackend.postgresql:
+            return _PostgreSQLProvisioning()
+        case DatabaseBackend.cockroachdb:
+            return _CockroachDBProvisioning()
+        case _:
+            raise ValueError(f"unsupported database backend {settings.database_backend}")
 
 
 def alembic_config() -> Config:

@@ -448,9 +448,9 @@ services:
   # recipe that mounts the original Qwen3 reranker checkpoint as a sequence classifier scoring
   # yes/no token logits; score calibration additionally requires the official prompt scaffold,
   # which `src/aizk/config/settings.py`'s rerank templates apply client-side. The 4B is the measured
-  # floor for this lane: on 253 real vault queries reranking the embedder's own top 8, the
-  # 0.6B checkpoint DEGRADED ordering (MRR 0.90 to 0.77 even correctly templated) while the
-  # 4B held it (0.90 to 0.91), so the small model is never a valid economy here. The
+  # floor for this lane. A sanitized fixture found that the 0.6B checkpoint degraded ordering
+  # even when correctly templated while the 4B preserved it, so the small model is not a valid
+  # economy here. The
   # depends_on chain keeps the three models profiling one at a time on the shared 24 GB card.
   # AIZK_RERANK_CHECKPOINT/AIZK_RERANK_MODEL split the same way as the other lanes, weights
   # path versus served alias, and the alias must match `src/aizk/config/settings.py`'s rerank_model.

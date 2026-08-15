@@ -483,12 +483,20 @@ async def compact_storage(limit: int | None = None) -> None:
     Raising `AIZK_OBJECT_STORE_COMPRESSION_LEVEL` only changes how new objects are written,
     so run this to bring everything already stored up to the same policy. Each object is
     restored and matched against its content hash before it is written again, so the pass
-    doubles as an integrity check and can be interrupted at any point. Run it repeatedly
-    until `examined` comes back zero.
+    doubles as an integrity check and can be interrupted at any point. Old layouts are
+    retired after the reader-safety grace rather than deleted inline. Run it repeatedly until
+    `examined` comes back zero.
     """
     compaction = ArtifactCompaction(build_byte_store(settings), ArtifactRepository())
     report = await compaction.compact(limit or settings.object_store_compaction_batch_size)
-    print(_json({**report.model_dump(mode="json"), "reclaimed": report.reclaimed}))
+    print(
+        _json(
+            {
+                **report.model_dump(mode="json"),
+                "logical_savings": report.logical_savings,
+            }
+        )
+    )
 
 
 @settings_app.command(name="show")

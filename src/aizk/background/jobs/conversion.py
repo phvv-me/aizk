@@ -1,6 +1,7 @@
 from typing import ClassVar, Protocol
 from uuid import UUID
 
+from loguru import logger
 from patos import FrozenModel
 from pydantic import UUID7
 from sqlalchemy import and_, or_
@@ -147,8 +148,11 @@ class ArtifactRecovery:
         for payload in payloads:
             try:
                 content_ids.append(ArtifactConversionJob.decode(payload).artifact_content_id)
-            except TypeError, ValueError:
-                continue
+            except (TypeError, ValueError) as error:
+                logger.warning(
+                    "ignored malformed active conversion payload of type {}",
+                    type(error).__name__,
+                )
         return tuple(content_ids)
 
 
@@ -256,8 +260,11 @@ class ArtifactReconversion:
         for payload in payloads:
             try:
                 content_ids.append(ArtifactConversionJob.decode(payload).artifact_content_id)
-            except TypeError, ValueError:
-                continue
+            except (TypeError, ValueError) as error:
+                logger.warning(
+                    "ignored malformed active conversion payload of type {}",
+                    type(error).__name__,
+                )
         return tuple(content_ids)
 
 

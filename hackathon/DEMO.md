@@ -130,7 +130,7 @@ Docker socket, AWS credentials, or a writable host workspace.
 
 Codex called `status` as Maya Chen, kept one private note, and recalled it with a differently worded
 `find` using `web="off"` and `fresh=false`. The resulting document was
-`019ff5bf-c172-756e-9a76-08ea9c2c8b1d`, and it appeared as the first evidence item. Complete agent
+the returned document receipt, and it appeared as the first evidence item. Complete agent
 turns took 16.98 seconds for `status`, 18.46 seconds for `keep`, and 37.33 seconds for `find`.
 
 The dated August 12 result used an external PKCE bootstrap and a short-lived bearer token because it
@@ -160,7 +160,7 @@ ordinary isolated Docker bridge.
 
 The run completed DCR and OAuth as Maya Chen, connected over MCP `2026-07-28`, called `status`, kept
 one private note, and recalled it with a differently worded `find` using `web="off"` and
-`fresh=false`. The resulting document was `019ff54f-8b2d-72ab-8a34-0b7a57e71ce7`. The MCP portion
+`fresh=false`. The resulting document identifier was redacted. The MCP portion
 of `status` took 2.86 seconds, `keep` took 4.82 seconds, and `find` took 7.26 seconds. The three
 DeepSeek V4 Flash conversations cost about $0.0048 through OpenRouter.
 

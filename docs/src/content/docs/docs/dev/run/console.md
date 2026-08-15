@@ -3,7 +3,7 @@ title: "The operator console"
 description: "One gated hostname for Grafana, tracing and the operator pages, and the Cloudflare names that reach it."
 ---
 
-Everything an operator touches lives behind one hostname, `admin.phvv.me`, and one Logto role.
+Everything an operator touches lives behind one hostname, `admin.example.com`, and one Logto role.
 It is a second Caddy site on port 8082 inside the same container that serves the public origin,
 described on [Deployment topology](/docs/dev/run/topology/).
 
@@ -37,8 +37,8 @@ host.caddy -> host.grafana: "/grafana"
 ## One host, several paths
 
 Paths rather than a name per tool, and the reason is money. Cloudflare's free Universal SSL
-certificate covers the apex and one level of subdomain, so `admin.phvv.me` is covered while
-`observability.admin.phvv.me` would need Advanced Certificate Manager at ten dollars a month.
+certificate covers the apex and one level of subdomain, so `admin.example.com` is covered while
+`observability.admin.example.com` would need Advanced Certificate Manager at ten dollars a month.
 
 | Match | Goes to |
 |---|---|
@@ -82,23 +82,23 @@ rather than in this repository.
 
 | Public hostname | Service |
 |---|---|
-| `aizk.phvv.me` | `web:8081` |
-| `auth.phvv.me` | `logto:3001` |
-| `admin.phvv.me` | `web:8082` |
-| `console.phvv.me` | `logto:3002` |
+| `aizk.example.com` | `web:8081` |
+| `auth.example.com` | `logto:3001` |
+| `admin.example.com` | `web:8082` |
+| `console.example.com` | `logto:3002` |
 
 All four are first-level subdomains, which is what keeps the certificate free.
 
 :::caution[Move the Logto console in one step]
 Logto's console must own an origin. Serving it under a path was asked for in 2022 and never
-implemented, so a subpath deployment answers 404, and that is why it cannot join `admin.phvv.me`
-as `/console`. It moves to `console.phvv.me` instead. Add the Cloudflare hostname and change
+implemented, so a subpath deployment answers 404, and that is why it cannot join `admin.example.com`
+as `/console`. It moves to `console.example.com` instead. Add the Cloudflare hostname and change
 `AIZK_LOGTO_ADMIN_ENDPOINT` in the same step, because Logto bakes that endpoint into the console's
 own redirect URIs and a half-done cutover locks the console out. Keep it to one line so the revert
 is one line too.
 :::
 
-Cloudflare Access can sit in front of `admin.phvv.me` as a second, independent layer. Its free tier
+Cloudflare Access can sit in front of `admin.example.com` as a second, independent layer. Its free tier
 covers 50 users and its Independent MFA policy asks for a WebAuthn key at the edge, before a
 request ever reaches the tunnel. It is worth adding because it fails differently than the Logto
 gate does, so one of them being wrong does not open the console. It stays optional, and the

@@ -44,7 +44,7 @@ def reordered(
     """Put maximal named-source evidence first, then order each group by merit.
 
     A source title contained inside another named title is not a separate identity match. This
-    prevents `JLPT N2` from shadowing `JLPT N2 Window Weekly Plan`, while unrelated titles named
+    prevents `Atlas` from shadowing `Atlas Weekly Plan`, while unrelated titles named
     together remain peers. Ties break on `evidence_id` exactly as the statement orders them, and
     candidates beyond the scoring depth keep the statement's lane-priority order as the fallback.
     """

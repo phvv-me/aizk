@@ -33,7 +33,7 @@
     "database_warm_range_ms": [443.646, 536.459],
     "cold_first_find_ms": 7133.897
   },
-  "pgAIZK_cross_check": {
+  "full_profile_cross_check": {
     "note": "The same phrase checks ran against the broader source corpus, so this is diagnostic rather than an apples-to-apples retrieval benchmark.",
     "expectations_matched": 13,
     "expectations_total": 29,

@@ -49,8 +49,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - pypi: ..
-      - pypi: ../../../home/pedro/projects/packages/rls
-      - pypi: ../../../home/pedro/projects/packages/sqlalchemy
+      - pypi: ../../rls
+      - pypi: ../../sqlalchemy
       - pypi: https://files.pythonhosted.org/packages/02/36/ecc85bc96c273dc8a11273ed4782272975e6338d4a3e9228621175edf0e3/jaraco_functools-4.6.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/03/f9/08d8ce5d312e05f3c53368ce993d2f6346519d212e8801fa9c5cdbd299a3/asyncpg_stubs-0.31.3-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/04/2c/9e69d73c4297508be9e3b64a970ea3971b3eb8db64ffc5802d40bd25981f/jsonschema_path-0.5.0-py3-none-any.whl
@@ -821,7 +821,7 @@ packages:
   - rtree>=1.4,<2 ; extra == 'heavy-converter'
   - scipy>=1.18,<2 ; extra == 'heavy-converter'
   requires_python: '>=3.14'
-- pypi: ../../../home/pedro/projects/packages/rls
+- pypi: ../../rls
   name: rlsalchemy
   requires_dist:
   - alembic>=1.18.5,<2
@@ -831,7 +831,7 @@ packages:
   - sqlalchemy>=2.1.0b3,<3
   - sqlglot>=30,<31
   requires_python: '>=3.14'
-- pypi: ../../../home/pedro/projects/packages/sqlalchemy
+- pypi: ../../sqlalchemy
   name: sqlalchemy
   requires_dist:
   - typing-extensions>=4.6.0

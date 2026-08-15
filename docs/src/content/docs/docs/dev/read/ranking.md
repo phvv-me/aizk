@@ -135,12 +135,12 @@ list and leaves the tail alone.
 
 `_shadowed_titles` returns every named title that is strictly contained in another named title.
 
-Without it, a question naming `JLPT N2 Window Weekly Plan` also directly names the document titled
-`JLPT N2`, and both would land in the authoritative group. The broader document then competes on
-equal footing with the one the question actually asked for. Shadowing drops the contained title out
-of the identity group while leaving it in the ranking, so it can still win on merit. Two unrelated
-titles named in the same question shadow neither, since neither contains the other, and they stay
-peers.
+Without it, a question naming the fictional document `Atlas Migration Weekly Plan` also directly
+names the document titled `Atlas Migration`, and both would land in the authoritative group. The
+broader document then competes on equal footing with the one the question actually asked for.
+Shadowing drops the contained title out of the identity group while leaving it in the ranking, so
+it can still win on merit. Two unrelated titles named in the same question shadow neither, since
+neither contains the other, and they stay peers.
 
 The shadow test runs on `Candidate.direct_title`, which is the casefolded `source_title` and only
 exists when `direct` is true.

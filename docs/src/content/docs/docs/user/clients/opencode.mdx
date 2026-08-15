@@ -13,11 +13,10 @@ OpenCode is the shortest of the three client setups. One committed file, one sig
 command for when something looks wrong.
 
 :::caution[Use a release that speaks modern MCP]
-As of August 13, 2026, OpenCode `1.18.8` is the official release that negotiates MCP
-`2026-07-28`. OpenCode reverted that client in `1.18.9` while upstream compatibility problems are
-resolved, so releases `1.18.9` through `1.18.18` cannot connect to a modern-only aizk server. Pin
-`1.18.8` for now and check the [OpenCode rollback](https://github.com/anomalyco/opencode/pull/39373)
-before removing the pin.
+AIZK requires MCP `2026-07-28`. OpenCode `1.18.8` is the verified compatible release. OpenCode
+returned to its earlier MCP client in `1.18.9`, so releases `1.18.9` through `1.18.18` cannot
+connect to an AIZK server that accepts only the modern protocol. Pin `1.18.8` and check the
+[OpenCode rollback](https://github.com/anomalyco/opencode/pull/39373) before changing the pin.
 :::
 
 ## The configuration file

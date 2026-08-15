@@ -29,13 +29,16 @@ class Recorder:
 
     async def record_compaction(
         self,
-        blob_id: UUID7,
+        observed: StoredObject,
         level: int,
         verified_at: datetime,
         replacement: StoredBytes | None = None,
-    ) -> None:
+        retire_after: datetime | None = None,
+    ) -> bool:
         assert verified_at.tzinfo is UTC
-        self.recorded.append((blob_id, level, replacement))
+        assert (retire_after is not None) is (replacement is not None)
+        self.recorded.append((observed.id, level, replacement))
+        return True
 
 
 def store(backend: MemoryStore, compression_enabled: bool = True) -> ByteStore:
@@ -75,10 +78,12 @@ def test_a_legacy_object_moves_to_a_denser_layout_without_changing_one_byte() ->
         assert recorder.asked == [(9, 10)]
         assert report.examined == 1
         assert report.rewritten == 1
+        assert report.conflicted == 0
         assert report.failed == 0
         assert report.stored_bytes_before == len(payload)
         assert report.stored_bytes_after < report.stored_bytes_before
-        assert report.reclaimed == report.stored_bytes_before - report.stored_bytes_after
+        assert report.logical_savings == report.stored_bytes_before - report.stored_bytes_after
+        assert report.pending_retirement_bytes == legacy.stored_size
 
         blob_id, level, replacement = recorder.recorded[0]
         assert (blob_id, level) == (legacy.id, 9)
@@ -99,9 +104,8 @@ def test_a_legacy_object_moves_to_a_denser_layout_without_changing_one_byte() ->
             )
             == payload
         )
-        # The old key is only dropped after PostgreSQL points at the new one.
-        with pytest.raises(FileNotFoundError):
-            await backend.get_async(legacy.key)
+        # The old key remains readable until its durable retirement grace expires.
+        assert bytes(await (await backend.get_async(legacy.key)).bytes_async()) == payload
 
     asyncio.run(body())
 
@@ -118,14 +122,63 @@ def test_an_incompressible_object_is_stamped_and_left_exactly_where_it_is() -> N
             limit=10
         )
 
-        assert (report.examined, report.rewritten, report.failed) == (1, 0, 0)
-        assert report.reclaimed == 0
+        assert (report.examined, report.rewritten, report.conflicted, report.failed) == (
+            1,
+            0,
+            0,
+            0,
+        )
+        assert report.logical_savings == 0
+        assert report.pending_retirement_bytes == 0
         # Stamped so the next pass skips it, with no replacement recorded.
         assert recorder.recorded == [(legacy.id, 9, None)]
         # The original is untouched and the speculative rewrite left nothing behind.
         assert bytes(await (await backend.get_async(legacy.key)).bytes_async()) == payload
         keys = [entry["path"] async for batch in backend.list() for entry in batch]
         assert keys == [legacy.key]
+
+    asyncio.run(body())
+
+
+def test_a_stale_nonreplacement_pass_counts_a_conflict_without_claiming_success() -> None:
+    class ConflictingRecorder(Recorder):
+        async def record_compaction(
+            self,
+            observed: StoredObject,
+            level: int,
+            verified_at: datetime,
+            replacement: StoredBytes | None = None,
+            retire_after: datetime | None = None,
+        ) -> bool:
+            await super().record_compaction(
+                observed,
+                level,
+                verified_at,
+                replacement,
+                retire_after,
+            )
+            return False
+
+    async def body() -> None:
+        backend = MemoryStore()
+        payload = Random(23).randbytes(4096)
+        legacy = await seed(backend, "objects/stale-dense", payload)
+
+        report = await ArtifactCompaction(
+            store(backend),
+            cast(ArtifactRepository, ConflictingRecorder((legacy,))),
+        ).compact(limit=1)
+
+        assert report.model_dump() == {
+            "examined": 1,
+            "rewritten": 0,
+            "conflicted": 1,
+            "failed": 0,
+            "stored_bytes_before": len(payload),
+            "stored_bytes_after": len(payload),
+            "pending_retirement_bytes": 0,
+        }
+        assert report.logical_savings == 0
 
     asyncio.run(body())
 
@@ -147,7 +200,12 @@ def test_an_unreadable_object_is_reported_and_stays_a_candidate() -> None:
             store(backend), cast(ArtifactRepository, recorder)
         ).compact(limit=10)
 
-        assert (report.examined, report.rewritten, report.failed) == (1, 0, 1)
+        assert (report.examined, report.rewritten, report.conflicted, report.failed) == (
+            1,
+            0,
+            0,
+            1,
+        )
         assert report.stored_bytes_after == report.stored_bytes_before
         # Nothing is stamped, so the object is retried and the integrity pass still sees it.
         assert recorder.recorded == []
@@ -191,8 +249,13 @@ def test_a_batch_reports_every_outcome_it_saw() -> None:
             store(backend), cast(ArtifactRepository, recorder)
         ).compact(limit=3)
 
-        assert (report.examined, report.rewritten, report.failed) == (3, 1, 1)
+        assert (report.examined, report.rewritten, report.conflicted, report.failed) == (
+            3,
+            1,
+            0,
+            1,
+        )
         assert report.stored_bytes_before == sum(item.stored_size for item in candidates)
-        assert report.reclaimed > 0
+        assert report.logical_savings > 0
 
     asyncio.run(body())

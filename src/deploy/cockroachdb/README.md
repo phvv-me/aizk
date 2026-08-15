@@ -1,7 +1,7 @@
 # CockroachDB development profile
 
 This isolated profile runs AIZK with CockroachDB and OpenRouter. It does not join, stop, or
-reuse any Crimson service, network, port, or volume. The existing PostgreSQL profile remains
+reuse any existing service, network, port, or volume. The PostgreSQL profile remains
 unchanged.
 
 Copy `.env.example` outside version control or pass the monorepo environment file explicitly.

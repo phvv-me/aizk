@@ -32,7 +32,7 @@ narrows authority, and the last filter runs under a role that cannot turn it off
                └▶ resolve User from Logto orgs and roles
                    └▶ per-caller token bucket
                        └▶ find, keep, share, artifact
-                           └▶ bind caller scopes into app.scopes
+                           └▶ bind typed app.scopes.* and app.operator settings
                                └▶ forced RLS inside PostgreSQL
                                     every scope present ─▶ tenant rows
                                     missing a scope    ─▶ row filtered out

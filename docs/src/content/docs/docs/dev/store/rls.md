@@ -53,7 +53,9 @@ policies = [
     rls.Policy.insert(write, roles=(settings.app_role,)),
 ]
 if cls.mutable:
-    policies.append(rls.Policy.update(write, check=write, roles=(settings.app_role,)))
+    policies.append(
+        rls.Policy.update(write, check=write, roles=(settings.app_role,))
+    )
 if cls.deletable:
     policies.append(rls.Policy.delete(write, roles=(settings.app_role,)))
 ```

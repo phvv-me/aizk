@@ -406,8 +406,10 @@ def test_docling_filename_renames_to_the_extension_docling_requires(
 
 
 def test_docling_client_renames_extensionless_html_and_plain_text_before_sending() -> None:
-    """Reproduces the crimson incident: html and plain text stored under a display name with
-    no extension came back Docling `skipped`, until the wire copy carried the right one."""
+    """Reproduce extensionless HTML and plain text being skipped by Docling.
+
+    The wire copy must carry the extension implied by its media type.
+    """
     requests: list[httpx.Request] = []
 
     async def convert(request: httpx.Request) -> httpx.Response:

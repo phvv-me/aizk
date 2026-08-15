@@ -24,8 +24,8 @@ def status_user() -> User:
         owner,
         read=(owner, private_lab, docs),
         write=(owner, private_lab),
-        name="Pedro Valois",
-        username="pedro",
+        name="Maya Chen",
+        username="maya",
         avatar="https://example.com/avatar.png",
         roles=("aizk-user",),
         organizations=(
@@ -51,10 +51,10 @@ def test_caller_status_exposes_authority_without_internal_identifiers() -> None:
     status = CallerStatus.from_user(status_user())
 
     assert status.model_dump(mode="json") == {
-        "name": "Pedro Valois",
-        "username": "pedro",
+        "name": "Maya Chen",
+        "username": "maya",
         "avatar": "https://example.com/avatar.png",
-        "label": "Pedro Valois",
+        "label": "Maya Chen",
         "roles": ["aizk-user"],
         "anonymous": False,
         "organizations": [

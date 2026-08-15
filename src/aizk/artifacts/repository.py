@@ -2,10 +2,11 @@ from datetime import UTC, datetime
 
 from pydantic import UUID7, JsonValue
 from sqlalchemy import func, or_
-from sqlmodel import select, update
+from sqlalchemy.sql.elements import ColumnElement
+from sqlmodel import delete, select, update
 
-from ..storage import IntegrityCheck, StoredBytes, StoredObject
-from ..store import Artifact, Blob
+from ..storage import IntegrityCheck, RetiredObject, StoredBytes, StoredObject
+from ..store import Artifact, Blob, ObjectRetirement
 from ..store.identity import User
 from ..store.locking import acquire_locks
 from ..store.models.tables import ArtifactContent
@@ -22,7 +23,32 @@ def _stored_object(row: Blob) -> StoredObject:
         size=row.size,
         stored_size=row.stored_size,
         encoding=row.encoding,
+        encoding_level=row.encoding_level,
         version=row.storage_version,
+    )
+
+
+def _observed_layout(stored: StoredObject) -> tuple[ColumnElement[bool], ...]:
+    """Match exactly the immutable layout one worker actually read."""
+    expected_version = (
+        Blob.storage_version.is_(None)
+        if stored.version is None
+        else Blob.storage_version == stored.version
+    )
+    expected_level = (
+        Blob.encoding_level.is_(None)
+        if stored.encoding_level is None
+        else Blob.encoding_level == stored.encoding_level
+    )
+    return (
+        Blob.id == stored.id,
+        Blob.content_hash == stored.content_hash,
+        Blob.size == stored.size,
+        Blob.storage_key == stored.key,
+        expected_version,
+        Blob.stored_size == stored.stored_size,
+        Blob.encoding == stored.encoding,
+        expected_level,
     )
 
 
@@ -180,47 +206,146 @@ class ArtifactRepository:
 
     async def record_compaction(
         self,
-        blob_id: UUID7,
+        observed: StoredObject,
         level: int,
         verified_at: datetime,
         replacement: StoredBytes | None = None,
-    ) -> None:
-        """Stamp one evaluated object, moving it when the pass found a denser layout.
+        retire_after: datetime | None = None,
+    ) -> bool:
+        """Conditionally stamp one observed layout and report whether this worker won.
 
         Reaching this point required restoring the object and matching it against the
         stored content hash, so the same transaction records that verification.
+        The update compares the complete observed representation and prior compression
+        policy. Concurrent or stale workers therefore cannot overwrite a newer layout.
         `content_hash` and `size` describe the original bytes and never move.
         """
+        if replacement is not None:
+            if (
+                replacement.content_hash != observed.content_hash
+                or replacement.size != observed.size
+            ):
+                raise ValueError("a compacted representation must preserve content identity")
+            if replacement.key == observed.key:
+                raise ValueError("a compacted representation must use a fresh storage key")
+            if replacement.stored_size >= observed.stored_size:
+                raise ValueError(
+                    "a compacted replacement must be smaller than the observed layout"
+                )
+            if replacement.encoding_level != level:
+                raise ValueError("a compacted replacement must record the evaluated policy level")
+            if retire_after is None:
+                raise ValueError("a compacted replacement must defer its old layout's retirement")
+        elif retire_after is not None:
+            raise ValueError("an unchanged layout has nothing to retire")
+
+        values: dict[str, str | int | datetime | Blob.Encoding | None] = {
+            "encoding_level": level,
+            "integrity_checked_at": verified_at,
+            "integrity_error": None,
+        }
+        if replacement is not None:
+            values.update(
+                storage_key=replacement.key,
+                stored_size=replacement.stored_size,
+                encoding=replacement.encoding,
+                etag=replacement.etag,
+                storage_version=replacement.version,
+            )
         async with User.system().owner as session:
-            blob = await session.get(Blob, blob_id)
-            if blob is None:
-                raise LookupError("a compaction candidate disappeared before recording")
-            blob.encoding_level = level
-            blob.integrity_checked_at = verified_at
-            blob.integrity_error = None
-            if replacement is not None:
-                blob.storage_key = replacement.key
-                blob.stored_size = replacement.stored_size
-                blob.encoding = replacement.encoding
-                blob.etag = replacement.etag
-                blob.storage_version = replacement.version
+            written = await session.exec(
+                update(Blob)
+                .where(*_observed_layout(observed))
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+            won = bool(written.rowcount)
+            if won and replacement is not None:
+                assert retire_after is not None
+                session.add(
+                    ObjectRetirement(
+                        storage_key=observed.key,
+                        storage_version=observed.version,
+                        stored_size=observed.stored_size,
+                        delete_after=retire_after,
+                    )
+                )
+            return won
 
     async def record_integrity(
         self,
         checks: tuple[IntegrityCheck, ...],
         checked_at: datetime,
-    ) -> None:
-        """Record one pass in one owner transaction without changing immutable metadata."""
+    ) -> tuple[IntegrityCheck, ...]:
+        """Stamp only results whose exact observed layout is still current."""
         if not checks:
-            return
-        errors = {check.id: check.error for check in checks}
+            return ()
+        recorded: list[IntegrityCheck] = []
         async with User.system().owner as session:
-            rows = (await session.exec(select(Blob).where(Blob.id.in_(errors)))).all()
-            if len(rows) != len(checks):
-                raise LookupError("an integrity candidate disappeared before recording")
+            for check in checks:
+                written = await session.exec(
+                    update(Blob)
+                    .where(*_observed_layout(check.observed))
+                    .values(
+                        integrity_checked_at=checked_at,
+                        integrity_error=check.error,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+                if written.rowcount:
+                    recorded.append(check)
+        return tuple(recorded)
+
+    async def claim_retirements(
+        self,
+        delete_before: datetime,
+        lease_until: datetime,
+        limit: int,
+    ) -> tuple[RetiredObject, ...]:
+        """Lease reader-safe obsolete layouts so only one collector deletes each key."""
+        async with User.system().owner as session:
+            rows = list(
+                await session.exec(
+                    select(ObjectRetirement)
+                    .where(ObjectRetirement.delete_after <= delete_before)
+                    .order_by(ObjectRetirement.delete_after, ObjectRetirement.id)
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            )
             for row in rows:
-                row.integrity_checked_at = checked_at
-                row.integrity_error = errors[row.id]
+                row.delete_after = lease_until
+        return tuple(
+            RetiredObject(
+                id=row.id,
+                key=row.storage_key,
+                version=row.storage_version,
+                stored_size=row.stored_size,
+                delete_after=row.delete_after,
+            )
+            for row in rows
+        )
+
+    async def retirement_is_unreferenced(self, retired: RetiredObject) -> bool:
+        """Refuse deletion if a corrupted or manually edited row reused a retired key."""
+        async with User.system().owner as session:
+            current = await session.scalar(select(Blob.id).where(Blob.storage_key == retired.key))
+            return current is None
+
+    async def forget_retirement(self, retired: RetiredObject) -> bool:
+        """Remove one collected retirement only if no current blob refers to its key."""
+        async with User.system().owner as session:
+            current = await session.scalar(select(Blob.id).where(Blob.storage_key == retired.key))
+            if current is not None:
+                return False
+            removed = await session.exec(
+                delete(ObjectRetirement).where(
+                    ObjectRetirement.id == retired.id,
+                    ObjectRetirement.storage_key == retired.key,
+                    ObjectRetirement.delete_after == retired.delete_after,
+                )
+            )
+            return bool(removed.rowcount)
 
     async def original(
         self,

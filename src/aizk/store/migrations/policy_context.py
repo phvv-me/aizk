@@ -1,4 +1,5 @@
 from collections.abc import Callable, Sequence
+from typing import cast
 from uuid import UUID
 
 import rls
@@ -54,7 +55,7 @@ class PolicyContextTransition:
         )
         return states
 
-    def replace(self, execute: Callable[[Executable | str], None], *, legacy: bool) -> None:
+    def replace(self, execute: Callable[[Executable], None], *, legacy: bool) -> None:
         """Replace policies while keeping row security enabled and forced."""
         before = self.states(legacy=not legacy)
         after = self.states(legacy=legacy)
@@ -112,7 +113,7 @@ class PolicyContextTransition:
             ),
         )
         read = scoped_read
-        parent_scope: ColumnElement[bool] = sa.true()
+        parent_scope = sa.true()
         if read_through:
             parent_id = table.c[f"{read_through}_id"]
             if self.cockroachdb:
@@ -173,7 +174,7 @@ class PolicyContextTransition:
                 ),
                 "",
             )
-            return encoded.cast(ARRAY(sa.Uuid()))
+            return cast(ColumnElement[Sequence[UUID]], encoded.cast(ARRAY(sa.Uuid())))
         standing = rls.current_setting("scopes", JSONB(), prefix="app")
         values = (
             sa.func.jsonb_array_elements_text(standing.op("->")(permission))
@@ -184,7 +185,6 @@ class PolicyContextTransition:
 
     def operator_state(self, *, legacy: bool) -> rls.RLSState:
         """Build the operator snapshot policy for the selected carrier."""
-        standing: ColumnElement[bool]
         if legacy and self.cockroachdb:
             standing = sa.func.nullif(
                 sa.func.split_part(sa.func.current_setting("application_name", True), "|", 5),

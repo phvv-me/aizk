@@ -107,7 +107,7 @@ def status_report() -> StatusReport:
     now = datetime(2026, 7, 20, tzinfo=UTC)
     return StatusReport(
         generated_at=now,
-        caller=CallerStatus(name="Pedro", label="Pedro"),
+        caller=CallerStatus(name="Maya", label="Maya"),
         usage=UsageStatus(
             generated_at=now,
             recorded_through=now,

@@ -50,9 +50,9 @@ and cannot be an index lookup.
 ## The predicate
 
 `Scoped.__rls__` compiles the policies. The caller's standing reaches the transaction through the
-database adapter. PostgreSQL uses `app.scopes` settings. CockroachDB uses an encoded
-`application_name` value. `_authority` turns either form into native UUID arrays for the
-containment operators.
+database adapter. RLSAlchemy flattens the nested context into transaction-local
+`app.scopes.read`, `app.scopes.write` and `app.scopes.public` arrays on both PostgreSQL and
+CockroachDB. `_authority` reads those native UUID arrays for the containment operators.
 
 ```text
   read a row?
@@ -76,8 +76,8 @@ so it must not fall out of the public branch. Requiring cardinality 1 there is w
 doing so. The tests that cover this still carry the older name for the shape, in
 `tests/store/test_rls.py::test_scope_intersections_and_public_access_follow_the_lattice`.
 
-`Scoped` emits `scope_read` and `scope_insert` always, adds `scope_update` when the model declares
-`mutable` and `scope_delete` when it declares `deletable`, all bound to `settings.app_role`.
+`Scoped` emits `rls_select` and `rls_insert` always, adds `rls_update` when the model declares
+`mutable` and `rls_delete` when it declares `deletable`, all bound to `settings.app_role`.
 Setting `read_through` replaces the child's read predicate with "my parent is visible", and adds to
 its write predicate that `(parent_id, scopes)` must match a visible parent row exactly. That pairing
 is what stops a chunk from being written with a wider array than the document it belongs to.

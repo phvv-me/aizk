@@ -11,7 +11,7 @@ claim is inferred from the deployment-only update.
 
 ## Reference point
 
-Five live pgAIZK calls measured about 3.4 seconds of server time per call. Observed connector time
+Five calls against the full self-hosted profile measured about 3.4 seconds of server time per call. Observed connector time
 ranged from 3.5 to 3.9 seconds.
 
 The first crAIZK configuration never became warm because its 25 second timeout killed each new
@@ -24,7 +24,7 @@ environment during cold initialization. A 60 second timeout removed that failure
 | Query embedding | Commonly 0.29 to 0.65 seconds | 0.32 second warm median | Pin DeepInfra without fallback |
 | CockroachDB recall | 0.65 to 0.81 seconds | 1.55 second pooled warm median | Keep quality-safe lanes and optimize the composed statement next |
 | Access recording | Disabled | Disabled | Keep enabled by default and disable only for crAIZK |
-| Reranking | Disabled | Disabled | Keep pgAIZK behavior and omit it in crAIZK |
+| Reranking | Disabled | Disabled | Keep the full profile behavior and omit it in crAIZK |
 | Packing | Below 1 millisecond | Below 1 millisecond | Keep it |
 | Cold initialization | About 25 to 28 seconds | 32.68 second post-deployment find | Use 2048 MB and a five-minute warm event |
 
@@ -34,7 +34,7 @@ and graph facts all contribute useful evidence, so the final quality-safe profil
 communities, the entity catalog, and graph expansion. Profiles and RAPTOR remain disabled.
 
 Access recording does not change the current answer. Disabling it removes the recency and frequency
-feedback that improves future ranking, so pgAIZK keeps it enabled.
+feedback that improves future ranking, so the full profile keeps it enabled.
 
 ## Provider comparison
 
@@ -60,7 +60,7 @@ That pass used image digest
 
 ## Settings
 
-All recall settings default to true. This preserves pgAIZK behavior.
+All recall settings default to true. This preserves the full profile behavior.
 
 - `AIZK_RECALL_GRAPH_EXPANSION_ENABLED`
 - `AIZK_RECALL_COMMUNITIES_ENABLED`
@@ -73,12 +73,12 @@ All recall settings default to true. This preserves pgAIZK behavior.
 The AWS CDK inputs use the matching `AIZK_AWS_RECALL_*` names. The quality-safe crAIZK profile keeps
 communities, the entity catalog, and graph expansion. It disables profiles, RAPTOR, and access
 recording. Because crAIZK has no cross-encoder reranker, it also serves dense sources before graph
-facts. The production pgAIZK profile keeps facts first and every default enabled.
+facts. The full self-hosted profile keeps facts first and every default enabled.
 
 ## SWE reference workload
 
 The August 12 local Lambda simulation used a fresh `craizk_swe_eval` database with six public
-software engineering reference notes derived from pgAIZK sources. Native declarations connected the
+software engineering reference notes derived only from public sources. Native declarations connected the
 notes into 37 facts, 15 entities, and three communities. The eight local, global, and multihop
 questions covered 26 of 29 expected answer phrases. Warm Lambda find median was 867 ms. Internal
 database median was 462 ms, with warm samples from 444 to 536 ms.

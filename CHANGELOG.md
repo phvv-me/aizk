@@ -8,7 +8,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 ### Added
 
-- An operator console at `admin.phvv.me`, gated by one Logto role. `aizk-admin` joins `aizk-user`
+- An operator console at `admin.example.com`, gated by one Logto role. `aizk-admin` joins `aizk-user`
   as a second managed global role, carrying the same `control` API permission but never default,
   and `admin auth apply` now reconciles it instead of deleting it as an obsolete managed role. A
   new `admin auth roles` command prints every role under the managed prefix with the accounts
@@ -18,7 +18,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   `/grafana`, `/traces` reserved for a later tracing service, and the operator pages under
   `/app/admin`. It is one hostname carrying paths rather than a name per tool because Cloudflare's
   free certificate covers only first-level subdomains. Logto's own console moves to
-  `console.phvv.me`, since it cannot be served under a path.
+  `console.example.com`, since it cannot be served under a path.
 
 - `share` can select documents by question and can move instead of copy, so an agent no longer
   needs a document ID it had no way to obtain. Recall now prints the source document's ID and
@@ -299,18 +299,16 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   constant in the recall program is now a setting: seed weights, the mass window, the
   dangling-object factor, per-lane depths, the fact-candidate factor, the token estimate,
   and the fuzzy toggle.
-- The embedding default was measured, not assumed: on 1,903 real vault chunks and 1,101
-  title queries, `Qwen3-VL-Embedding-2B` at the schema's 1,024 dimensions retrieves within
-  one to two points of `Qwen3-Embedding-4B` (hit@5 88.0% vs 90.1%, MRR 0.794 vs 0.802),
-  and native dimensions add under a point, so the multimodal default and the Matryoshka cut
-  both stand. The text-only models widen the off-corpus distance gap, so a text-only
-  deployment can swap the checkpoint and reembed.
+- The embedding default was measured on a sanitized retrieval fixture rather than assumed.
+  `Qwen3-VL-Embedding-2B` stayed close to the larger text-only model while retaining the image
+  lane, so the multimodal default and the Matryoshka cut both stand. A text-only deployment can
+  still swap the checkpoint and reembed.
 - Facts are grounded to their exact source spans: the extraction schema asks each fact for
   the shortest verbatim supporting quote, and the graph writer aligns it to the chunk text
   (exact first, then case- and whitespace-insensitive with an offset map that survives
   multi-character casefolds like ß to ss) into `quote_start`/`quote_end` claim attributes.
-  A quote that cannot be aligned grounds nothing rather than guessing. Measured live on
-  real chunks, 13 of 20 extracted facts grounded with correct recovered spans. The idea
+  A quote that cannot be aligned grounds nothing rather than guessing. A bounded synthetic
+  fixture confirmed that supported facts recover their source spans. The idea
   came from evaluating Google LangExtract head-to-head, which lost to the house extractor
   on yield, latency, and vocabulary enforcement but demonstrated char-interval grounding
   worth stealing.
@@ -319,7 +317,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   unavailable model fails visibly. `AIZK_EXTRACT_BACKEND` selects the production LLM extractor or
   the experimental GLiNER graph route without changing graph-building code. The service batches
   overlapping word windows through GLiNER2's public `batch_extract` API and restores source spans.
-  A controlled Crimson comparison found the large checkpoint nearly as fast as base and somewhat
+  A controlled GPU host comparison found the large checkpoint nearly as fast as base and somewhat
   more precise, but still much weaker than the LLM on relation meaning. Large therefore serves the
   cheap gate while the LLM remains the default writer.
 - Ordinary 2,048-character graph chunks now fit one LLM extraction window instead of repeating
@@ -342,10 +340,9 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   Python packer that exactly replays the SQL packer walks the budget. Without the endpoint,
   recall stays one statement. The client wraps query and documents in the official Qwen3
   reranker prompt scaffold (`rerank_query_template`/`rerank_document_template`), which is
-  load-bearing: unscaffolded, the served classifier scores junk above answers. Measured on
-  real vault queries reranking the embedder's own top 8, the 0.6B checkpoint degraded MRR
-  0.90 to 0.77 even correctly scaffolded while the 4B held 0.91, so 4B is the shipped
-  default and the small checkpoint is never a valid economy.
+  load-bearing since unscaffolded requests can rank irrelevant text above answers. A sanitized
+  reranking fixture showed that the small checkpoint degraded ordering while the 4B checkpoint
+  preserved it, so 4B is the shipped default.
 
 - Speaker-aware capture preserves author label, role, channel, reply, phase, topic, and source
   time through chunks, working memory, graph claims, recall hits, and context blocks.
@@ -521,7 +518,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   back to the operating system is separate and worth one `pg_repack -t artifact_content` after the
   migration runs, which also rewrites that table's TOAST under the new `lz4` setting.
 
-## 0.0.1 - 2026-07-04
+## 0.0.1
 
 ### Added
 
@@ -540,5 +537,5 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   maintenance and admin, with Logto identity.
 - The eval harness, hit@k/nDCG@k/MRR scoring, a config sweep, and EverMemBench/TEMPO dataset
   loaders gated behind `AIZK_BENCHMARKS_ENABLED`.
-- Documentation at [phvv.me/aizk](https://phvv.me/aizk), the engine explained in five parts,
+- Documentation in the repository, with the engine explained in five parts,
   a paper-by-paper provenance map, and measured benchmarks and comparisons.

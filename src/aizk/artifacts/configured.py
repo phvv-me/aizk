@@ -27,7 +27,13 @@ from ..storage import ByteStore, s3_backend
 from .boilerplate import WebBoilerplateCleaner
 from .description import ImageDescriptionEnricher, OpenRouterImageCaptioner
 from .repository import ArtifactRepository
-from .service import ArtifactIntake, ArtifactIntegrity, ArtifactProcessor, ArtifactReindexer
+from .service import (
+    ArtifactIntake,
+    ArtifactIntegrity,
+    ArtifactProcessor,
+    ArtifactReindexer,
+    ArtifactRetirement,
+)
 from .visual import DirectImageEnricher
 
 
@@ -53,6 +59,7 @@ def build_byte_store(config: Settings) -> ByteStore:
         internal_download_lifetime=timedelta(
             seconds=config.object_store_internal_download_lifetime_seconds
         ),
+        retirement_grace=timedelta(seconds=config.object_store_retirement_grace_seconds),
     )
 
 
@@ -64,6 +71,7 @@ class ArtifactServices:
     conversion: DoclingConversionJob
     reindex: MarkdownReindexJob
     integrity: ArtifactIntegrity
+    retirement: ArtifactRetirement
     reader: ArtifactReader
     converter: DoclingClient
     scanner: ContentScanner
@@ -182,6 +190,7 @@ def build_artifact_services(config: Settings, storage: ByteStore) -> ArtifactSer
         conversion=conversion,
         reindex=MarkdownReindexJob(ArtifactReindexer(repository)),
         integrity=ArtifactIntegrity(storage, repository),
+        retirement=ArtifactRetirement(storage, repository),
         reader=reader,
         converter=converter,
         scanner=scanner,

@@ -32,8 +32,8 @@ scopes = ["control", "offline_access", "openid"]
 client_id = "YOUR_AIZK_CLIENT_ID"
 ```
 
-Codex `0.147.0` ships MCP `2026-07-28` behind the `mcp_2026_07_28` feature. aizk accepts only
-that current protocol, so this flag is required until Codex enables it by default.
+The `mcp_2026_07_28` feature makes Codex negotiate MCP `2026-07-28`. AIZK accepts only that
+protocol, so keep the feature enabled while Codex exposes it as an opt-in setting.
 
 Codex derives the exact resource from the MCP endpoint. The scopes remain explicit because some
 serverless gateways rename the authentication challenge header. `control` grants use of the memory

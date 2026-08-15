@@ -465,6 +465,8 @@ class Settings(BaseSettings):
     # An adaptive-compression threshold below one can only ever reduce stored bytes.
     object_store_compression_min_savings: float = Field(0.05, ge=0.0, lt=1.0)
     object_store_internal_download_lifetime_seconds: PositiveInt = 300
+    object_store_retirement_batch_size: PositiveInt = 100
+    object_store_retirement_grace_seconds: PositiveInt = 3600
     object_store_secret_key: SecretStr = SecretStr("")
     object_store_upload_byte_limit: PositiveInt = 100_663_296
     object_store_user_byte_limit: PositiveInt | None = None
@@ -896,6 +898,19 @@ class Settings(BaseSettings):
                 else permissions - {self.logto_write_permission}
                 for role, permissions in self.logto_role_permissions.items()
             }
+        return self
+
+    @model_validator(mode="after")
+    def safe_object_retirement(self) -> Self:
+        """Keep an obsolete layout beyond every signed URL minted for that key."""
+        if (
+            self.object_store_retirement_grace_seconds
+            <= self.object_store_internal_download_lifetime_seconds
+        ):
+            raise ValueError(
+                "object_store_retirement_grace_seconds must exceed "
+                "object_store_internal_download_lifetime_seconds"
+            )
         return self
 
     @model_validator(mode="after")

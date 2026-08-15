@@ -46,14 +46,14 @@ def test_memory_status_and_user_serialization_are_directory_safe() -> None:
         uuid5(),
         read=(organization.id,),
         organizations=(organization,),
-        name="Pedro",
-        username="pedro",
+        name="Maya",
+        username="maya",
     )
 
     assert Memory(user, fake_artifact_services().intake).status is user
     serialized = user.model_dump(mode="json")
-    assert serialized["name"] == "Pedro"
-    assert serialized["username"] == "pedro"
+    assert serialized["name"] == "Maya"
+    assert serialized["username"] == "maya"
     assert serialized["organizations"][0]["name"] == "Research"
     assert "id" not in serialized
     assert "scopes" not in serialized

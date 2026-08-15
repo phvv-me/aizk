@@ -1,124 +1,125 @@
 ---
-title: "Comparison"
-description: "How aizk differs from vault search and from published memory systems."
+title: "Choosing the right memory tool"
+description: "When to use exact search, semantic file search, or aizk."
 ---
 
-This page compares mechanisms. It is not a scoreboard. Where a number appears it carries the date
-and the conditions it was taken under, and where no number exists the page says so plainly. For
-what has actually been measured and how, [How we evaluate](/docs/dev/eval/approach/) owns that
-subject.
+This page explains which problem aizk solves and when a simpler tool is a better choice. The
+comparison is about behavior, not winners. No head-to-head benchmark supports the feature tables
+below. [How we evaluate](/docs/dev/eval/approach/) explains which measurements can support a public
+quality claim.
 
-## Against vault search
+## Exact search, semantic file search, and aizk
 
-Literal search stays the right tool for an exact string or a file path. `rg` finds it in
-milliseconds and nothing has to be indexed first. aizk earns its keep on the other kind of
-question, the one that needs meaning, source time, a speaker's perspective, a shared scope, or
-evidence gathered across several documents. They are complements and a working setup runs both.
+A vault means a folder of Markdown files, notes, or project documents. Three tools cover different
+ways of finding information in that folder.
+
+- [`rg`](https://github.com/BurntSushi/ripgrep) searches exact text and file paths without an
+  index.
+- [`qmd`](https://github.com/tobi/qmd) indexes local documents for keyword and semantic search. It
+  returns matching files or passages.
+- aizk stores sources, claims, authorship, validity periods, and sharing boundaries. It returns a
+  ranked set of evidence that an agent can use directly.
+
+Use exact search whenever the wording or path is known. Use semantic file search when the wording
+is uncertain but the matching document is the desired result. Use aizk when the answer also
+depends on who said something, when it was true, who may read it, or how several sources fit
+together.
 
 ```text
   a question
       │
       ▼
-  exact string or file path?
+  exact wording or path known?
       │
-      ├─ yes ─▶ rg      fastest, no index to keep fresh
+      ├─ yes ─▶ rg      searches the files directly
       │
-      └─ no  ─▶ needs a scope, a speaker, or a point in time?
+      └─ no  ─▶ is a matching file or passage enough?
                     │
-                    ├─ no  ─▶ qmd    returns matching files and snippets
+                    ├─ yes ─▶ qmd    searches an indexed document collection
                     │
-                    └─ yes ─▶ aizk   returns one ranked evidence pack
+                    └─ no  ─▶ aizk   returns ranked, sourced evidence
 ```
 
-| Need | Vault tools | aizk |
+| Need | Best starting point | Why |
 |---|---|---|
-| exact term or path | fastest and simplest | unnecessary overhead |
-| paraphrased intent | embedding search where available | dense and lexical fusion in one statement |
-| shared project memory | no authorization model | Logto-derived scope lattice |
-| overlap of two organizations | manual duplication | native scope intersection |
-| speaker belief or preference | prose to interpret | captured and attributed perspective |
-| point-in-time replay | Git archaeology | bi-temporal range query |
-| sourced agent context | manual note assembly | budgeted MCP context pack |
+| exact term or path | `rg` | it searches the files directly and needs no index |
+| related passage with different wording | `qmd` | it combines keyword and semantic document search |
+| current project decision | aizk | it can rank the maintained brief above related history |
+| belief, preference, or observation | aizk | it keeps the statement attached to its speaker and kind |
+| knowledge shared by two teams | aizk | one item can require membership in both organizations |
+| earlier state of a fact | aizk | claims retain when they were valid and when they were recorded |
+| sourced context for an agent | aizk | recall returns bounded evidence with source provenance |
 
-### One dated cell, 2026-07-15
+### Reproducible comparison questions
 
-The conditions come first, because they are what make the cell worth keeping. The full `qmd` index
-was refreshed after the management notes had been normalized, then both systems were asked the
-same eight representative questions. This was a manual check of which document came back first,
-not an answer-generation benchmark, and it ran on one machine on one day.
+Use synthetic fixtures when comparing retrieval systems. They make the inputs public and
+reproducible without exposing a private corpus. Every example below is fictional and states the
+retrieval behavior being tested.
 
-aizk ranked the intended current brief first on eight of the eight questions. `qmd` without
-reranking did so on five.
+| Question family | Example |
+|---|---|
+| exact lookup | find the release checklist by its title |
+| current state | return the maintained Atlas migration brief rather than an older journal entry |
+| similar titles | distinguish Atlas Migration from Atlas Migration Weekly Plan |
+| shared decision | find the retry decision visible to the platform team |
+| historical state | recover the policy that was valid before a rollback |
+| multi-source evidence | gather the independent findings that support a cache change |
 
-| Question family | aizk first | qmd first |
-|---|---:|---:|
-| current open Projects | yes | yes |
-| current aizk state | yes | yes |
-| current Japanese Area state | yes | no |
-| JLPT N2 Window Weekly Plan | yes | yes |
-| Personal Brand and Career Website | yes | yes |
-| whether graph memory improves answers | yes | no |
-| evaluating obsolete memory | yes | yes |
-| next action for My Personal Computer | yes | no |
+A fair comparison must score the result each tool promises. File search succeeds when it returns
+the right file or passage. aizk succeeds when the authorized evidence comes from the right sources
+and reflects the requested history. Mixing those contracts into one score would hide what each
+system actually did.
 
-`qmd` stayed excellent whenever the question named one exact Project or one durable note. Its three
-misses were broad current-state questions where a related journal or Area note outranked the
-authority, plus one conceptual question where a note about CAGRA graph indexes outranked the
-memory-research note. What made those cases reliable in aizk was managed-document identity,
-status-aware catalogs, civil source dates, and maximal-title authority, so no query router was
-needed.
+## Published memory systems
 
-Latency is the honest weak spot of the cell. The only stable `qmd` path was `--no-gpu --no-rerank`,
-and it ranged from about 1.2 to 29.6 seconds with heavy variance on cold requests. CUDA
-initialization kept failing because CMake could not resolve `CUDA::cublas`, and reranking sometimes
-announced its stage and then returned nothing. Sequential aizk recalls over the same questions took
-about 0.7 to 2.6 seconds. The two systems also hand back different things. `qmd` returns files and
-snippets for an agent to interpret, while aizk returns one ranked prompt-ready evidence string. So
-literal search and `qmd` remain the better file-discovery tools, and aizk was the better
-current-state memory surface in this cell.
+The systems below overlap with aizk, but none has the same boundary.
 
-## Against published memory systems
+- [Zep and Graphiti](https://arxiv.org/abs/2501.13956) organize changing facts in a temporal
+  knowledge graph.
+- [Mem0](https://arxiv.org/abs/2504.19413) maintains compact user memories through add, update, and
+  delete decisions.
+- [GraphRAG](https://arxiv.org/abs/2404.16130) builds graph communities and summaries to answer
+  questions over document collections.
+- aizk keeps original sources beside attributed and time-bounded claims, then applies database row
+  security before retrieval.
 
 | Capability | Zep and Graphiti | Mem0 | GraphRAG | aizk |
 |---|---|---|---|---|
-| temporal facts | temporal graph | memory updates | no | valid and recorded ranges |
-| consolidation | model-driven | add, update, delete | no | rules first, model on ambiguity |
-| speaker semantics in a group | limited | user namespace | no | author snapshot and epistemic kind |
-| authorization | application layer | application layer | no | forced database RLS |
-| overlapping scopes | no | no | no | arbitrary nonempty scope sets |
-| retrieval | graph and text | vector | community summaries | typed hybrid plan and graph lanes |
-| local operation | service oriented | optional | batch oriented | PostgreSQL plus local model lanes |
+| changing facts | temporal graph | memory replacement | not its focus | separate validity and recording ranges |
+| conflicting speakers | limited representation | separate user memories | not its focus | attributed claims with statement kinds |
+| access control | handled by the application | handled by the application | handled by the application | forced row security in the database |
+| overlapping organizations | handled by the application | handled by the application | handled by the application | one item may require several memberships |
+| primary retrieval unit | graph facts and text | compact memories | community summaries | original passages, claims, and optional graph projections |
+| deployment shape | memory service | hosted or self-hosted service | offline indexing pipeline | SQL database with replaceable model services |
 
 :::caution
-Read that table as a description of mechanisms and nothing more. No head-to-head benchmark exists
-behind it.
+The table describes architectural responsibilities. It makes no answer-quality claim.
 :::
 
-An honest GroupMemBench adapter lives in the repository at `src/eval/groupmem.py`, but the full aizk
-run has not been completed, and an external claim would need the same imported histories, the same
-answer model, the same judge, and the same hardware budget on every system before it meant anything.
-[External benchmarks](/docs/dev/eval/external/) tracks that work.
+The repository includes a GroupMemBench adapter at `src/eval/groupmem.py`. A publishable comparison
+would still need every system to receive the same histories and questions under the same answer
+model, judge, and resource budget. No such result is published. [External
+benchmarks](/docs/dev/eval/external/) defines that work.
 
-## More graph is not automatically better
+## Why graph retrieval stays optional
 
-It would be easy to read the table above as an argument that aizk wins by carrying more graph
-machinery. The evidence says otherwise. The ACL 2026 study
+Building a graph does not guarantee a better answer. The study
 [Does Memory Need Graphs](https://aclanthology.org/2026.acl-long.1232/) finds that raw session
 evidence plus independent summaries, facts, and keywords is already a strong baseline. Similarity
-edges can add noise, and graph summaries can lift retrieval metrics while lowering answer quality,
-because the summary crowds the raw evidence out of the prompt.
+edges can add noise, and graph summaries can improve retrieval measures while making the final
+answer worse because the summary displaces original evidence from the prompt.
 
-That is why source chunks stay the primary evidence in every recall, why each graph lane has to
-earn its cost in ablation instead of being assumed useful, and why a flat baseline over raw
-messages, summaries, facts, and keywords sits on the roadmap.
-[Retrieval results](/docs/dev/eval/retrieval/) is where those ablations land.
+For that reason, aizk keeps passages from the original source as primary evidence. Graph facts,
+profiles, and summaries are replaceable aids. Each one must improve answer quality in an ablation,
+which means comparing the same retrieval process with that aid enabled and disabled. [Retrieval
+results](/docs/dev/eval/retrieval/) records those comparisons.
 
 ## Next
 
 <div class="not-content">
 
 - [References and lineage](/docs/dev/prior-art/references/) maps each mechanism to its source and its code.
-- [Rejected and deferred](/docs/dev/prior-art/rejected/) records what did not survive contact with evidence.
+- [Rejected and deferred](/docs/dev/prior-art/rejected/) records which ideas were not adopted and why.
 - [How we evaluate](/docs/dev/eval/approach/) explains what counts as a measurement here.
 
 </div>

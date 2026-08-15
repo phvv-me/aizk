@@ -136,13 +136,13 @@ directory. The named-volume defaults are fine for development and prove nothing 
 physical disk holds the bytes.
 
 ```sh
-AIZK_POSTGRES_DATA_VOLUME=/mnt/ssd2/aizk/postgres
-AIZK_OBJECT_DATA_VOLUME=/mnt/ssd2/aizk/objects
-AIZK_BACKUP_VOLUME=/mnt/ssd2/aizk/backups
-AIZK_CLAMAV_DATA_VOLUME=/mnt/ssd2/aizk/clamav
-AIZK_LOKI_VOLUME=/mnt/ssd2/aizk/loki
-AIZK_ALLOY_VOLUME=/mnt/ssd2/aizk/alloy
-AIZK_GRAFANA_VOLUME=/mnt/ssd2/aizk/grafana
+AIZK_POSTGRES_DATA_VOLUME=/srv/aizk/postgres
+AIZK_OBJECT_DATA_VOLUME=/srv/aizk/objects
+AIZK_BACKUP_VOLUME=/srv/aizk/backups
+AIZK_CLAMAV_DATA_VOLUME=/srv/aizk/clamav
+AIZK_LOKI_VOLUME=/srv/aizk/loki
+AIZK_ALLOY_VOLUME=/srv/aizk/alloy
+AIZK_GRAFANA_VOLUME=/srv/aizk/grafana
 ```
 
 Separate subdirectories keep ownership and backup policy explicit even when one device holds them
@@ -168,18 +168,17 @@ filesystem or block encryption when a stolen drive is the threat. On Linux that 
 dm-crypt. Column encryption with `pgcrypto` is not a substitute here, because embeddings, BM25
 indexes, graph traversal and reranking all need searchable plaintext inside the database process.
 
-The reference host has no TPM available to systemd, which leaves two honest unlock designs. A
-passphrase entered after reboot is the strongest simple option and needs an operator present. A
-network-bound key from a separate trusted machine allows unattended reboot and adds a key service
-and a recovery dependency.
+A passphrase entered after reboot is the strongest simple unlock option and needs an operator
+present. A TPM or network-bound key can allow unattended reboot, but each adds its own trust and
+recovery requirements.
 
 Storing the LUKS key on the same machine's unencrypted root disk protects against removal of the
 database SSD and nothing else. It is not full at-rest encryption and should not be described as
 such.
 
-:::caution[The dedicated device ships unencrypted]
-Until an unlock design is chosen the database device stays unencrypted, and that stays on
-[the release gate](/docs/dev/run/release-gate/) as an accepted gap rather than quietly closing.
+:::caution[Verify encryption for your deployment]
+AIZK does not configure host block encryption. Verify the database and backup devices before
+storing private material, and record any gap in your own release gate.
 :::
 
 ## Next

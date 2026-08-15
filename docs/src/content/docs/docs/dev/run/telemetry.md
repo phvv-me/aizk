@@ -53,7 +53,7 @@ somebody's private memory is exactly what they would contain.
 
 ## Following one query end to end
 
-Open Grafana at `admin.phvv.me/grafana`, or `admin.phvv.me/traces` to land straight in the trace
+Open Grafana at `admin.example.com/grafana`, or `admin.example.com/traces` to land straight in the trace
 explorer. Both sit behind the same operator sign-in.
 
 1. Start on the **AIZK overview** dashboard and find the spike, whether that is a slow operation,

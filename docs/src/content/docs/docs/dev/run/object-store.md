@@ -3,11 +3,9 @@ title: "Object storage and compression"
 description: "How stored artifacts are compressed, which formats are accepted, and how to compact a store that predates the current policy."
 ---
 
-AIZK keeps artifact bytes outside the SQL database in an S3-compatible object store and keeps
-metadata in the `blob` table. crAIZK uses Amazon S3, while the self-hosted profile uses SeaweedFS.
-This page covers what gets written there, why almost all of it is
-compressed, which formats are refused at the door, and how to bring an older store up to the
-current policy.
+AIZK keeps artifact bytes outside the SQL database in an S3-compatible object store. The `blob`
+table holds their metadata. crAIZK uses Amazon S3, while the self-hosted profile uses SeaweedFS.
+This page explains compression, accepted formats, and safe migration of older objects.
 
 ## Everything readable is compressed, losslessly
 
@@ -34,48 +32,21 @@ restores the object and compares the result against the recorded hash, so a pass
 the container is intact and that it still decodes to the file that was accepted.
 
 The S3 backend also sets `checksum_algorithm="SHA256"`, a separate transport guarantee covering
-the bytes as uploaded, meaning the compressed form. It protects the write in flight and says
-nothing about the original, which is why aizk keeps its own hash.
+the bytes as uploaded, meaning the compressed form. It protects the write in flight but does not
+verify the restored original. AIZK's content hash performs that check.
 
-### What it saves in practice
+### Expected effect
 
-Here is a copy of the live deployment, 327 objects and 459.8 MB of originals.
-
-| Media type | Objects | Original | Stored | Saved |
-| --- | ---: | ---: | ---: | ---: |
-| `application/pdf` (compressed) | 107 | 333 MB | 178 MB | 46.5% |
-| `application/pdf` (kept verbatim) | 11 | 53 MB | 53 MB | 0% |
-| `text/html` | 176 | 35 MB | 9.7 MB | 72.5% |
-| `text/markdown` | 22 | 6.0 MB | 1.6 MB | 73.0% |
-| `text/plain` | 7 | 202 kB | 83 kB | 58.8% |
-| `application/epub+zip` | 4 | 11 MB | 10.4 MB | 5.5% |
-| **Whole store** | **327** | **459.8 MB** | **265.3 MB** | **42.3%** |
-
-### Reads get faster, not slower
-
-Zstandard decompresses at roughly 1.7 GB/s here, and that rate barely moves with the compression
-level. Reading a compressed object is therefore faster than reading a verbatim one whenever the
-link to the object store is slower than `savings x decompression rate`. At the 42.3% the live
-store actually achieves, that break-even sits near 720 MB/s. Every real path into the object
-store, whether the Compose network, a LAN, or a tunnel, is far below that, so compression is a
-read win as well as a storage win.
+Plain text, Markdown, and HTML usually shrink substantially. JPEG, EPUB, and other compressed
+formats often do not. The savings threshold handles that difference per object and keeps the
+original representation whenever compression adds no useful value. Smaller objects also require
+fewer bytes from remote storage, though the exact effect depends on the corpus and network.
 
 ### Choosing a level
 
-`AIZK_OBJECT_STORE_COMPRESSION_LEVEL` defaults to 9, measured as the knee on a 165 MB corpus of
-real documents.
-
-| Level | Stored | Saved | Compression | Decompression |
-| ---: | ---: | ---: | ---: | ---: |
-| 1 | 128.5 MB | 22.1% | 1017 MB/s | 1707 MB/s |
-| 3 | 123.1 MB | 25.4% | 599 MB/s | 1691 MB/s |
-| 9 | 118.7 MB | 28.0% | 197 MB/s | 1746 MB/s |
-| 12 | 118.5 MB | 28.2% | 95 MB/s | 1749 MB/s |
-| 19 | 115.9 MB | 29.7% | 6.7 MB/s | 1447 MB/s |
-
-Level 9 takes most of what is available while still compressing a full-size upload in well under a
-second, on a path that already runs off the request thread. Past 12 the write cost rises by two
-orders of magnitude to buy about one more point, and decompression never improves.
+`AIZK_OBJECT_STORE_COMPRESSION_LEVEL` defaults to 9 as a balance between write cost and stored
+size. Compression runs outside the request thread. A deployment may choose another level after
+measuring its own document mix and hardware.
 
 ### Turning it off
 
@@ -100,11 +71,18 @@ Run it until `examined` comes back zero. Each pass takes the largest objects sti
 configured level, so the reclaimable bytes come back first and a store can be compacted in as
 many short passes as you like.
 
-Per object the pass restores the bytes, verifies them against the content hash, writes a
-replacement under a fresh key, repoints the database row, and only then deletes the old key. An
-interruption leaves an unreferenced object behind rather than a blob row pointing at bytes that
-are gone. When the replacement is not smaller the object stays where it is and only its level is
-stamped.
+The pass restores each object and verifies its content hash. It then writes a replacement under a
+fresh key. One conditional transaction repoints the blob and records the old
+key for deferred retirement. This prevents a reader that loaded the old pointer just before the
+swap from seeing missing bytes. The grace defaults to one hour and must exceed the lifetime of
+every signed download URL. Nightly cleanup leases due retirements in bounded batches before it
+deletes them. A failed delete keeps its durable row and becomes eligible again after the lease.
+When the replacement is not smaller the object stays where it is and only its level is stamped.
+
+The compaction report separates active-layout savings from bytes awaiting retirement. A compare
+and swap loss is reported as a conflict rather than a successful unchanged evaluation. The
+winning worker keeps its candidate and every losing worker deletes only the fresh candidate it
+created.
 
 Because a rewrite requires verifying the original, the pass doubles as an integrity check and
 records itself as one. A failure is reported and left unstamped, so the object stays a candidate.
@@ -126,10 +104,9 @@ The check runs twice. `UploadRequest` validates the declared type when a capabil
 an unreadable format costs one round trip rather than a whole upload, and `ArtifactIntake.accept`
 re-checks the delivered bytes before anything is scanned or stored.
 
-Accepted today are PDF, the image formats PNG, JPEG, GIF, TIFF, BMP and WebP, WAV audio, EPUB and
-the OOXML documents, and the textual family, meaning plain text, Markdown, HTML, XHTML, XML,
-AsciiDoc, JSON, CSV and TSV. Anything else is refused with a message naming what was declared and
-what the bytes turned out to be.
+Accepted formats include PDF, PNG, JPEG, GIF, TIFF, BMP, WebP, WAV, EPUB, and OOXML documents. The
+text family covers plain text, Markdown, HTML, XHTML, XML, AsciiDoc, JSON, CSV, and TSV. Anything
+else is refused with a message that identifies the declared type and detected content.
 
-Video is refused today, deliberately. Aizk has no video reader, so accepting it would store an
-opaque object nobody could search. Accepting video means first giving it a reader.
+Video is not accepted because AIZK has no video reader. Storing it would create an opaque object
+that recall cannot search.

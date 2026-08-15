@@ -75,8 +75,8 @@ the read and the write side of the caller's `ScopeTable`. An empty argument fall
 `{settings.system_user_id}` rather than to nothing, so a misconfigured job sees the system's own
 private scope instead of somebody else's memory.
 
-From there the pass is an ordinary caller. It goes through the app role, the same `scope_read` and
-`scope_insert` policies apply, and a bug in the pass body cannot widen what it touches.
+From there the pass is an ordinary caller. It goes through the app role, the same `rls_select` and
+`rls_insert` policies apply, and a bug in the pass body cannot widen what it touches.
 
 ## Why exact sets and not users
 

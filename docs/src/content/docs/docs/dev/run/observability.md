@@ -30,7 +30,7 @@ docker compose --profile observability --env-file .env -f src/deploy/docker-comp
 ```
 
 Grafana on `127.0.0.1:3003` is the only host port anything in the Compose file publishes. Reach
-it locally, forward it over SSH, or use the gated console at `admin.phvv.me/grafana`.
+it locally, forward it over SSH, or use the gated console at `admin.example.com/grafana`.
 
 :::caution[Keep the observability stack off the network]
 Never expose Grafana, Loki, Tempo, VictoriaMetrics, Alloy or the Docker socket. Alloy reads the
@@ -114,7 +114,7 @@ To see why one chunk produced nothing, run extraction and grounding over it with
 
 ```sh
 docker compose --env-file .env -f src/deploy/docker-compose.yml run --rm --no-deps worker \
-  admin graph diagnose-extraction 019f6bf4-ec29-72c5-93d2-59f791ae42d0
+  admin graph diagnose-extraction document-id
 ```
 
 This needs owner access to read an arbitrary stored chunk, so it runs in `worker`. It does not

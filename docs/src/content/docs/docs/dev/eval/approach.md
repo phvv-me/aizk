@@ -56,10 +56,10 @@ SHA-256, the judge model, `k` and the arm list, and a run whose metadata differs
 usage error rather than silently compared.
 
 :::note[Two honest limits]
-The committed question corpus is a two question placeholder today, so the gate currently guards the
-plumbing and the statistics rather than retrieval quality, and it becomes a quality gate only once a
-real corpus is frozen with `chefe run aizk-eval freeze`. And a baseline is only meaningful against
-the same corpus, so reblessing with `--force-regen` is a deliberate act.
+The committed question corpus has only two placeholder questions, so the gate guards the plumbing
+and statistics rather than retrieval quality. It becomes a quality gate only after a representative
+corpus is frozen with `chefe run aizk-eval freeze`. A baseline is meaningful only against the same
+corpus, so reblessing with `--force-regen` is a deliberate act.
 :::
 
 ## Level two, the production bench
@@ -76,9 +76,8 @@ published number, because nobody else has your corpus.
 Only a level three run compares aizk with anything. It brings its own conversations, imports them
 into a deterministic isolated scope in a separate database, and answers the released questions
 through the same write, recall, answer and judge path a person would use. That is the only level
-whose score means the same thing to a stranger, and it is also the level where aizk currently has no
-published number. [External benchmarks](/docs/dev/eval/external/) explains why and what would have to
-be true first.
+whose score means the same thing to a stranger. AIZK has no published external benchmark score.
+[External benchmarks](/docs/dev/eval/external/) explains why and what would have to be true first.
 
 ## A number without its conditions is not evidence
 
@@ -94,12 +93,11 @@ prediction, and the rendered line always carries `failed=` beside the F1. A benc
 drops its failures reports the quality of the subset that happened to work, which is not the quality
 of anything.
 
-## Why the dated cells stay dated
+## Why every result carries its conditions
 
-The pages that follow are full of measurement cells that name a date, a corpus size, a model, a GPU
-and a database version. Averaging them into one headline figure would read better, and we do not,
-for a boring reason. Every one of those numbers is a function of its conditions, and the conditions
-changed between the cells.
+Every measurement is a function of its corpus, model, hardware, and database configuration.
+Averaging incompatible runs into one headline figure would produce a number that describes no real
+system.
 
 An extraction latency on a 31B checkpoint with a dedicated RTX 3090 is not comparable to the same
 number on 12B. A recall p50 over a hundred thousand chunks is not the same measurement as one over
@@ -107,17 +105,16 @@ two thousand. A retrieval hit rate on the vault is not one on planted synthetic 
 Averaging those would produce a number that describes no run that ever happened, and worse, would
 strip exactly the metadata a reader needs to decide whether it applies to them.
 
-So a cell is written as a pinned observation. It carries its date, its corpus, its hardware and its
-model, it says what it proves and what it does not. When conditions change we add a new cell rather
-than update the old one, and when a cell stops being relevant we say so instead of quietly deleting
-it.
+So a publishable result carries the complete fixture, hardware class, software configuration,
+models, and raw report. It also says what it proves and what it does not. Private regression runs
+stay private unless their corpus can be replaced with a reproducible public fixture.
 
 ## Next
 
 <div class="not-content">
 
 - [The eval CLI](/docs/dev/eval/cli/) is every command and the question it answers.
-- [Retrieval results](/docs/dev/eval/retrieval/) has the production bench and its dated cells.
+- [Retrieval results](/docs/dev/eval/retrieval/) has the production bench and publication rules.
 - [Extraction and models](/docs/dev/eval/extraction/) has the graph writer and model selection.
 - [External benchmarks](/docs/dev/eval/external/) has GroupMemBench and the claims we avoid.
 

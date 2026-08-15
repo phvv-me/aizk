@@ -18,17 +18,8 @@ It is not a setting and cannot be set from the environment, which is the point. 
 configurable `identity_url` typed as a URL until that was understood, and a value that looks like
 a deployment address is an invitation to update it when the deployment moves.
 
-```python
-_IDENTITY_NAMESPACE = "https://aizk.phvv.me"
-
-
-def subject_id(self, subject: str) -> UUID5:
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/subjects/{subject}")
-
-
-def scope_id(self, external_id: str) -> UUID5:
-    return uuid.uuid5(uuid.NAMESPACE_URL, f"{_IDENTITY_NAMESPACE}/scopes/{external_id}")
-```
+The source contains a fixed namespace string. Treat the value as an opaque identifier. It is not a
+deployment example and must not be copied into a new setting or changed during a domain move.
 
 Two things come out of that namespace. Every user id, and every **scope** id. Scope ids are
 stored in the `scopes` array on documents, chunks, entities, facts and profiles, and row level
@@ -58,10 +49,9 @@ tables untouched. It is recoverable only by putting the old value back, which is
 is worse than a crash would be.
 
 :::danger[Leave the constant alone]
-Do not edit `_IDENTITY_NAMESPACE`, and do not "genericize" it when preparing a fork or a rename.
-The string being somebody's old domain is cosmetic. Its value is arbitrary and its stability is
-not, exactly like a UUID namespace, which is what it is. The anonymous and system ids derive from
-the same constant, so the rule covers all three at once.
+Do not edit `_IDENTITY_NAMESPACE` when preparing a fork or a rename. Its value is arbitrary and its
+stability is not, exactly like a UUID namespace, which is what it is. The anonymous and system ids
+derive from the same constant, so the rule covers all three at once.
 
 A deployment that has never stored anything may choose a different value once, before its first
 write, and never again.

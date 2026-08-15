@@ -247,7 +247,7 @@ def test_me_returns_the_label_and_exact_organization_standing(
         owner,
         read=(owner, shared),
         write=(owner, shared),
-        name="Pedro Valois",
+        name="Maya Chen",
         organizations=(
             OrganizationStanding(
                 id=shared,
@@ -263,7 +263,7 @@ def test_me_returns_the_label_and_exact_organization_standing(
 
     assert response.status_code == 200, response.text
     assert response.json() == {
-        "label": "Pedro Valois",
+        "label": "Maya Chen",
         "admin": False,
         "organizations": [
             {

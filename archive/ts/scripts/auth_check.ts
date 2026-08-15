@@ -12,7 +12,7 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 
 import type { User } from '../src/lib/server/db';
 
-// uuid.uuid5(NAMESPACE_URL, "https://aizk.phvv.me/subjects/user-1") and friends, from Python.
+// uuid.uuid5(NAMESPACE_URL, "urn:aizk:subjects:user-1") and friends, from Python.
 const SUBJECT = 'd250ee8e-6726-533b-9daa-1225f0700fef';
 const ORG_A = '7268ca0d-4507-51f6-a4d4-d60f37a18eca';
 const ORG_B = '33fe0d2a-1f97-5a4b-92fb-1c7efe8389d9';

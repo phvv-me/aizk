@@ -47,6 +47,7 @@ from .models import (
     IntegrityReport,
     OriginalArtifact,
     OriginalDescription,
+    RetirementReport,
 )
 from .quality import MarkdownQualityGate
 from .repository import ArtifactRepository, StorageQuotaExceeded
@@ -236,13 +237,7 @@ class ArtifactProcessor:
         )
         try:
             original = await self.repository.original(user, content_id, scopes)
-            content = await self.storage.get(
-                original.storage_key,
-                encoding=original.storage_encoding,
-                expected_size=original.size,
-                expected_hash=original.storage_hash,
-                version=original.storage_version,
-            )
+            original, content = await self.read_original(user, original, content_id, scopes)
             response = await self.converter.convert(
                 ArtifactBytes(
                     content=content,
@@ -359,6 +354,46 @@ class ArtifactProcessor:
                     str(error)[:1024],
                 )
             raise
+
+    async def read_original(
+        self,
+        user: User,
+        original: OriginalArtifact,
+        content_id: UUID7,
+        scopes: Scopes,
+    ) -> tuple[OriginalArtifact, bytes]:
+        """Retry through the current pointer if compaction retired a stale layout."""
+        try:
+            content = await self.storage.get(
+                original.storage_key,
+                encoding=original.storage_encoding,
+                expected_size=original.size,
+                expected_hash=original.storage_hash,
+                version=original.storage_version,
+            )
+            return original, content
+        except ObjectStoreError, OSError:
+            current = await self.repository.original(user, content_id, scopes)
+            observed = (
+                original.storage_key,
+                original.storage_version,
+                original.storage_encoding,
+            )
+            refreshed = (
+                current.storage_key,
+                current.storage_version,
+                current.storage_encoding,
+            )
+            if refreshed == observed:
+                raise
+            content = await self.storage.get(
+                current.storage_key,
+                encoding=current.storage_encoding,
+                expected_size=current.size,
+                expected_hash=current.storage_hash,
+                version=current.storage_version,
+            )
+            return current, content
 
     async def reject(
         self,
@@ -511,9 +546,13 @@ class ArtifactIntegrity:
             limit,
         )
         checks = tuple([await self.check(stored) for stored in objects])
-        await self.repository.record_integrity(checks, checked_at)
-        failed = sum(check.error is not None for check in checks)
-        return IntegrityReport(checked=len(checks), valid=len(checks) - failed, failed=failed)
+        recorded = await self.repository.record_integrity(checks, checked_at)
+        failed = sum(check.error is not None for check in recorded)
+        return IntegrityReport(
+            checked=len(recorded),
+            valid=len(recorded) - failed,
+            failed=failed,
+        )
 
     async def check(self, stored: StoredObject) -> IntegrityCheck:
         """Read, decode, bound, and compare one object without exposing its storage key."""
@@ -534,8 +573,8 @@ class ArtifactIntegrity:
         ) as error:
             message = f"{type(error).__name__}: {error}"[:1024]
             logger.error("artifact integrity failure blob={} error={}", stored.id, message)
-            return IntegrityCheck(id=stored.id, error=message)
-        return IntegrityCheck(id=stored.id)
+            return IntegrityCheck(observed=stored, error=message)
+        return IntegrityCheck(observed=stored)
 
 
 class CompactionDisabled(RuntimeError):
@@ -547,6 +586,8 @@ class CompactionOutcome(FrozenModel):
 
     stored_size: int
     rewritten: bool = False
+    conflicted: bool = False
+    retired_bytes: int = 0
     error: str | None = None
 
 
@@ -565,7 +606,7 @@ class ArtifactCompaction:
         self.repository = repository
 
     async def compact(self, limit: int) -> CompactionReport:
-        """Re-lay one bounded batch and report the stored bytes it handed back."""
+        """Re-lay one bounded batch and report active savings plus deferred retirements."""
         if not self.storage.compression_enabled:
             raise CompactionDisabled(
                 "object store compression is turned off, so there is no policy to compact toward"
@@ -576,18 +617,21 @@ class ArtifactCompaction:
         return CompactionReport(
             examined=len(outcomes),
             rewritten=sum(outcome.rewritten for outcome in outcomes),
+            conflicted=sum(outcome.conflicted for outcome in outcomes),
             failed=sum(outcome.error is not None for outcome in outcomes),
             stored_bytes_before=sum(stored.stored_size for stored in candidates),
             stored_bytes_after=sum(outcome.stored_size for outcome in outcomes),
+            pending_retirement_bytes=sum(outcome.retired_bytes for outcome in outcomes),
         )
 
     async def rewrite(self, stored: StoredObject, level: int) -> CompactionOutcome:
         """Restore, re-encode, and repoint one object, keeping whichever layout is denser.
 
-        The replacement lands under a fresh key and PostgreSQL is repointed before the old
-        key is dropped, so an interruption leaks an unreferenced object rather than leaving
-        a blob row pointing at bytes that are gone. A failure is left unstamped and reported,
-        which keeps the object a candidate and lets the integrity pass raise it separately.
+        The replacement lands under a fresh key. PostgreSQL atomically repoints the blob and
+        records when the old key becomes safe to delete. Nightly cleanup waits beyond every
+        signed URL lifetime before removing it, so a reader holding the observed pointer
+        remains valid across the swap. A failure is left unstamped and reported, which keeps
+        the object a candidate and lets the integrity pass raise it separately.
         """
         try:
             data = await self.storage.get(
@@ -611,8 +655,69 @@ class ArtifactCompaction:
         verified_at = datetime.now(UTC)
         if replacement.stored_size >= stored.stored_size:
             await self.storage.delete(replacement.key)
-            await self.repository.record_compaction(stored.id, level, verified_at)
+            won = await self.repository.record_compaction(stored, level, verified_at)
+            if not won:
+                return CompactionOutcome(
+                    stored_size=stored.stored_size,
+                    conflicted=True,
+                )
             return CompactionOutcome(stored_size=stored.stored_size)
-        await self.repository.record_compaction(stored.id, level, verified_at, replacement)
-        await self.storage.delete(stored.key)
-        return CompactionOutcome(stored_size=replacement.stored_size, rewritten=True)
+        won = await self.repository.record_compaction(
+            stored,
+            level,
+            verified_at,
+            replacement,
+            retire_after=verified_at + self.storage.retirement_grace,
+        )
+        if won:
+            return CompactionOutcome(
+                stored_size=replacement.stored_size,
+                rewritten=True,
+                retired_bytes=stored.stored_size,
+            )
+        await self.storage.delete(replacement.key)
+        return CompactionOutcome(stored_size=stored.stored_size, conflicted=True)
+
+
+class ArtifactRetirement:
+    """Delete obsolete layouts only after stale readers and signed URLs have expired."""
+
+    def __init__(self, storage: ByteStore, repository: ArtifactRepository) -> None:
+        self.storage = storage
+        self.repository = repository
+
+    async def collect(self, limit: int) -> RetirementReport:
+        """Lease and delete one bounded batch while retaining failures for retry."""
+        now = datetime.now(UTC)
+        retired = await self.repository.claim_retirements(
+            now,
+            now + timedelta(minutes=5),
+            limit,
+        )
+        deleted = 0
+        failed = 0
+        reclaimed = 0
+        for item in retired:
+            if not await self.repository.retirement_is_unreferenced(item):
+                logger.error("retired artifact object is referenced key={}", item.key)
+                failed += 1
+                continue
+            try:
+                await self.storage.delete(item.key)
+            except (ObjectStoreError, OSError) as error:
+                logger.error(
+                    "artifact object retirement failure key={} error={}",
+                    item.key,
+                    f"{type(error).__name__}: {error}"[:1024],
+                )
+                failed += 1
+                continue
+            if await self.repository.forget_retirement(item):
+                deleted += 1
+                reclaimed += item.stored_size
+        return RetirementReport(
+            examined=len(retired),
+            deleted=deleted,
+            failed=failed,
+            reclaimed=reclaimed,
+        )

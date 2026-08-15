@@ -1,9 +1,16 @@
 import { env } from '$env/dynamic/private';
 
+class MissingSettingError extends Error {
+  constructor(name: string) {
+    super(`missing required environment variable ${name}`);
+    this.name = 'MissingSettingError';
+  }
+}
+
 /** Read a required AIZK_* environment variable, failing fast when absent. */
 function required(name: string): string {
   const value = env[name];
-  if (!value) throw new Error(`missing required environment variable ${name}`);
+  if (!value) throw new MissingSettingError(name);
   return value;
 }
 

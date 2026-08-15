@@ -322,8 +322,8 @@ def test_status_returns_authority_usage_and_processing(
         owner,
         read=(owner, docs, research),
         write=(owner, docs),
-        name="Pedro Valois",
-        username="pedro",
+        name="Maya Chen",
+        username="maya",
         roles=("aizk-user",),
         organizations=(
             OrganizationStanding(
@@ -333,8 +333,8 @@ def test_status_returns_authority_usage_and_processing(
                 custom_data={"public": True},
                 members=(
                     OrganizationMember(
-                        name="Pedro Valois",
-                        username="pedro",
+                        name="Maya Chen",
+                        username="maya",
                         roles=("editor",),
                     ),
                 ),

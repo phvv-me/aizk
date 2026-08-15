@@ -4,7 +4,7 @@ import tailwind from '@tailwindcss/vite';
 import { defineConfig } from 'astro/config';
 import d2 from 'astro-d2';
 
-const site = process.env.AIZK_DOCS_SITE_URL ?? 'https://aizk.phvv.me';
+const site = process.env.AIZK_DOCS_SITE_URL ?? 'https://aizk.example.com';
 
 // The whole product lives on one origin. A plain Astro page owns `/`, and Astro gives static
 // routes priority over Starlight's dynamic `[...slug]`, so the marketing page wins without a
@@ -27,7 +27,7 @@ export default defineConfig({
     svelte(),
     starlight({
       title: 'aizk',
-      description: 'Shared memory for people, teams, and MCP agents.',
+      description: 'Shared memory for people, teams, and AI agents.',
       logo: { src: './src/assets/icon.svg', alt: 'aizk' },
       favicon: '/favicon.svg',
       head: [
@@ -48,7 +48,7 @@ export default defineConfig({
           },
         },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
-        { tag: 'meta', attrs: { name: 'theme-color', content: '#4f46e5' } },
+        { tag: 'meta', attrs: { name: 'theme-color', content: '#315dff' } },
         {
           tag: 'meta',
           attrs: { property: 'og:image', content: `${site}/social-card.png` },
@@ -57,7 +57,7 @@ export default defineConfig({
           tag: 'meta',
           attrs: {
             property: 'og:image:alt',
-            content: 'aizk · memory your agents actually keep',
+            content: 'aizk · shared memory for people, teams, and AI agents',
           },
         },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },

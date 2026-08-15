@@ -21,11 +21,6 @@ does not mean imposing one universal folder layout. SOLID principles are design 
 Pattern counts and tiny-function counts are poor quality measures. Refactoring is justified when it
 preserves external behavior and makes a likely change easier, safer, or clearer.
 
-Sources retained in pgAIZK include Pedro Valois's `Meteng audit of architecture, maintainability,
-refactoring, review, and repository health`, document `019f83f4-a27b-72d7-ae35-c2af58def67a`, and
-the extracted `Simple Object-Oriented Design`, document
-`019f7a9c-db85-7420-8493-6b5b69cc772a`.
-
 Public references
 
 - [A Philosophy of Software Design extract](https://web.stanford.edu/~ouster/cgi-bin/aposd2ndEdExtract.pdf)

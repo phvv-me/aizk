@@ -331,9 +331,9 @@ def test_client_reads_current_user_directory_and_caches_by_subject(
                 200,
                 json={
                     "id": "user/a",
-                    "username": "pedro",
-                    "name": "Pedro Valois",
-                    "avatar": "https://images.test/pedro.png",
+                    "username": "maya",
+                    "name": "Maya Chen",
+                    "avatar": "https://images.example/maya.png",
                 },
             )
         if request.url.path == "/api/users/user/a/roles":
@@ -364,8 +364,8 @@ def test_client_reads_current_user_directory_and_caches_by_subject(
                 json=[
                     {
                         "id": "user/a",
-                        "username": "pedro",
-                        "name": "Pedro Valois",
+                        "username": "maya",
+                        "name": "Maya Chen",
                         "organizationRoles": [{"id": "role-a", "name": "editor"}],
                     }
                 ],
@@ -420,14 +420,14 @@ def test_client_reads_current_user_directory_and_caches_by_subject(
 
     user, second, current, current_again, organization_roles, cached_roles = dbutil.run(probe())
 
-    assert user.name == "Pedro Valois"
-    assert user.username == "pedro"
+    assert user.name == "Maya Chen"
+    assert user.username == "maya"
     assert user.roles == ("aizk-user",)
     assert second[0].roles[0].name == "editor"
     assert second[0].scopes[0].name == "write:memory"
     assert second[0].members[0].roles[0].name == "editor"
     assert user.organizations[0].public
-    assert user.organizations[0].members[0].username == "pedro"
+    assert user.organizations[0].members[0].username == "maya"
     assert len(user.organizations) == 1
     assert current == current_again == user
     assert organization_roles[0].name == cached_roles[0].name == "Alpha"

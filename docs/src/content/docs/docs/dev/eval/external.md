@@ -3,8 +3,8 @@ title: "External benchmarks"
 description: "GroupMemBench, forgetting-aware scoring, and the claims we do not make."
 ---
 
-An external benchmark is the only level that compares aizk with anything, and it is the level where
-aizk currently has no number to show. This page assumes you have read
+An external benchmark is the only level that compares aizk with another system. AIZK has no
+published external benchmark score. This page assumes you have read
 [how we evaluate](/docs/dev/eval/approach/) and know the isolation rules on
 [the eval CLI](/docs/dev/eval/cli/).
 
@@ -18,7 +18,7 @@ equation from Memora ([2604.20006](https://arxiv.org/abs/2604.20006)). The full 
 ## The GroupMemBench adapter
 
 `src/eval/groupmem.py` reads the released conversation and question schemas directly. It does not
-copy the upstream implementation, whose repository currently declares no license. Messages come from
+copy the upstream implementation, whose repository declares no license. Messages come from
 `data/final/<Domain>/synthetic_domain_channels_rolevariants_<Domain>.json` and questions come from
 `questions/<Domain>/<kind>.jsonl`, both validated into frozen models before anything is stored.
 
@@ -127,12 +127,12 @@ current memory and also repeats an invalidated one scores a perfect MPA and stil
 proportion to how much of the question was about forgetting. When a question declares no forgetting
 criteria the absence term defaults to 1.0 and the score reduces to plain presence accuracy.
 
-It is available and tested rather than in use. The GroupMemBench runner currently scores correctness
-with an LLM judge, so no report here carries a FAMA number yet.
+It is available and tested rather than in use. The GroupMemBench runner scores correctness with an
+LLM judge, so no report here carries a FAMA number.
 
 ## The adapters that do not exist
 
-`src/eval/` holds exactly one external adapter today. LongMemEval-V2, Memora and Mem2ActBench are
+`src/eval/` contains one external adapter. LongMemEval-V2, Memora and Mem2ActBench are
 read, cited and used to shape the design, and briefs for each live in the corpus, but no code
 imports their corpora and no score for them exists. If a page anywhere claims otherwise it is wrong.
 

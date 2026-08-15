@@ -100,10 +100,10 @@ A real response looks like this.
 
 - **Source excerpt** from scope `private ∩ book-club`
 
-    Q3 Retrieval Plan by Sam (author) observed 2026-07-02
+    Retrieval plan by Sam (author)
       Week three targets the reranker ablation and the fused-lane sweep.
 
-    Resource `aizk://artifacts/019820a1-.../contents/019820a4-...`
+    Resource `aizk://artifacts/document-id/contents/content-id`
 
 - **Derived memory** from scope `private`
 

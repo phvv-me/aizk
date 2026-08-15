@@ -11,7 +11,7 @@ through the end of judging.
 ## Required build
 
 The entry must be a newly created agentic application that uses CockroachDB as its persistent
-memory layer and runs on AWS. Every named integration must do real work. The project must use at
+memory layer and runs on AWS. Each integration must do real work. The project must use at
 least two approved CockroachDB tools and at least one AWS service.
 
 Approved CockroachDB tools include CockroachDB Cloud Managed MCP, Distributed Vector Indexing,
@@ -63,11 +63,11 @@ The five criteria have equal weight.
 
 | Criterion | Question the submission must answer |
 |---|---|
-| Agentic Memory Design | Does CockroachDB have a meaningful production role as persistent agent memory? |
+| Agentic Memory Design | Does CockroachDB have a substantial production role as persistent agent memory? |
 | Technological Implementation | Is the CockroachDB integration sound software engineering? |
-| Real-World Impact | Could this improve a real user or workflow? |
-| Product Readiness | Is it secure, observable, and scalable? |
-| Creativity and Originality | Is the idea or application genuinely novel? |
+| Real-World Impact | Could this materially improve a real user or workflow? |
+| Product Readiness | Is it secure and observable, and can it grow safely? |
+| Creativity and Originality | Is the idea or application actually novel? |
 
 ## Release gate
 
@@ -82,7 +82,7 @@ The dated execution order and detailed acceptance criteria live in [PLAN.md](PLA
 - [x] Run `status`, `keep`, and `find` as the judge-visible Maya identity
 - [ ] Verify the public demo without a local credential or private network
 - [ ] Rehearse setup from a clean clone using only committed instructions
-- [ ] Record screenshots with no secret, private note, or unrelated deployment visible
+- [x] Record and inspect gallery images with no secret, private note, or unrelated deployment visible
 - [ ] Record and publish the English video under three minutes
 - [ ] Open the video and demo from a signed-out browser
 - [ ] Complete every Devpost field and submit before August 19 at 6 AM JST

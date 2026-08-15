@@ -27,7 +27,8 @@ This roadmap separates shipped behavior from hypotheses that still need measured
 
 ## Measure next
 
-- [ ] Run bounded GroupMemBench smoke cells on crimson, then the complete four-domain matrix.
+- [ ] Run bounded GroupMemBench smoke cells on an available GPU host, then the complete
+  four-domain matrix.
 - [ ] Add a flat baseline over raw messages, summaries, facts, and keywords as independent keys.
 - [ ] Ablate one-hop expansion, personalized PageRank, communities, RAPTOR, profiles, reranking,
   and context ordering independently.

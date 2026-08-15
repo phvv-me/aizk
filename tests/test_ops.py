@@ -502,10 +502,6 @@ def test_cockroach_setup_uses_its_migrations_and_skips_postgres_services(
     violations: list[str],
 ) -> None:
     monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
-    assert (
-        ops.provision._database_provisioning().drop_database('"aizk"')
-        == 'DROP DATABASE IF EXISTS "aizk" CASCADE'
-    )
     calls: list[str] = []
 
     async def current() -> str:
@@ -565,8 +561,17 @@ def test_cockroach_setup_uses_its_migrations_and_skips_postgres_services(
     assert calls == ["migrate", "verify", "queue", "grant", "ontology"]
 
 
+@pytest.mark.parametrize(
+    ("backend", "drop_suffix"),
+    [
+        (DatabaseBackend.postgresql, "WITH (FORCE)"),
+        (DatabaseBackend.cockroachdb, "CASCADE"),
+    ],
+)
 def test_reset_recreates_only_the_configured_database_then_runs_setup(
     monkeypatch: pytest.MonkeyPatch,
+    backend: DatabaseBackend,
+    drop_suffix: str,
 ) -> None:
     engine = FakeEngine(None)
 
@@ -575,15 +580,25 @@ def test_reset_recreates_only_the_configured_database_then_runs_setup(
 
     monkeypatch.setattr(ops.provision, "database_adapter", lambda: FakeDatabaseAdapter(engine))
     monkeypatch.setattr(ops.provision, "setup", setup)
+    monkeypatch.setattr(settings, "database_backend", backend)
 
     report = dbutil.run(ops.reset())
 
     assert report == ops.ResetReport(database=settings.db_name, migrated_to="0001_init")
     assert engine.connection.statements == [
-        f'DROP DATABASE IF EXISTS "{settings.db_name}" WITH (FORCE)',
+        f'DROP DATABASE IF EXISTS "{settings.db_name}" {drop_suffix}',
         f'CREATE DATABASE "{settings.db_name}"',
     ]
     assert engine.disposed is True
+
+
+def test_provisioning_rejects_an_unknown_database_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "database_backend", "sqlite")
+
+    with pytest.raises(ValueError, match="unsupported database backend sqlite"):
+        ops.provision._database_provisioning()
 
 
 @pytest.mark.parametrize(

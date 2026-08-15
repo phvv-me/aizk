@@ -89,7 +89,7 @@ CMD ["node", "build"]
 # The marketing page and the documentation are one static Astro build. Nothing here reaches the
 # database or Logto, so the output is plain files and the serving stage carries no runtime.
 FROM node:24-alpine AS docs-build
-ARG AIZK_DOCS_SITE_URL=https://aizk.phvv.me
+ARG AIZK_DOCS_SITE_URL=https://aizk.example.com
 ARG AIZK_DOCS_MCP_CLIENT_ID=YOUR_AIZK_CLIENT_ID
 ENV AIZK_DOCS_SITE_URL=${AIZK_DOCS_SITE_URL}
 ENV AIZK_DOCS_MCP_CLIENT_ID=${AIZK_DOCS_MCP_CLIENT_ID}
@@ -98,8 +98,13 @@ WORKDIR /app
 COPY docs/package.json docs/pnpm-lock.yaml docs/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY docs ./
+COPY README.md /README.md
+COPY SECURITY.md ROADMAP.md CHANGELOG.md pyproject.toml /
+COPY infra/aws/README.md /infra/aws/README.md
+COPY src/web/.env.example /src/web/.env.example
+COPY src/deploy/.env.example src/deploy/Dockerfile src/deploy/docker-compose.yml /src/deploy/
+COPY hackathon /hackathon
 COPY src/web/static /src/web/static
-COPY hackathon/thumbnail.png /hackathon/thumbnail.png
 # Rasterizing SVGs is platform dependent because Alpine and the development environment carry
 # different font engines. The committed outputs pass `brand:check` before the image build, while
 # this stage consumes those exact files and verifies the rendered pages without regenerating them.

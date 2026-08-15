@@ -6,6 +6,7 @@ from .coordination_lock import CoordinationLock
 from .document import Document
 from .entity import EntityClaim, EntityContent
 from .fact import FactClaim, FactContent
+from .object_retirement import ObjectRetirement
 from .ontology import EntityKind, RelationKind, RelationPolicy
 from .operator import OperatorReading, OperatorSnapshot
 from .profile import Profile
@@ -42,5 +43,6 @@ __all__ = [
     "UsageEvent",
     "OperatorReading",
     "OperatorSnapshot",
+    "ObjectRetirement",
     "Watermark",
 ]

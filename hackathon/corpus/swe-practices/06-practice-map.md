@@ -24,6 +24,4 @@ abstraction is helpful, whether a benchmark is representative, whether a test st
 risk, and whether an optimization earns its complexity. A useful engineering system distinguishes
 these two kinds of decisions instead of converting every judgment into a numeric rule.
 
-This map synthesizes the public references indexed in pgAIZK's `Software engineering good practices
-and programming languages study`, document `019f82b7-3b9a-771c-92da-71bba3017104`, and `Open SWE
-Book`, document `019f7b62-b4d0-77dc-8bf2-75bd924529a9`.
+This map synthesizes the public references attached to the five supporting notes in this corpus.

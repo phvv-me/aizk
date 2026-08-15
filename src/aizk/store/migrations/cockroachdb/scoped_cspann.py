@@ -26,18 +26,12 @@ WHERE candidate.kind = requested_kind
   AND cardinality(candidate.scopes) > 0
   AND (
       candidate.scopes <@ CAST(
-          nullif(
-              split_part(current_setting('application_name', true), '|', 2),
-              ''
-          ) AS UUID[]
+          nullif(current_setting('app.scopes.read', true), '') AS UUID[]
       )
       OR (
           cardinality(candidate.scopes) = 1
           AND candidate.scopes <@ CAST(
-              nullif(
-                  split_part(current_setting('application_name', true), '|', 4),
-                  ''
-              ) AS UUID[]
+              nullif(current_setting('app.scopes.public', true), '') AS UUID[]
           )
       )
   )
@@ -70,18 +64,12 @@ BEGIN
     IF NOT coalesce(
         cardinality(requested_scopes) > 0 AND (
             requested_scopes <@ CAST(
-                nullif(
-                    split_part(current_setting('application_name', true), '|', 2),
-                    ''
-                ) AS UUID[]
+                nullif(current_setting('app.scopes.read', true), '') AS UUID[]
             )
             OR (
                 cardinality(requested_scopes) = 1
                 AND requested_scopes <@ CAST(
-                    nullif(
-                        split_part(current_setting('application_name', true), '|', 4),
-                        ''
-                    ) AS UUID[]
+                    nullif(current_setting('app.scopes.public', true), '') AS UUID[]
                 )
             )
         ),

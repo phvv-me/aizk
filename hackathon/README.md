@@ -1,6 +1,6 @@
 # crAIZK submission workspace
 
-The submission thumbnail is generated from the canonical aizk social card at `thumbnail.png`. Run
+The submission thumbnail is generated from the canonical 3 to 2 brand source at `thumbnail.png`. Run
 `chefe run aizk-brand` from the monorepo root after changing any brand source.
 
 This directory contains event-specific material for the CockroachDB and AWS Build with Agentic
@@ -26,8 +26,8 @@ The submission closes on August 18, 2026 at 5 PM EDT, which is August 19 at 6 AM
 
 The repository, license, build dates, local Lambda simulation, CockroachDB schema, C-SPANN search,
 managed AWS deployment, public demo URL, S3 flow, Logto identity, and isolated Codex Luna client have
-been verified. Final screenshots and video are still pending. [PLAN.md](PLAN.md) is the working
-execution board, while [RULES.md](RULES.md) remains the compliance gate.
+been verified. The final gallery is ready, while video editing and upload remain. [PLAN.md](PLAN.md)
+is the working execution board, while [RULES.md](RULES.md) remains the compliance gate.
 
 ## Separation rule
 

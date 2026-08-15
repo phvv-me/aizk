@@ -21,10 +21,6 @@ then show which adapter, domain operation, or dependency consumed the time. The 
 failure paths easier to test because external dependencies can be replaced with controlled test
 implementations. This is why maintainable design, testing, and observability reinforce each other.
 
-Sources retained in pgAIZK include `Observability Engineering second edition publisher preview`,
-document `019f7a54-11e4-7769-865a-55ea75d417ec`, and `Crivo JUDGMENT.md`, document
-`019f7a9d-6672-7743-9a31-0a9cc80fcf1a`.
-
 Public references
 
 - [OpenTelemetry trace API](https://opentelemetry.io/docs/specs/otel/trace/api/)

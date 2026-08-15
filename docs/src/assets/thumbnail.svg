@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-labelledby="title desc">
+  <title id="title">crAIZK</title>
+  <desc id="desc">Shared memory for people, teams, and AI agents</desc>
+  <rect width="1800" height="1200" fill="#fffaf1"/>
+  <rect x="0" y="0" width="48" height="1200" fill="#315dff"/>
+  <g transform="translate(136 300) scale(3.75)">
+    <rect width="96" height="96" rx="24" fill="#315dff"/>
+    <path d="M27 29H69L27 67H69" fill="none" stroke="#fffaf1" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="27" cy="29" r="6" fill="#ff6b4a"/>
+    <circle cx="69" cy="29" r="6" fill="#fffaf1"/>
+    <circle cx="27" cy="67" r="6" fill="#fffaf1"/>
+    <circle cx="69" cy="67" r="6" fill="#fffaf1"/>
+  </g>
+  <text x="574" y="548" fill="#17223b" font-family="'Space Grotesk', 'Noto Sans', sans-serif" font-size="236" font-weight="700" letter-spacing="-2.36">crAIZK</text>
+  <text x="590" y="640" fill="#17223b" opacity=".72" font-family="'Space Grotesk', 'Noto Sans', sans-serif" font-size="44" font-weight="500">Shared memory for people, teams, and AI agents</text>
+  <g opacity=".9">
+    <polyline points="590,850 832,782 1082,868 1330,752 1604,834" fill="none" stroke="#17223b" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="590" cy="850" r="11" fill="#ff6b4a" stroke="#17223b" stroke-width="9"/>
+    <circle cx="832" cy="782" r="11" fill="#fffaf1" stroke="#17223b" stroke-width="9"/>
+    <circle cx="1082" cy="868" r="11" fill="#fffaf1" stroke="#17223b" stroke-width="9"/>
+    <circle cx="1330" cy="752" r="11" fill="#fffaf1" stroke="#17223b" stroke-width="9"/>
+    <circle cx="1604" cy="834" r="11" fill="#315dff" stroke="#17223b" stroke-width="9"/>
+  </g>
+</svg>

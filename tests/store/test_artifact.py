@@ -609,15 +609,14 @@ def test_repository_tracks_bounded_object_integrity_passes() -> None:
         assert candidates[0].id == stored.blob.id
         assert candidates[0].key == stored.blob.storage_key
 
-        await repository.record_integrity((), checked_at)
-        await repository.record_integrity((IntegrityCheck(id=stored.blob.id),), checked_at)
+        assert await repository.record_integrity((), checked_at) == ()
+        valid = IntegrityCheck(observed=candidates[0])
+        assert await repository.record_integrity((valid,), checked_at) == (valid,)
         assert await repository.integrity_candidates(checked_at - timedelta(days=1), limit=1) == ()
 
         error = "IntegrityMismatch: changed bytes"
-        await repository.record_integrity(
-            (IntegrityCheck(id=stored.blob.id, error=error),),
-            checked_at,
-        )
+        failed = IntegrityCheck(observed=candidates[0], error=error)
+        assert await repository.record_integrity((failed,), checked_at) == (failed,)
         assert (await repository.integrity_candidates(checked_at, limit=1))[0].id == stored.blob.id
         async with User.system().owner as session:
             blob = await session.get(Blob, stored.blob.id)
@@ -625,8 +624,8 @@ def test_repository_tracks_bounded_object_integrity_passes() -> None:
             assert blob.integrity_checked_at == checked_at
             assert blob.integrity_error == error
 
-        with pytest.raises(LookupError, match="disappeared"):
-            await repository.record_integrity((IntegrityCheck(id=uuid7()),), checked_at)
+        stale = IntegrityCheck(observed=candidates[0].model_copy(update={"id": uuid7()}))
+        assert await repository.record_integrity((stale,), checked_at) == ()
 
     dbutil.run(body())
 
@@ -642,7 +641,8 @@ def test_repository_compacts_objects_left_under_a_weaker_compression_policy() ->
         # Every legacy object records no level, so the first pass sees all of them.
         candidates = await repository.compaction_candidates(level=9, limit=10)
         assert [candidate.id for candidate in candidates] == [stored.blob.id]
-        assert candidates[0].stored_size == stored.blob.stored_size
+        candidate = candidates[0]
+        assert candidate.stored_size == stored.blob.stored_size
 
         moved = StoredBytes(
             key="objects/denser",
@@ -654,7 +654,13 @@ def test_repository_compacts_objects_left_under_a_weaker_compression_policy() ->
             etag="moved-etag",
             version="moved-version",
         )
-        await repository.record_compaction(stored.blob.id, 9, verified_at, moved)
+        assert await repository.record_compaction(
+            candidate,
+            9,
+            verified_at,
+            moved,
+            retire_after=verified_at + timedelta(hours=1),
+        )
 
         async with User.system().owner as session:
             blob = await session.get(Blob, stored.blob.id)
@@ -674,18 +680,20 @@ def test_repository_compacts_objects_left_under_a_weaker_compression_policy() ->
 
         # A stamped object is done at this level and only reappears when the policy rises.
         assert await repository.compaction_candidates(level=9, limit=10) == ()
-        assert len(await repository.compaction_candidates(level=12, limit=10)) == 1
+        candidates = await repository.compaction_candidates(level=12, limit=10)
+        assert len(candidates) == 1
 
         # A pass that finds nothing better still stamps, without moving the object.
-        await repository.record_compaction(stored.blob.id, 12, verified_at)
+        assert await repository.record_compaction(candidates[0], 12, verified_at)
         async with User.system().owner as session:
             blob = await session.get(Blob, stored.blob.id)
             assert blob is not None
             assert (blob.encoding_level, blob.storage_key) == (12, "objects/denser")
         assert await repository.compaction_candidates(level=12, limit=10) == ()
 
-        with pytest.raises(LookupError, match="disappeared"):
-            await repository.record_compaction(uuid7(), 9, verified_at)
+        assert not await repository.record_compaction(
+            candidate.model_copy(update={"id": uuid7()}), 9, verified_at
+        )
 
     dbutil.run(body())
 

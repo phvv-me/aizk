@@ -175,6 +175,38 @@ def test_openrouter_caption_retries_an_empty_success_on_the_same_model() -> None
     assert [attempt.status_code for attempt in caption.attempts] == [200, 200]
 
 
+def test_openrouter_caption_retries_a_malformed_success_on_the_same_model() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        del request
+        calls += 1
+        body = {"unexpected": True} if calls == 1 else completion(caption="Ready")
+        return httpx.Response(200, json=body)
+
+    caption = asyncio.run(request_caption(handler, models=("primary",), attempts=2))
+
+    assert caption.text == "Ready"
+    assert [attempt.status_code for attempt in caption.attempts] == [200, 200]
+    assert caption.attempts[0].error is not None
+
+
+def test_openrouter_caption_falls_back_after_a_malformed_success() -> None:
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        requested.append(model)
+        body = {"unexpected": True} if model == "primary" else completion(model="fallback")
+        return httpx.Response(200, json=body)
+
+    caption = asyncio.run(request_caption(handler, attempts=1))
+
+    assert requested == ["primary", "fallback"]
+    assert caption.requested_model == "fallback"
+
+
 @pytest.mark.parametrize(
     ("body", "message"),
     [

@@ -1,6 +1,6 @@
 ---
 title: "Rejected and deferred"
-description: "Ideas we looked at and did not take, with the reason recorded."
+description: "Ideas evaluated but not adopted, with the reason recorded."
 ---
 
 [References and lineage](/docs/dev/prior-art/references/) records what was taken. This page records
@@ -33,8 +33,8 @@ These lost to something already in the tree, and the number is the reason.
 |---|---|
 | query-time lane routing | the measured classifier was 44 percent accurate, and a wrong route deletes decisive evidence before ranking ever runs. The router survives only as an evaluation instrument |
 | fixed lane ordering | facts-first and overview-first each failed on a different evaluation stratum, so neither order is safe as a default |
-| `Qwen3-Reranker-0.6B` | reranking the embedder's own top 8 on real vault queries, MRR fell from 0.90 to 0.77 even with the official Qwen3 prompt scaffold, while the 4B checkpoint held 0.91. The small model is never a valid economy |
-| swapping in `Qwen3-Embedding-4B` | on 1,903 real chunks and 1,101 title queries it gained one to two points (hit@5 90.1 against 88.0, MRR 0.802 against 0.794), which does not pay for losing the multimodal lane. Native dimensions added under a point, so the 1,024-dimension cut stands too |
+| `Qwen3-Reranker-0.6B` | it reduced ranking quality on the evaluation fixture even with the official Qwen3 prompt scaffold, while the 4B checkpoint preserved the baseline. The small model is not a valid economy |
+| swapping in `Qwen3-Embedding-4B` | it gave only a small ranking gain on the evaluation fixture and would remove the multimodal lane. The benefit did not justify that capability loss or the larger stored vectors |
 | Google LangExtract as the extractor | lost head to head on yield, latency, and vocabulary enforcement. Its character-interval grounding was worth taking, and it became `quote_start` and `quote_end` on the claim |
 | GLiNER2 as the graph authority | the large checkpoint is nearly as fast as base and somewhat more precise, but still much weaker than the LLM on relation meaning. It serves the cheap gate instead |
 | the recursive graph walk | replaced by an in-statement personalized PageRank, which lifted planted chain-fact recall from 32 of 128 to 123 of 128 inside the final pack and is faster |
@@ -81,10 +81,10 @@ justifies letting the schema drift on its own.
 | Mem2ActBench | evaluation has to be able to judge tool selection and arguments, not just retrieval |
 | a flat baseline over raw messages, summaries, facts, and keywords | it is next in line and blocks nothing, and it is the honest control for every graph lane |
 | page-level document images and video frames | measured retrieval quality has to justify the storage and serving cost |
-| an import counterpart to scoped export | export shipped first because it is the one needed for backups |
-| authenticated invalidation of the public organization directory | the directory is fail-closed today, which is safe but stale |
+| an import counterpart to scoped export | export was implemented first because backups need it |
+| authenticated invalidation of the public organization directory | the directory fails closed when its cache expires, which is safe but can serve no result until it refreshes |
 | narrow erasure and collecting content rows left without claims | needs a careful pass so a shared content row is never orphaned out from under another scope |
-| a proactive work layer | aizk supplies memory and does not own an agent's planning or action loop |
+| a work orchestration layer | aizk supplies memory and does not own an agent's planning or action loop |
 | broad ingestion connectors | correctness, access, time, and evaluation come first |
 | cross-platform CI | macOS runners carry no service containers, so the suite is a Linux job until that is solved |
 | automatic PyPI publishing | the `rls` dependency is a direct git reference, which PyPI rejects. [Releasing](/docs/dev/contributing/release/) has the detail |

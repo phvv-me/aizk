@@ -90,7 +90,7 @@
   "notes": [
     "The three lexical misses were wording variants whose returned passages still answered the question.",
     "The cloud query set matched the local 26 of 29 lexical score exactly.",
-    "Warm end-to-end recall is faster than the roughly 3.4 second pgAIZK reference point.",
+    "Warm end-to-end recall is faster than the roughly 3.4 second full-profile reference point.",
     "The 32.68 second post-deployment call includes process initialization that the five-minute warm schedule normally pays before a user request.",
     "C-SPANN itself took 7 ms, while the composed CockroachDB stage remains the next optimization target."
   ]

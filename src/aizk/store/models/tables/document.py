@@ -1,7 +1,7 @@
 from collections.abc import Collection
 from datetime import datetime
 from enum import auto
-from typing import ClassVar, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from patos import sql
 from patos.sql import Column as C
@@ -27,8 +27,10 @@ from sqlmodel.sql.expression import Select, SelectOfScalar
 from ...engine import Session
 from ...mixins import Id, Scoped, TableBase, Timestamped
 from .artifact import Artifact
-from .chunk import Chunk
 from .ontology import EntityKind
+
+if TYPE_CHECKING:
+    from .chunk import Chunk
 
 
 class Document(Id, Scoped, Timestamped, TableBase, table=True):

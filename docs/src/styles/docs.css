@@ -1,6 +1,6 @@
 /* aizk brand for Starlight.
 
-   Indigo identifies product actions and navigation. Zinc keeps long-form
+   Cobalt identifies product actions and navigation. Zinc keeps long-form
    documentation calm, while underlines ensure links never rely on color alone.
 
    daisyUI is deliberately absent here. It emits an `@layer daisyui` that
@@ -16,17 +16,17 @@
 /* Starlight reads its accent and gray ramps from these. */
 @theme {
   --font-brand: 'Space Grotesk', var(--font-sans);
-  --color-accent-50: var(--color-indigo-50);
-  --color-accent-100: var(--color-indigo-100);
-  --color-accent-200: var(--color-indigo-200);
-  --color-accent-300: var(--color-indigo-300);
-  --color-accent-400: var(--color-indigo-400);
-  --color-accent-500: var(--color-indigo-500);
-  --color-accent-600: var(--color-indigo-600);
-  --color-accent-700: var(--color-indigo-700);
-  --color-accent-800: var(--color-indigo-800);
-  --color-accent-900: var(--color-indigo-900);
-  --color-accent-950: var(--color-indigo-950);
+  --color-accent-50: #eef3ff;
+  --color-accent-100: #dfe8ff;
+  --color-accent-200: #c7d6ff;
+  --color-accent-300: #a9c5ff;
+  --color-accent-400: #7598ff;
+  --color-accent-500: #315dff;
+  --color-accent-600: #264ce6;
+  --color-accent-700: #203fbd;
+  --color-accent-800: #203895;
+  --color-accent-900: #1f3375;
+  --color-accent-950: #17223b;
   --color-gray-50: var(--color-zinc-50);
   --color-gray-100: var(--color-zinc-100);
   --color-gray-200: var(--color-zinc-200);

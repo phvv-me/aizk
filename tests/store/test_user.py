@@ -124,7 +124,7 @@ def test_report_scope_resolves_to_the_one_fixed_operator_destination() -> None:
 
 def test_user_indexes_current_organization_directory_and_standing() -> None:
     user_id, public_id, private_id = uuid5(), uuid5(), uuid5()
-    named = OrganizationMember(name="Pedro", username="pedro")
+    named = OrganizationMember(name="Maya", username="maya")
     username_only = OrganizationMember(username="colleague")
     unnamed = OrganizationMember()
     public = OrganizationStanding(
@@ -141,11 +141,11 @@ def test_user_indexes_current_organization_directory_and_standing() -> None:
         organizations=(public, private),
     )
 
-    assert named.label == "Pedro"
+    assert named.label == "Maya"
     assert username_only.label == "colleague"
     assert unnamed.label == "unnamed member"
     assert public.members_by_name == {
-        "Pedro": named,
+        "Maya": named,
         "colleague": username_only,
         "unnamed member": unnamed,
     }

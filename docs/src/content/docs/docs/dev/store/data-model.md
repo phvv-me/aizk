@@ -81,8 +81,8 @@ point at them. `ClaimedContent.__rls__` in `src/aizk/store/mixins/claimed.py` em
 policies.
 
 ```python
-rls.Policy.select("content_read", content.id.in_(select(claims.content_id)))
-rls.Policy.insert("content_insert", sa.true())
+rls.Policy.select(content.id.in_(select(claims.content_id)))
+rls.Policy.insert(sa.true())
 ```
 
 Reading a piece of content requires a visible claim on it. Inserting is always allowed, because
@@ -108,8 +108,8 @@ Tables are assembled from mixins in `src/aizk/store/mixins/` rather than repeati
 | `Embedded` | `embedding` as `halfvec(1024)` plus its vector index |
 | `ViewBase` | a security-invoker view rather than a table |
 
-`Scoped` is the one that matters most. It emits `scope_read` and `scope_insert` always, plus
-`scope_update` when the table is declared mutable and `scope_delete` when it is deletable, so
+`Scoped` is the one that matters most. It emits `rls_select` and `rls_insert` always, plus
+`rls_update` when the table is declared mutable and `rls_delete` when it is deletable, so
 mutability is a property of the model rather than something a policy file has to remember.
 
 It also supports `read_through`, which makes a child table inherit its parent's visibility. A

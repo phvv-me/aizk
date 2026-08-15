@@ -1,65 +1,72 @@
 {
   "version": 1,
   "sources": {
-    "icon.svg": "cae75be6f91c16545d0e6e12adb10a9acf4521d586c08515330b071fe235441d",
-    "logo.svg": "d83b76c64f64088b46d4c18fcccef92ea6073b248f46ffbfc2f73541b88e02bf",
-    "banner.svg": "126bff6e3591e41ca1a54759d0552b942c9cb9f02ef6d16418061973d114dad9",
-    "social-card.svg": "f479ab1cf7689cfd06b1a8c1b91c54628a0489011cf38d3591102bf9cc4f502a"
+    "icon.svg": "1ddd197596c63cebfc18e1c9db460a49df04d5fbb3d0be58515d7dd6e04c418a",
+    "logo.svg": "a032c089f3f3fcd8fbe3d448b0280089061fc4b1c7d4d665eeaa0a8605fb01f5",
+    "banner.svg": "803a74de3125c39aa25cfa1dea1262ce9ca9f4cc213abc08cc980b093b479b33",
+    "social-card.svg": "7e4bd7586797bb6ba13874d7a271b82eb7fa6a0589ef3f7c52d7760e2c6922ee",
+    "thumbnail.svg": "4b1023d4e7eadfe0f95dc65573adfdd5cc7e3723386d9ef9c4b2a60122a80116"
   },
   "targets": {
     "docs/src/assets/icon-512.png": {
       "source": "icon.svg",
-      "sha256": "2ffe9e54133a3701ea3f9d690e9978426060879ce08810834b7ba7ada50065e3",
+      "sha256": "dfe9b18a059db04f2095c2a0cfd00605b4ac1e857f7e6e3015b2ff66e915f5dd",
       "width": 512,
       "height": 512
     },
     "docs/public/apple-touch-icon.png": {
       "source": "icon.svg",
-      "sha256": "bed0da183698bef30148f1678d69ff9a5d4db45647adca6dfdb5209d5a37fcd6",
+      "sha256": "10024a116a984c86da9b1c917e10a3e4e43ca3fd4bb1b69020aa1f29e27248bf",
       "width": 180,
       "height": 180
     },
     "src/web/static/apple-touch-icon.png": {
       "source": "icon.svg",
-      "sha256": "bed0da183698bef30148f1678d69ff9a5d4db45647adca6dfdb5209d5a37fcd6",
+      "sha256": "10024a116a984c86da9b1c917e10a3e4e43ca3fd4bb1b69020aa1f29e27248bf",
       "width": 180,
       "height": 180
     },
     "docs/src/assets/logo.png": {
       "source": "logo.svg",
-      "sha256": "e4d8e67c7e37faf0a8f4aa72d4ea343c3683457077dc409d1d8c1d03feb71576",
-      "width": 1120,
+      "sha256": "34783711990a89b1adb07f372f1d748976e4f096986913748e2332c2a2e67b50",
+      "width": 1200,
       "height": 400
     },
     "docs/src/assets/banner.png": {
       "source": "banner.svg",
-      "sha256": "2f289b3e650ef76db018cb39f15e55dd437f0f72c773ed9588c02acc16f67b97",
+      "sha256": "4033a65bb4d9b6ea01df10cdd71796089aa97eee92326442edd9576344371c96",
       "width": 2560,
       "height": 640
     },
     "docs/src/assets/social-card.png": {
       "source": "social-card.svg",
-      "sha256": "98a0d43297af00e8c476e69068788d90bbf211d9d075322e09e05a1e8308c77a",
+      "sha256": "2c9f85d4a8de36f88772aec01e01cf963fe088e8c255fcdfcb2635f35a845a71",
       "width": 1200,
       "height": 630
     },
     "docs/public/social-card.png": {
       "source": "social-card.svg",
-      "sha256": "98a0d43297af00e8c476e69068788d90bbf211d9d075322e09e05a1e8308c77a",
+      "sha256": "2c9f85d4a8de36f88772aec01e01cf963fe088e8c255fcdfcb2635f35a845a71",
       "width": 1200,
       "height": 630
     },
     "src/web/static/social-card.png": {
       "source": "social-card.svg",
-      "sha256": "98a0d43297af00e8c476e69068788d90bbf211d9d075322e09e05a1e8308c77a",
+      "sha256": "2c9f85d4a8de36f88772aec01e01cf963fe088e8c255fcdfcb2635f35a845a71",
       "width": 1200,
       "height": 630
     },
     "hackathon/thumbnail.png": {
-      "source": "social-card.svg",
-      "sha256": "98a0d43297af00e8c476e69068788d90bbf211d9d075322e09e05a1e8308c77a",
-      "width": 1200,
-      "height": 630
+      "source": "thumbnail.svg",
+      "sha256": "7d355c0425e70ad7df70180ae5db2dd23968da694b153fd7a4c9b636c7e2b1b1",
+      "width": 1800,
+      "height": 1200
+    },
+    "hackathon/media/thumbnail-devpost.png": {
+      "source": "thumbnail.svg",
+      "sha256": "7d355c0425e70ad7df70180ae5db2dd23968da694b153fd7a4c9b636c7e2b1b1",
+      "width": 1800,
+      "height": 1200
     }
   }
 }

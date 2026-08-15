@@ -135,10 +135,10 @@
     <p class="mx-auto max-w-7xl px-5 py-16 text-slate-400">Opening crAIZK…</p>
   {:else if !authenticated}
     <section class="mx-auto max-w-xl px-5 py-24 text-center">
-      <p class="mb-3 text-sm font-semibold uppercase tracking-widest text-indigo-400">CockroachDB demo</p>
+      <p class="mb-3 text-sm font-semibold uppercase tracking-widest text-[#a9c5ff]">CockroachDB demo</p>
       <h1 class="text-4xl font-bold">Shared memory for your team and agents</h1>
       <p class="mt-5 text-slate-300">Create an account or sign in to start using crAIZK.</p>
-      <button class="mt-8 rounded-xl bg-indigo-500 px-5 py-3 font-semibold hover:bg-indigo-400" onclick={signIn}>Create account or sign in</button>
+      <button class="mt-8 rounded-xl bg-[#315dff] px-5 py-3 font-semibold hover:brightness-110" onclick={signIn}>Create account or sign in</button>
       {#if error}<p class="mt-5 text-sm text-rose-300">{error}</p>{/if}
     </section>
   {:else}
@@ -146,7 +146,7 @@
       <nav class="flex gap-2 overflow-x-auto lg:flex-col" aria-label="Application">
         {#each views as item}
           <button
-            class="rounded-lg px-3 py-2 text-left text-sm whitespace-nowrap {view === item.id ? 'bg-indigo-500 font-semibold' : 'text-slate-300 hover:bg-slate-800'}"
+            class="rounded-lg px-3 py-2 text-left text-sm whitespace-nowrap {view === item.id ? 'bg-[#315dff] font-semibold' : 'text-slate-300 hover:bg-slate-800'}"
             onclick={() => load(item.id)}
           >{item.label}</button>
         {/each}
@@ -156,7 +156,7 @@
         {#if view === 'recall'}
           <form class="mt-5 flex gap-3" onsubmit={(event) => { event.preventDefault(); recall(); }}>
             <input class="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-4 py-3" bind:value={query} required placeholder="What does the team know about…" />
-            <button class="rounded-lg bg-indigo-500 px-5 py-3 font-semibold" type="submit">Ask</button>
+            <button class="rounded-lg bg-[#315dff] px-5 py-3 font-semibold" type="submit">Ask</button>
           </form>
         {/if}
         {#if error}<p class="mt-5 rounded-lg bg-rose-950 p-4 text-rose-200">{error}</p>{/if}

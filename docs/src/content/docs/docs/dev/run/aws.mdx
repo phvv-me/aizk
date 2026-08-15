@@ -16,8 +16,8 @@ landing page, these docs, the browser app and the MCP endpoint.
 
 `https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp`
 
-Do not replace that host with `aizk.phvv.me`. That address belongs to a separate PostgreSQL
-deployment named pgAIZK.
+Use the origin printed above for the website and MCP endpoint. Other AIZK deployments are separate
+systems with their own users and memory.
 
 <Diagram
   title="The live crAIZK deployment uses one public Lambda origin and one private worker"
@@ -76,9 +76,9 @@ cluster or separate static hosting service. A Lambda Function URL is enough for 
 | `/app/` | browser UI |
 | `/mcp` | modern MCP endpoint and OAuth discovery |
 
-Keeping one origin makes the submission easy to inspect and avoids sending a visitor to the
-unrelated pgAIZK deployment. The build receives its own public URL through
-`AIZK_DOCS_SITE_URL`, so canonical metadata and client examples match the deployed image.
+Keeping one origin makes the submission easy to inspect and avoids sending a visitor to another
+deployment. The build receives its own public URL through `AIZK_DOCS_SITE_URL`, so canonical
+metadata and client examples match the deployed image.
 
 ## Demo limits
 

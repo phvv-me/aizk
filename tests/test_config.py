@@ -178,6 +178,15 @@ def test_object_storage_rejects_a_nonreducing_compression_threshold(
         Settings(object_store_compression_min_savings=minimum_savings)
 
 
+def test_object_retirement_outlives_every_signed_download() -> None:
+    with pytest.raises(ValidationError, match="retirement_grace_seconds must exceed"):
+        Settings(
+            _env_file=None,
+            object_store_internal_download_lifetime_seconds=300,
+            object_store_retirement_grace_seconds=300,
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "dsn"),
     [

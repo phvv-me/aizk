@@ -46,10 +46,9 @@ absolute number, so treat each row as a floor.
 | Gemma 4 31B w4a16 | previous baseline | 22.8 GB |
 | Gemma 4 E2B w4a16 | low resource extractor | 9.5 GB |
 
-Two of these are not free choices. The reranker cannot be economized down to the 0.6B checkpoint,
-because on 253 real vault queries reranking the embedder's own top 8 the small model dropped MRR
-from 0.90 to 0.77 while the 4B held 0.91. And the KV cache dtype is pinned to `bfloat16` because
-an RTX 3090 supports nothing else through vLLM's Triton backend.
+Two of these are not free choices. The smaller reranker did not preserve ranking quality on the
+evaluation fixture, so the deployment uses the 4B checkpoint. The KV cache dtype is pinned to
+`bfloat16` for compatibility with the supported serving hardware.
 
 ## Context lengths are part of the sizing
 
@@ -94,18 +93,10 @@ All four model containers mount one shared Hugging Face cache from
 it reads the same copy. Size that directory for the checkpoints you actually plan to try rather
 than the one you settled on, because swapping an extractor to compare it leaves both on disk.
 
-The reference host was measured on July 15, 2026 and carries three SSDs.
-
-| Device | Capacity | Role |
-|---|---|---|
-| Samsung 980 PRO NVMe | 1 TB | OS, Docker, containers, model cache |
-| WD Blue SN580 NVMe | 2 TB | all durable aizk data |
-| Crucial MX500 SATA | 2 TB | datasets, overflow, backup staging |
-
-PostgreSQL is the latency-sensitive tenant on that middle device. Object bytes, observability
-state and backup staging can share it until they create measured contention, and then they move
-to the SATA drive. Keep 20 percent of the aizk device free, since PostgreSQL needs headroom for
-WAL spikes, index builds, vacuum rewrites and restore work on top of the table size.
+PostgreSQL is the latency-sensitive storage tenant. Put its data on durable low-latency storage and
+separate object bytes, observability state, and backup staging when measurements show contention.
+Keep at least 20 percent of the database device free, since PostgreSQL needs headroom for WAL
+spikes, index builds, vacuum rewrites, and restore work on top of the table size.
 
 ## Read the throughput numbers carefully
 

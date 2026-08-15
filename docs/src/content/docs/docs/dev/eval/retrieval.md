@@ -60,17 +60,11 @@ survived anywhere in the pack. First means it ranked first. Making the current b
 retrieval reference exposes incidental evidence that would otherwise hide a correct answer
 underneath it.
 
-The 2026-07-15 production cell covered all 8 Areas and all 40 Projects, including paused, completed,
-cancelled and archived work. It ran 960 questions with four concurrent recalls, an eight candidate
-target and the production 2,048 token budget. The intended brief was present and ranked first for
-960 of 960 questions, every subject scored MRR 1.0, p50 was 1,778.5 ms and p95 was 2,103.1 ms.
-
-The first run of that cell is the more useful half of the story. It reached 960 hits but only 945
-first-place results. Every one of the fifteen misses came from one managed title being contained
-inside another, `JLPT N2` inside `JLPT N2 Window Weekly Plan` being the clearest, so a question
-about the shorter subject pulled the longer subject's brief up with it. Giving direct identity
-authority only to the maximal overlapping title closed all fifteen cases without touching the
-maximal retrieval plan.
+A public management fixture should contain invented Areas, Projects, statuses, and notes. The
+fixture must include paused and archived subjects plus nested titles such as `Atlas Migration`
+inside `Atlas Migration Weekly Plan`. That case verifies that a question about the shorter subject
+does not incorrectly promote the longer brief. Giving direct identity authority only to the
+maximal overlapping title resolves the ambiguity without changing the retrieval plan.
 
 :::note
 This proves source identity and packing correctness, meaning the right document reaches the top of
@@ -78,10 +72,9 @@ the pack for a question about its subject. It does not judge whether an answerin
 every field of that brief, because no answer is generated.
 :::
 
-A second production cell used seven briefs from the vendored memory papers, one focused question
-each, covering GroupMemBench, Does Memory Need Graphs, Hindsight, APEX-MEM, LongMemEval-V2, Memora
-and Mem2ActBench. All seven ranked their own brief first, and later sequential recalls took about
-1.0 to 2.3 seconds.
+The repository can also build public fixtures from vendored research papers. Each paper gets a
+focused question and an explicit source relevance label, so anyone can reproduce the check without
+access to private memory.
 
 ## The plan ablation and the router
 
@@ -98,25 +91,14 @@ predicted route against the stratum label with a full confusion matrix. That cla
 plan and why the `Route` enum survives only as an instrument for what query-time routing would have
 chosen and cost.
 
-## The other dated cells
+## Publishable results
 
-Every one is a pinned observation with its conditions attached, and none is a published quality
-score.
-
-| Date | Conditions | Result |
-|---|---|---|
-| 2026-07-12 query regression | PostgreSQL 18, VectorChord 1.1.1, 100,000 chunks and 100,000 live facts | local database execution 855 ms to 340 ms, cold multihop 3.02 s to 2.05 s, warm multihop about 0.5 s, temporary I/O removed |
-| 2026-07-12 vault check | 23 related notes, 10 explicit source qrels | identical rankings, hit@8 and MRR both 1.0 |
-| 2026-07-12 ranking upgrade | planted corpus, 128 topics, 99,840 chunks, 104,448 live facts, ground truth encoding each mechanism | mention-seeded PPR recovered 508 of 512 planted chain facts against 128 for the previous recursive walk, access-decay ranked the fresh twin first in 128 of 128 pairs, the per-document cap lifted distinct sources from 1 to 4 of 8, the 0.65 floor packed zero lines on every noise question |
-| 2026-07-12 latency on that corpus | same planted corpus, ordered candidates materialized | local recall about 259 ms p50, multihop about 465 ms p50 |
-| 2026-07-12 embedder shootout | real vault chunked by the production chunker into 1,903 spans over 1,156 notes, 1,101 title queries, 1,024 stored dimensions | Qwen3-VL-Embedding-2B hit@5 88.0 percent and MRR 0.794, Qwen3-Embedding-0.6B 89.3 and 0.792, Qwen3-Embedding-4B 90.1 and 0.802, rising to 90.3 and 0.807 at its native 2,560 dimensions |
-| 2026-07-12 reranker cell | both Qwen3 reranker checkpoints through vLLM, reranking the embedder's own top 8 for 253 real vault queries | without the official prompt scaffold both collapsed MRR from 0.90 to about 0.40, with it the 0.6B still fell to 0.77 while the 4B held 0.91 against a 0.90 baseline |
-
-Two readings of that table matter. The 0.65 relevance floor is not a tuned constant, it comes from
-real Qwen3-VL geometry where relevant vault chunks landed at cosine distance 0.27 to 0.49 while
-off-corpus questions bottomed out at 0.60 to 0.75. And cross-model distance comparisons say nothing
-at all, because absolute cosine values under instruction-asymmetric embedding are model-specific
-geometry and only margins carry meaning.
+Private corpora remain useful for local regression checks, but their questions, titles, identifiers,
+and measurements do not belong in public documentation. A publishable result must use committed
+synthetic fixtures or public sources and include the corpus generator, relevance labels, model
+configuration, database configuration, and raw report. Absolute cosine values are model-specific,
+so comparisons should use ranking metrics and margins rather than treating one distance threshold as
+portable.
 
 ## Next
 

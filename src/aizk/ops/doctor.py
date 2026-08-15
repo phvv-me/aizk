@@ -5,6 +5,7 @@ from typing import Literal, cast
 from uuid import UUID
 
 import asyncpg
+from loguru import logger
 from patos import FrozenModel
 from pydantic import UUID7, ConfigDict, ValidationError
 from sqlalchemy import and_, func, or_
@@ -448,17 +449,21 @@ class QueueDiagnostics:
         for row in rows:
             try:
                 content_id = ArtifactConversionJob.decode(row["payload"]).artifact_content_id
-            except TypeError, ValueError, ValidationError:
-                continue
-            failures[content_id] = ConversionQueueFailure(
-                job_id=row["id"],
-                attempts=row["attempts"],
-                error=error_identity(
-                    row["exception_type"],
-                    row["exception_message"],
-                    self.include_messages,
-                ),
-            )
+            except (TypeError, ValueError, ValidationError) as error:
+                logger.warning(
+                    "ignored malformed failed conversion payload of type {}",
+                    type(error).__name__,
+                )
+            else:
+                failures[content_id] = ConversionQueueFailure(
+                    job_id=row["id"],
+                    attempts=row["attempts"],
+                    error=error_identity(
+                        row["exception_type"],
+                        row["exception_message"],
+                        self.include_messages,
+                    ),
+                )
         return failures
 
     def conversion_jobs(
@@ -476,9 +481,13 @@ class QueueDiagnostics:
                 continue
             try:
                 content_id = ArtifactConversionJob.decode(row["payload"]).artifact_content_id
-            except TypeError, ValueError, ValidationError:
-                continue
-            activity[content_id] = row["status"]
+            except (TypeError, ValueError, ValidationError) as error:
+                logger.warning(
+                    "ignored malformed active conversion payload of type {}",
+                    type(error).__name__,
+                )
+            else:
+                activity[content_id] = row["status"]
         return failures, activity
 
 
@@ -682,22 +691,26 @@ class PortableQueueDiagnostics:
         for task in tasks:
             try:
                 content_id = ArtifactConversionJob.decode(task.payload).artifact_content_id
-            except TypeError, ValueError, ValidationError:
-                continue
-            if task.status == QueueStatus.failed.value:
-                failures[content_id] = ConversionQueueFailure(
-                    job_id=task.id,
-                    attempts=task.attempts,
-                    error=error_identity(
-                        task.error_type,
-                        task.error_message,
-                        self.include_messages,
-                    ),
+            except (TypeError, ValueError, ValidationError) as error:
+                logger.warning(
+                    "ignored malformed portable conversion payload of type {}",
+                    type(error).__name__,
                 )
-            elif task.status == QueueStatus.queued.value:
-                activity[content_id] = "queued"
-            elif task.status == QueueStatus.picked.value:
-                activity[content_id] = "picked"
+            else:
+                if task.status == QueueStatus.failed.value:
+                    failures[content_id] = ConversionQueueFailure(
+                        job_id=task.id,
+                        attempts=task.attempts,
+                        error=error_identity(
+                            task.error_type,
+                            task.error_message,
+                            self.include_messages,
+                        ),
+                    )
+                elif task.status == QueueStatus.queued.value:
+                    activity[content_id] = "queued"
+                elif task.status == QueueStatus.picked.value:
+                    activity[content_id] = "picked"
         return failures, activity
 
 

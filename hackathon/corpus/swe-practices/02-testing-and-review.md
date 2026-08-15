@@ -23,10 +23,6 @@ same resolved dependencies and artifact that will be deployed. When a static ana
 wrong, first determine whether the code or rule can be improved. Suppression is the last resort and
 must explain why the warning is a genuine tool limitation.
 
-Sources retained in pgAIZK include Google's `review`, document
-`019f7a28-94d9-77ab-8f82-481b326c7c20`, and Pedro Valois's `Meteng rule taxonomy expansion`,
-document `019f83e0-6778-7077-a0d9-8a9b6fdf0136`.
-
 Public references
 
 - [Google Engineering Practices for code review](https://google.github.io/eng-practices/review/)

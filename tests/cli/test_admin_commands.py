@@ -338,9 +338,11 @@ def test_storage_compact_reports_the_bytes_one_bounded_pass_reclaimed(
     report = CompactionReport(
         examined=4,
         rewritten=3,
+        conflicted=0,
         failed=0,
         stored_bytes_before=1000,
         stored_bytes_after=400,
+        pending_retirement_bytes=900,
     )
     compaction = Mock(return_value=SimpleNamespace(compact=AsyncMock(return_value=report)))
     monkeypatch.setattr(commands, "ArtifactCompaction", compaction)
@@ -352,10 +354,12 @@ def test_storage_compact_reports_the_bytes_one_bounded_pass_reclaimed(
     assert json.loads(capsys.readouterr().out) == {
         "examined": 4,
         "rewritten": 3,
+        "conflicted": 0,
         "failed": 0,
         "stored_bytes_before": 1000,
         "stored_bytes_after": 400,
-        "reclaimed": 600,
+        "pending_retirement_bytes": 900,
+        "logical_savings": 600,
     }
 
 

@@ -29,8 +29,8 @@ your agent can do from a chat.
 
 Yes. Everything you can see exports to a plain JSONL file, including sources, chunks and derived
 knowledge. Preserved originals come back byte for byte. The active SQL backend holds the memory,
-while the configured object store holds original file bytes. The export is an operator command
-today rather than a button, so a copy means asking whoever runs the deployment.
+while the configured object store holds original file bytes. Export is an operator command rather
+than a user interface button, so a copy means asking whoever runs the deployment.
 
 ## Why did recall not find my note?
 

@@ -96,8 +96,8 @@ little to say about an `object` but a great deal to say about the first attribut
 ## Suppressions have to be earned
 
 :::note[Zero suppressions in src]
-There are currently zero `# type: ignore`, zero `noqa`, and zero `pyrefly: ignore` comments in
-`src/`. That is the standard, not a coincidence, because it means an error report is always about
+The `src/` tree contains no `# type: ignore`, `noqa`, or `pyrefly: ignore` comments. That is the
+standard, not a coincidence, because it means an error report is always about
 the code rather than about the annotations somebody silenced.
 :::
 

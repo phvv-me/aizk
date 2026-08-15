@@ -397,23 +397,22 @@ def test_source_lane_guarantees_a_document_whose_complete_title_is_in_the_query(
             )
 
     async def probe() -> list[str]:
-        await add("Japanese", "Daily grammar practice.", basis(0.0, 1.0))
-        await add("Finances", "Japanese risks need attention.", basis())
+        await add("Atlas migration", "The migration follows a staged rollout.", basis(0.0, 1.0))
+        await add("Finances", "Migration risks need attention.", basis())
         return [
             row._mapping["line"]
             for row in await retrieve(
                 user,
                 basis(),
                 lane_k=1,
-                query="What risks need attention in the Japanese Area?",
+                query="What risks need attention in the Atlas migration?",
             )
         ]
 
     lines = dbutil.run(probe())
 
-    source = next(line for line in lines if line.startswith("Japanese"))
-    assert "Japanese" in source
-    assert "Daily grammar practice." in source
+    source = next(line for line in lines if line.startswith("Atlas migration"))
+    assert "staged rollout" in source
 
 
 def test_source_lane_excludes_expired_documents_and_labels_observation_time(
@@ -879,11 +878,11 @@ def test_reordered_sorts_scored_merit_and_preserves_the_unscored_tail(
         ),
         (
             [
-                (Lane.Kind.SOURCES, "short title", "JLPT N2", True, 0.99),
+                (Lane.Kind.SOURCES, "short title", "Atlas", True, 0.99),
                 (
                     Lane.Kind.SOURCES,
                     "maximal title",
-                    "JLPT N2 Window Weekly Plan",
+                    "Atlas Weekly Plan",
                     True,
                     0.01,
                 ),
@@ -999,8 +998,8 @@ def test_recall_embeds_before_its_single_context_query(
     fake_reranker: list[list[str]],
     stub_entities: None,
 ) -> None:
-    user = User.authorized(owner, read=(owner,), write=(owner,), label="Pedro")
-    search_query = "what holds\nThe asking speaker is Pedro."
+    user = User.authorized(owner, read=(owner,), write=(owner,), label="Maya")
+    search_query = "what holds\nThe asking speaker is Maya."
     vector = deterministic_vector(f"query:{search_query}", settings.embed_dim)
 
     async def probe() -> list[Candidate]:

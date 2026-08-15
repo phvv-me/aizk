@@ -131,7 +131,7 @@ export class LogtoAuth {
 			requiredScopes: listVariable('AIZK_LOGTO_REQUIRED_SCOPES', ['control']).sort(),
 			writableRoles: listVariable('AIZK_LOGTO_WRITABLE_ROLES', ['admin', 'editor']),
 			cacheSeconds: Number(env.AIZK_LOGTO_CACHE_SECONDS ?? 60),
-			identityUrl: stripSlash(env.AIZK_IDENTITY_URL ?? 'https://aizk.phvv.me'),
+			identityUrl: stripSlash(env.AIZK_IDENTITY_URL ?? 'https://aizk.example.com'),
 			anonymousUserId:
 				env.AIZK_ANONYMOUS_USER_ID ?? '00000000-0000-0000-0000-000000000000'
 		});

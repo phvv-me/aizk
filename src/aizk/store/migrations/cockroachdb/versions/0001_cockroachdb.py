@@ -32,12 +32,15 @@ _seeds = cast(
     "OntologySeeds",
     import_module("aizk.store.migrations.versions.0001_init"),
 )
+_INCREMENTAL_TABLES = frozenset({"object_retirement"})
 
 
 def mapped_tables() -> tuple[Table, ...]:
-    """Return mapped base tables in dependency order, excluding mapped views."""
+    """Return the frozen baseline tables in dependency order, excluding later revisions."""
     return tuple(
-        table for table in TableBase.metadata.sorted_tables if not table.info.get("is_view")
+        table
+        for table in TableBase.metadata.sorted_tables
+        if not table.info.get("is_view") and table.name not in _INCREMENTAL_TABLES
     )
 
 
@@ -133,7 +136,7 @@ def _revoke_app_role(app_role: str) -> None:
 
 
 def upgrade() -> None:
-    """Create the complete CockroachDB schema from current mapped metadata."""
+    """Create the frozen CockroachDB baseline from its mapped table definitions."""
     connection = op.get_bind()
     tables = mapped_tables()
     TableBase.metadata.create_all(connection, tables=tables, checkfirst=False)
@@ -189,13 +192,13 @@ def upgrade() -> None:
     catalog = TableBase.metadata.info.get("rls")
     if not isinstance(catalog, rls.Catalog):
         raise RuntimeError("mapped metadata has no RLS catalog")
-    for protected_table in catalog.protected:
-        state = catalog.state(protected_table)
+    for table in catalog.protected:
+        if table not in tables:
+            continue
+        state = catalog.state(table)
         if state is None:
-            raise RuntimeError(f"protected table {protected_table.name} has no RLS state")
-        for statement in rls.apply_statements(
-            protected_table, _legacy_rls(protected_table, state)
-        ):
+            raise RuntimeError(f"protected table {table.name} has no RLS state")
+        for statement in rls.apply_statements(table, _legacy_rls(table, state)):
             connection.execute(statement)
     op.execute(
         CreateView(
@@ -220,7 +223,10 @@ def downgrade() -> None:
     catalog = TableBase.metadata.info.get("rls")
     if not isinstance(catalog, rls.Catalog):
         raise RuntimeError("mapped metadata has no RLS catalog")
+    tables = mapped_tables()
     for table in catalog.protected:
+        if table not in tables:
+            continue
         state = catalog.state(table)
         if state is None:
             raise RuntimeError(f"protected table {table.name} has no RLS state")
@@ -236,6 +242,6 @@ def downgrade() -> None:
         op.execute(f"DROP FUNCTION IF EXISTS {function}")
     TableBase.metadata.drop_all(
         connection,
-        tables=tuple(reversed(mapped_tables())),
+        tables=tuple(reversed(tables)),
         checkfirst=False,
     )

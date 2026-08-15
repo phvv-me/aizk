@@ -3,9 +3,8 @@ title: Brand and visual identity
 description: The canonical aizk mark, palette, typography, and asset workflow.
 ---
 
-The aizk identity comes from one idea. A slip-box holds source cards while a small graph on the
-front shows the knowledge connected through them. The gold spark signals a useful finding, not a
-generic AI effect.
+The aizk identity comes from one idea. A single connected path forms a `Z` for Zettelkasten. Its
+four nodes represent sources that become useful memory without losing their links.
 
 Use the lowercase `aizk` wordmark in navigation, titles, and visual branding. Uppercase `AIZK` is
 still acceptable in prose when it improves readability.
@@ -19,7 +18,8 @@ The editable sources live in `docs/src/assets/`.
 | `icon.svg`        | Square product mark, favicon, and compact navigation identity |
 | `logo.svg`        | Horizontal mark and wordmark                                  |
 | `banner.svg`      | Repository and documentation banner                           |
-| `social-card.svg` | Social previews and hackathon thumbnail                       |
+| `social-card.svg` | Social previews                                                |
+| `thumbnail.svg`   | Hackathon thumbnail in the required 3 to 2 ratio               |
 
 Never edit a generated PNG or a copied favicon directly. Run the generator from the monorepo root.
 
@@ -31,16 +31,16 @@ Documentation checks fail when a generated asset has drifted from its vector sou
 
 ## Color
 
-| Role           | Value     | Use                                  |
-| -------------- | --------- | ------------------------------------ |
-| Ink            | `#1e1b4b` | Dark text and deep surfaces          |
-| Primary indigo | `#4f46e5` | Actions, links, and the product mark |
-| Bright indigo  | `#6366f1` | Highlights and gradients             |
-| Paper          | `#eef2ff` | Light detail and quiet surfaces      |
-| Gold           | `#fbbf24` | The small finding spark only         |
+| Role   | Value     | Use                                        |
+| ------ | --------- | ------------------------------------------ |
+| Ink    | `#17223b` | Text, outlines, and deep surfaces          |
+| Cobalt | `#315dff` | The product mark, actions, and links       |
+| Coral  | `#ff6b4a` | The starting node and focused details      |
+| Paper  | `#fffaf1` | Quiet surfaces and the path through memory |
+| Mist   | `#dfe8ff` | Supporting highlights                      |
 
-Indigo identifies the product and interactive actions. Gold is intentionally scarce. Documentation
-diagrams stay neutral unless color carries actual information.
+Cobalt identifies the product and interactive actions. Coral marks a starting point or one focused
+detail. Documentation diagrams stay neutral unless color carries meaning.
 
 ## Type
 
@@ -54,12 +54,13 @@ measurements use the local monospace stack.
 - Give the icon at least one eighth of its width as clear space.
 - Use the full icon at 24 pixels or larger. Use the generated favicon at smaller sizes.
 - Keep the supplied colors on light or dark neutral surfaces.
-- Do not replace the mark with a generic sparkle, stretch it, rotate it, or recolor individual parts.
+- Do not add cards, shadows, patterns, or decorative layers to the mark.
+- Do not stretch, rotate, or recolor individual parts of the mark.
 - Give decorative copies empty alternative text. Use `aizk` when the mark is the only identifying
   content in a link or image.
 
 The repository banner, documentation, marketing site, web app, browser icons, social cards, and
-hackathon thumbnail all derive from this system.
+hackathon thumbnail all derive from the same specification in `docs/scripts/brand-spec.mjs`.
 
 The generator records the source and output hashes plus dimensions in `brand-manifest.json`.
 Checks validate that committed manifest instead of rerasterizing SVG text with the runner's local
@@ -67,11 +68,12 @@ fonts. Regeneration remains explicit, so a fresh checkout verifies the same rele
 platform.
 
 ```text
-canonical SVGs
+brand specification
       |
       v
 brand generator
       |
+      +---- canonical SVGs
       +---- repository banner
       +---- docs and marketing
       +---- web app icons

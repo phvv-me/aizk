@@ -54,14 +54,25 @@ class CompactionReport(FrozenModel):
 
     examined: int
     rewritten: int
+    conflicted: int
     failed: int
     stored_bytes_before: int
     stored_bytes_after: int
+    pending_retirement_bytes: int
 
     @property
-    def reclaimed(self) -> int:
-        """Stored bytes this pass handed back to the object store."""
+    def logical_savings(self) -> int:
+        """Active-layout bytes saved before deferred object retirement runs."""
         return self.stored_bytes_before - self.stored_bytes_after
+
+
+class RetirementReport(FrozenModel):
+    """Summarize one bounded cleanup of reader-safe obsolete layouts."""
+
+    examined: int
+    deleted: int
+    failed: int
+    reclaimed: int
 
 
 class OriginalArtifact(FrozenModel):

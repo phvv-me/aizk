@@ -131,8 +131,8 @@ than the original.
 was given the file. It declares its own `__rls__` in `blob.py` instead.
 
 ```python
-rls.Policy.select("blob_read", cls.id.in_(select(content.c.blob_id)), roles=(settings.app_role,))
-rls.Policy.insert("blob_insert", sa.true(), roles=(settings.app_role,))
+rls.Policy.select(cls.id.in_(select(content.c.blob_id)), roles=(settings.app_role,))
+rls.Policy.insert(sa.true(), roles=(settings.app_role,))
 ```
 
 Metadata is readable only through an `artifact_content` row the caller can already see, the

@@ -26,8 +26,8 @@ exactly one extraction call.
 to decide whether a path is text at all, and it is the filter `ingest_path` applies when walking a
 directory. `is_code` subtracts the structural tags `identify` mixes in and asks whether the
 remaining language tags avoid `chunk_denylist`, the prose and configuration formats such as
-`markdown`, `json` and `toml`. `is_code` has no caller in the ingest path today, so every source is
-chunked as prose.
+`markdown`, `json` and `toml`. The ingest path does not call `is_code`, so every source is chunked
+as prose.
 
 ## What a chunk row carries
 
