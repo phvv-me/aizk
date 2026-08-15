@@ -319,7 +319,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.14.2,<3" },
     { name = "pypandoc-binary", specifier = ">=1.17,<2" },
     { name = "python-slugify", specifier = ">=8.0.4,<9" },
-    { name = "rlsalchemy", specifier = "==0.5.1" },
+    { name = "rlsalchemy", specifier = ">=0.6.0,<0.7" },
     { name = "rtree", marker = "extra == 'heavy-converter'", specifier = ">=1.4,<2" },
     { name = "scipy", marker = "extra == 'heavy-converter'", specifier = ">=1.18,<2" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.1.0b3,<3" },
@@ -3995,7 +3995,7 @@ wheels = [
 
 [[package]]
 name = "rlsalchemy"
-version = "0.5.1"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -4005,8 +4005,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "sqlglot" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/56/ce/16228657d847cf9f6342d61cfd0d2c5664c981e9b769433af161854e9f1d/rlsalchemy-0.6.0.tar.gz", hash = "sha256:6f84984c4acaf06c59c21c24dc9d9e97ab40bd54d186c188ae695b72d1999293", size = 17884, upload-time = "2026-08-14T03:57:08.099Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/09/04/be8dd7c097d9a9953adfd1af38aabf71a076f3c2226bbf0633251085497e/rlsalchemy-0.5.1-py3-none-any.whl", hash = "sha256:c691822789431220993993af71e4363a9e918ef4c956ae114e260fdabe63ba12", size = 23754, upload-time = "2026-07-19T02:31:34.453Z" },
+    { url = "https://files.pythonhosted.org/packages/92/67/2c03f435898d2a82cb314e939fa51f80e656e73d6c0ebb8f436d169f3128/rlsalchemy-0.6.0-py3-none-any.whl", hash = "sha256:095bbe035c7cc8677d411a851adb2a17fbfbcde9ecba3cef53ed42090bb857b9", size = 26794, upload-time = "2026-08-14T03:57:06.792Z" },
 ]
 
 [[package]]
