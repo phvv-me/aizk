@@ -49,7 +49,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.14-8_cp314.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - pypi: ..
-      - pypi: git+https://github.com/Pedrexus/sqlalchemy.git?rev=64fee70a136029c83a138fd2a43adad870207937#64fee70a136029c83a138fd2a43adad870207937
+      - pypi: git+https://github.com/Pedrexus/sqlalchemy.git?rev=1bbe0d64d6017b346a5e6f7bf784ba7a3294662f#1bbe0d64d6017b346a5e6f7bf784ba7a3294662f
       - pypi: git+https://github.com/phvv-me/rls.git?rev=16a7798ffcae819a8bf3e7114344e9e99c1be8f6#16a7798ffcae819a8bf3e7114344e9e99c1be8f6
       - pypi: https://files.pythonhosted.org/packages/02/36/ecc85bc96c273dc8a11273ed4782272975e6338d4a3e9228621175edf0e3/jaraco_functools-4.6.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/03/f9/08d8ce5d312e05f3c53368ce993d2f6346519d212e8801fa9c5cdbd299a3/asyncpg_stubs-0.31.3-py3-none-any.whl
@@ -821,7 +821,7 @@ packages:
   - rtree>=1.4,<2 ; extra == 'heavy-converter'
   - scipy>=1.18,<2 ; extra == 'heavy-converter'
   requires_python: '>=3.14'
-- pypi: git+https://github.com/Pedrexus/sqlalchemy.git?rev=64fee70a136029c83a138fd2a43adad870207937#64fee70a136029c83a138fd2a43adad870207937
+- pypi: git+https://github.com/Pedrexus/sqlalchemy.git?rev=1bbe0d64d6017b346a5e6f7bf784ba7a3294662f#1bbe0d64d6017b346a5e6f7bf784ba7a3294662f
   name: sqlalchemy
   version: 2.1.0b4.dev0
   requires_dist:

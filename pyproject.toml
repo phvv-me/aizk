@@ -325,12 +325,12 @@ aws-cdk = ">=2.200, <3"
 prerelease-mode = "allow"
 
 [tool.chefe.python.dependency-overrides]
-sqlalchemy = { git = "https://github.com/Pedrexus/sqlalchemy.git", rev = "64fee70a136029c83a138fd2a43adad870207937" }
+sqlalchemy = { git = "https://github.com/Pedrexus/sqlalchemy.git", rev = "1bbe0d64d6017b346a5e6f7bf784ba7a3294662f" }
 
 [tool.chefe.sources]
 # Immutable public revisions keep standalone CI and local development on the same row security
 # implementation while the upstream changes are reviewed.
-sqlalchemy = { provider = "git", git = "https://github.com/Pedrexus/sqlalchemy.git", rev = "64fee70a136029c83a138fd2a43adad870207937" }
+sqlalchemy = { provider = "git", git = "https://github.com/Pedrexus/sqlalchemy.git", rev = "1bbe0d64d6017b346a5e6f7bf784ba7a3294662f" }
 rlsalchemy = { provider = "git", git = "https://github.com/phvv-me/rls.git", rev = "16a7798ffcae819a8bf3e7114344e9e99c1be8f6" }
 
 [tool.chefe.tasks]

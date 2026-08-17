@@ -52,7 +52,7 @@ pypandoc-binary = "<2,>=1.17"
 
 [pypi-dependencies.sqlalchemy]
 git = "https://github.com/Pedrexus/sqlalchemy.git"
-rev = "64fee70a136029c83a138fd2a43adad870207937"
+rev = "1bbe0d64d6017b346a5e6f7bf784ba7a3294662f"
 extras = ["asyncio"]
 
 [pypi-dependencies.py-key-value-aio]
@@ -80,7 +80,7 @@ prerelease-mode = "allow"
 
 [pypi-options.dependency-overrides.sqlalchemy]
 git = "https://github.com/Pedrexus/sqlalchemy.git"
-rev = "64fee70a136029c83a138fd2a43adad870207937"
+rev = "1bbe0d64d6017b346a5e6f7bf784ba7a3294662f"
 
 [feature.dev.pypi-dependencies]
 fire = "<0.8,>=0.7.1"
