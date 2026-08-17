@@ -26,7 +26,21 @@ wd() {
 
 element() {
   wd /element "$(jq -nc --arg value "$1" '{using:"css selector",value:$value}')" |
-    jq -r '.value["element-6066-11e4-a52e-4f735466cecf"]'
+    jq -r '.value["element-6066-11e4-a52e-4f735466cecf"] // empty'
+}
+
+wait_for_element() {
+  local selector=$1
+  local element_id
+  for attempt in {1..50}; do
+    element_id=$(element "$selector")
+    if [[ -n "$element_id" ]]; then
+      printf '%s\n' "$element_id"
+      return
+    fi
+    sleep 0.2
+  done
+  return 1
 }
 
 run_script() {
@@ -53,13 +67,9 @@ response=$(curl -fsS -X POST "http://127.0.0.1:${webdriver_port}/session" \
 session_id=$(jq -r '.value.sessionId // .sessionId' <<< "$response")
 
 navigate "$site_url/app/dashboard/"
-sleep 5
-button_id=$(element button)
-wd "/element/${button_id}/click" '{}' >/dev/null
-sleep 5
-identifier_id=$(element 'input[name="identifier"]')
-password_id=$(element 'input[name="password"]')
-submit_id=$(element 'button[type="submit"]')
+identifier_id=$(wait_for_element 'input[name="identifier"]')
+password_id=$(wait_for_element 'input[name="password"]')
+submit_id=$(wait_for_element 'button[type="submit"]')
 password=$(< "$password_root/password")
 wd "/element/${identifier_id}/value" "$(jq -nc --arg text maya '{text:$text}')" >/dev/null
 wd "/element/${password_id}/value" "$(jq -nc --arg text "$password" '{text:$text}')" >/dev/null

@@ -1,11 +1,12 @@
 import type { APIRoute } from 'astro';
+import { publicOAuthClientId } from '../config/deployment';
 import { setupFor } from '../config/setup';
 
 export const prerender = true;
 
 const site = (import.meta.env.SITE ?? 'https://aizk.example.com').replace(/\/$/, '');
 const endpoint = `${site}/mcp`;
-const clientId = import.meta.env.AIZK_DOCS_MCP_CLIENT_ID ?? 'PUBLIC_AIZK_CLIENT_ID';
+const clientId = publicOAuthClientId();
 const claude = setupFor('claude-code');
 const codex = setupFor('codex');
 

@@ -44,6 +44,13 @@ chefe run infra-bootstrap
 chefe run infra-deploy
 ```
 
+Verify that the bundled public client is Native, distinct from the Management API client and owns
+every exact agent callback before building anything.
+
+```sh
+chefe run aizk-auth-check
+```
+
 Build both Lambda targets for one architecture without provenance metadata. Push an immutable tag
 for each target and resolve both digests from ECR. The API image serves the public site, docs, API,
 MCP, and worker. The web image runs the production SvelteKit application behind the public Lambda.
@@ -54,7 +61,6 @@ docker buildx build \
   --provenance=false \
   --target lambda \
   --build-arg AIZK_DOCS_SITE_URL="$AIZK_AWS_PUBLIC_URL" \
-  --build-arg AIZK_DOCS_MCP_CLIENT_ID="$AIZK_DEMO_MCP_PUBLIC_CLIENT_ID" \
   --build-context sqlalchemy=../sqlalchemy \
   -f src/deploy/Dockerfile \
   -t "$ECR_REPOSITORY:$IMMUTABLE_TAG" \

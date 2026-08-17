@@ -111,6 +111,9 @@ WORKDIR /app
 COPY docs/package.json docs/pnpm-lock.yaml docs/pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY docs ./
+COPY .agents /.agents
+COPY .claude-plugin /.claude-plugin
+COPY plugins /plugins
 COPY README.md /README.md
 COPY SECURITY.md ROADMAP.md CHANGELOG.md pyproject.toml /
 COPY infra/aws/README.md /infra/aws/README.md

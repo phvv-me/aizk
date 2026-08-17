@@ -158,12 +158,18 @@ cwd = ".."
 [tasks.infra-check]
 depends-on = ["infra-synth", "infra-test"]
 
+[tasks.aizk-auth-check]
+cmd = "python -m infra.aws.logto verify"
+description = "refuse deployment unless AIZK uses a distinct Native Logto client with every fixed agent callback"
+cwd = ".."
+
 [tasks.infra-bootstrap]
 cmd = "cdk bootstrap --app 'python -m infra.aws.app'"
 cwd = ".."
 
 [tasks.infra-deploy]
 cmd = "cdk deploy --app 'python -m infra.aws.app'"
+depends-on = ["aizk-auth-check"]
 cwd = ".."
 
 [tasks.ccloud-build]

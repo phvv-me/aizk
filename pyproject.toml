@@ -341,8 +341,9 @@ test = { run = "python -m pytest -n 4 --dist loadscope --benchmark-disable --cov
 infra-synth = { run = "python -m infra.aws.app", env = { CDK_OUTDIR = "cdk.out" } }
 infra-test = { run = "python -m pytest tests/deploy --no-cov" }
 infra-check = { depends = ["infra-synth", "infra-test"] }
+aizk-auth-check = { run = "python -m infra.aws.logto verify", description = "refuse deployment unless AIZK uses a distinct Native Logto client with every fixed agent callback" }
 infra-bootstrap = { run = "cdk bootstrap --app 'python -m infra.aws.app'" }
-infra-deploy = { run = "cdk deploy --app 'python -m infra.aws.app'" }
+infra-deploy = { run = "cdk deploy --app 'python -m infra.aws.app'", depends = ["aizk-auth-check"] }
 ccloud-build = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml build ccloud" }
 ccloud = { run = "sh -lc 'docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud \"$@\"' --" }
 ccloud-check = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud version && docker run --rm --entrypoint cockroach-sql aizk-cockroachdb-ccloud:0.6.12 --version", depends = [

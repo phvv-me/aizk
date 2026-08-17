@@ -239,6 +239,7 @@ const claudePlugin = JSON.parse(
 const claudeMcp = JSON.parse(
   await readFile(join(project, 'plugins/aizk/claude.mcp.json'), 'utf8'),
 );
+const publicClientId = codexPlugin.mcpServers?.aizk?.oauth?.client_id;
 const pluginContracts = [
   ['the Codex marketplace name', codexMarketplace.name, 'aizk'],
   ['the Codex marketplace plugin', codexMarketplace.plugins?.[0]?.name, 'aizk'],
@@ -258,9 +259,22 @@ const pluginContracts = [
     codexPlugin.mcpServers?.aizk?.url,
     claudeMcp.mcpServers?.aizk?.url,
   ],
+  [
+    'the shared public OAuth client',
+    publicClientId,
+    claudeMcp.mcpServers?.aizk?.oauth?.clientId,
+  ],
 ];
 for (const [label, actual, expected] of pluginContracts) {
   if (actual !== expected) failures.push(`Plugin manifests disagree on ${label}.`);
+}
+if (!/^[a-z0-9]{21}$/.test(publicClientId ?? '')) {
+  failures.push('The plugin public OAuth client is not one valid Logto application ID.');
+} else if (!setupInstructions.includes(publicClientId)) {
+  failures.push('setup.md does not use the plugin public OAuth client.');
+}
+if (setupInstructions.includes('PUBLIC_AIZK_CLIENT_ID')) {
+  failures.push('setup.md contains the placeholder OAuth client ID.');
 }
 
 const external = /^\/(app|mcp|api|auth|events)(\/|$)/;
