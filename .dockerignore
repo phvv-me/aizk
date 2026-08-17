@@ -27,7 +27,7 @@ backups
 .env
 .mcp.json
 htmlcov
-.coverage
+.coverage*
 src/web/node_modules
 src/web/build
 src/web/.svelte-kit

@@ -800,7 +800,7 @@ packages:
   - inflection>=0.5.1,<0.6
   - patos[sql]==0.0.12
   - rlsalchemy>=0.6.0,<0.7
-  - mainboard==0.0.9
+  - mainboard>=0.0.9
   - pgqueuer>=1.1.1,<2
   - croniter>=6.2.4,<7
   - pendulum>=3.2,<4

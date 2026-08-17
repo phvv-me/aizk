@@ -13,6 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-ssm": "^3.1111.0",
     "@logto/sveltekit": "^0.3.2",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",

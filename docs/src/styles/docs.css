@@ -15,7 +15,10 @@
 
 /* Starlight reads its accent and gray ramps from these. */
 @theme {
-  --font-brand: 'Space Grotesk', var(--font-sans);
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-brand: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Instrument Serif', ui-serif, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
   --color-accent-50: #eef3ff;
   --color-accent-100: #dfe8ff;
   --color-accent-200: #c7d6ff;

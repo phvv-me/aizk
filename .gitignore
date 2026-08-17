@@ -46,7 +46,8 @@ __pycache__/
 .pyrefly/
 .mypy_cache/
 .hypothesis/
-.coverage
+.coverage*
+*.blend1
 htmlcov/
 *.egg-info/
 

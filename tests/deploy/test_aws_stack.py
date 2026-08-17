@@ -18,9 +18,11 @@ def template(
     config = DeploymentConfig(
         deploy_compute=compute,
         image_digest=_DIGEST if compute else "",
+        web_image_digest=_DIGEST if compute and logto else "",
         public_url="https://memory.example.com" if logto else None,
         logto_url="https://tenant.logto.app" if logto else None,
         logto_client_id="management-client" if logto else "",
+        web_client_id="web-client" if logto else "",
         billing_email=billing_email,
     )
     return Template.from_stack(AizkAwsStack(app, "TestStack", config))
@@ -44,7 +46,7 @@ def test_bootstrap_creates_only_the_bounded_image_repository() -> None:
                         {
                             "rules": [
                                 Match.object_like(
-                                    {"selection": Match.object_like({"countNumber": 2})}
+                                    {"selection": Match.object_like({"countNumber": 4})}
                                 )
                             ]
                         }
@@ -183,6 +185,7 @@ def test_runtime_is_serverless_bounded_and_recovers_every_fifteen_minutes() -> N
 def test_logto_makes_the_function_url_public_only_after_app_auth_is_enabled() -> None:
     stack = template(compute=True, logto=True)
 
+    stack.resource_count_is("AWS::Lambda::Function", 3)
     stack.has_resource_properties(
         "AWS::Lambda::Url",
         {"AuthType": "NONE"},
@@ -198,6 +201,29 @@ def test_logto_makes_the_function_url_public_only_after_app_auth_is_enabled() ->
                         "AIZK_LOGTO_MANAGEMENT_RESOURCE": "https://tenant.logto.app/api",
                         "AIZK_MCP_PUBLIC_URL": "https://memory.example.com",
                         "AIZK_REQUIRE_AUTH": "true",
+                        "AIZK_WEB_FUNCTION_NAME": Match.any_value(),
+                    }
+                )
+            },
+        },
+    )
+    stack.has_resource_properties(
+        "AWS::Lambda::Function",
+        {
+            "FunctionName": "craizk-staging-web",
+            "MemorySize": 1024,
+            "Timeout": 60,
+            "Environment": {
+                "Variables": Match.object_like(
+                    {
+                        "AIZK_LOGTO_URL": "https://tenant.logto.app",
+                        "AIZK_WEB_CLIENT_ID": "web-client",
+                        "AIZK_WEB_PUBLIC_URL": "https://memory.example.com",
+                        "AIZK_WEB_API_URL": "https://memory.example.com",
+                        "AIZK_MCP_PUBLIC_URL": "https://memory.example.com",
+                        "AIZK_AWS_PARAMETER_ENV": Match.string_like_regexp(
+                            "/craizk/staging/web-client-secret"
+                        ),
                     }
                 )
             },
@@ -263,6 +289,16 @@ def test_deployment_config_rejects_unready_compute_or_partial_logto() -> None:
             deploy_compute=True,
             image_digest=_DIGEST,
             logto_url="https://tenant.logto.app",
+        )
+
+    with pytest.raises(ValueError, match="web image digest"):
+        DeploymentConfig(
+            deploy_compute=True,
+            image_digest=_DIGEST,
+            public_url="https://memory.example.com",
+            logto_url="https://tenant.logto.app",
+            logto_client_id="mcp-client",
+            web_client_id="web-client",
         )
 
 

@@ -82,9 +82,22 @@ WORKDIR /app
 COPY --from=web-build /app/build ./build
 COPY --from=web-build /app/node_modules ./node_modules
 COPY --from=web-build /app/package.json ./package.json
+COPY --from=web-build /app/start.js ./start.js
 USER node
 EXPOSE 3000
 CMD ["node", "build"]
+
+# The exact production SvelteKit application also runs in the AWS profile. Lambda Web Adapter
+# turns Function URL events forwarded by the public Python Lambda into ordinary HTTP requests,
+# while the small startup module resolves only the two web secrets assigned to this function.
+FROM web AS lambda-web
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.0.0 /lambda-adapter /opt/extensions/lambda-adapter
+ENV PORT=8080 \
+    AWS_LWA_PORT=8080 \
+    AWS_LWA_READINESS_CHECK_PATH=/healthz \
+    AWS_LWA_ENABLE_COMPRESSION=true
+EXPOSE 8080
+CMD ["node", "start.js"]
 
 # The marketing page and the documentation are one static Astro build. Nothing here reaches the
 # database or Logto, so the output is plain files and the serving stage carries no runtime.

@@ -35,15 +35,17 @@ const report: ProcessingReport = {
 };
 
 describe('ProcessingEvents', () => {
-  it('opens once, delivers snapshots, reports reconnects, and closes cleanly', () => {
+  it('opens once, delivers snapshots, falls back to polling, and closes cleanly', async () => {
     const source = new FakeEventSource();
     const reports: ProcessingReport[] = [];
     const statuses: ProcessingConnection[] = [];
     const create = vi.fn(() => source as unknown as EventSource);
+    const load = vi.fn().mockResolvedValue(report);
     const events = new ProcessingEvents(
       (next) => reports.push(next),
       (status) => statuses.push(status),
-      create
+      create,
+      load
     );
 
     events.start();
@@ -51,11 +53,12 @@ describe('ProcessingEvents', () => {
     source.onopen?.();
     source.emit(JSON.stringify(report));
     source.onerror?.();
+    await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
     events.stop();
 
     expect(create).toHaveBeenCalledOnce();
-    expect(reports).toEqual([report]);
-    expect(statuses).toEqual(['connecting', 'live', 'live', 'reconnecting', 'paused']);
+    expect(reports).toEqual([report, report]);
+    expect(statuses).toEqual(['connecting', 'live', 'live', 'reconnecting', 'live', 'paused']);
     expect(source.closed).toBe(true);
   });
 

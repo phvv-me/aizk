@@ -1,5 +1,6 @@
 ---
 import { Code } from '@astrojs/starlight/components';
+import { setupFor } from '../config/setup';
 
 interface Props {
   client: 'claude-code' | 'codex' | 'opencode';
@@ -10,6 +11,8 @@ const { client, shared = false } = Astro.props;
 const site = (Astro.site?.origin ?? 'https://aizk.example.com').replace(/\/$/, '');
 const endpoint = `${site}/mcp`;
 const clientId = import.meta.env.AIZK_DOCS_MCP_CLIENT_ID ?? 'PUBLIC_AIZK_CLIENT_ID';
+const claude = setupFor('claude-code');
+const codex = setupFor('codex');
 
 const configurations = {
   'claude-code': shared
@@ -30,25 +33,11 @@ const configurations = {
       }
     : {
         lang: 'sh',
-        code: `claude mcp add --scope user --transport http --client-id ${clientId} \\
-  --callback-port 8912 aizk ${endpoint}
-claude mcp login aizk`,
+        code: `${claude.install}\n${claude.connect}`,
       },
   codex: {
-    lang: 'toml',
-    code: `mcp_oauth_credentials_store = "file"
-mcp_oauth_callback_port = 8912
-
-[features]
-mcp_2026_07_28 = true
-
-[mcp_servers.aizk]
-url = "${endpoint}"
-auth = "oauth"
-scopes = ["control", "offline_access", "openid"]
-
-[mcp_servers.aizk.oauth]
-client_id = "${clientId}"`,
+    lang: 'sh',
+    code: `${codex.install}\n${codex.connect}`,
   },
   opencode: {
     lang: 'json',

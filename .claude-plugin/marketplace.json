@@ -1,0 +1,15 @@
+{
+  "name": "aizk",
+  "owner": {
+    "name": "AIZK"
+  },
+  "plugins": [
+    {
+      "name": "aizk",
+      "source": "./plugins/aizk",
+      "description": "Durable, sourced memory for people, teams and their agents",
+      "category": "Productivity",
+      "tags": ["memory", "knowledge", "mcp", "zettelkasten"]
+    }
+  ]
+}

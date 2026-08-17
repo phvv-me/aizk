@@ -19,10 +19,12 @@ class DeploymentConfig:
     region: str = "ap-southeast-1"
     deploy_compute: bool = False
     image_digest: str = ""
+    web_image_digest: str = ""
     public_url: str | None = None
     logto_url: str | None = None
     logto_client_id: str = ""
     spa_client_id: str = "rdxzy3laahdnyp1mgxndf"
+    web_client_id: str = ""
     billing_email: str = ""
     monthly_budget_usd: int = 10
     db_null_pool: bool = False
@@ -37,6 +39,8 @@ class DeploymentConfig:
     admin_database_url_parameter: str = "/craizk/staging/admin-database-url"
     openrouter_key_parameter: str = "/craizk/staging/openrouter-api-key"
     logto_client_secret_parameter: str = "/craizk/staging/logto-management-client-secret"
+    web_client_secret_parameter: str = "/craizk/staging/web-client-secret"
+    web_session_secret_parameter: str = "/craizk/staging/web-session-secret"
 
     def __post_init__(self) -> None:
         if self.deploy_compute and _DIGEST.fullmatch(self.image_digest) is None:
@@ -51,9 +55,19 @@ class DeploymentConfig:
                 self.logto_url,
                 self.logto_client_id,
                 self.spa_client_id,
+                self.web_client_id,
             )
         ):
             raise ValueError("Logto deployment requires every public and client setting")
+        if (
+            self.deploy_compute
+            and self.logto_enabled
+            and _DIGEST.fullmatch(self.web_image_digest) is None
+        ):
+            raise ValueError(
+                "authenticated compute deployment requires a lowercase 64 character web "
+                "image digest"
+            )
 
     @property
     def logto_enabled(self) -> bool:
@@ -63,6 +77,7 @@ class DeploymentConfig:
                 self.public_url,
                 self.logto_url,
                 self.logto_client_id,
+                self.web_client_id,
             )
         )
 
@@ -75,10 +90,12 @@ class DeploymentConfig:
             region=get("AIZK_AWS_REGION", cls.region),
             deploy_compute=enabled(get("AIZK_AWS_DEPLOY_COMPUTE", "false")),
             image_digest=get("AIZK_AWS_IMAGE_DIGEST", ""),
+            web_image_digest=get("AIZK_AWS_WEB_IMAGE_DIGEST", ""),
             public_url=get("AIZK_AWS_PUBLIC_URL") or None,
             logto_url=get("AIZK_AWS_LOGTO_URL") or None,
             logto_client_id=get("AIZK_AWS_LOGTO_CLIENT_ID", ""),
             spa_client_id=get("AIZK_AWS_SPA_CLIENT_ID", cls.spa_client_id),
+            web_client_id=get("AIZK_AWS_WEB_CLIENT_ID", ""),
             billing_email=get("AIZK_AWS_BILLING_EMAIL", ""),
             monthly_budget_usd=int(get("AIZK_AWS_MONTHLY_BUDGET_USD", "10")),
             db_null_pool=enabled(get("AIZK_AWS_DB_NULL_POOL", "false")),
@@ -107,5 +124,13 @@ class DeploymentConfig:
             logto_client_secret_parameter=get(
                 "AIZK_AWS_LOGTO_CLIENT_SECRET_PARAMETER",
                 cls.logto_client_secret_parameter,
+            ),
+            web_client_secret_parameter=get(
+                "AIZK_AWS_WEB_CLIENT_SECRET_PARAMETER",
+                cls.web_client_secret_parameter,
+            ),
+            web_session_secret_parameter=get(
+                "AIZK_AWS_WEB_SESSION_SECRET_PARAMETER",
+                cls.web_session_secret_parameter,
             ),
         )

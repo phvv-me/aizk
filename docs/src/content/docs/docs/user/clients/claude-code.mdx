@@ -32,13 +32,13 @@ secret. Claude Code uses PKCE, and you sign in as yourself in a browser.
 
 ## The two-command setup
 
-The shortest personal setup puts aizk in Claude Code's user scope, so every project you open has it.
+The shortest personal setup installs one plugin that contains both the AIZK skill and its MCP
+connection. It does not edit a project or replace an existing MCP entry.
 
 <ClientConfig client="claude-code" />
 
-The second command opens a browser, you sign in, and the browser hands the result back to Claude Code
-on port 8912. Pinning that port with `--callback-port` is not required locally, but it makes the
-remote case below predictable, so it is worth doing from the start.
+After Claude Code opens, approve the plugin-provided server. Use `/mcp`, select AIZK, and choose sign
+in. Claude opens the browser and stores the refreshed credential itself.
 
 :::tip[Confirm it worked]
 Ask Claude to call `status`. Getting your name and your organizations back is the real proof the
@@ -48,28 +48,22 @@ connection works, since a stored credential alone does not prove the server acce
 ## When the browser is on another machine
 
 Claude Code running over SSH cannot open a browser on the machine in front of you, and the loopback
-redirect has nowhere to land. Use the headless flow instead.
-
-```sh
-claude mcp login --no-browser aizk
-```
-
-It prints an authorization URL. Open that URL in your own browser, finish signing in, and the page
-lands on a redirect URL. Copy the whole redirect URL out of the address bar and paste it back into the
-terminal when Claude asks for it.
+redirect has nowhere to land. Select AIZK in `/mcp` and copy the authorization URL to your browser.
+Finish signing in, then copy the whole redirect URL from the address bar back into Claude Code when
+it asks for it.
 
 This flow needs no port forward at all, which is the main reason to prefer it over forwarding a
 callback port. [Codex](/docs/user/clients/codex/) has no equivalent and does need the forward.
 
 ## A shared repository
 
-For a team repository, commit the server entry so nobody has to remember the `add` command.
+For a team repository that cannot use plugins, commit the server entry as a fallback.
 
 <ClientConfig client="claude-code" shared />
 
-That file holds no credential and is safe to commit. Each person still runs `claude mcp login aizk`
-once on their own machine, and each person's memory stays their own. Sharing a repository does not
-share memory. Only [scopes](/docs/user/concepts/scopes/) do that.
+That file holds no credential and is safe to commit. Each person still signs in through `/mcp` on
+their own machine, and each person's memory stays their own. Sharing a repository does not share
+memory. Only [scopes](/docs/user/concepts/scopes/) do that.
 
 ## Let it finish its own setup
 

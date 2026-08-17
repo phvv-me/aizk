@@ -113,7 +113,7 @@ class PolicyContextTransition:
             ),
         )
         read = scoped_read
-        parent_scope = sa.true()
+        parent_scope: ColumnElement[bool] = sa.true()
         if read_through:
             parent_id = table.c[f"{read_through}_id"]
             if self.cockroachdb:
@@ -185,11 +185,15 @@ class PolicyContextTransition:
 
     def operator_state(self, *, legacy: bool) -> rls.RLSState:
         """Build the operator snapshot policy for the selected carrier."""
+        standing: ColumnElement[bool]
         if legacy and self.cockroachdb:
-            standing = sa.func.nullif(
-                sa.func.split_part(sa.func.current_setting("application_name", True), "|", 5),
-                "",
-            ).cast(sa.Boolean())
+            standing = cast(
+                ColumnElement[bool],
+                sa.func.nullif(
+                    sa.func.split_part(sa.func.current_setting("application_name", True), "|", 5),
+                    "",
+                ).cast(sa.Boolean()),
+            )
         else:
             standing = rls.current_setting("operator", sa.Boolean(), prefix="app")
         return rls.RLSState.declared(

@@ -1,44 +1,51 @@
 ---
 const pillars = [
   {
+    number: '01',
     title: 'Private by default',
-    body: 'A memory you write belongs to you alone until you say otherwise. There is no shared bucket that things fall into by accident, and no setting that quietly widens an old note.',
+    body: 'Your memory stays yours until you deliberately name who may share it.',
     href: '/docs/user/concepts/scopes/',
-    art: ['  you', '   │', '   ▼', ' ┌─────┐', ' │  •  │  private', ' └─────┘'],
   },
   {
-    title: 'Shared on purpose',
-    body: 'Sharing names the organizations that may read a note. Name two and only people who belong to both can see it, which is how a memory about one collaboration stays inside it.',
-    href: '/docs/user/using/sharing/',
-    art: ['  ┌───┐   ┌───┐', '  │ A │   │ B │', '  └─┬─┘   └─┬─┘', '    └───┬───┘', '      ┌─┴─┐', '      │A∩B│'],
+    number: '02',
+    title: 'Sources stay attached',
+    body: 'Every answer can show where it came from and what the system derived later.',
+    href: '/docs/user/concepts/evidence/',
   },
   {
+    number: '03',
     title: 'Portable by design',
-    body: 'Run AIZK in the cloud or on your own hardware. The memory model and the five agent tools stay the same, so deployment choices do not leak into how people use it.',
+    body: 'Five MCP tools keep the same shape across agents, teams and deployments.',
     href: '/docs/dev/run/databases/',
-    art: ['  your agent', '      │', '      ▼', '  ┌───────────┐', '  │ AIZK tools│', '  │ stay stable│', '  └───────────┘'],
   },
 ];
 ---
 
 <section class="border-base-300 border-b">
-  <div class="bg-base-300 mx-auto grid max-w-6xl gap-px md:grid-cols-3">
-    {
-      pillars.map((pillar) => (
-        <a
-          href={pillar.href}
-          class="group bg-base-100 hover:bg-base-200 flex flex-col gap-4 p-8 transition-colors"
-        >
-          <pre class="text-base-content/70 font-mono text-xs leading-tight"><code>{pillar.art.join('\n')}</code></pre>
-          <h2 class="text-xl font-semibold" style="font-family: var(--font-brand)">
-            {pillar.title}
-          </h2>
-          <p class="text-base-content/70 text-sm">{pillar.body}</p>
-          <span class="text-base-content mt-auto text-sm font-medium underline underline-offset-4">
-            Read more
-          </span>
-        </a>
-      ))
-    }
+  <div class="mx-auto max-w-7xl px-4 py-20 lg:py-28">
+    <p class="text-primary mb-3 font-mono text-xs font-semibold uppercase tracking-[0.18em]">One memory</p>
+    <h2 class="max-w-2xl text-3xl font-semibold tracking-tight sm:text-4xl" style="font-family: var(--font-brand)">
+      Useful without losing context
+    </h2>
+
+    <div class="mt-10 grid gap-4 md:grid-cols-3">
+      {
+        pillars.map((pillar) => (
+          <a
+            href={pillar.href}
+            class="group border-base-300 bg-base-200/55 hover:bg-base-200 flex min-h-64 flex-col rounded-3xl border p-7 transition"
+          >
+            <span class="text-primary font-mono text-xs">{pillar.number}</span>
+            <div class="mt-auto pt-16">
+              <h3 class="text-xl font-semibold" style="font-family: var(--font-brand)">{pillar.title}</h3>
+              <p class="text-base-content/65 mt-3 text-sm leading-relaxed">{pillar.body}</p>
+              <span class="mt-5 inline-block text-sm font-medium group-hover:underline group-hover:underline-offset-4">
+                Learn more
+              </span>
+            </div>
+          </a>
+        ))
+      }
+    </div>
   </div>
 </section>

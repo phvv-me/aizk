@@ -12,12 +12,18 @@ const tagline = 'Shared memory for people, teams, and AI agents';
 function mark(x, y, size) {
   const scale = size / 96;
   return `<g transform="translate(${x} ${y}) scale(${scale})">
+    <defs>
+      <clipPath id="brain-box-clip"><rect width="96" height="96" rx="24"/></clipPath>
+    </defs>
     <rect width="96" height="96" rx="24" fill="${colors.cobalt}"/>
-    <path d="M27 29H69L27 67H69" fill="none" stroke="${colors.paper}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="27" cy="29" r="6" fill="${colors.coral}"/>
-    <circle cx="69" cy="29" r="6" fill="${colors.paper}"/>
-    <circle cx="27" cy="67" r="6" fill="${colors.paper}"/>
-    <circle cx="69" cy="67" r="6" fill="${colors.paper}"/>
+    <g clip-path="url(#brain-box-clip)" fill="none" stroke="${colors.paper}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M25 -5V15C25 26 33 29 33 39C33 49 26 54 15 54H-5"/>
+      <path d="M67 -5V14C67 24 74 29 84 29H101"/>
+      <path d="M101 58H83C73 58 68 64 68 74V101"/>
+      <path d="M-5 76H14C24 76 29 83 29 101"/>
+      <path d="M47 -5V15C47 25 51 30 58 36C65 42 65 49 59 56C53 62 49 67 49 76V101"/>
+    </g>
+    <circle cx="59" cy="56" r="5" fill="${colors.coral}" stroke="${colors.paper}" stroke-width="2"/>
   </g>`;
 }
 
@@ -41,13 +47,13 @@ function wordmark(x, y, size, label = 'aizk', fill = colors.ink) {
 export const vectors = {
   'icon.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-labelledby="title desc">
   <title id="title">aizk</title>
-  <desc id="desc">A connected Z graph</desc>
+  <desc id="desc">A memory block with a brain-fold texture</desc>
   ${mark(0, 0, 96)}
 </svg>
 `,
   'logo.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200" viewBox="0 0 600 200" role="img" aria-labelledby="title desc">
   <title id="title">aizk</title>
-  <desc id="desc">The aizk connected Z mark and wordmark</desc>
+  <desc id="desc">The aizk memory-block mark and wordmark</desc>
   ${mark(28, 28, 144)}
   ${wordmark(204, 139, 128)}
 </svg>

@@ -1,40 +1,158 @@
 ---
-const site = (Astro.site?.origin ?? 'https://aizk.example.com').replace(/\/$/, '');
-const setupCommand = `setup ${site}/setup.md`;
+import { supportedClients } from '../../config/setup';
+
+const clients = supportedClients();
 ---
 
-<section class="border-base-300 border-b">
-  <div class="mx-auto grid max-w-6xl gap-12 px-4 py-16 lg:grid-cols-2 lg:items-center lg:py-24">
-    <div class="space-y-6">
-      <div class="badge badge-outline badge-sm font-mono">sourced · scoped · MCP native</div>
+<section class="overflow-hidden border-base-300 border-b">
+  <div class="mx-auto grid max-w-7xl gap-12 px-4 py-16 lg:grid-cols-[1fr_1.05fr] lg:items-center lg:py-24">
+    <div class="space-y-7">
+      <div class="badge badge-outline badge-sm font-mono">the open AI Zettelkasten</div>
       <h1
-        class="text-4xl leading-[1.05] font-semibold tracking-tight text-balance sm:text-5xl lg:text-6xl"
-        style="font-family: var(--font-brand)"
+        class="max-w-2xl text-6xl leading-[0.88] font-normal tracking-[-0.045em] text-balance sm:text-7xl lg:text-8xl"
+        style="font-family: var(--font-display)"
       >
-        One memory for you, your team and your agents
+        Memory with its shape intact
       </h1>
-      <p class="text-base-content/70 max-w-xl text-lg text-pretty">
-        aizk keeps what you and your agents learn and brings it back with its source and sharing
-        boundary intact.
+      <p class="text-base-content/70 max-w-xl text-lg leading-relaxed text-pretty sm:text-xl">
+        AIZK is an AI Zettelkasten for people, teams and agents. It connects what you learn without
+        flattening sources, history or access boundaries.
       </p>
       <div class="flex flex-wrap gap-3">
-        <a href="/docs/" class="btn btn-primary">Read the docs</a>
-        <a href="https://github.com/phvv-me/aizk" class="btn btn-outline">View on GitHub</a>
+        <a href="#agent-setup" class="btn btn-primary">Get started</a>
+        <a href="/docs/" class="btn btn-outline">Read the docs</a>
       </div>
+      <ul class="text-base-content/60 flex flex-wrap gap-x-6 gap-y-2 font-mono text-xs" aria-label="Product qualities">
+        <li>private by default</li>
+        <li>five MCP tools</li>
+        <li>open source</li>
+      </ul>
     </div>
 
-    <aside class="border-base-300 bg-base-200 border p-6 sm:p-8" aria-labelledby="quickstart-title">
-      <div class="mb-6">
-        <p class="text-primary mb-2 font-mono text-xs font-semibold uppercase tracking-widest">
-          Quickstart
-        </p>
-        <h2 id="quickstart-title" class="text-2xl font-semibold" style="font-family: var(--font-brand)">
-          Ask your agent
-        </h2>
+    <div class="relative min-h-[38rem] sm:min-h-[42rem]" aria-label="AIZK agent setup">
+      <div
+        class="absolute inset-x-0 top-0 mx-auto aspect-square max-w-[36rem] overflow-hidden rounded-[2.5rem] border border-base-300 bg-[radial-gradient(circle_at_50%_40%,color-mix(in_oklab,var(--color-accent)_48%,transparent),transparent_68%)]"
+      >
+        <img
+          src="/brain-box.webp"
+          alt="A translucent cube holding a folded blue memory form"
+          class="size-full object-cover"
+          width="1024"
+          height="1024"
+          loading="eager"
+          fetchpriority="high"
+        />
       </div>
 
-      <p class="text-base-content/70 mb-4 text-sm">Paste this into Claude Code, Codex, or OpenCode.</p>
-      <pre class="border-base-300 bg-base-100 border p-4"><code class="break-all whitespace-pre-wrap">{setupCommand}</code></pre>
-    </aside>
+      <aside id="agent-setup" class="absolute right-0 bottom-0 left-4 scroll-mt-6 overflow-hidden rounded-2xl border border-white/15 bg-[#10182b] text-[#f4e8d0] shadow-2xl sm:left-10">
+        <div class="flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-3">
+          <span class="size-2.5 rounded-full bg-[#ff6b4a]"></span>
+          <span class="size-2.5 rounded-full bg-[#f4e8d0]/35"></span>
+          <span class="size-2.5 rounded-full bg-[#a9c5ff]/55"></span>
+          <span class="ml-2 mr-auto font-mono text-xs text-[#f4e8d0]/60">Agent setup</span>
+          <div class="flex rounded-lg bg-white/5 p-1" role="tablist" aria-label="Choose an agent">
+            {
+              clients.map((client, index) => (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={index === 0 ? 'true' : 'false'}
+                  aria-controls={`${client.id}-setup-panel`}
+                  data-client-tab={client.id}
+                  class="rounded-md px-3 py-1.5 font-mono text-[11px] text-[#f4e8d0]/60 transition aria-selected:bg-[#f4e8d0] aria-selected:text-[#10182b]"
+                >
+                  {client.label}
+                </button>
+              ))
+            }
+          </div>
+        </div>
+
+        {
+          clients.map((client, index) => (
+            <div
+              id={`${client.id}-setup-panel`}
+              role="tabpanel"
+              data-client-panel={client.id}
+              hidden={index !== 0}
+            >
+              <div class="grid gap-px bg-white/10">
+                {[
+                  {
+                    label: '1 Install AIZK',
+                    command: client.install,
+                    action: 'Copy install',
+                    color: '#ff6b4a',
+                  },
+                  {
+                    label: `2 ${client.connectLabel}`,
+                    command: client.connect,
+                    action: 'Copy command',
+                    color: '#a9c5ff',
+                  },
+                ].map((step) => (
+                  <section class="bg-[#10182b] px-4 py-4 sm:px-5">
+                    <div class="mb-3 flex items-center justify-between gap-3">
+                      <p class="font-mono text-xs text-[#f4e8d0]/55">{step.label}</p>
+                      <button
+                        type="button"
+                        class="btn btn-xs shrink-0 border-0 px-3 font-mono text-[#10182b] shadow-lg"
+                        style={`background:${step.color}`}
+                        data-copy-command={step.command}
+                        aria-label={`Copy the ${client.label} command`}
+                      >
+                        <svg viewBox="0 0 24 24" class="size-3.5" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+                          <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"></path>
+                        </svg>
+                        <span data-copy-label>{step.action}</span>
+                      </button>
+                    </div>
+                    <div class="flex min-w-0 items-start gap-3 font-mono text-[11px] leading-relaxed sm:text-xs">
+                      <span class="select-none" style={`color:${step.color}`}>$</span>
+                      <code class="min-w-0 break-all whitespace-pre-wrap">{step.command}</code>
+                    </div>
+                  </section>
+                ))}
+              </div>
+              <p class="border-t border-white/10 px-5 py-3 text-xs text-[#f4e8d0]/55">
+                {client.note}
+              </p>
+            </div>
+          ))
+        }
+      </aside>
+    </div>
   </div>
 </section>
+
+<script>
+  import { copyText } from '../../scripts/copy';
+
+  const tabs = document.querySelectorAll<HTMLButtonElement>('[data-client-tab]');
+  const panels = document.querySelectorAll<HTMLElement>('[data-client-panel]');
+  tabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const selected = tab.dataset.clientTab;
+      tabs.forEach((candidate) => {
+        candidate.setAttribute('aria-selected', String(candidate === tab));
+      });
+      panels.forEach((panel) => {
+        panel.hidden = panel.dataset.clientPanel !== selected;
+      });
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('[data-copy-command]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const command = button.dataset.copyCommand ?? '';
+      const label = button.querySelector<HTMLElement>('[data-copy-label]');
+      if (!label) return;
+      const original = label.textContent ?? 'Copy';
+      label.textContent = (await copyText(command)) ? 'Copied' : 'Select command';
+      window.setTimeout(() => {
+        label.textContent = original;
+      }, 1600);
+    });
+  });
+</script>

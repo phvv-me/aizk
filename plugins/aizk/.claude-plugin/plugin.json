@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "aizk",
+  "version": "0.1.0",
+  "description": "Durable, sourced memory for people, teams and their agents",
+  "author": {
+    "name": "AIZK"
+  },
+  "homepage": "https://github.com/phvv-me/aizk",
+  "repository": "https://github.com/phvv-me/aizk",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "knowledge", "mcp", "zettelkasten"],
+  "mcpServers": "./claude.mcp.json"
+}

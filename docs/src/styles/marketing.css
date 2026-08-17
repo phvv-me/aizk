@@ -41,13 +41,13 @@
   --color-warning-content: oklch(100% 0 0);
   --color-error: oklch(45% 0 0);
   --color-error-content: oklch(100% 0 0);
-  --radius-selector: 0;
-  --radius-field: 0;
-  --radius-box: 0;
+  --radius-selector: 2rem;
+  --radius-field: 0.75rem;
+  --radius-box: 1.5rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
-  --depth: 0;
+  --depth: 1;
   --noise: 0;
 }
 
@@ -76,16 +76,19 @@
   --color-warning-content: oklch(14% 0 0);
   --color-error: oklch(70% 0 0);
   --color-error-content: oklch(14% 0 0);
-  --radius-selector: 0;
-  --radius-field: 0;
-  --radius-box: 0;
+  --radius-selector: 2rem;
+  --radius-field: 0.75rem;
+  --radius-box: 1.5rem;
   --size-selector: 0.25rem;
   --size-field: 0.25rem;
   --border: 1px;
-  --depth: 0;
+  --depth: 1;
   --noise: 0;
 }
 
 @theme {
-  --font-brand: 'Space Grotesk', var(--font-sans);
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-brand: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Instrument Serif', ui-serif, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 }

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "aizk": {
+      "type": "http",
+      "url": "https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp",
+      "oauth": {
+        "clientId": "2yqsd1rbjsxxzkyrem1xv",
+        "callbackPort": 8912,
+        "scopes": "control offline_access openid"
+      }
+    }
+  }
+}

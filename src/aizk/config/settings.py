@@ -635,6 +635,7 @@ class Settings(BaseSettings):
     vchordrq_prefilter: bool = False
     web_client_id: str = ""
     web_client_secret: SecretStr = SecretStr("")
+    web_function_name: str = ""
     web_public_url: AnyHttpUrl | None = None
     web_artifact_companion_max_chars: PositiveInt = 65_536
     web_recent_artifact_limit: PositiveInt = 12

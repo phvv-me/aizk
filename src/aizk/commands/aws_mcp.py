@@ -1,10 +1,13 @@
+import json
 from collections.abc import Mapping
 from functools import cache
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
+import boto3
 from mangum import Mangum
 from mangum.types import LambdaContext
+from pydantic import TypeAdapter
 from starlette.responses import FileResponse, JSONResponse
 from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -19,11 +22,42 @@ from ..store.engine import Database
 from ..store.mixins.base import Json
 from .aws_observability import instrument
 
+if TYPE_CHECKING:
+    from mypy_boto3_lambda import LambdaClient
+
 _MCP_PATHS = frozenset(
     {
         "/.well-known/oauth-protected-resource/mcp",
     }
 )
+_WEB_PATHS = ("/_app", "/app", "/auth")
+_WEB_RESPONSE = TypeAdapter(dict[str, Json])
+
+
+class LambdaWebApplication:
+    """Forward browser application events to the production SvelteKit Lambda."""
+
+    def __init__(self, function_name: str, client: LambdaClient | None = None) -> None:
+        self.function_name = function_name
+        self.client = client or boto3.client("lambda")
+
+    def handles(self, event: Mapping[str, Json]) -> bool:
+        """Report whether one Function URL request belongs to the web application."""
+        path = event.get("rawPath")
+        return isinstance(path, str) and any(
+            path == prefix or path.startswith(f"{prefix}/") for prefix in _WEB_PATHS
+        )
+
+    def forward(self, event: Mapping[str, Json]) -> dict[str, Json]:
+        """Invoke the web Lambda synchronously and preserve its HTTP response envelope."""
+        response = self.client.invoke(
+            FunctionName=self.function_name,
+            InvocationType="RequestResponse",
+            Payload=json.dumps(event, separators=(",", ":")).encode(),
+        )
+        if error := response.get("FunctionError"):
+            raise RuntimeError(f"web application Lambda failed with {error}")
+        return _WEB_RESPONSE.validate_json(response["Payload"].read())
 
 
 class AwsSurface:
@@ -65,8 +99,7 @@ class AwsSurface:
             and candidate.suffix == ".md"
             and candidate.is_file()
         ):
-            response = FileResponse(candidate, media_type="text/plain")
-            await response(scope, receive, send)
+            await FileResponse(candidate, media_type="text/plain")(scope, receive, send)
             return
         if candidate.is_relative_to(self.static_root) and candidate.is_dir():
             static_scope = dict(scope)
@@ -102,9 +135,20 @@ def mcp_application() -> Mangum:
     return Mangum(application, lifespan="auto")
 
 
+@cache
+def web_application() -> LambdaWebApplication | None:
+    """Build the optional internal proxy to the production browser application."""
+    if not settings.web_function_name:
+        return None
+    return LambdaWebApplication(settings.web_function_name)
+
+
 def mcp_handler(event: Mapping[str, Json], context: LambdaContext) -> dict[str, Json]:
     """Adapt one Lambda Function URL event to the cached MCP ASGI application."""
     if event.get("kind") == "warm":
         mcp_application()
         return {"warmed": True}
+    web = web_application()
+    if web is not None and web.handles(event):
+        return web.forward(event)
     return mcp_application()(dict(event), context)

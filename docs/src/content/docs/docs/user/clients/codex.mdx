@@ -13,26 +13,14 @@ Codex points at the same endpoint every other client uses and signs you in throu
 flow. The public client ID is not a credential, and PKCE protects the flow without a client secret
 or shared token.
 
-## The configuration file
+## The plugin setup
 
-Codex takes its servers from `.codex/config.toml`. This entry is safe to commit because it holds no
-secret.
+The plugin installs the AIZK skill and MCP connection together. No project file or secret is added.
 
 <ClientConfig client="codex" />
 
-The `mcp_2026_07_28` feature makes Codex negotiate MCP `2026-07-28`. AIZK accepts only that
-protocol, so keep the feature enabled while Codex exposes it as an opt-in setting.
-
-Codex derives the exact resource from the MCP endpoint. The scopes remain explicit because some
-serverless gateways rename the authentication challenge header. `control` grants use of the memory
-tools, `offline_access` lets Codex refresh without another browser login, and `openid` carries your
-identity.
-
-Then sign in once per machine.
-
-```sh
-codex mcp login aizk
-```
+The second command signs in once for the isolated profile. The callback override keeps the loopback
+port aligned with the public AIZK client registered in Logto.
 
 Ask Codex to call `status` afterward. Getting your name and organizations back is the real
 confirmation because a stored credential alone does not prove the server accepted it.
@@ -43,7 +31,7 @@ The callback port pins the loopback redirect registered for the public Logto cli
 belongs to Codex. Codex opens a small listener on that port, the browser hands the authorization
 result to it and the listener closes.
 
-Codex appends one stable server-specific callback ID. Run `codex mcp login aizk` once and register
+Codex appends one stable server-specific callback ID. Run the login command once and register
 the complete `redirect_uri` printed in its authorization URL with Logto. Registering only
 `http://127.0.0.1:8912/callback` is not enough.
 

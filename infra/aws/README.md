@@ -7,12 +7,13 @@ never reuses another AIZK deployment or its identity boundary.
 
 ## Live shape
 
-- One immutable ECR repository with a two-image lifecycle
+- One immutable ECR repository retaining the current and previous API and web images
 - One private encrypted S3 bucket for original artifacts
-- One MCP Lambda and one worker Lambda from the same image digest
-- One Lambda Function URL with the site at `/`, docs at `/docs/`, UI at `/app/dashboard/`, and MCP at `/mcp`
+- One MCP Lambda and one worker Lambda from the same API image digest
+- One internal web Lambda running the same SvelteKit application as the regular deployment
+- One public Lambda Function URL with the site at `/`, docs at `/docs/`, UI at `/app/dashboard`, and MCP at `/mcp`
 - One EventBridge Scheduler recovery call every fifteen minutes and one warm call every five minutes
-- Four SSM SecureString parameters for database, model, and Logto credentials
+- Six SSM SecureString parameters for database, model, Logto, and web session credentials
 - Seven-day CloudWatch log retention
 - One ten dollar monthly gross-cost budget that excludes credits and refunds
 
@@ -43,8 +44,9 @@ chefe run infra-bootstrap
 chefe run infra-deploy
 ```
 
-Build the Lambda target for one architecture without provenance metadata, push an immutable tag,
-and resolve its digest from ECR.
+Build both Lambda targets for one architecture without provenance metadata. Push an immutable tag
+for each target and resolve both digests from ECR. The API image serves the public site, docs, API,
+MCP, and worker. The web image runs the production SvelteKit application behind the public Lambda.
 
 ```sh
 docker buildx build \
@@ -52,22 +54,36 @@ docker buildx build \
   --provenance=false \
   --target lambda \
   --build-arg AIZK_DOCS_SITE_URL="$AIZK_AWS_PUBLIC_URL" \
-  --build-arg AIZK_DOCS_MCP_CLIENT_ID="$AIZK_DEMO_MCP_CLIENT_ID" \
+  --build-arg AIZK_DOCS_MCP_CLIENT_ID="$AIZK_DEMO_MCP_PUBLIC_CLIENT_ID" \
   --build-context sqlalchemy=../sqlalchemy \
   -f src/deploy/Dockerfile \
   -t "$ECR_REPOSITORY:$IMMUTABLE_TAG" \
   --push \
   .
+
+docker buildx build \
+  --platform linux/amd64 \
+  --provenance=false \
+  --target lambda-web \
+  --build-context sqlalchemy=../sqlalchemy \
+  -f src/deploy/Dockerfile \
+  -t "$ECR_REPOSITORY:$WEB_IMMUTABLE_TAG" \
+  --push \
+  .
 ```
 
-Store the application database URL, migration database URL, and demonstration OpenRouter key in
-these SecureString parameters. Secret values must not enter source files, CDK variables, shell
-history, or CloudFormation. Each Lambda role reads only its assigned parameters during cold start.
+Store the application database URL, migration database URL, demonstration OpenRouter key, Logto
+secrets, and web session key in these SecureString parameters. Secret values must not enter source
+files, CDK variables, shell history, or CloudFormation. Each Lambda role reads only its assigned
+parameters during cold start.
 
 ```text
 /craizk/staging/database-url
 /craizk/staging/admin-database-url
 /craizk/staging/openrouter-api-key
+/craizk/staging/logto-management-client-secret
+/craizk/staging/web-client-secret
+/craizk/staging/web-session-secret
 ```
 
 The URLs use `cockroachdb+asyncpg`, port 26257, database `craizk_staging`, and
@@ -80,6 +96,7 @@ Deploy compute with the lowercase digest and no `sha256` prefix.
 export AIZK_AWS_DEPLOY_COMPUTE=true
 export AIZK_AWS_REGION=ap-southeast-1
 export AIZK_AWS_IMAGE_DIGEST=REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS
+export AIZK_AWS_WEB_IMAGE_DIGEST=REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS
 export AIZK_AWS_MONTHLY_BUDGET_USD=10
 chefe run infra-check
 chefe run infra-deploy
@@ -136,13 +153,10 @@ Normal recovery uses `{"kind":"worker"}`. Every successful `keep` also invokes t
 asynchronously. Scheduler polling remains necessary for delayed jobs, usage records admitted after
 a response, failed wake hints, and stale leases.
 
-The current Logto-protected deployment has completed modern discovery, all five tool discovery,
-private S3 upload, worker extraction, identity resolution and grounded retrieval. The durable
-queue drained with no retained failures. The six-note cloud workload measured a 2.14 second warm
-`find` median and a 3.16 second warm p95 after enabling one reusable database connection per
-Lambda environment. The recorded cold maximum was 32.68 seconds, so EventBridge Scheduler builds
-the cached MCP application every five minutes. [The full operation map](../../hackathon/PERFORMANCE.md)
-records the dated evidence and retrieval tradeoffs.
+The release gate verifies modern discovery, all five tools, private S3 upload, worker extraction,
+identity resolution, and grounded retrieval. EventBridge Scheduler builds the cached MCP
+application every five minutes to reduce cold starts. [The performance study](../../hackathon/PERFORMANCE.md)
+explains the operation map and retrieval tradeoffs.
 
 ## Logto authentication
 
@@ -150,8 +164,18 @@ The deployed Function URL uses public AWS invocation because AIZK verifies Logto
 The stack permits that mode only when the Logto issuer, Management API client, SPA client and
 public AIZK URL are complete. Partial authentication configuration fails synthesis.
 
-```text
-/craizk/staging/logto-management-client-secret
-```
+The client ID embedded in the documentation must belong to a separate Native public application.
+Never use the Management API machine-to-machine client. Register
+`http://localhost:8912/callback` for Claude Code and `http://127.0.0.1:8912/callback` for clients
+that use the numeric loopback address. Set that Native application ID as
+`AIZK_DEMO_MCP_PUBLIC_CLIENT_ID` before building the image.
+
+The browser application uses its own Traditional Web client. Register the exact callback at
+`$AIZK_AWS_PUBLIC_URL/auth/sign-in-callback`, store its application secret in
+`/craizk/staging/web-client-secret`, and set its public client ID as `AIZK_AWS_WEB_CLIENT_ID`.
+Generate an independent session key of at least 32 bytes for
+`/craizk/staging/web-session-secret`. The public Lambda forwards only browser application paths to
+the internal web Lambda. The browser exchanges its user token with the public API at the same
+origin.
 
 The staging MCP URL is `$AIZK_AWS_PUBLIC_URL/mcp`.

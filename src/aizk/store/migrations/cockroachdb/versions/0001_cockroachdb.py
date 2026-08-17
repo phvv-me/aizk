@@ -172,11 +172,11 @@ def upgrade() -> None:
         "aizk_entity_content_visible": ("entity_claim", "content_id"),
         "aizk_fact_content_visible": ("fact_claim", "content_id"),
     }
-    for name, (table, field) in functions.items():
+    for name, (source_table, field) in functions.items():
         op.execute(
             f"CREATE FUNCTION {name}(target UUID) RETURNS BOOL "
             f"LANGUAGE SQL STABLE SECURITY INVOKER AS $$ "
-            f"SELECT EXISTS (SELECT 1 FROM {table} WHERE {field} = target) $$"
+            f"SELECT EXISTS (SELECT 1 FROM {source_table} WHERE {field} = target) $$"
         )
     for parent in ("artifact", "document"):
         op.execute(

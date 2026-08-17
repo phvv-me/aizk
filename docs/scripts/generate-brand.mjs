@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import sharp from 'sharp';
@@ -12,19 +12,23 @@ const project = resolve(docs, '..');
 const assets = join(docs, 'src', 'assets');
 const checking = process.argv.includes('--check');
 const manifestPath = join(assets, 'brand-manifest.json');
+const iconCrop = { left: 152, top: 152, width: 950, height: 950 };
 
 const vectorSources = Object.entries(vectors).map(([name, content]) => [
   join(assets, name),
   Buffer.from(content),
 ]);
 
-const vectorCopies = [
+const directCopies = [
   ['icon.svg', join(assets, 'favicon.svg')],
   ['icon.svg', join(docs, 'public', 'favicon.svg')],
   ['icon.svg', join(project, 'src', 'web', 'static', 'favicon.svg')],
+  ['brand-3d/aizk-memory-cube.glb', join(docs, 'public', 'aizk-memory-cube.glb')],
 ];
 
 const rasterExports = [
+  ['brain-box-master.png', join(docs, 'public', 'brain-box.webp'), 1024, 1024],
+  ['brain-box-master.png', join(docs, 'public', 'brain-box-icon.webp'), 192, 192, iconCrop],
   ['icon.svg', join(assets, 'icon-512.png'), 512, 512],
   ['icon.svg', join(docs, 'public', 'apple-touch-icon.png'), 180, 180],
   ['icon.svg', join(project, 'src', 'web', 'static', 'apple-touch-icon.png'), 180, 180],
@@ -60,7 +64,7 @@ for (const [target, expected] of vectorSources) {
   await synchronize(target, expected);
 }
 
-for (const [source, target] of vectorCopies) {
+for (const [source, target] of directCopies) {
   await synchronize(target, await readFile(join(assets, source)));
 }
 
@@ -99,12 +103,15 @@ if (checking) {
   }
 } else {
   const manifest = { version: 1, sources: {}, targets: {} };
-  for (const [source, target, width, height] of rasterExports) {
+  for (const [source, target, width, height, crop] of rasterExports) {
     const sourceContent = await readFile(join(assets, source));
-    const rendered = await sharp(sourceContent, { density: 192 })
-      .resize(width, height, { fit: 'fill' })
-      .png({ compressionLevel: 9, adaptiveFiltering: true })
-      .toBuffer();
+    let pipeline = sharp(sourceContent, { density: 192 });
+    if (crop) pipeline = pipeline.extract(crop);
+    pipeline = pipeline.resize(width, height, { fit: 'fill' });
+    const rendered = await (extname(target) === '.webp'
+      ? pipeline.webp({ quality: 92, effort: 6 })
+      : pipeline.png({ compressionLevel: 9, adaptiveFiltering: true })
+    ).toBuffer();
     await writeFile(target, rendered);
     manifest.sources[source] = digest(sourceContent);
     manifest.targets[targetName(target)] = {

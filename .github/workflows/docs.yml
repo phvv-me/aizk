@@ -7,9 +7,21 @@ name: Docs
 on:
   push:
     branches: [main]
-    paths: ["docs/**", ".github/workflows/docs.yml", "README.md"]
+    paths:
+      - ".agents/**"
+      - ".claude-plugin/**"
+      - ".github/workflows/docs.yml"
+      - "docs/**"
+      - "plugins/**"
+      - "README.md"
   pull_request:
-    paths: ["docs/**", ".github/workflows/docs.yml", "README.md"]
+    paths:
+      - ".agents/**"
+      - ".claude-plugin/**"
+      - ".github/workflows/docs.yml"
+      - "docs/**"
+      - "plugins/**"
+      - "README.md"
   workflow_dispatch:
 
 permissions:

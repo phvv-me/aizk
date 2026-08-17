@@ -6,48 +6,48 @@ still open.
 
 ## Deadline clock
 
-Checked on August 13, 2026 at 5:04 PM JST.
+Checked on August 17, 2026 at 1:44 PM JST.
 
 | Milestone | Time in Japan | State |
 | --- | --- | --- |
-| Current point | August 13 at 5:04 PM JST | 5 days and 1 hour remain before the internal cutoff |
+| Current point | August 17 at 1:44 PM JST | 1 day and 4 hours remain before the internal cutoff |
 | Internal submission cutoff | August 18 at 6 PM JST | 12 hour safety buffer |
 | Official submission deadline | August 19 at 6 AM JST | Hard stop |
 | Judging ends | September 16 at 6 AM JST | Keep everything working through this time |
 | Expected winner announcement | Around September 22 at 4 AM JST | No action required |
-
-Event time used  ▰▰▰▰▰▰▰▰▰▱  88.3 percent
 
 The internal deadline is the real target. Nothing except an emergency repair should change after
 August 18 at 6 PM JST.
 
 ## Top flag
 
-The deployed product and public release are no longer blockers. The top risk is proving the exact
-judge path from a signed-out browser and clean client profile. Direct OAuth and the full live memory
-flow passed as Maya through pinned OpenCode. The secure SSM demo-directory password was refreshed
-and verified after the recording rehearsal. Final screenshots, video editing, and the Devpost entry
-remain open.
+The deployed product is healthy. The public release is the immediate blocker because eight local
+commits and the current coherent release changes are not on GitHub. The Claude Code and Codex
+marketplace files therefore return 404 even though their local validation passes. After owner review,
+the release must be committed, pushed, and observed through GitHub Actions. A signed-in dashboard
+pass in the isolated browser, final video editing, and the Devpost entry remain open.
 
 ## Current readiness
 
 | Area | State | Evidence or gap |
 | --- | --- | --- |
-| Public repository and license | Ready | GitHub is public and reports Apache 2.0 |
+| Public repository and license | Release pending | GitHub is public and reports Apache 2.0, but the current release and marketplace files are still local |
 | Local CockroachDB application | Ready | Local Lambda simulation loaded 87 documents as 345 chunks |
 | Persistent memory design | Ready locally | Documents, vectors, graph, time, scopes, usage, and queue share one database |
 | Distributed Vector Indexing | Ready in cloud | Live scoped C-SPANN selected the vector index and executed in 7 milliseconds |
 | Modern MCP | Ready in cloud | `status`, `find`, `keep`, `report`, and `share` use protocol `2026-07-28` with direct Logto token verification |
-| Automated tests | Ready | 1,742 tests pass at full coverage |
-| Formatting gate | Ready | Ruff lint and format checks pass across 518 files |
+| Automated tests | Ready locally | 1,767 tests pass at full coverage |
+| Formatting gate | Ready locally | Ruff lint and format checks pass across 529 files |
 | Type gate | Ready | Pyrefly, ty, and mypy pass |
 | Infrastructure synthesis | Ready | CDK synthesis and ten deployment tests pass |
+| Web gate | Ready locally | Svelte diagnostics, formatting, 24 tests, and the production build pass and are now part of CI |
+| Documentation and plugins | Ready locally | The 94-page build, privacy checks, setup consistency, Claude validation, and Codex validation pass |
 | CockroachDB Cloud cluster | Ready | The Singapore serverless database is migrated and restricted app access works |
 | CockroachDB Managed MCP | Out of scope | Required ccloud and C-SPANN evidence is complete, so daily MCP reauthorization adds no submission value |
 | AWS operator tooling | Ready | Pinned AWS CLI 2.36.20 authenticates through the isolated `craizk` profile in Singapore |
 | AWS promotional credit | Ready | The current account has $100 unused through August 11, 2027 |
-| AWS runtime | Ready | Both Lambdas run immutable image `sha256:1f99af4ef0eb88d59550c72626fa58e28a01fa94dfd1a4cf0a5ac3d406cde04b` |
-| Judge website and UI | Ready for rehearsal | The assigned AWS URL serves the landing page, full docs, Logto SPA and authenticated API |
+| AWS runtime | Ready | MCP and worker use `sha256:3280ad739f7021ee025432c33d68d4cbfcccd0cf93cdc3ed888ba087f8fb21fa`, while the web Lambda uses `sha256:00d28570ff61b6e985da81ad93aebdda39abbd17e0941594172eeeb6c6df8b50` |
+| Judge website and UI | Ready for browser rehearsal | The assigned AWS URL serves the landing page, full docs, Logto sign-in, production dashboard and authenticated API |
 | File intake | Ready for rehearsal | A 4 MiB file cap, format verification, 1 GiB user quota, private S3 and worker recall passed live |
 | Cloud corpus and benchmark | Ready for rehearsal | Six public notes produced 40 facts, 19 entities, four communities, 29 of 29 semantically complete answers, and a 2.14 second warm median |
 | Judge identity and access | Ready for final rehearsal | Maya Chen completed direct OAuth and the live flow. Her secure SSM demo-directory entry is current |
@@ -58,9 +58,12 @@ remain open.
 
 These are the only submission blockers, in order.
 
-1. Cut the complete walkthrough to the narrated submission length, upload it, and verify it while
+1. Review the coherent release, commit it, push it, and keep GitHub Actions running until every
+   required check passes.
+2. Verify the marketplace install and signed-in dashboard from clean client and browser profiles.
+3. Cut the complete walkthrough to the narrated submission length, upload it, and verify it while
    signed out.
-2. Create and complete the Devpost draft, run the final smoke twice, then submit by August 18 at
+4. Create and complete the Devpost draft, run the final smoke twice, then submit by August 18 at
    6 PM JST.
 
 Managed MCP, the composed query plan, new benchmark automation, extra corpus material, budget email,
@@ -104,18 +107,35 @@ Target completion is August 15 at noon JST.
   `artifacts/description.py`
 - [x] Review every uncommitted and untracked file and separate submission work from unrelated work
 - [x] Keep OCR as post-hackathon production work and retain the bounded artifact demo path
-- [x] Run the complete Python test suite with 1,742 passing tests and 100 percent coverage
+- [x] Run the complete Python test suite with 1,767 passing tests and 100 percent coverage
 - [x] Run documentation diagnostics, the 94-page build, page checks, and brand drift checks
 - [x] Synthesize and diff the deployed CDK stack before both August 13 deployments
 - [x] Run package lint, import contracts, all three type checkers, and frontend checks on the final release candidate
-- [x] Run every test and infrastructure check once more from the exact submitted commit
+- [ ] Run every test and infrastructure check once more from the exact submitted commit
 - [ ] Run the local Lambda workload once from a clean database after the gates pass
 - [x] Keep the existing dated local baselines. No superseding local result is needed
-- [x] Have the project owner approve and commit the coherent release candidate
-- [x] Push the release candidate and confirm GitHub checks pass on `main`
+- [ ] Have the project owner approve and commit the coherent release candidate
+- [ ] Push the release candidate and confirm GitHub checks pass on `main`
 
 Acceptance requires a clean release candidate with every required gate green. The working tree may
 contain unrelated user work only if it is clearly excluded from the submitted commit.
+
+## P0 storefront and dashboard restoration
+
+- [x] Use one canonical Claude Code and Codex setup definition across the homepage, quickstart,
+  `setup.md`, client pages, and repository README
+- [x] Validate both local plugin manifests and their marketplace metadata
+- [x] Add the production Svelte dashboard and plugin consistency checks to GitHub Actions
+- [ ] Commit and push the marketplace files so the public install commands resolve from GitHub
+- [x] Deploy the production SvelteKit dashboard behind the existing AWS Function URL
+- [x] Create a separate Traditional Web Logto client and store both web secrets in SSM
+- [x] Verify the public routes, OAuth discovery, sign-in redirect, image digests, queue state, and
+  zero Lambda errors or throttles
+- [ ] Complete one signed-in dashboard pass in an isolated rendered browser
+
+Acceptance requires both public marketplace commands to install from GitHub and one signed-in
+browser pass through the dashboard. The deployed application is ready, but the current marketplace
+files remain local until the project owner approves the release commit and push.
 
 ## P0 restore cloud control
 
@@ -185,7 +205,8 @@ Target completion is August 13 at 8 PM JST.
 - [x] Replace the embedded OAuth proxy with direct Logto verification
 - [x] Register the exact stable Codex callback and verify Logto accepts the PKCE request
 - [x] Delete the obsolete confidential OAuth application and SSM secret
-- [x] Deploy final image `sha256:1f99af4ef0eb88d59550c72626fa58e28a01fa94dfd1a4cf0a5ac3d406cde04b`
+- [x] Deploy final MCP and worker image `sha256:3280ad739f7021ee025432c33d68d4cbfcccd0cf93cdc3ed888ba087f8fb21fa`
+- [x] Deploy final web image `sha256:00d28570ff61b6e985da81ad93aebdda39abbd17e0941594172eeeb6c6df8b50`
 
 The deployment must use the AWS assigned Function URL. It must not reuse any separate production
 endpoint.
@@ -338,17 +359,19 @@ Create the draft by August 14. Finish it by August 17 at 10 PM JST.
 Target completion is August 18 at noon JST.
 
 - [ ] Freeze code and corpus
+- [x] Run every local gate from the current working tree
 - [ ] Run every local gate from the submitted commit
-- [x] Confirm GitHub checks are green
+- [ ] Confirm GitHub checks are green for the current release candidate
+- [x] Deploy the final API and web image digests and verify the unchanged public URL
 - [ ] Run the complete cloud smoke flow twice
-- [ ] Confirm no retained queue failures, Lambda errors, or throttles
+- [x] Confirm no retained queue failures, Lambda errors, or throttles
 - [ ] Open repository, docs, AWS demo, and video from a signed-out browser
 - [ ] Test the judge account from a clean MCP client profile
 - [ ] Verify the video is under three minutes and public
 - [ ] Verify every Devpost field is complete
 - [ ] Verify no claim uses local evidence as a cloud measurement
 - [ ] Verify all screenshots and logs are free of secrets and private data
-- [ ] Confirm the ten dollar gross-cost budget remains active. Email notification is optional
+- [x] Confirm the ten dollar gross-cost budget remains active. Email notification is optional
 - [ ] Confirm the service can remain online through September 16 at 6 AM JST
 - [ ] The project owner performs the final submission by August 18 at 6 PM JST
 - [ ] Reopen the submitted project page and verify all links after submission
@@ -400,7 +423,7 @@ and submission.
 - [x] Keep the current `craizk_staging` database without a destructive reset
 - [x] Approve the bounded six-note public corpus and no external expansion
 - [ ] Confirm Devpost eligibility and create the draft
-- [x] Review and commit the release candidate
+- [ ] Review and commit the release candidate
 - [ ] Approve the final video and submission text
 - [ ] Press the final Devpost submit button by the internal cutoff
 

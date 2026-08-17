@@ -3,7 +3,7 @@ import Diagram from '../Diagram.astro';
 
 const nodes = [
   { id: 'client', label: 'your agent', col: 1, row: 0, href: '/docs/dev/interfaces/mcp/' },
-  { id: 'logto', label: 'Logto identity', col: 2, row: 0, href: '/docs/dev/identity/logto/' },
+  { id: 'identity', label: 'your identity', col: 2, row: 0, href: '/docs/user/concepts/scopes/' },
   { id: 'write', label: 'write path', col: 0, row: 1, href: '/docs/dev/write/intake/' },
   { id: 'read', label: 'read path', col: 2, row: 1, href: '/docs/dev/read/overview/' },
   { id: 'graph', label: 'gate → extract → ground', col: 0, row: 2, href: '/docs/dev/write/extraction/' },
@@ -20,7 +20,7 @@ const edges = [
   { from: 'store', to: 'read' },
   { from: 'read', to: 'evidence' },
   { from: 'store', to: 'passes', label: 'project' },
-  { from: 'logto', to: 'store', label: 'scopes', dashed: true },
+  { from: 'identity', to: 'store', label: 'scopes', dashed: true },
 ];
 ---
 

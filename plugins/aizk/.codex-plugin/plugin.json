@@ -1,0 +1,39 @@
+{
+  "name": "aizk",
+  "version": "0.1.0",
+  "description": "Durable, sourced memory for people, teams and their agents",
+  "author": {
+    "name": "AIZK",
+    "url": "https://github.com/phvv-me/aizk"
+  },
+  "homepage": "https://github.com/phvv-me/aizk",
+  "repository": "https://github.com/phvv-me/aizk",
+  "license": "Apache-2.0",
+  "keywords": ["memory", "knowledge", "mcp", "zettelkasten"],
+  "skills": "./skills/",
+  "mcpServers": {
+    "aizk": {
+      "url": "https://xpc3f5mjuv5edgnsfsfbffcoda0ckvij.lambda-url.ap-southeast-1.on.aws/mcp",
+      "auth": "oauth",
+      "scopes": ["control", "offline_access", "openid"],
+      "oauth": {
+        "client_id": "2yqsd1rbjsxxzkyrem1xv"
+      }
+    }
+  },
+  "interface": {
+    "displayName": "AIZK",
+    "shortDescription": "Durable memory for you and your agents",
+    "longDescription": "Find, keep and share sourced knowledge across people, projects and agents through the AIZK memory service.",
+    "developerName": "AIZK",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/phvv-me/aizk",
+    "defaultPrompt": [
+      "What do we already know about this project?",
+      "Keep this decision and its reasoning in AIZK.",
+      "Find the sources behind our current plan."
+    ],
+    "brandColor": "#315DFF"
+  }
+}

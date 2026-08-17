@@ -125,6 +125,9 @@ const candidateFiles = [
   join(project, 'src/deploy/Dockerfile'),
   join(project, 'src/deploy/docker-compose.yml'),
   join(project, 'tests/eval/data/certainty_audit_cases.jsonl'),
+  ...(await walk(join(project, '.agents'), (name) => /\.(?:json|md)$/.test(name))),
+  ...(await walk(join(project, '.claude-plugin'), (name) => /\.(?:json|md)$/.test(name))),
+  ...(await walk(join(project, 'plugins'), (name) => /\.(?:json|md)$/.test(name))),
   ...(await walk(join(docs, 'src'), (name) => /\.(?:astro|md|mdx|svelte)$/.test(name))),
   ...(await walk(join(project, 'hackathon'), (name) => /\.(?:json|md|py|sh|txt)$/.test(name))),
 ];
@@ -184,6 +187,80 @@ for (const path of pages) {
   if (body.length < 400 && !path.endsWith('404.html') && !clientApplication) {
     failures.push(`${relative(dist, path)} rendered an almost empty body, so a diagram probably failed silently.`);
   }
+}
+
+const homepage = await readFile(join(dist, 'index.html'), 'utf8');
+const homepageContracts = [
+  ['the rendered brain cube', 'src="/brain-box.webp"'],
+  ['the rendered navigation mark', 'src="/brain-box-icon.webp"'],
+  ['the agent setup', 'Agent setup'],
+  ['the Claude Code choice', 'Claude Code'],
+  ['the Codex choice', 'Codex'],
+  ['the command copy controls', 'data-copy-command='],
+  ['the Claude marketplace installer', 'claude plugin marketplace add phvv-me/aizk'],
+  ['the Claude plugin installer', 'claude plugin install aizk@aizk'],
+  ['the Codex marketplace installer', 'codex plugin marketplace add phvv-me/aizk'],
+  ['the Codex plugin installer', 'codex plugin add aizk@aizk'],
+  ['the Codex sign in command', 'mcp_oauth_callback_port=8912'],
+  ['the install copy label', 'Copy install'],
+  ['the second command copy label', 'Copy command'],
+];
+for (const [label, snippet] of homepageContracts) {
+  if (!homepage.includes(snippet)) failures.push(`index.html omits ${label}.`);
+}
+
+const setupInstructions = await readFile(join(dist, 'setup.md'), 'utf8');
+const readme = await readFile(join(project, 'README.md'), 'utf8');
+const homepageCommands = homepage.replaceAll('&amp;', '&');
+const canonicalSetupCommands = [
+  'claude plugin marketplace add phvv-me/aizk && claude plugin install aizk@aizk',
+  'claude',
+  'codex plugin marketplace add phvv-me/aizk && codex plugin add aizk@aizk',
+  'codex -c mcp_oauth_callback_port=8912 mcp login aizk',
+];
+for (const command of canonicalSetupCommands) {
+  if (!homepageCommands.includes(command)) failures.push(`index.html omits the canonical ${command} command.`);
+  if (!setupInstructions.includes(command)) failures.push(`setup.md omits the canonical ${command} command.`);
+  if (!readme.includes(command)) failures.push(`README.md omits the canonical ${command} command.`);
+}
+
+const codexMarketplace = JSON.parse(
+  await readFile(join(project, '.agents/plugins/marketplace.json'), 'utf8'),
+);
+const claudeMarketplace = JSON.parse(
+  await readFile(join(project, '.claude-plugin/marketplace.json'), 'utf8'),
+);
+const codexPlugin = JSON.parse(
+  await readFile(join(project, 'plugins/aizk/.codex-plugin/plugin.json'), 'utf8'),
+);
+const claudePlugin = JSON.parse(
+  await readFile(join(project, 'plugins/aizk/.claude-plugin/plugin.json'), 'utf8'),
+);
+const claudeMcp = JSON.parse(
+  await readFile(join(project, 'plugins/aizk/claude.mcp.json'), 'utf8'),
+);
+const pluginContracts = [
+  ['the Codex marketplace name', codexMarketplace.name, 'aizk'],
+  ['the Codex marketplace plugin', codexMarketplace.plugins?.[0]?.name, 'aizk'],
+  [
+    'the Codex marketplace source',
+    codexMarketplace.plugins?.[0]?.source?.path,
+    './plugins/aizk',
+  ],
+  ['the Claude marketplace name', claudeMarketplace.name, 'aizk'],
+  ['the Claude marketplace plugin', claudeMarketplace.plugins?.[0]?.name, 'aizk'],
+  ['the Claude marketplace source', claudeMarketplace.plugins?.[0]?.source, './plugins/aizk'],
+  ['the Codex plugin name', codexPlugin.name, 'aizk'],
+  ['the Claude plugin name', claudePlugin.name, 'aizk'],
+  ['the shared plugin version', codexPlugin.version, claudePlugin.version],
+  [
+    'the shared MCP endpoint',
+    codexPlugin.mcpServers?.aizk?.url,
+    claudeMcp.mcpServers?.aizk?.url,
+  ],
+];
+for (const [label, actual, expected] of pluginContracts) {
+  if (actual !== expected) failures.push(`Plugin manifests disagree on ${label}.`);
 }
 
 const external = /^\/(app|mcp|api|auth|events)(\/|$)/;

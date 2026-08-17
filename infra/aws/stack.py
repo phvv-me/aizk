@@ -49,8 +49,8 @@ class AizkAwsStack(Stack):
             empty_on_delete=False,
         )
         repository.add_lifecycle_rule(
-            description="Keep only the two newest immutable images",
-            max_image_count=2,
+            description="Keep the current and previous API and web images",
+            max_image_count=4,
             rule_priority=1,
         )
         return repository
@@ -74,9 +74,23 @@ class AizkAwsStack(Stack):
 
     def _runtime(self) -> None:
         shared = self._shared_environment()
+        web = (
+            self._image_function(
+                "Web",
+                command=None,
+                image_digest=self.config.web_image_digest,
+                memory=1024,
+                timeout=60,
+                environment=self._web_environment(),
+                parameters=self._web_parameters(),
+            )
+            if self.config.logto_enabled
+            else None
+        )
         worker = self._image_function(
             "Worker",
             command="aizk.commands.aws_worker.worker_handler",
+            image_digest=self.config.image_digest,
             memory=2048,
             timeout=840,
             environment=shared
@@ -87,11 +101,14 @@ class AizkAwsStack(Stack):
             | {"AIZK_ADMIN_DATABASE_URL": self.config.admin_database_url_parameter},
         )
         public_environment = shared | {"AIZK_WORKER_FUNCTION_NAME": worker.function_name}
+        if web is not None:
+            public_environment["AIZK_WEB_FUNCTION_NAME"] = web.function_name
         if self.config.logto_enabled:
             public_environment |= self._logto_environment()
         public = self._image_function(
             "Mcp",
             command="aizk.commands.aws_mcp.mcp_handler",
+            image_digest=self.config.image_digest,
             memory=2048,
             timeout=60,
             environment=public_environment,
@@ -101,6 +118,8 @@ class AizkAwsStack(Stack):
         self._grant_artifacts(worker)
         self._grant_artifacts(public)
         worker.grant_invoke(public)
+        if web is not None:
+            web.grant_invoke(public)
         self._schedules(worker, public)
         self._budget()
         endpoint = public.add_function_url(
@@ -113,6 +132,8 @@ class AizkAwsStack(Stack):
         )
         CfnOutput(self, "McpUrl", value=f"{endpoint.url}mcp")
         CfnOutput(self, "WorkerFunctionName", value=worker.function_name)
+        if web is not None:
+            CfnOutput(self, "WebFunctionName", value=web.function_name)
 
     def _grant_artifacts(self, function: lambda_.DockerImageFunction) -> None:
         function.add_to_role_policy(
@@ -226,11 +247,29 @@ class AizkAwsStack(Stack):
             "AIZK_LOGTO_CLIENT_SECRET": self.config.logto_client_secret_parameter,
         }
 
+    def _web_environment(self) -> dict[str, str]:
+        if self.config.public_url is None or self.config.logto_url is None:
+            raise RuntimeError("validated web configuration is incomplete")
+        return {
+            "AIZK_LOGTO_URL": self.config.logto_url,
+            "AIZK_WEB_CLIENT_ID": self.config.web_client_id,
+            "AIZK_WEB_PUBLIC_URL": self.config.public_url,
+            "AIZK_WEB_API_URL": self.config.public_url,
+            "AIZK_MCP_PUBLIC_URL": self.config.public_url,
+        }
+
+    def _web_parameters(self) -> dict[str, str]:
+        return {
+            "AIZK_WEB_CLIENT_SECRET": self.config.web_client_secret_parameter,
+            "AIZK_WEB_SESSION_SECRET": self.config.web_session_secret_parameter,
+        }
+
     def _image_function(
         self,
         construct_id: str,
         *,
-        command: str,
+        command: str | None,
+        image_digest: str,
         memory: int,
         timeout: int,
         environment: Mapping[str, str],
@@ -250,8 +289,8 @@ class AizkAwsStack(Stack):
             function_name=name,
             code=lambda_.DockerImageCode.from_ecr(
                 self.repository,
-                tag_or_digest=f"sha256:{self.config.image_digest}",
-                cmd=[command],
+                tag_or_digest=f"sha256:{image_digest}",
+                cmd=[command] if command is not None else None,
             ),
             architecture=lambda_.Architecture.X86_64,
             memory_size=memory,

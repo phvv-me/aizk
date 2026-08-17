@@ -30,7 +30,10 @@
   --series-3: #e87ba4;
   --series-4: #eda100;
   --radius: 0.55rem;
-  --font-brand: 'Space Grotesk', var(--font-sans);
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-brand: 'Manrope', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Instrument Serif', ui-serif, Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 }
 
 @media (prefers-color-scheme: dark) {

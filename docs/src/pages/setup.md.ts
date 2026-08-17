@@ -1,10 +1,13 @@
 import type { APIRoute } from 'astro';
+import { setupFor } from '../config/setup';
 
 export const prerender = true;
 
 const site = (import.meta.env.SITE ?? 'https://aizk.example.com').replace(/\/$/, '');
 const endpoint = `${site}/mcp`;
 const clientId = import.meta.env.AIZK_DOCS_MCP_CLIENT_ID ?? 'PUBLIC_AIZK_CLIENT_ID';
+const claude = setupFor('claude-code');
+const codex = setupFor('codex');
 
 const instructions = `# Set up AIZK
 
@@ -23,54 +26,33 @@ The public client ID is not a secret. Never ask for an API key or client secret.
 need to create an account before setup. Guide them through it during the browser sign-in step if
 they do not already have one.
 
-## 1. Install the operating guidance
+## 1. Choose one client
 
-Fetch the operating skill and repository instructions above.
-
-- Codex and OpenCode use \`.agents/skills/aizk/SKILL.md\` and merge the instructions into \`AGENTS.md\`.
-- Claude Code uses \`.claude/skills/aizk/SKILL.md\` and merges the instructions into \`CLAUDE.md\`.
-
-Create parent directories when needed. Merge with existing files and keep their current rules.
-
-## 2. Configure this MCP server
-
-Detect which client is running and use only its section.
+Show the user the Claude Code and Codex choices. Use only the section they choose. Do not remove an
+existing AIZK connection. The plugin contains both the AIZK skill and its MCP server definition.
 
 ### Claude Code
 
 Run the following commands.
 
 \`\`\`sh
-claude mcp add --scope user --transport http --client-id ${clientId} \\
-  --callback-port 8912 aizk ${endpoint}
-claude mcp login aizk
+${claude.install}
+${claude.connect}
 \`\`\`
 
-For a remote session, use \`claude mcp login --no-browser aizk\` and let the user complete the
-browser step.
+If this instruction is already running inside Claude Code, do not open a nested Claude process.
+Install the plugin, ask the user to restart Claude Code, then continue after restart. Approve the
+plugin-provided MCP server, open \`/mcp\` and choose sign in. For a remote session, let the user
+complete the browser step manually.
 
 ### Codex
 
-Merge this configuration into \`.codex/config.toml\`.
-
-\`\`\`toml
-mcp_oauth_credentials_store = "file"
-mcp_oauth_callback_port = 8912
-
-[features]
-mcp_2026_07_28 = true
-
-[mcp_servers.aizk]
-url = "${endpoint}"
-auth = "oauth"
-scopes = ["control", "offline_access", "openid"]
-
-[mcp_servers.aizk.oauth]
-client_id = "${clientId}"
+\`\`\`sh
+${codex.install}
+${codex.connect}
 \`\`\`
 
-Then run \`codex mcp login aizk\`. Let the user complete the browser step. A remote session may
-need an SSH forward for port 8912.
+Let the user complete the browser step. A remote session may need an SSH forward for port 8912.
 
 ### OpenCode
 
@@ -97,14 +79,14 @@ Merge this server into \`opencode.json\`.
 
 Then run \`opencode mcp auth aizk\` and let the user complete the browser step.
 
-## 3. Guide browser authentication
+## 2. Guide browser authentication
 
-Tell the user when the Logto page opens. If they already have an account, ask them to sign in. If
+Tell the user when the AIZK sign-in page opens. If they already have an account, ask them to sign in. If
 they do not, ask them to choose account creation, enter their email and complete email verification.
 Wait for the browser flow to finish before continuing. Never ask the user to send you their password
 or authentication code.
 
-## 4. Verify
+## 3. Verify
 
 Restart the client if it does not reload MCP configuration automatically. Call AIZK \`status\` and
 confirm it returns the signed-in user and five tools. Report the files changed and whether login and

@@ -1,0 +1,20 @@
+{
+  "name": "aizk",
+  "interface": {
+    "displayName": "AIZK"
+  },
+  "plugins": [
+    {
+      "name": "aizk",
+      "source": {
+        "source": "local",
+        "path": "./plugins/aizk"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

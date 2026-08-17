@@ -5,33 +5,31 @@ description: "Choose an agent and make your first memory in about five minutes."
 
 import SetupChooser from '../../../../components/SetupChooser.astro';
 
-This page configures itself for the AIZK deployment serving it. You do not need to copy a host,
-find a public client ID or create an account before you begin. Your agent reads the exact setup
-instructions from this website and guides you through browser sign-in or account creation.
+This page configures itself for the AIZK deployment serving it. You do not need an API key or a
+client secret. Choose your agent, install the AIZK plugin and complete browser sign in.
 
 ```text
-  1  choose      pick the agent you are using
+  1  choose      pick Claude Code or Codex
                         │
-  2  ask         send it the deployment-aware setup instruction
+  2  install     add the AIZK plugin
                         │
-  3  verify      let the agent sign in and call status
+  3  sign in     connect your own AIZK account
                         │
-  4  remember    keep one useful note and find it again
+  4  verify      call status, then keep and find one note
 ```
 
 ## 1. Choose your agent
 
 <SetupChooser />
 
-The instruction points the agent back to the current website. The machine-readable setup page
-supplies this deployment's MCP endpoint, public OAuth client and repository guidance. Nothing in
-the prompt is tied to the crAIZK demonstration or to somebody else's self-hosted deployment.
+The plugin contains the AIZK skill and the MCP connection together. It does not remove an existing
+server or replace project instructions. OpenCode remains available through its manual setup page.
 
 ## 2. Complete sign-in
 
-Your agent adds the MCP server without replacing existing project instructions. It then opens the
-Logto sign-in page. Sign in if you already have an account, or choose account creation and complete
-email verification if you do not.
+Claude Code asks you to approve AIZK after it opens. Use `/mcp`, select AIZK and choose sign in.
+Codex opens sign in from the second command in its panel. Sign in if you already have an account,
+or choose account creation and complete email verification if you do not.
 
 When the browser flow finishes, ask the agent to call `status`. A successful response returns your
 identity and the organizations you can use. It also confirms the five tools named `status`, `find`,

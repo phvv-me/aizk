@@ -1,7 +1,9 @@
 import asyncio
+import io
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 
 import mcp.types as mt
 import pytest
@@ -9,6 +11,7 @@ from bg_doubles import fake_runtime
 from doubles import AsyncContext
 from mangum.types import LambdaCognitoIdentity, LambdaMobileClientContext
 from mcp_probe import USER_TOOLS
+from mypy_boto3_lambda import LambdaClient
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
@@ -230,6 +233,7 @@ def test_mcp_handler_builds_and_reuses_one_application(
     monkeypatch.setattr(mcp_mod, "configured_worker_wake", lambda config: expected_wake)
     monkeypatch.setattr(mcp_mod, "instrument", lambda database: observed.append(database))
     mcp_mod.mcp_application.cache_clear()
+    mcp_mod.web_application.cache_clear()
     event: dict[str, Json] = {"version": "2.0"}
     context = Context()
 
@@ -238,6 +242,84 @@ def test_mcp_handler_builds_and_reuses_one_application(
     assert builds == [1]
     assert observed == [complete.database]
     assert calls == [(event, context), (event, context)]
+
+
+def test_lambda_web_application_forwards_only_browser_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Json]] = []
+
+    class Lambda:
+        def invoke(self, **request: Json) -> dict[str, Json | io.BytesIO]:
+            calls.append(request)
+            payload = json.dumps({"statusCode": 200, "body": "dashboard"}).encode()
+            return {"Payload": io.BytesIO(payload)}
+
+    client = Lambda()
+    monkeypatch.setattr(mcp_mod.boto3, "client", lambda service: client)
+    application = mcp_mod.LambdaWebApplication("craizk-web")
+
+    assert application.handles({"rawPath": "/app/dashboard"})
+    assert application.handles({"rawPath": "/_app/immutable/app.js"})
+    assert not application.handles({"rawPath": "/api/overview"})
+    assert not application.handles({"rawPath": 3})
+    assert application.forward({"rawPath": "/app/dashboard"}) == {
+        "statusCode": 200,
+        "body": "dashboard",
+    }
+    assert calls == [
+        {
+            "FunctionName": "craizk-web",
+            "InvocationType": "RequestResponse",
+            "Payload": b'{"rawPath":"/app/dashboard"}',
+        }
+    ]
+
+
+def test_lambda_web_application_surfaces_function_failures() -> None:
+    class Lambda:
+        def invoke(self, **request: Json) -> dict[str, Json | io.BytesIO]:
+            del request
+            return {"FunctionError": "Unhandled", "Payload": io.BytesIO()}
+
+    application = mcp_mod.LambdaWebApplication("craizk-web", cast("LambdaClient", Lambda()))
+
+    with pytest.raises(RuntimeError, match="Unhandled"):
+        application.forward({"rawPath": "/app/dashboard"})
+
+
+def test_web_application_builds_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Lambda:
+        def invoke(self, **request: Json) -> dict[str, Json | io.BytesIO]:
+            raise AssertionError(request)
+
+    client = Lambda()
+    monkeypatch.setattr(mcp_mod.settings, "web_function_name", "craizk-web")
+    monkeypatch.setattr(mcp_mod.boto3, "client", lambda service: client)
+    mcp_mod.web_application.cache_clear()
+
+    application = mcp_mod.web_application()
+
+    assert isinstance(application, mcp_mod.LambdaWebApplication)
+    assert application.function_name == "craizk-web"
+    mcp_mod.web_application.cache_clear()
+
+
+def test_mcp_handler_forwards_browser_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Web:
+        def handles(self, event: dict[str, Json]) -> bool:
+            return event.get("rawPath") == "/app/dashboard"
+
+        def forward(self, event: dict[str, Json]) -> dict[str, Json]:
+            assert event["rawPath"] == "/app/dashboard"
+            return {"statusCode": 302, "body": ""}
+
+    monkeypatch.setattr(mcp_mod, "web_application", lambda: Web())
+
+    assert mcp_mod.mcp_handler({"rawPath": "/app/dashboard"}, Context()) == {
+        "statusCode": 302,
+        "body": "",
+    }
 
 
 @pytest.mark.parametrize(
