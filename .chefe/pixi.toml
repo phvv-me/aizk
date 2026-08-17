@@ -51,7 +51,8 @@ liteparse = "<3,>=2.11.1"
 pypandoc-binary = "<2,>=1.17"
 
 [pypi-dependencies.sqlalchemy]
-version = "<3,>=2.1.0b3"
+git = "https://github.com/Pedrexus/sqlalchemy.git"
+rev = "64fee70a136029c83a138fd2a43adad870207937"
 extras = ["asyncio"]
 
 [pypi-dependencies.py-key-value-aio]
@@ -67,8 +68,8 @@ version = "==0.0.12"
 extras = ["sql"]
 
 [pypi-dependencies.rlsalchemy]
-path = "../../rls"
-editable = true
+git = "https://github.com/phvv-me/rls.git"
+rev = "16a7798ffcae819a8bf3e7114344e9e99c1be8f6"
 
 [pypi-dependencies.aizk]
 path = "../."
@@ -78,7 +79,8 @@ editable = true
 prerelease-mode = "allow"
 
 [pypi-options.dependency-overrides.sqlalchemy]
-path = "../../sqlalchemy"
+git = "https://github.com/Pedrexus/sqlalchemy.git"
+rev = "64fee70a136029c83a138fd2a43adad870207937"
 
 [feature.dev.pypi-dependencies]
 fire = "<0.8,>=0.7.1"
