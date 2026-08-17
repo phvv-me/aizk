@@ -21,27 +21,27 @@ August 18 at 6 PM JST.
 
 ## Top flag
 
-The deployed product is healthy. The public release is the immediate blocker because eight local
-commits and the current coherent release changes are not on GitHub. The Claude Code and Codex
-marketplace files therefore return 404 even though their local validation passes. After owner review,
-the release must be committed, pushed, and observed through GitHub Actions. A signed-in dashboard
-pass in the isolated browser, final video editing, and the Devpost entry remain open.
+The deployed product and public repository are healthy. GitHub Actions passes the complete package,
+database, infrastructure, documentation, and dashboard gates from a standalone checkout. Both
+marketplace manifests return 200, and an isolated Claude configuration installs and enables the
+AIZK plugin. A signed-in dashboard pass in the isolated browser, final video editing, and the Devpost
+entry remain open.
 
 ## Current readiness
 
 | Area | State | Evidence or gap |
 | --- | --- | --- |
-| Public repository and license | Release pending | GitHub is public and reports Apache 2.0, but the current release and marketplace files are still local |
+| Public repository and license | Ready | GitHub is public, current, and reports Apache 2.0 |
 | Local CockroachDB application | Ready | Local Lambda simulation loaded 87 documents as 345 chunks |
 | Persistent memory design | Ready locally | Documents, vectors, graph, time, scopes, usage, and queue share one database |
 | Distributed Vector Indexing | Ready in cloud | Live scoped C-SPANN selected the vector index and executed in 7 milliseconds |
 | Modern MCP | Ready in cloud | `status`, `find`, `keep`, `report`, and `share` use protocol `2026-07-28` with direct Logto token verification |
-| Automated tests | Ready locally | 1,767 tests pass at full coverage |
-| Formatting gate | Ready locally | Ruff lint and format checks pass across 529 files |
+| Automated tests | Ready | 1,767 tests pass at full coverage locally and in GitHub Actions |
+| Formatting gate | Ready | Ruff lint and format checks pass across 529 files locally and in GitHub Actions |
 | Type gate | Ready | Pyrefly, ty, and mypy pass |
 | Infrastructure synthesis | Ready | CDK synthesis and ten deployment tests pass |
-| Web gate | Ready locally | Svelte diagnostics, formatting, 24 tests, and the production build pass and are now part of CI |
-| Documentation and plugins | Ready locally | The 94-page build, privacy checks, setup consistency, Claude validation, and Codex validation pass |
+| Web gate | Ready | Svelte diagnostics, formatting, 24 tests, and the production build pass in GitHub Actions |
+| Documentation and plugins | Ready | The 94-page build, privacy checks, setup consistency, plugin validation, and isolated Claude installation pass |
 | CockroachDB Cloud cluster | Ready | The Singapore serverless database is migrated and restricted app access works |
 | CockroachDB Managed MCP | Out of scope | Required ccloud and C-SPANN evidence is complete, so daily MCP reauthorization adds no submission value |
 | AWS operator tooling | Ready | Pinned AWS CLI 2.36.20 authenticates through the isolated `craizk` profile in Singapore |
@@ -58,12 +58,10 @@ pass in the isolated browser, final video editing, and the Devpost entry remain 
 
 These are the only submission blockers, in order.
 
-1. Review the coherent release, commit it, push it, and keep GitHub Actions running until every
-   required check passes.
-2. Verify the marketplace install and signed-in dashboard from clean client and browser profiles.
-3. Cut the complete walkthrough to the narrated submission length, upload it, and verify it while
+1. Verify the signed-in dashboard from clean client and browser profiles.
+2. Cut the complete walkthrough to the narrated submission length, upload it, and verify it while
    signed out.
-4. Create and complete the Devpost draft, run the final smoke twice, then submit by August 18 at
+3. Create and complete the Devpost draft, run the final smoke twice, then submit by August 18 at
    6 PM JST.
 
 Managed MCP, the composed query plan, new benchmark automation, extra corpus material, budget email,
@@ -111,11 +109,11 @@ Target completion is August 15 at noon JST.
 - [x] Run documentation diagnostics, the 94-page build, page checks, and brand drift checks
 - [x] Synthesize and diff the deployed CDK stack before both August 13 deployments
 - [x] Run package lint, import contracts, all three type checkers, and frontend checks on the final release candidate
-- [ ] Run every test and infrastructure check once more from the exact submitted commit
+- [x] Run every test and infrastructure check once more from the exact submitted commit
 - [ ] Run the local Lambda workload once from a clean database after the gates pass
 - [x] Keep the existing dated local baselines. No superseding local result is needed
-- [ ] Have the project owner approve and commit the coherent release candidate
-- [ ] Push the release candidate and confirm GitHub checks pass on `main`
+- [x] Have the project owner approve and commit the coherent release candidate
+- [x] Push the release candidate and confirm GitHub checks pass on `main`
 
 Acceptance requires a clean release candidate with every required gate green. The working tree may
 contain unrelated user work only if it is clearly excluded from the submitted commit.
@@ -126,7 +124,7 @@ contain unrelated user work only if it is clearly excluded from the submitted co
   `setup.md`, client pages, and repository README
 - [x] Validate both local plugin manifests and their marketplace metadata
 - [x] Add the production Svelte dashboard and plugin consistency checks to GitHub Actions
-- [ ] Commit and push the marketplace files so the public install commands resolve from GitHub
+- [x] Commit and push the marketplace files so the public install commands resolve from GitHub
 - [x] Deploy the production SvelteKit dashboard behind the existing AWS Function URL
 - [x] Create a separate Traditional Web Logto client and store both web secrets in SSM
 - [x] Verify the public routes, OAuth discovery, sign-in redirect, image digests, queue state, and
@@ -360,8 +358,8 @@ Target completion is August 18 at noon JST.
 
 - [ ] Freeze code and corpus
 - [x] Run every local gate from the current working tree
-- [ ] Run every local gate from the submitted commit
-- [ ] Confirm GitHub checks are green for the current release candidate
+- [x] Run every local gate from the submitted commit
+- [x] Confirm GitHub checks are green for the current release candidate
 - [x] Deploy the final API and web image digests and verify the unchanged public URL
 - [ ] Run the complete cloud smoke flow twice
 - [x] Confirm no retained queue failures, Lambda errors, or throttles
