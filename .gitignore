@@ -25,10 +25,9 @@ site/
 .chefe/*
 !.chefe/pixi.toml
 !.chefe/pixi.lock
-# The digest of what the lock was solved against. chefe treats a missing one as drift, since
-# nothing on disk can then vouch for the lock beside it, so committing the pair without this
-# leaves a checkout that still refuses to install.
-!.chefe/.resolution-inputs
+# Chefe keeps compilation and lock freshness in one atomic state snapshot. A clean checkout
+# needs it beside the generated manifest and lock so CI can verify rather than solve them.
+!.chefe/state.toml
 dist/
 build/
 cdk.out/
