@@ -29,7 +29,7 @@ item: "session_item" {
   created_at: timestamptz
 }
 
-lane: "recall, vector lane" {
+lane: "find, vector lane" {
   shape: rectangle
 }
 

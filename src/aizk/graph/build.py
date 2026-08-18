@@ -6,13 +6,13 @@ from typing import cast
 
 from asyncpg.exceptions import TransactionRollbackError
 from loguru import logger
-from mainboard.profiling import span
 from pydantic import UUID5, UUID7
 from sqlalchemy import func, update
 from sqlalchemy.exc import DBAPIError
 from sqlmodel import select
 from tenacity import AsyncRetrying, retry_if_exception, stop_after_attempt, wait_random_exponential
 
+from ..common.observability import span
 from ..config import Settings, settings
 from ..extract.dates import with_source_fallback
 from ..extract.declaration import SourceDeclaration, journal_facts

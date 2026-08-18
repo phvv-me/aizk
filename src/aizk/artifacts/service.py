@@ -149,7 +149,7 @@ class ArtifactIntake:
         hashing, and object storage each need the complete bytes.
         """
         media_type = self.formats.accept(artifact.media_type, artifact.content)
-        annotate_operation(Usage.Event.Operation.remember_file, target)
+        annotate_operation(Usage.Event.Operation.keep_file, target)
         await self.scanner.scan(artifact.content)
         stored = await self.storage.put(artifact.content)
         try:
@@ -224,7 +224,7 @@ class ArtifactProcessor:
         scopes: Scopes,
         policy: str = "converter-v2",
     ) -> None:
-        """Convert one original and make its text recallable before marking it ready."""
+        """Convert one original and make its text findable before marking it ready."""
         user = User.system(scopes)
         original: OriginalArtifact | None = None
         content: bytes | None = None
@@ -406,7 +406,7 @@ class ArtifactProcessor:
         error: DoclingConversionError,
         policy: str,
     ) -> None:
-        """Keep one metadata-only document recallable and stamp Docling's final verdict.
+        """Keep one metadata-only document findable and stamp Docling's final verdict.
 
         `state` tells the caller whether this original stays in the retry pool (`failed`) or
         leaves it for good (`unreadable`), and the stored `error` keeps Docling's own reason
@@ -448,7 +448,7 @@ class ArtifactProcessor:
         content: bytes,
         markdown: str | None = None,
     ) -> None:
-        """Make a converted or metadata-only original recallable as one stable document."""
+        """Make a converted or metadata-only original findable as one stable document."""
         source = ArtifactDocument(
             filename=original.filename,
             media_type=original.media_type,
@@ -487,7 +487,7 @@ class ArtifactReindexer:
 
     Conversion has two halves and only the first one is expensive. Docling reads the bytes,
     runs OCR and writes Markdown, then chunking, embedding and graph projection turn that
-    Markdown into something recallable. A chunk size change, a lexical prefix change or a new
+    Markdown into something findable. A chunk size change, a lexical prefix change or a new
     embedder invalidates the second half alone, so this pass replays it from the stored text
     and never asks Docling to read the original again. That is what keeps `markdown` a load
     bearing column rather than a derivative nothing consumes.

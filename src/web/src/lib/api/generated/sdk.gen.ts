@@ -2,7 +2,7 @@
 
 import type { Client, ClientMeta, Options as Options2, RequestResult, ServerSentEventsResult, TDataShape } from './client';
 import { client } from './client.gen';
-import type { AddMemberData, AddMemberErrors, AddMemberResponses, AdminDoctorData, AdminDoctorResponses, AdminHardwareData, AdminHardwareResponses, AdminHealthData, AdminHealthResponses, AdminLinksData, AdminLinksResponses, AdminRecallData, AdminRecallResponses, AdminUsageData, AdminUsageResponses, CreateOrganizationData, CreateOrganizationResponses, FindingsData, FindingsErrors, FindingsResponses, GraphData, GraphErrors, GraphResponses, HealthData, HealthResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, ProcessingData, ProcessingEventsData, ProcessingEventsResponse, ProcessingEventsResponses, ProcessingResponses, RecallData, RecallResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses, SourcesData, SourcesErrors, SourcesResponses, StatusData, StatusErrors, StatusResponses, SubjectsData, SubjectsErrors, SubjectsResponses, ThemesData, ThemesErrors, ThemesResponses, UsageData, UsageErrors, UsageResponses } from './types.gen';
+import type { AddMemberData, AddMemberErrors, AddMemberResponses, AdminDoctorData, AdminDoctorResponses, AdminFindData, AdminFindResponses, AdminHardwareData, AdminHardwareResponses, AdminHealthData, AdminHealthResponses, AdminLinksData, AdminLinksResponses, AdminUsageData, AdminUsageResponses, CreateOrganizationData, CreateOrganizationResponses, FindData, FindingsData, FindingsErrors, FindingsResponses, FindResponses, GraphData, GraphErrors, GraphResponses, HealthData, HealthResponses, MeData, MeResponses, OrganizationsData, OrganizationsResponses, OverviewData, OverviewResponses, ProcessingData, ProcessingEventsData, ProcessingEventsResponse, ProcessingEventsResponses, ProcessingResponses, ReceiveUploadData, ReceiveUploadErrors, ReceiveUploadResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, SetMemberRoleData, SetMemberRoleErrors, SetMemberRoleResponses, SourcesData, SourcesErrors, SourcesResponses, StatusData, StatusErrors, StatusResponses, SubjectsData, SubjectsErrors, SubjectsResponses, ThemesData, ThemesErrors, ThemesResponses, UsageData, UsageErrors, UsageResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -147,13 +147,13 @@ export const graph = <ThrowOnError extends boolean = false>(options?: Options<Gr
 });
 
 /**
- * Recall
+ * Find
  *
- * Answer one recall question with merit-ordered Markdown evidence.
+ * Answer one find question with merit-ordered Markdown evidence.
  */
-export const recall = <ThrowOnError extends boolean = false>(options: Options<RecallData, ThrowOnError>): RequestResult<RecallResponses, unknown, ThrowOnError> => (options.client ?? client).post<RecallResponses, unknown, ThrowOnError>({
+export const find = <ThrowOnError extends boolean = false>(options: Options<FindData, ThrowOnError>): RequestResult<FindResponses, unknown, ThrowOnError> => (options.client ?? client).post<FindResponses, unknown, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/recall',
+    url: '/api/find',
     ...options,
     headers: {
         'Content-Type': 'application/json',
@@ -271,18 +271,18 @@ export const adminHealth = <ThrowOnError extends boolean = false>(options?: Opti
 });
 
 /**
- * Admin Recall
+ * Admin Find
  *
- * Run the live recall probe over the largest corpus the stored reading names.
+ * Run the live find probe over the largest corpus the stored reading names.
  *
  * Which corpora exist is a platform-wide count only the owner may take, so it is read
  * from the worker's reading rather than measured here. The retrieval itself runs under
  * an ordinary scoped session, which is what makes the probe a real exercise of the same
  * path a caller takes. Nothing until a worker pass has named a corpus.
  */
-export const adminRecall = <ThrowOnError extends boolean = false>(options?: Options<AdminRecallData, ThrowOnError>): RequestResult<AdminRecallResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminRecallResponses, unknown, ThrowOnError>({
+export const adminFind = <ThrowOnError extends boolean = false>(options?: Options<AdminFindData, ThrowOnError>): RequestResult<AdminFindResponses, unknown, ThrowOnError> => (options?.client ?? client).get<AdminFindResponses, unknown, ThrowOnError>({
     security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/admin/health/recall',
+    url: '/api/admin/health/find',
     ...options
 });
 

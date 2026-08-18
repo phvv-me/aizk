@@ -4,7 +4,7 @@
   let { data, navigate }: { data: DashboardData; navigate: (view: 'sources' | 'findings' | 'subjects' | 'themes' | 'usage' | 'processing' | 'explore') => void } = $props();
 
   const metrics = $derived(data.overview ? [
-    { label: 'Documents', value: data.overview.totals.documents, view: 'sources' as const, note: 'Remembered text' },
+    { label: 'Documents', value: data.overview.totals.documents, view: 'sources' as const, note: 'Kept text' },
     { label: 'Files', value: data.overview.totals.files, view: 'sources' as const, note: 'Preserved originals' },
     { label: 'Findings', value: data.overview.totals.findings, view: 'findings' as const, note: 'Grounded claims' },
     { label: 'Subjects', value: data.overview.totals.subjects, view: 'subjects' as const, note: 'Known entities' },
@@ -112,8 +112,8 @@
         <div class="empty-chart">Activity appears here as your agents use memory.</div>
       {/if}
       <dl class="usage-summary">
-        <div><dt>Recall</dt><dd>{data.usage.summary.recalls.toLocaleString('en-US')}</dd></div>
-        <div><dt>Remember</dt><dd>{data.usage.summary.remembers.toLocaleString('en-US')}</dd></div>
+        <div><dt>Find</dt><dd>{data.usage.summary.finds.toLocaleString('en-US')}</dd></div>
+        <div><dt>Keep</dt><dd>{data.usage.summary.keeps.toLocaleString('en-US')}</dd></div>
         <div><dt>Evidence items</dt><dd>{data.usage.summary.items.toLocaleString('en-US')}</dd></div>
       </dl>
     </section>

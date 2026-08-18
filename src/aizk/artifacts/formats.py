@@ -73,7 +73,7 @@ class FormatPolicy(FrozenModel):
     """Accept only formats aizk can open, deciding from the bytes rather than the claim.
 
     An artifact aizk cannot read is one it cannot convert, index, compress deliberately, or
-    ever recall, so it is refused while the caller still holds the file rather than kept as
+    ever find, so it is refused while the caller still holds the file rather than kept as
     an opaque blob that only costs storage. The check runs before the bytes reach the object
     store, which is what makes the refusal free.
     """

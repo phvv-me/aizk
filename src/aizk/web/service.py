@@ -21,7 +21,7 @@ from ..integrations.web import (
     WebResult,
     WebSearcher,
 )
-from ..retrieval import RecallEvidence
+from ..retrieval import FindEvidence
 from ..serving.extract import LLM
 from ..serving.gate import MentionDetector
 from ..store.identity import User
@@ -106,7 +106,7 @@ class WebSearch:
         self,
         user: User,
         query: str,
-        evidence: RecallEvidence,
+        evidence: FindEvidence,
         mode: WebMode,
         fresh: bool,
         scopes: ScopeNames | None,
@@ -134,7 +134,7 @@ class WebSearch:
         self,
         user: User,
         query: str,
-        evidence: RecallEvidence,
+        evidence: FindEvidence,
         mode: WebMode,
         fresh: bool,
         target: Scopes,
@@ -355,7 +355,7 @@ class WebSearch:
         )
 
     async def probe(
-        self, user: User, query: str, evidence: RecallEvidence, fresh: bool, execute: bool
+        self, user: User, query: str, evidence: FindEvidence, fresh: bool, execute: bool
     ) -> RouterProbe:
         """Run the router and the sanitizer, calling providers only when asked to.
 

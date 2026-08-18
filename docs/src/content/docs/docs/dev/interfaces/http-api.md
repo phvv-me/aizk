@@ -33,7 +33,7 @@ decorators, so the whole surface is one readable list.
 | GET | `/api/subjects` | `subjects` | `SubjectPage`, same paging |
 | GET | `/api/themes` | `themes` | `ThemePage`, same paging, biggest themes first |
 | GET | `/api/graph` | `graph` | `GraphSlice`, `limit` 1 to 80 |
-| POST | `/api/recall` | `recall` | `Answer`, one Markdown string |
+| POST | `/api/find` | `find` | `Answer`, one Markdown string |
 | PUT | `/api/uploads/{capability}` | `receive_upload` | `ArtifactReceipt` |
 | GET | `/api/organizations` | `organizations` | `OrganizationDirectory` |
 | POST | `/api/organizations` | `create_organization` | `OrganizationChange` |
@@ -47,7 +47,7 @@ uses. A missing or invalid token is a 401 before the handler runs.
 
 ## Not a second engine
 
-The handlers are thin on purpose. Recall builds a `Memory` and calls it. The catalog routes call
+The handlers are thin on purpose. Find builds a `Memory` and calls it. The catalog routes call
 `SourcePage.load`, `FindingPage.load`, `SubjectPage.load`, `ThemePage.load` and `GraphSlice.load`,
 each of which runs one `user.exec[...]` over a statement defined on the `Explorer` namespace in
 `src/aizk/store/models/namespaces.py`. Organization mutations go straight to `OrganizationManager`,
@@ -67,7 +67,7 @@ handlers for eight types.
 | `ValidationError`, `MalwareRejectedError` | 422 |
 | `ScopeNotFoundError`, `PermissionError` | 403 |
 | `MalwareUnavailableError`, `ObjectStoreError` | 503 |
-| `httpx.HTTPError` | 502 |
+| `httpx.HTTPError` | 503 |
 | `ValueError` | 400 |
 
 Domain messages pass through, and external failures are replaced with fixed text so an upstream
@@ -108,7 +108,7 @@ into `src/lib/api/generated`. The FastAPI response models are therefore the fron
 and a route whose return type changes breaks the TypeScript build rather than a page at runtime.
 
 The `json_body` helper exists for the same reason. Handlers read and validate their own bodies
-through `AizkAPI.payload`, which keeps the byte budget of `8 * mcp_remember_max_chars`, so the
+through `AizkAPI.payload`, which keeps the byte budget of `8 * mcp_keep_max_chars`, so the
 request schema is declared explicitly with `openapi_extra` and its local `$defs` are inlined
 before embedding.
 

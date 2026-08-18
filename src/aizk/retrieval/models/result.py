@@ -13,7 +13,7 @@ from ..templates import environment
 from .candidate import Candidate
 from .lane import Lane
 
-_template = environment.get_template("recall.md.j2")
+_template = environment.get_template("find.md.j2")
 
 
 class _Provenance(StrEnum):
@@ -26,7 +26,7 @@ class _Provenance(StrEnum):
 
 
 class _Scope(FrozenModel):
-    """One exact Logto scope represented in recalled evidence."""
+    """One exact Logto scope represented in found evidence."""
 
     name: str
     description: str | None = None
@@ -65,7 +65,7 @@ type Evidence = _Evidence
 type Provenance = _Provenance
 
 
-class RecallResult(FrozenModel):
+class FindResult(FrozenModel):
     """Structured `find` result that can be serialized as JSON or rendered as Markdown.
 
     Memory evidence and web findings stay in separate collections because they carry
@@ -132,7 +132,7 @@ class RecallResult(FrozenModel):
         )
 
     @cached_property
-    def remembered(self) -> tuple[_Evidence, ...]:
+    def kept(self) -> tuple[_Evidence, ...]:
         """Evidence the caller or an organization they belong to put into memory."""
         return tuple(item for item in self.evidence if item.provenance is not _Provenance.WEB)
 
@@ -151,14 +151,14 @@ class RecallResult(FrozenModel):
 
     @cached_property
     def unsettled(self) -> tuple[_Evidence, ...]:
-        """Every remembered item whose source did not state it outright.
+        """Every kept item whose source did not state it outright.
 
         The template turns this into a standing instruction rather than a label, because a
         word beside a claim is easy to read past while a sentence naming the excerpt as the
         authority is not. A derived claim arrives as a clean assertion whatever the sentence
         behind it said, so this is the only place the reader is told which ones those are.
         """
-        return tuple(item for item in self.remembered if item.stance is not Stance.settled)
+        return tuple(item for item in self.kept if item.stance is not Stance.settled)
 
     @cached_property
     def shared_scopes(self) -> tuple[_Scope, ...]:
@@ -175,7 +175,7 @@ class RecallResult(FrozenModel):
         """Render the structured result through the public template.
 
         A result with nothing at all in it renders as the empty string, which is what a
-        recall over an empty memory has always returned. A `find` never lands there, since
+        a query over an empty memory has always returned. A `find` never lands there, since
         its receipt alone is worth printing.
         """
         if not (self.evidence or self.web or self.receipt):

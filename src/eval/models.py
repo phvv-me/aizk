@@ -87,7 +87,7 @@ class BenchmarkCorpusState(FrozenModel):
 
 
 class BenchmarkAnswer(FrozenModel):
-    """One answer generated strictly from recalled benchmark context."""
+    """One answer generated strictly from retrieved benchmark context."""
 
     answer: str
     abstained: bool = False

@@ -50,7 +50,7 @@ def candidates() -> st.SearchStrategy[Candidate]:
 
 
 @st.composite
-def recalled_candidates(draw: st.DrawFn) -> tuple[Candidate, ...]:
+def found_candidates(draw: st.DrawFn) -> tuple[Candidate, ...]:
     return tuple(draw(st.lists(candidates(), max_size=12)))
 
 

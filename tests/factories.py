@@ -30,7 +30,7 @@ class CandidateFactory(AizkModelFactory[Candidate]):
     artifact_id = None
     artifact_content_id = None
     created_by = Use(uuid5)
-    # A generated candidate stands for something the caller remembered. A cached web page is
+    # A generated candidate stands for something the caller kept. A cached web page is
     # a deliberate, rare shape whose tests build it explicitly, and letting the factory roll
     # one at random would swap the provenance label under every eval and benchmark arm.
     web_cache = False

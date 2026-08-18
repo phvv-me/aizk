@@ -7,7 +7,7 @@ This roadmap separates shipped behavior from hypotheses that still need measured
 - [x] Logto tokens are the only source of user, organization, role, and public organization state.
 - [x] Nonempty scope sets represent personal memory, organization memory, and organization
   intersections under forced PostgreSQL RLS.
-- [x] Speaker snapshots and epistemic kinds survive capture, extraction, consolidation, recall,
+- [x] Speaker snapshots and epistemic kinds survive capture, extraction, consolidation, Find,
   and context rendering without creating identity tables.
 - [x] Objective facts consolidate at world scope while experiences, observations, opinions, and
   preferences remain distinct per speaker.
@@ -45,7 +45,7 @@ This roadmap separates shipped behavior from hypotheses that still need measured
     enrichment.
   - Prototype private-only, read-only client adapters with deterministic event IDs, import and
     delivery cursors, bounded handoffs, one active-writer lease, and repository checkpoints.
-  - Measure transcript volume, storage growth, prompt cost, recall quality, graph queue impact,
+  - Measure transcript volume, storage growth, prompt cost, Find quality, graph queue impact,
     client format stability, crash recovery, and concurrent handoff behavior.
   - Threat-model secrets, prompt injection, completed tool-call replay, organization sharing, and
     authorization boundaries before enabling capture outside private memory.

@@ -39,7 +39,7 @@ heading() {
 }
 
 printf '\033[2J\033[H'
-printf '\033[1;36mcrAIZK complete live walkthrough\033[0m\n\n'
+printf '\033[1;36mAIZK complete live walkthrough\033[0m\n\n'
 printf 'Authenticated agent memory on CockroachDB Cloud and AWS\n'
 printf '\033[2mFictional Maya Chen demo identity. No credentials are shown.\033[0m\n'
 sleep 5
@@ -63,7 +63,7 @@ run_client run --pure --model openrouter/openrouter/auto \
   'Call aizk status. If processing is active, call status again until it is idle, with at most four total calls. Report each stage and confirm whether pending, running, and failed work reached zero. Do not use any other tool.'
 sleep 7
 
-heading '5  Recall Atlas with different wording and web disabled'
+heading '5  Find Atlas with different wording and web disabled'
 run_client run --pure --model openrouter/openrouter/auto \
   'Call aizk find exactly once with web off and this question. What should Atlas verify before promoting a release? Report the answer, quote the supporting source excerpt, show its document ID and capture date, and repeat the privacy receipt. Do not use the web or inspect files.'
 sleep 8
@@ -79,5 +79,5 @@ run_client run --pure --model openrouter/openrouter/auto \
 sleep 10
 
 printf '\n\033[1;32mLive workflow complete\033[0m\n'
-printf 'The write, worker processing and three grounded recalls used the deployed MCP endpoint.\n'
+printf 'The write, worker processing and three grounded finds used the deployed MCP endpoint.\n'
 sleep 8

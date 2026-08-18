@@ -28,9 +28,9 @@ describe('rankedCounts', () => {
 describe('bucketTotals', () => {
   it('groups repeated series and orders buckets deterministically', () => {
     const points = [
-      { day: '2026-07-20', operation: 'remember', requests: 2 },
-      { day: '2026-07-19', operation: 'recall', requests: 3 },
-      { day: '2026-07-20', operation: 'remember', requests: 4 },
+      { day: '2026-07-20', operation: 'keep', requests: 2 },
+      { day: '2026-07-19', operation: 'find', requests: 3 },
+      { day: '2026-07-20', operation: 'keep', requests: 4 },
       { day: '2026-07-20', operation: '__proto__', requests: 1 }
     ];
 
@@ -42,8 +42,8 @@ describe('bucketTotals', () => {
         (point) => point.requests
       )
     ).toEqual([
-      { bucket: '2026-07-19', values: { recall: 3 }, total: 3 },
-      { bucket: '2026-07-20', values: { remember: 6, ['__proto__']: 1 }, total: 7 }
+      { bucket: '2026-07-19', values: { find: 3 }, total: 3 },
+      { bucket: '2026-07-20', values: { keep: 6, ['__proto__']: 1 }, total: 7 }
     ]);
   });
 });

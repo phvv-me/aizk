@@ -293,7 +293,7 @@ class Knowledge:
         so counting them would greet a brand-new account with tens of thousands of items it
         never wrote. `Standing.counted` keeps a public scope only where the caller may also
         write to it, which leaves private and ordinary member scopes counting as before and
-        leaves recall free to read every public row.
+        leaves find free to read every public row.
         """
         return cast(
             "Select[tuple[int, int, int, int, int]]",

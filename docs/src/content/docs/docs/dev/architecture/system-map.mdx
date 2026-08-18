@@ -60,14 +60,14 @@ CockroachDB Cloud, C-SPANN, S3 and hosted model endpoints. Logto provides identi
 
 ## The write path
 
-A `keep` call lands on `Memory.remember` in `src/aizk/memory.py`, the one service both the
+A `keep` call lands on `Memory.keep` in `src/aizk/memory.py`, the one service both the
 MCP server and the browser API share. Plain text and a file take different routes from there.
 
 ```text
   caller
     │ keep
     ▼
-  Memory.remember
+  Memory.keep
     ├── text ──────────▶ extract.ingest ──┐
     │                                      │
     └── uri or file ──▶ ArtifactIntake     │
@@ -103,14 +103,14 @@ worker own it on CockroachDB. A caller never waits for graph extraction.
 ## The read path
 
 A `find` call is synchronous and touches no queue. `Memory.find` calls
-`retrieval.recall`, which runs the lanes in `src/aizk/retrieval/lanes/`, fuses them, reranks the
+`retrieval.find`, which runs the lanes in `src/aizk/retrieval/lanes/`, fuses them, reranks the
 survivors with a cross-encoder, and packs the highest-merit prefix that fits the token budget.
-The result is rendered from `src/aizk/retrieval/templates/recall.md.j2` into one prompt-ready
+The result is rendered from `src/aizk/retrieval/templates/find.md.j2` into one prompt-ready
 Markdown string.
 
 The retrieval plan decides which lanes run. The full PostgreSQL plan can run every lane and use a
-cross-encoder to order the fused candidates. The bounded crAIZK plan disables measured high-cost
-lanes and can skip reranking. [How recall runs](/docs/dev/read/overview/) owns the shared path, and
+cross-encoder to order the fused candidates. The bounded AIZK plan disables measured high-cost
+lanes and can skip reranking. [How find runs](/docs/dev/read/overview/) owns the shared path, and
 [Retrieval tuning](/docs/dev/read/tuning/) owns the switches.
 
 ## The identity boundary

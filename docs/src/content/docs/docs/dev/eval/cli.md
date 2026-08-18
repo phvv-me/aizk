@@ -3,24 +3,24 @@ title: "The eval CLI"
 description: "Every evaluation command and the question it answers."
 ---
 
-Every measurement on the pages around this one came out of one command tree. This page assumes
+Every measurement here came from one command tree. This page assumes
 you have read [how we evaluate](/docs/dev/eval/approach/) and that you have a running deployment
 with a corpus in it.
 
 ## How to run it
 
-From the monorepo root, always through chefe.
+From the repository root, use the frozen environment.
 
 ```sh
-chefe run aizk-eval <command> [--flags]
+uv run --no-sync aizk-eval <command> [--flags]
 ```
 
-That task runs `python -m eval.launcher` inside `packages/aizk`, and the launcher is a five line
+The entry point runs `eval.launcher`, and the launcher is a five line
 module that exists for exactly one reason. Three commands must never touch the live database, so
 the launcher rewrites the environment before it execs `eval.cli`.
 
 ```text
-  chefe run aizk-eval <command>
+  uv run --no-sync aizk-eval <command>
              │
              ▼
       eval/launcher.py
@@ -76,8 +76,8 @@ stratified probes. Flags are `--k 8`, `--per-stratum 8` and `--strata local,glob
 match, so the regression gate can never drift onto different questions without saying so.
 
 **`trace`** takes a query as its one positional argument and shows statement rank, cross-encoder
-merit and the packing cut for a single recall. It runs the real read path without updating access
-history, so tracing a query never changes what the next recall would rank. Flags are `--k 8` and
+merit and the packing cut for a single find. It runs the real read path without updating access
+history, so tracing a query never changes what the next find would rank. Flags are `--k 8` and
 `--budget`, which defaults to the production `context_token_budget` of 2048.
 
 **`management`** discovers every visible Area and Project from declared source documents, then
@@ -101,7 +101,7 @@ why this never runs inside a build.
 human-verified cases and scores one explicit backend against them.
 
 ```sh
-chefe run aizk-eval extraction /path/to/extraction-cases.jsonl \
+uv run --no-sync aizk-eval extraction /path/to/extraction-cases.jsonl \
   --backend llm --model gemma-4-31b --concurrency 1 --backlog 10704 \
   --out /tmp/extraction-llm.json
 ```
@@ -112,17 +112,17 @@ endpoint rather than a report label, so one URL and key can compare several host
 [Extraction and models](/docs/dev/eval/extraction/) has the metrics and the results.
 
 **`certainty`** reports the flattening rate before and after the grounding rule that catches it,
-the false rejection it costs, and whether an unsettled claim changes what recall returns. It
+the false rejection it costs, and whether an unsettled claim changes what find returns. It
 reaches no model and no database, so it answers identically every time.
 
 ```sh
-chefe run aizk-eval certainty --out /tmp/certainty.json
+uv run --no-sync aizk-eval certainty --out /tmp/certainty.json
 ```
 
 **`groupmem`** runs the full external benchmark path against a released corpus directory.
 
 ```sh
-chefe run aizk-eval groupmem /path/to/GroupMemBench --domain Finance --question-limit 2
+uv run --no-sync aizk-eval groupmem /path/to/GroupMemBench --domain Finance --question-limit 2
 ```
 
 Flags are `--domain Finance`, `--kinds` over the six question families, `--message-limit`,
@@ -131,16 +131,16 @@ rather than publishable, and the isolated scope is purged after the run unless y
 
 **`scale`** grows a synthetic corpus through a list of sizes and reports where each component
 crosses its budget. Flags are `--sizes 1000,10000`, `--k 8`, `--repeats 10` and
-`--recall-p95-ms 200`. Each point records ingest throughput, recall p50, p95 and p99, per lane
-latency, community detection time, table and index bytes, and peak host and GPU memory measured
-through `mainboard`. The report ends with the flagged knees, which are the first size at which
+`--find-p95-ms 200`. Each point records ingest throughput, find p50, p95 and p99, per lane
+latency, community detection time, table and index bytes, and process peak host memory. GPU memory
+is reported as zero because the scale runner does not inspect accelerator devices. The report ends with the flagged knees, which are the first size at which
 each component went over budget.
 
 ## What a run costs
 
 Three of these commands are cheap and the rest are not, which is worth knowing before you start
-one on a laptop. `trace` is a single recall. `scale` and `management` spend database time rather
-than model time, although `management` runs twenty recalls per subject and that multiplies fast on
+one on a laptop. `trace` is a single find. `scale` and `management` spend database time rather
+than model time, although `management` runs twenty finds per subject and that multiplies fast on
 a corpus with forty projects in it.
 
 Everything else spends model calls. `bench`, `freeze` and `plans` generate one question per sample

@@ -17,7 +17,7 @@ from sqlmodel.sql.expression import Select
 
 from aizk.config import settings
 from aizk.ontology import System
-from aizk.retrieval import Candidate, Plan, RecallResult, recall
+from aizk.retrieval import Candidate, FindResult, Plan, find
 from aizk.retrieval.packing import pack
 from aizk.serving.extract import LLM
 from aizk.store import Community, Entity, Fact
@@ -127,12 +127,12 @@ class Arm(FrozenModel):
 
     @classmethod
     def production(cls) -> Arm:
-        """The only plan used by production recall."""
+        """The only plan used by production Find requests."""
         return cls(name="maximal", plan=Plan.maximal())
 
     @classmethod
     def ablations(cls) -> tuple[Arm, ...]:
-        """The production plan, three recall removals, and the evidence floor."""
+        """The production plan, three Find ablations, and the evidence floor."""
         return (
             cls.production(),
             cls(name="maximal_without_raptor", plan=Plan.maximal_without_raptor()),
@@ -550,7 +550,7 @@ async def measure_arm(
     k: int,
     judge: bool | None = None,
 ) -> ArmScore:
-    """Recall every probe and retain its paired ranking, judge, and latency row."""
+    """Find every probe and retain its paired ranking, judge, and latency row."""
     rows: list[QueryResult] = []
     judge_enabled = eval_settings.judge if judge is None else judge
     with SettingsOverlay(arm.overrides):
@@ -561,13 +561,13 @@ async def measure_arm(
                 if arm.plan is not None
                 else (await Route.classify(question.question)).plan
             )
-            result = await recall(question.question, user=user, k=k, plan=plan)
+            result = await find(question.question, user=user, k=k, plan=plan)
             latency_ms = (time.perf_counter() - start) * 1000.0
             scores = question_scores(question, result)
             rank, hit_at_k, ndcg_at_k, mrr = ranking_metrics(question, scores, k)
             verdict: float | None = None
             if judge_enabled:
-                context = await RecallResult.from_candidates(
+                context = await FindResult.from_candidates(
                     pack(result, _JUDGE_CONTEXT_BUDGET)
                 ).to_markdown()
                 verdict = float(await judge_answerable(question.question, context))
@@ -634,7 +634,7 @@ class RetrievalBenchmark:
         self.judge = judge
 
     async def production(self) -> PlanStudyReport:
-        """Benchmark the maximal plan used by every production recall."""
+        """Benchmark the maximal plan used by every production Find request."""
         report = await self.run(
             arms=(Arm.production(),),
             title="production retrieval",

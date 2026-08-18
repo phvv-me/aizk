@@ -10,7 +10,7 @@ page assumes you know how [extraction and the gate](/docs/dev/write/extraction/)
 
 ## The benchmark
 
-`chefe run aizk-eval extraction` takes a JSONL file of human-verified cases. Each line is one source
+`uv run --no-sync aizk-eval extraction` takes a JSONL file of human-verified cases. Each line is one source
 span and the facts a correct extraction would produce, where a target names the acceptable subject
 names, the predicate, the acceptable object names, and optionally the epistemic kind, the
 settledness, and the valid-from date.
@@ -104,7 +104,7 @@ edges.
 
 Gate value is corpus dependent, so replay it rather than assume. An earlier base-model run over the
 dense research vault skipped only 2.2 percent of chunks, so the gate earns far more on a sparse
-corpus. `chefe run aizk-eval gate` is how you find out for yours.
+corpus. `uv run --no-sync aizk-eval gate` is how you find out for yours.
 
 A whole-stack cell used three vendored papers, one repository guide, and five public fixture files.
 Extraction completed all 220 chunks and produced 2,086 entities, 2,033 facts, and 2,079 profiles.

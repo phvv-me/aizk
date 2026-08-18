@@ -19,7 +19,7 @@
     "reranker": false,
     "sources_first": true
   },
-  "recall": {
+  "find": {
     "queries": 8,
     "samples": 16,
     "expectations_matched": 26,

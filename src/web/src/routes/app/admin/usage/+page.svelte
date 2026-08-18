@@ -32,10 +32,10 @@
       : []
   );
   const byActor = $derived(
-    [...(usage?.by_actor ?? [])].sort((a, b) => b.recalls + b.remembers - (a.recalls + a.remembers))
+    [...(usage?.by_actor ?? [])].sort((a, b) => b.finds + b.keeps - (a.finds + a.keeps))
   );
   const byScope = $derived(
-    [...(usage?.by_scope ?? [])].sort((a, b) => b.recalls + b.remembers - (a.recalls + a.remembers))
+    [...(usage?.by_scope ?? [])].sort((a, b) => b.finds + b.keeps - (a.finds + a.keeps))
   );
 </script>
 
@@ -68,7 +68,7 @@
           <Card.Description>Successful requests</Card.Description>
           <InfoTip
             label="What successful requests counts"
-            text="One completed Recall, Remember, Share, or artifact read by any caller. Failed calls and ordinary page views are excluded."
+            text="One completed Find, Keep, Share, or artifact read by any caller. Failed calls and ordinary page views are excluded."
           />
         </div>
         <Card.Title class="text-3xl">{period.summary.requests.toLocaleString('en-US')}</Card.Title>
@@ -135,12 +135,12 @@
     <Card.Content>
       <dl class="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
         <div>
-          <dt class="text-muted-foreground text-xs">Recalls</dt>
-          <dd class="mt-1 text-xl">{period.summary.recalls.toLocaleString('en-US')}</dd>
+          <dt class="text-muted-foreground text-xs">Finds</dt>
+          <dd class="mt-1 text-xl">{period.summary.finds.toLocaleString('en-US')}</dd>
         </div>
         <div>
-          <dt class="text-muted-foreground text-xs">Remembers</dt>
-          <dd class="mt-1 text-xl">{period.summary.remembers.toLocaleString('en-US')}</dd>
+          <dt class="text-muted-foreground text-xs">Keeps</dt>
+          <dd class="mt-1 text-xl">{period.summary.keeps.toLocaleString('en-US')}</dd>
         </div>
         <div>
           <dt class="text-muted-foreground text-xs">Files</dt>
@@ -179,8 +179,8 @@
               <thead>
                 <tr class="border-b">
                   <th class="pb-3 font-medium">Caller</th>
-                  <th class="pb-3 font-medium">Recalls</th>
-                  <th class="pb-3 font-medium">Remembers</th>
+                  <th class="pb-3 font-medium">Finds</th>
+                  <th class="pb-3 font-medium">Keeps</th>
                   <th class="pb-3 font-medium">Shares</th>
                   <th class="pb-3 font-medium">Reads</th>
                 </tr>
@@ -191,8 +191,8 @@
                     <td class="max-w-[10rem] truncate py-3 pr-4 font-mono text-xs"
                       >{row.actor_id}</td
                     >
-                    <td class="py-3 pr-4">{row.recalls.toLocaleString('en-US')}</td>
-                    <td class="py-3 pr-4">{row.remembers.toLocaleString('en-US')}</td>
+                    <td class="py-3 pr-4">{row.finds.toLocaleString('en-US')}</td>
+                    <td class="py-3 pr-4">{row.keeps.toLocaleString('en-US')}</td>
                     <td class="py-3 pr-4">{row.shares.toLocaleString('en-US')}</td>
                     <td class="py-3">{row.artifact_reads.toLocaleString('en-US')}</td>
                   </tr>
@@ -224,8 +224,8 @@
               <thead>
                 <tr class="border-b">
                   <th class="pb-3 font-medium">Scope</th>
-                  <th class="pb-3 font-medium">Recalls</th>
-                  <th class="pb-3 font-medium">Remembers</th>
+                  <th class="pb-3 font-medium">Finds</th>
+                  <th class="pb-3 font-medium">Keeps</th>
                   <th class="pb-3 font-medium">Shares</th>
                   <th class="pb-3 font-medium">Reads</th>
                 </tr>
@@ -236,8 +236,8 @@
                     <td class="max-w-[10rem] truncate py-3 pr-4 font-mono text-xs"
                       >{row.scope_id}</td
                     >
-                    <td class="py-3 pr-4">{row.recalls.toLocaleString('en-US')}</td>
-                    <td class="py-3 pr-4">{row.remembers.toLocaleString('en-US')}</td>
+                    <td class="py-3 pr-4">{row.finds.toLocaleString('en-US')}</td>
+                    <td class="py-3 pr-4">{row.keeps.toLocaleString('en-US')}</td>
                     <td class="py-3 pr-4">{row.shares.toLocaleString('en-US')}</td>
                     <td class="py-3">{row.artifact_reads.toLocaleString('en-US')}</td>
                   </tr>

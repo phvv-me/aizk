@@ -1,6 +1,6 @@
-# crAIZK execution plan
+# AIZK execution plan
 
-This is the working checklist for finishing and submitting crAIZK. [RULES.md](RULES.md) remains
+This is the working checklist for finishing and submitting AIZK. [RULES.md](RULES.md) remains
 the compliance source. This file owns sequencing, dates, acceptance criteria, and the work that is
 still open.
 
@@ -43,15 +43,16 @@ entry remain open.
 | Web gate | Ready | Svelte diagnostics, formatting, 24 tests, and the production build pass in GitHub Actions |
 | Documentation and plugins | Ready | The 94-page build, privacy checks, setup consistency, plugin validation, and isolated Claude installation pass |
 | CockroachDB Cloud cluster | Ready | The Singapore serverless database is migrated and restricted app access works |
-| CockroachDB Managed MCP | Out of scope | Required ccloud and C-SPANN evidence is complete, so daily MCP reauthorization adds no submission value |
+| CockroachDB Managed MCP | Ready in cloud | Cluster-scoped service account inspection returned a healthy typed verdict through the read-only allowlist |
+| CockroachDB Agent Skills | Ready in cloud | Official cluster health and background job skills drove the live queue steward verdict |
 | AWS operator tooling | Ready | Pinned AWS CLI 2.36.20 authenticates through the isolated `craizk` profile in Singapore |
 | AWS promotional credit | Ready | The current account has $100 unused through August 11, 2027 |
 | AWS runtime | Ready | MCP and worker use `sha256:3280ad739f7021ee025432c33d68d4cbfcccd0cf93cdc3ed888ba087f8fb21fa`, while the web Lambda uses `sha256:00d28570ff61b6e985da81ad93aebdda39abbd17e0941594172eeeb6c6df8b50` |
 | Judge website and UI | Ready for browser rehearsal | The assigned AWS URL serves the landing page, full docs, Logto sign-in, production dashboard and authenticated API |
-| File intake | Ready for rehearsal | A 4 MiB file cap, format verification, 1 GiB user quota, private S3 and worker recall passed live |
+| File intake | Ready for rehearsal | A 4 MiB file cap, format verification, 1 GiB user quota, private S3 and worker find passed live |
 | Cloud corpus and benchmark | Ready for rehearsal | Six public notes produced 40 facts, 19 entities, four communities, 29 of 29 semantically complete answers, and a 2.14 second warm median |
 | Judge identity and access | Ready for final rehearsal | Maya Chen completed direct OAuth and the live flow. Her secure SSM demo-directory entry is current |
-| Screenshots and video | In progress | A privacy-reviewed nine minute walkthrough shows live onboarding, OAuth, write, processing, recall, console, AWS and CockroachDB evidence. Final narration, short edit and captions remain |
+| Screenshots and video | In progress | A privacy-reviewed nine minute walkthrough shows live onboarding, OAuth, write, processing, find, console, AWS and CockroachDB evidence. Final narration, short edit and captions remain |
 | Devpost entry | Manual confirmation pending | Eligibility, account standing, draft, and final submit need the project owner |
 
 ## Remaining critical path
@@ -64,8 +65,8 @@ These are the only submission blockers, in order.
 3. Create and complete the Devpost draft, run the final smoke twice, then submit by August 18 at
    6 PM JST.
 
-Managed MCP, the composed query plan, new benchmark automation, extra corpus material, budget email,
-and a replacement thumbnail are closed as out of scope. None is needed for submission.
+The composed query plan, new benchmark automation, extra corpus material, budget email, and a
+replacement thumbnail remain closed as out of scope.
 
 ## Scope freeze
 
@@ -77,8 +78,10 @@ Include the following work.
 - CockroachDB Cloud as the persistent memory, vector, graph, authorization, temporal, and queue store
 - Lambda for MCP plus a private worker that also handles explicit setup events
 - Lambda Function URL, EventBridge Scheduler, ECR, SSM, short CloudWatch logs, and one ten dollar gross-cost budget that excludes credits
-- Distributed Vector Indexing and ccloud as the two required CockroachDB tools
-- Managed MCP as optional read-only operator evidence
+- Distributed Vector Indexing for scoped semantic Find
+- ccloud for reproducible cluster and SQL identity management
+- Managed MCP for live read-only queue and database evidence
+- Official Agent Skills for the queue steward diagnosis and safety rules
 - One bounded public corpus and one complete grounded memory story
 - One private S3 artifact path with a bounded authenticated upload and text-only embedding
 - Honest cold and warm cloud measurements
@@ -139,23 +142,23 @@ files remain local until the project owner approves the release commit and push.
 
 Target completion is August 14 at 3 PM JST.
 
-- [x] Make Distributed Vector Indexing and ccloud the two required CockroachDB tools for the submission
-- [x] Skip the optional Managed MCP screenshot because its daily reauthorization adds no required evidence
+- [x] Keep Distributed Vector Indexing and ccloud as meaningful CockroachDB integrations
+- [x] Add the Managed MCP and Agent Skills queue steward with a read-only tool allowlist
+- [x] Create the cluster-scoped service account key and capture a redacted live verdict
 - [x] Inspect cluster health, schema, indexes, and current migration state through ccloud
 - [x] Record the current ccloud operator identifier outside the public repository
-- [x] Keep the unrelated Managed MCP identifier out of instructions and screenshots
-- [x] Add pinned AWS CLI 2.36.20 to chefe and expose the commands used by the deployment guide
+- [x] Keep the cluster UUID and Managed MCP service key out of screenshots
+- [x] Add a self-contained AWS CLI 2.36.20 wrapper and expose the commands used by the deployment guide
 - [x] Verify AWS caller identity and selected account without printing credentials
 - [x] Confirm `ap-southeast-1` as the only AWS runtime region
 - [x] Record the unused $100 promotional credit and its August 11, 2027 expiration
 - [x] Keep the active AWS Budget without optional direct email notifications for the demo
-- [x] Confirm the isolated Logto tenant and applications for crAIZK
+- [x] Confirm the isolated Logto tenant and applications for AIZK
 - [x] Confirm the OpenRouter demonstration key is available for SSM
 
-The current ccloud cluster is named `aizk-cockroachdb`, runs CockroachDB 26.2.5 on AWS Singapore,
-and reports serverless state `CREATED`. Its ccloud identifier is
-The exact operator identifier is intentionally omitted. The earlier identifier supplied for Managed MCP was
-different and must not be assumed to name the same resource.
+The CockroachDB Cloud cluster runs in AWS Singapore. Public evidence omits its cluster UUID,
+connection string, service account key, and operator identity. The queue steward reads the cluster
+UUID from the ignored local environment.
 
 ## P0 prepare the cloud database
 
@@ -186,7 +189,7 @@ Target completion is August 13 at 8 PM JST.
 - [x] Push one immutable image and record its digest
 - [x] Store both database URLs and the OpenRouter key in SSM SecureString
 - [x] Store the Logto management secret after its application exists
-- [x] Create the crAIZK Logto management application and browser SPA, plus the public Native MCP application
+- [x] Create the AIZK Logto management application and browser SPA, plus the public Native MCP application
 - [x] Configure the `control` scope and the required OAuth audience
 - [x] Confirm the direct AWS Function URL deployment sequence
 - [x] Protect the pre-Logto endpoint with AWS IAM
@@ -194,7 +197,7 @@ Target completion is August 13 at 8 PM JST.
 - [x] Update the Logto redirects and resource configuration to the same final URL
 - [x] Deploy the site, docs, user UI, API and modern MCP routes on the same origin with Logto OAuth
 - [x] Deploy private S3 with a 4 MiB file cap and 1 GiB cumulative quota per user
-- [x] Complete authenticated upload, worker extraction and recall through the public endpoint
+- [x] Complete authenticated upload, worker extraction and find through the public endpoint
 - [x] Invoke the worker setup event and save its successful migration receipt
 - [x] Confirm the worker recovery schedule is enabled
 - [x] Keep the active AWS Budget without optional direct email notifications for the demo
@@ -248,7 +251,7 @@ The public URL deadline is August 14 at 6 PM JST. The final evidence deadline is
 - [x] Capture Lambda duration, errors, throttles, and memory use from CloudWatch
 - [x] Confirm no request or model payload appears in the reviewed MCP and worker logs
 - [x] Capture one clean ccloud cluster inspection
-- [x] Skip the optional Managed MCP inspection because ccloud and SQL evidence are complete
+- [x] Capture one healthy service-key Managed MCP queue steward verdict
 - [x] Save a dated cloud result JSON
 - [x] Save a redacted command transcript
 
@@ -305,7 +308,7 @@ Target completion is August 16 at 8 PM JST.
 - [x] Capture the successful setup and worker Lambda invocations
 - [x] Capture Lambda log review, the gross-cost budget, and both EventBridge schedules
 - [x] Capture ccloud cluster inspection with no connection string
-- [x] Skip the optional Managed MCP inspection because required operator evidence is complete
+- [x] Capture the redacted queue steward verdict with its Managed MCP tools and Agent Skills
 - [x] Export the final architecture diagram at a readable resolution
 - [x] Select, crop, and inspect the final Devpost gallery from the privacy-reviewed 1080p footage
 - [x] Check the complete walkthrough for credentials, account identifiers, unrelated stacks, and private data
@@ -414,7 +417,7 @@ and submission.
 
 ## Owner decisions and manual actions
 
-- [x] Skip optional Managed MCP reauthorization because the required evidence is complete
+- [x] Create the cluster-scoped Managed MCP service key
 - [x] Confirm the AWS account
 - [x] Keep the active budget without optional direct email notifications
 - [x] Confirm the dedicated Logto applications and judge identity
@@ -440,8 +443,8 @@ These are planning estimates rather than measured durations.
 | Final verification and submission | 3 to 5 |
 | Remaining total | 22 to 35 |
 
-The available calendar window is adequate if the release candidate is committed by August 15 and
-Managed MCP, corpus expansion, OCR, and new features remain optional.
+The service-key steward run is complete. The final video and Devpost entry remain the submission
+path. Corpus expansion, OCR, and new features remain optional.
 
 ## After submission
 
@@ -455,7 +458,7 @@ Managed MCP, corpus expansion, OCR, and new features remain optional.
 
 ## Definition of done
 
-crAIZK is done when a signed-out judge can follow the submitted instructions and connect to the AWS
+AIZK is done when a signed-out judge can follow the submitted instructions and connect to the AWS
 assigned MCP URL. The supplied nonprivate account must authenticate without owner intervention. The
 judge can then keep a public memory while CockroachDB and Lambda complete the durable work. A later
 `find` must retrieve grounded evidence through C-SPANN, with the public repository and short video

@@ -62,13 +62,13 @@ Continue with the [first start guide](docs/src/content/docs/docs/dev/run/first-s
 
 ## Development
 
-`chefe` owns the environment and verification tasks.
+Python dependencies and their exact resolved versions live in `pyproject.toml` and `uv.lock`.
 
 ```sh
-uv tool install "chefe>=0.0.25"
-chefe install
-chefe run lint
-chefe run test
+uv sync --frozen --all-groups
+sh scripts/install-sqlalchemy.sh
+uv run --no-sync ruff check .
+uv run --no-sync python -m pytest
 ```
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing the project. Security reports follow

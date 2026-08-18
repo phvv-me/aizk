@@ -13,7 +13,7 @@ from aizk.config import settings as aizk_settings
 from aizk.extract.ingest import TextSource, ingest_texts
 from aizk.graph.build import GraphClients, build_graph
 from aizk.provenance import CaptureContext
-from aizk.retrieval import RecallResult, recall
+from aizk.retrieval import FindResult, find
 from aizk.serving.base import llm_model
 from aizk.store import Chunk, Document
 from aizk.store.identity import User
@@ -32,7 +32,7 @@ from .models import (
 )
 
 _ANSWER_SYSTEM = (
-    "Answer using only the recalled team memory. Resolve first-person language from the named\n"
+    "Answer using only the team memory provided. Resolve first-person language from the named\n"
     "asking user. If the memory does not contain the answer, abstain without guessing."
 )
 
@@ -48,7 +48,7 @@ class BenchmarkCorpusError(RuntimeError):
 
 
 class BenchmarkRunner:
-    """Prepare, recall, answer, and judge one isolated conversation benchmark."""
+    """Prepare, Find, answer, and judge one isolated conversation benchmark."""
 
     def __init__(
         self,
@@ -192,7 +192,7 @@ class BenchmarkRunner:
     async def answer(
         self, dataset: BenchmarkDataset, question: BenchmarkQuestion
     ) -> BenchmarkAnswer:
-        """Recall with benchmark authority and answer only from the recalled evidence."""
+        """Find with benchmark authority and answer only from retrieved evidence."""
         scope = self.scope(dataset)
         asker = aizk_settings.subject_id(f"benchmark:{dataset.name}:{question.asking_user}")
         user = User.authorized(
@@ -201,16 +201,16 @@ class BenchmarkRunner:
             write=scope,
             label=question.asking_user,
         )
-        candidates = await recall(
+        candidates = await find(
             question.question,
             user=user,
             token_budget=self.token_budget,
             k=self.k,
         )
-        context = await RecallResult.from_candidates(candidates).to_markdown()
+        context = await FindResult.from_candidates(candidates).to_markdown()
         prompt = (
             f"Asking user\n{question.asking_user}\n\nQuestion\n{question.question}\n\n"
-            f"Recalled memory\n{context}"
+            f"Found memory\n{context}"
         )
         return (await self.agent.run(prompt)).output
 

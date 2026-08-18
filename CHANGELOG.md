@@ -21,11 +21,11 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   `console.example.com`, since it cannot be served under a path.
 
 - `share` can select documents by question and can move instead of copy, so an agent no longer
-  needs a document ID it had no way to obtain. Recall now prints the source document's ID and
-  capture day under evidence grounded in a stored source, which makes the ordinary flow recall,
+  needs a document ID it had no way to obtain. Find now prints the source document's ID and
+  capture day under evidence grounded in a stored source, which makes the ordinary flow find,
   read the IDs, share. The result names every document it carried with its title and its copy in
   the destination. `move` copies into the destination and then retires the private original, so
-  ordinary recall returns only the destination copy while the original's rows, bytes, and
+  ordinary find returns only the destination copy while the original's rows, bytes, and
   `promoted_from` chain stay in place.
 
   Only an explicit `documents` list ever writes. A `query` answers which of the caller's own
@@ -154,23 +154,23 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   call before it starts, so two batches touching the same originals in opposite order cannot
   deadlock. Refreshing a copy never inherits a retired source's expiry onto a live destination,
   which would otherwise have retired the very copy the refresh brought up to date.
-- Recall packing prices the annotation lines it renders, so the document and resource lines an
+- Find packing prices the annotation lines it renders, so the document and resource lines an
   evidence item carries are charged against the caller's token budget instead of overrunning it.
-- Recall packing fills the budget greedily in merit order instead of taking the longest prefix.
+- Find packing fills the budget greedily in merit order instead of taking the longest prefix.
   One oversized excerpt used to end the walk and discard everything ranked behind it, so a few
   long source spans could spend a whole budget while short, well-ranked evidence was never
   considered. Such an item is now stepped over and the walk continues, still in rank order and
   still deterministic. A budget too small for even the best item returns that item trimmed with
   a visible marker rather than returning nothing, its annotations being the floor it cannot go
   under.
-- Recall drops a source excerpt whose span better-ranked evidence already speaks for, so an excerpt
+- Find drops a source excerpt whose span better-ranked evidence already speaks for, so an excerpt
   and a fact distilled from it no longer both spend the budget saying one thing twice. Only the
   excerpt side is ever dropped. A fact is one distinct statement and a span commonly yields several,
   so every fact stands and an excerpt that outranks the facts from its span is kept along with them,
   mild redundancy being the cheaper mistake than discarding statements. Nothing is weighed against a
   different document, and a community or overview summary names no span and so is never dropped,
   which keeps the mix of source excerpts and derived memories in a packed result intact.
-- Recall's chunk lanes rank inside a `MATERIALIZED` window over `chunk` alone and join `document`
+- Find's chunk lanes rank inside a `MATERIALIZED` window over `chunk` alone and join `document`
   outside it. Ranking chunks joined to their documents looks harmless and is not, because under row
   security the planner abandons both chunk indexes, loops over every visible chunk and sorts the
   lot, which on a production snapshot of 22,290 chunks cost 80 ms for the dense ranking and 245 ms
@@ -228,7 +228,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   rises to 24 GB after 76 percent of checkpoints turned out to be WAL pressure driven rather than
   timed with 21 percent of WAL records full page images. All of these sit on the command line, so
   they need the container recreated rather than reloaded.
-- The MCP verbs are `find` and `keep` rather than `recall` and `remember`. `find` answers from
+- The MCP verbs are `find` and `keep` across every supported client. `find` answers from
   memory first, always, and reaches the public web only for what memory could not answer and only
   after the question has been rewritten so that nothing identifying the asker leaves the machine,
   with every answer ending in a receipt naming exactly what left. `web` takes `auto`, `off` or
@@ -269,7 +269,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 - A SvelteKit browser dashboard under `src/web` replaces the planned Reflex Python UI, served by
   a separate browser API service. `AizkAPI` verifies the same Logto bearer tokens as MCP and
-  exposes profile, overview, recall, remember, upload, and organization management routes while
+  exposes profile, overview, find, keep, upload, and organization management routes while
   PostgreSQL row security stays the final boundary.
 - `request_upload` gives agents a file upload path that never embeds bytes in a tool call. The
   MCP tool and the API service mint single-use short-TTL capability PUT URLs into one shared
@@ -283,20 +283,20 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   constants follow the same nested interface through `Watermark.Kind`, `System.Entity`, and
   `System.Relation`.
 
-- Recall ranks with four new signals, each validated on a planted synthetic corpus before
+- Find ranks with four new signals, each validated on a planted synthetic corpus before
   landing. Multihop questions expand through an in-statement personalized PageRank seeded by
   the entities the query names (GLiNER2 extracts the mentions, an exact lowercased name match
   seeds them, and connection scoring takes the weaker endpoint's mass), lifting planted
-  chain-fact recall from 32/128 to 123/128 inside the final pack while replacing the slower
+  chain-fact coverage from 32/128 to 123/128 inside the final pack while replacing the slower
   recursive walk. Fact ordering blends access recency and frequency with cosine distance, so a
-  fresh, often-recalled claim outranks its stale twin (32/32 planted pairs, from 13/32).
-  Dense lanes carry a relevance floor (`recall_max_distance`) that keeps off-corpus questions
+  fresh, frequently found claim outranks its stale twin (32/32 planted pairs, from 13/32).
+  Dense lanes carry a relevance floor (`find_max_distance`) that keeps off-corpus questions
   from packing garbage, and the sources lane caps hits per document
-  (`recall_per_document`) so one repetitive note cannot crowd out every other source.
+  (`find_per_document`) so one repetitive note cannot crowd out every other source.
 - Query mentions also match entity names by trigram similarity through the fused initial schema,
   with fuzzy-matched seeds carrying mass scaled by their similarity so a misspelled or
   inflected mention still seeds its entity without outweighing an exact match. Every ranking
-  constant in the recall program is now a setting: seed weights, the mass window, the
+  constant in the find program is now a setting: seed weights, the mass window, the
   dangling-object factor, per-lane depths, the fact-candidate factor, the token estimate,
   and the fuzzy toggle.
 - The embedding default was measured on a sanitized retrieval fixture rather than assumed.
@@ -335,21 +335,21 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   ahead of chunk projection, scheduled passes stay below both, and exhausted failures remain held
   with their deduplication keys instead of being silently recreated.
 - An optional cross-encoder rerank pass between candidate retrieval and packing: with
-  `AIZK_RERANK_URL` set, recall runs the same lane program cut before packing, rescoring the
+  `AIZK_RERANK_URL` set, find runs the same lane program cut before packing, rescoring the
   evidence lanes through `/v1/rerank` (a vLLM `Qwen3-Reranker-4B` compose service), and a
   Python packer that exactly replays the SQL packer walks the budget. Without the endpoint,
-  recall stays one statement. The client wraps query and documents in the official Qwen3
+  find stays one statement. The client wraps query and documents in the official Qwen3
   reranker prompt scaffold (`rerank_query_template`/`rerank_document_template`), which is
   load-bearing since unscaffolded requests can rank irrelevant text above answers. A sanitized
   reranking fixture showed that the small checkpoint degraded ordering while the 4B checkpoint
   preserved it, so 4B is the shipped default.
 
 - Speaker-aware capture preserves author label, role, channel, reply, phase, topic, and source
-  time through chunks, working memory, graph claims, recall hits, and context blocks.
+  time through chunks, working memory, graph claims, find hits, and context blocks.
 - Epistemic kinds distinguish world state, experience, observation, opinion, preference,
   procedure, and negative results. Speaker-bound kinds consolidate per creator.
 - A real GroupMemBench adapter batches and imports conversation histories into isolated shared
-  scopes, recalls as each asking user, generates grounded answers, and reports each question
+  scopes, finds as each asking user, generates grounded answers, and reports each question
   family separately.
 - Pydantic Evals now owns typed external benchmark cases, concurrent execution, LLM judging,
   durations, and explicit operational failures. Reports record model provenance and distinguish
@@ -371,7 +371,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
 
 - The repository adopts one `src/` layout. The `aizk` package, the deployment files, the
   evaluation harness, the GPU sidecar services, and the web frontend now live under `src/`.
-- The MCP server is an agents-only surface of five tools, `status`, `recall`, `remember`,
+- The MCP server is an agents-only surface of five tools, `status`, `find`, `keep`,
   `share`, and `request_upload`. Every browser concern moved to the separate API service.
 - The Logto client, its models, and the write policy consolidated under `integrations/logto`
   alongside the ClamAV and Docling clients. Operator probes, provisioning, and reports split
@@ -397,7 +397,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   UUID7, the row-id invariant. Content-addressed and external identities use UUID5.
 - Text ingestion supports stable source URIs and batches a corpus through one embedder pipeline.
 - Graph writing and graph repair now live outside the extraction pipeline. Retrieval database
-  reads now live outside recall orchestration.
+  reads now live outside find orchestration.
 - PostgreSQL grants and extension setup use compiled SQLAlchemy DDL elements. Queue status and
   scale storage reads use SQLAlchemy expressions rather than query strings.
 - All string enums use `StrEnum` with `auto()` when member names already are the wire values.
@@ -467,7 +467,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   wrong. EasyOCR is not an alternative at roughly seventy seconds per image on CPU. Run the
   reconversion sweep only after the image carries the language data.
 
-- A preserved web page no longer floods recall with its own navigation. Converting an HTML page
+- A preserved web page no longer floods find with its own navigation. Converting an HTML page
   kept the site header, menus, dialogs, and footer beside the article, and a GitHub project page
   answered a question about a project plan with three chunks of sign-in links and pricing menus.
   `WebBoilerplateCleaner` now runs inside `ArtifactProcessor.declutter`, after source-relative
@@ -483,7 +483,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   `reconvert_web_pages` requeues pages converted before this landed so their stored text and
   chunks are rewritten, committing each page's move back to `queued` before its task exists so a
   worker that finishes mid-sweep is never overwritten.
-- Blank recall reads the caller's whole visible union while blank writes still choose the personal
+- Blank find reads the caller's whole visible union while blank writes still choose the personal
   singleton scope.
 - Entity profiles rank by profile-summary embedding rather than entity-name embedding.
 - Context packing skips an oversized early block and continues fitting smaller evidence.
@@ -493,7 +493,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   distinct documents.
 
 - Retrieval: gap-fill truncates to the requested `k`, rerank guards a score-count mismatch, and a
-  pagerank non-convergence degrades instead of failing the whole recall.
+  pagerank non-convergence degrades instead of failing the whole find.
 - Extraction: consolidation checks every same-predicate claim, a non-UTF-8 file no longer aborts a
   directory ingest, and the community/RAPTOR growth watermark stays monotonic under decay.
 - The GLiNER2 relevance gate is re-enabled on the classification head with a `Person` floor and
@@ -529,7 +529,7 @@ The format follows Keep a Changelog, and releases are cut from the version in `p
   of their own.
 - The write path, chunking, a GLiNER2 gate, one combined extraction call, and a rules-first
   consolidation cascade, averaging 1.22 LLM calls per chunk.
-- The read path, `recall()` fusing dense, lexical, graph-neighbor, community, RAPTOR, and
+- The read path, `find()` fusing dense, lexical, graph-neighbor, community, RAPTOR, and
   profile lanes behind one hybrid Postgres function plus a cross-encoder rerank.
 - Autonomy, a pgqueuer-backed worker and cron scheduler driving graph build, session
   promotion, dedup, decay, communities, RAPTOR, profiles, and insights.

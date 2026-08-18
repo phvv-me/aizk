@@ -11,7 +11,7 @@ three parts are worth keeping.
 ```text
   DataHub                              aizk
   ─────────────────────────────        ─────────────────────────────
-  catalogs assets a team owns          remembers what people wrote and said
+  catalogs assets a team owns          keeps what people wrote and said
   entity = URN + versioned aspects     content and claim split by who and when
   lineage between assets               provenance from a claim to its sentence
   policies and roles                   scopes under forced row security
@@ -52,7 +52,7 @@ That is less information than a report gains through aizk's ordinary path. A sto
 searchable chunks with extracted entities and facts. Each result retains provenance to the exact
 sentence. Its history records a fix as the end of a validity range, while statement kind preserves
 whether the report was certain or tentative. Recurrence then becomes a query over history rather
-than a field somebody must remember to set.
+than a field somebody must keep to set.
 
 So the conclusion for aizk is to extract reports rather than store them flat, and DataHub is the
 evidence for it rather than the model to copy.

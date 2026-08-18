@@ -33,7 +33,7 @@ and you never type them yourself.
   ]}
 />
 
-## Store a brief worth recalling
+## Store a brief worth finding
 
 Start with the thing you would otherwise explain to a new teammate. One project, its purpose, the
 choices already made, and the reasons behind them.
@@ -51,13 +51,13 @@ We validate the new binding assay before the summer run. We picked the plate rea
 imaging rig because the imaging rig cannot hold temperature for a nine hour plate.""")
 ```
 
-Two things are happening. The prose is what recall will hand back later, and the tagged lines
+Two things are happening. The prose is what find will hand back later, and the tagged lines
 attach the note to named things so related notes find each other.
 [Entities, facts, ontology](/docs/user/concepts/graph/) explains the tag syntax and what kinds are
 available, and you can safely skip all of it and write plain prose while you are starting out.
 
 Keep it to one topic. If you find yourself writing about a second project halfway down, that is a
-second call. [Writing memory well](/docs/user/using/remember/) covers where the line is.
+second call. [Writing memory well](/docs/user/using/keep/) covers where the line is.
 
 ## Ask it back in your own words
 
@@ -76,14 +76,14 @@ call returns. They exist to help find the right note faster, and sources always 
 ## Add a real document
 
 A URL is enough. Pass it and no text, and aizk fetches the page or file, scans it, keeps the exact
-original, and converts it into something recallable.
+original, and converts it into something findable.
 
 ```python
 aizk.keep(source_uri="https://example.org/binding-assay-protocol.pdf")
 ```
 
 This one comes back queued rather than done, because conversion happens in the background. A large
-PDF takes a while, and the note becomes recallable when conversion finishes rather than instantly.
+PDF takes a while, and the note becomes findable when conversion finishes rather than instantly.
 [Files, PDFs and web sources](/docs/user/using/files/) covers the size limits and what happens when
 a file cannot be converted.
 
@@ -134,7 +134,7 @@ aizk.keep(
 )
 ```
 
-Ordinary recall now favors the current version. The old one keeps its dates and stays in history,
+Ordinary find now favors the current version. The old one keeps its dates and stays in history,
 so asking what the schedule was in June still works.
 [Time and history](/docs/user/concepts/time/) explains the two clocks that make this work, and
 [Notes that stay useful](/docs/user/using/habits/) explains why correcting beats duplicating.
@@ -152,14 +152,14 @@ subjects are the named entities, and themes are clusters it found on its own.
 ## What an hour should leave you with
 
 Four or five real notes, one converted document, one thing written where a teammate can find it,
-and one correction. That is enough to tell whether recall gives back something you would have had
+and one correction. That is enough to tell whether find gives back something you would have had
 to go looking for otherwise, which is the only test that matters.
 
 ## Next
 
 <div class="not-content">
 
-- [Writing memory well](/docs/user/using/remember/) is the next thing to read.
+- [Writing memory well](/docs/user/using/keep/) is the next thing to read.
 - [Scopes](/docs/user/concepts/scopes/) explains who can read what, properly.
 - [Questions and answers](/docs/user/reference/faq/) covers what usually comes up next.
 

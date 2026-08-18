@@ -30,7 +30,7 @@ The generator writes the optimized homepage render to `docs/public/brain-box.web
 Never edit a generated PNG or a copied favicon directly. Run the generator from the monorepo root.
 
 ```sh
-chefe run aizk-brand
+pnpm --dir docs brand
 ```
 
 Documentation checks fail when a generated asset has drifted from its vector source.

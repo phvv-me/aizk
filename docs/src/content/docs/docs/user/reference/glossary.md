@@ -14,7 +14,7 @@ Most terms trace one path, from something you wrote to something an agent gets b
         │                                        │
         └──────────── every row carries a scope ─┘
                               │
-                           recall ──▶ evidence
+                           find ──▶ evidence
 ```
 
 ## A to E
@@ -41,21 +41,21 @@ The web app calls these Themes. See [the graph](/docs/user/concepts/graph/).
 claim on it. See [Graph tables](/docs/dev/store/graph-tables/).
 
 **Decay** is the background pass that archives derived knowledge nobody has touched in a long time. It
-leaves recall and stays in history. See [Who maintains memory](/docs/user/concepts/lifecycle/).
+leaves find and stays in history. See [Who maintains memory](/docs/user/concepts/lifecycle/).
 
 **Derived memory** is everything aizk worked out from your text, and it can be rebuilt. See
 [Sources and derived knowledge](/docs/user/concepts/sources/).
 
-**Document** is one remembered note or file as a source item, and the parent of its chunks. See
+**Document** is one kept note or file as a source item, and the parent of its chunks. See
 [Sources and derived knowledge](/docs/user/concepts/sources/).
 
 **Entity** is a thing being talked about, such as a person, a project, a tool, or a result. The web
 app calls these Subjects. See [the graph](/docs/user/concepts/graph/).
 
-**Evidence** is what recall returns, a ranked list of relevant items each labeled with where it came
+**Evidence** is what find returns, a ranked list of relevant items each labeled with where it came
 from. It is not an answer. See [Evidence and provenance](/docs/user/concepts/evidence/).
 
-**Expiry** is a known time after which a statement stops being true. Past it, ordinary recall skips
+**Expiry** is a known time after which a statement stops being true. Past it, ordinary find skips
 the source while history keeps it. See [Time and history](/docs/user/concepts/time/).
 
 ## F to P
@@ -98,14 +98,14 @@ See [Evidence and provenance](/docs/user/concepts/evidence/).
 summary rather than a hundred fragments. See
 [Communities](/docs/dev/passes/communities/).
 
-**Recall** is the tool that takes one question and returns evidence. It searches everything you can
-see and takes no scope selector. See [Asking memory well](/docs/user/using/recall/).
+**Find** is the tool that takes one question and returns evidence. It searches everything you can
+see and takes no scope selector. See [Asking memory well](/docs/user/using/find/).
 
 **Recorded time** is when aizk was told something, as opposed to when it was true. Correcting a note
 opens a new recorded window. See [Time and history](/docs/user/concepts/time/).
 
 **Keep** is the tool that stores a note, preserves an original, or prepares a file upload. See
-[Writing memory well](/docs/user/using/remember/).
+[Writing memory well](/docs/user/using/keep/).
 
 **Scope** is the answer to who can read a memory, expressed as a set of organizations. Naming none
 keeps it private. See [Scopes](/docs/user/concepts/scopes/).
@@ -114,7 +114,7 @@ keeps it private. See [Scopes](/docs/user/concepts/scopes/).
 and the thing the database checks on every read. See
 [Scope sets in depth](/docs/dev/identity/scope-sets/).
 
-**Session memory** is recent working material not yet promoted into the long-term graph. Recall labels
+**Session memory** is recent working material not yet promoted into the long-term graph. Find labels
 it separately. See [Evidence and provenance](/docs/user/concepts/evidence/).
 
 **Share** is the tool that copies documents you can see into a team scope. It copies rather than

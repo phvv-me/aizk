@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import distinct_on
 from sqlmodel import select
 
 from aizk.config import settings as aizk_settings
-from aizk.retrieval import recall
+from aizk.retrieval import find
 from aizk.store import Document
 from aizk.store.identity import User
 
@@ -211,7 +211,7 @@ class ManagementBenchmark:
         )
 
     def caller(self) -> User:
-        """Create an independent transaction stack for one concurrent recall."""
+        """Create an independent transaction stack for one concurrent Find request."""
         return User.authorized(
             self.user.id,
             read=self.user.scopes.read,
@@ -224,7 +224,7 @@ class ManagementBenchmark:
     async def probe(self, question: str, subject: str) -> ManagementProbe:
         """Measure the packed rank of the subject's own brief for one question."""
         started = perf_counter()
-        candidates = await recall(
+        candidates = await find(
             question,
             self.caller(),
             k=self.k,

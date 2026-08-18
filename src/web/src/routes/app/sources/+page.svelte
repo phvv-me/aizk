@@ -74,7 +74,7 @@
           <Card.Title>{data.sources.total.toLocaleString('en-US')} visible sources</Card.Title>
           <InfoTip
             label="What a source is"
-            text="A source grounds recalled evidence. Documents are remembered text. Files are preserved originals that AIZK converts into searchable text. Findings and subjects inherit their provenance and visibility from these sources."
+            text="A source grounds found evidence. Documents are kept text. Files are preserved originals that AIZK converts into searchable text. Findings and subjects inherit their provenance and visibility from these sources."
           />
         </div>
         <Card.Description>

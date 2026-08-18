@@ -142,7 +142,7 @@ prints each violation, and `admin auth audit` exits 1 when the tenant has drifte
 output.
 
 `admin database reset` takes a `--confirm` argument that must match `settings.db_name` exactly, and
-raises otherwise. Run every one of these with `chefe run` from the monorepo root.
+raises otherwise. Run every one of these with `uv run --no-sync` from the repository root.
 
 ## Next
 

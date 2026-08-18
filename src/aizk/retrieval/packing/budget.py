@@ -18,7 +18,7 @@ def deduplicate(candidates: Sequence[Candidate]) -> list[Candidate]:
     or refuted claim reads as a clean assertion while the sentence behind it did not, so
     the excerpt carrying that sentence is not repetition, it is the correction. Such a fact
     never speaks for its span and the excerpt under it travels with it, which is what makes
-    "the source wins" a property of what recall returns rather than advice to the reader.
+    "the source wins" a property of what find returns rather than advice to the reader.
 
     An excerpt that ranks above the facts from its span is kept, and so are they. It earned
     its place, and the redundancy it leaves costs a little budget where dropping statements

@@ -13,9 +13,9 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
   // A live retrieval, roughly 3 seconds in production, so it runs only on this explicit
   // request rather than blocking the page's own load.
-  recall: async ({ locals }) => {
+  find: async ({ locals }) => {
     try {
-      return { recall: await new ApiClient(locals.logtoClient).adminRecall() };
+      return { find: await new ApiClient(locals.logtoClient).adminFind() };
     } catch (error) {
       return failure(error);
     }

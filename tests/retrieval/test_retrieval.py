@@ -22,15 +22,15 @@ from aizk.ontology import Ontology, System
 from aizk.provenance import Stance
 from aizk.retrieval import (
     Candidate,
+    FindTrace,
     Lane,
     Plan,
     QueryContext,
-    RecallTrace,
-    recall,
+    find,
     trace,
 )
+from aizk.retrieval.find import build_find_statement
 from aizk.retrieval.lanes import FactLane, VectorLane
-from aizk.retrieval.recall import build_recall_statement
 from aizk.serving.gate import GateClient
 from aizk.serving.rerank import RerankClient
 from aizk.store import (
@@ -41,7 +41,7 @@ from aizk.store import (
 )
 from aizk.store.identity import User
 
-recall_module = import_module("aizk.retrieval.recall.orchestrator")
+find_module = import_module("aizk.retrieval.find.orchestrator")
 rescore_module = import_module("aizk.retrieval.rerank.rescore")
 
 
@@ -56,7 +56,7 @@ def owner(migrated_db: None) -> Iterator[UUID5 | UUID7]:
 def stub_gate(
     monkeypatch: pytest.MonkeyPatch, named_entities: Callable[[str], Awaitable[list[str]]]
 ) -> None:
-    """Route the entity gate recall makes at the client seam, keeping tests hermetic."""
+    """Route the entity gate find makes at the client seam, keeping tests hermetic."""
     monkeypatch.setattr(
         GateClient,
         "from_settings",
@@ -66,7 +66,7 @@ def stub_gate(
 
 @pytest.fixture
 def stub_entities(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stub the entity gate call recall makes, since the client assumes a live sidecar."""
+    """Stub the entity gate call find makes, since the client assumes a live sidecar."""
 
     async def no_entities(text: str) -> list[str]:
         del text
@@ -117,7 +117,7 @@ async def seed_fact(
 
 def statement_for(dimensions: int, plan: Plan) -> Select:
     context = QueryContext(dimensions=dimensions, fuzzy=settings.graph_mention_fuzzy)
-    return build_recall_statement(context, plan)
+    return build_find_statement(context, plan)
 
 
 async def retrieve(
@@ -208,15 +208,15 @@ def test_plan_presets_declare_and_compile_the_composed_query(
         assert f"hop_{settings.multihop_max_hops}" in sql
 
 
-def test_maximal_plan_follows_the_deployment_recall_feature_switches(
+def test_maximal_plan_follows_the_deployment_find_feature_switches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "recall_communities_enabled", False)
-    monkeypatch.setattr(settings, "recall_entity_catalog_enabled", False)
-    monkeypatch.setattr(settings, "recall_graph_expansion_enabled", False)
-    monkeypatch.setattr(settings, "recall_profiles_enabled", False)
-    monkeypatch.setattr(settings, "recall_raptor_enabled", False)
-    monkeypatch.setattr(settings, "recall_sources_first", True)
+    monkeypatch.setattr(settings, "find_communities_enabled", False)
+    monkeypatch.setattr(settings, "find_entity_catalog_enabled", False)
+    monkeypatch.setattr(settings, "find_graph_expansion_enabled", False)
+    monkeypatch.setattr(settings, "find_profiles_enabled", False)
+    monkeypatch.setattr(settings, "find_raptor_enabled", False)
+    monkeypatch.setattr(settings, "find_sources_first", True)
 
     plan = Plan.maximal()
     sql = str(statement_for(settings.embed_dim, plan).compile(dialect=postgresql.dialect()))
@@ -243,11 +243,11 @@ def test_vector_lane_rejects_a_section_it_does_not_serve() -> None:
         lane(context)
 
 
-def test_cockroach_recall_routes_dense_surfaces_through_scoped_cspann(
+def test_cockroach_find_routes_dense_surfaces_through_scoped_cspann(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "database_backend", DatabaseBackend.cockroachdb)
-    build_recall_statement.cache_clear()
+    build_find_statement.cache_clear()
     try:
         sql = str(
             statement_for(settings.embed_dim, Plan.maximal()).compile(
@@ -255,7 +255,7 @@ def test_cockroach_recall_routes_dense_surfaces_through_scoped_cspann(
             )
         )
     finally:
-        build_recall_statement.cache_clear()
+        build_find_statement.cache_clear()
 
     assert "aizk_private.cspann_scopes" in sql
     assert "aizk_private.cspann_search" in sql
@@ -273,7 +273,7 @@ def test_context_query_executes_every_preset_on_an_empty_graph(
     assert dbutil.run(retrieve(user, basis(), preset())) == []
 
 
-def test_recall_packs_within_budget_and_records_only_the_kept_fact(
+def test_find_packs_within_budget_and_records_only_the_kept_fact(
     owner: UUID5 | UUID7,
     fake_embedder: RecordingEmbedder,
     fake_reranker: list[list[str]],
@@ -287,7 +287,7 @@ def test_recall_packs_within_budget_and_records_only_the_kept_fact(
         # large one that no longer fits.
         small = await seed_fact(user, "short", vector)
         large = await seed_fact(user, "x" * 1000, vector)
-        context = await recall("what holds", user=user, token_budget=20)
+        context = await find("what holds", user=user, token_budget=20)
         async with User.system().owner as opened:
             counts = dict(
                 (
@@ -336,7 +336,7 @@ def test_fact_lane_deduplicates_identical_world_statements(owner: UUID5 | UUID7)
     assert lines.count("- (related_to) one shared statement") == 1
 
 
-def test_source_lane_preserves_a_complete_recall_sized_note(owner: UUID5 | UUID7) -> None:
+def test_source_lane_preserves_a_complete_find_sized_note(owner: UUID5 | UUID7) -> None:
     user = User.private(owner)
     text = "Current projects. " + "relevant detail " * 110 + "Final verified project."
 
@@ -689,9 +689,7 @@ def test_query_entities_seed_the_graph_expansion_beyond_the_hop_budget(
 @pytest.mark.parametrize("fuzzy", [True, False], ids=["fuzzy", "exact-only"])
 def test_mention_matching_compiles_trigram_fuzz_only_when_enabled(fuzzy: bool) -> None:
     context = QueryContext(dimensions=settings.embed_dim, fuzzy=fuzzy)
-    sql = str(
-        build_recall_statement(context, Plan.multihop()).compile(dialect=postgresql.dialect())
-    )
+    sql = str(build_find_statement(context, Plan.multihop()).compile(dialect=postgresql.dialect()))
 
     assert ("similarity(" in sql) is fuzzy
     # the trigram operator drives the index, the floor cuts the long tail it admits by default
@@ -703,9 +701,7 @@ def test_mention_matching_compiles_trigram_fuzz_only_when_enabled(fuzzy: bool) -
 @pytest.mark.parametrize("owned", [True, False], ids=["owned", "everything-visible"])
 def test_an_owned_query_narrows_every_source_ranking_before_it_cuts(owned: bool) -> None:
     context = QueryContext(dimensions=settings.embed_dim, fuzzy=False, owned=owned)
-    sql = str(
-        build_recall_statement(context, Plan.maximal()).compile(dialect=postgresql.dialect())
-    )
+    sql = str(build_find_statement(context, Plan.maximal()).compile(dialect=postgresql.dialect()))
     dense, lexical, titled = (
         sql[sql.index(cte) :] for cte in ("dense_ranked", "lexical_ranked", "title_chunk")
     )
@@ -716,7 +712,7 @@ def test_an_owned_query_narrows_every_source_ranking_before_it_cuts(owned: bool)
     assert all(("qscopes" in ranking) is owned for ranking in (dense, lexical, titled))
 
 
-def test_recall_reranks_evidence_between_the_candidate_and_packing_phases(
+def test_find_reranks_evidence_between_the_candidate_and_packing_phases(
     owner: UUID5 | UUID7,
     fake_embedder: RecordingEmbedder,
     stub_entities: None,
@@ -741,7 +737,7 @@ def test_recall_reranks_evidence_between_the_candidate_and_packing_phases(
     async def probe() -> tuple[list[Candidate], dict[UUID5 | UUID7, int]]:
         first = await seed_fact(user, "first seeded", vector)
         second = await seed_fact(user, "second seeded", vector)
-        context = await recall("what holds", user=user, token_budget=400)
+        context = await find("what holds", user=user, token_budget=400)
         async with User.system().owner as opened:
             counts = dict(
                 (
@@ -762,7 +758,7 @@ def test_recall_reranks_evidence_between_the_candidate_and_packing_phases(
     assert sorted(counts.values()) == [1, 1]
 
 
-def test_recall_trace_preserves_access_history(
+def test_find_trace_preserves_access_history(
     owner: UUID5 | UUID7,
     fake_embedder: RecordingEmbedder,
     fake_reranker: list[list[str]],
@@ -774,12 +770,12 @@ def test_recall_trace_preserves_access_history(
     messages: list[str] = []
     monkeypatch.setattr(settings, "profiling", True)
     monkeypatch.setattr(
-        recall_module.logger,
+        find_module.logger,
         "info",
         lambda message, *args, **kwargs: messages.append(message),
     )
 
-    async def probe() -> tuple[RecallTrace, int]:
+    async def probe() -> tuple[FindTrace, int]:
         fact_id = await seed_fact(user, "diagnostic fact", vector)
         diagnostic = await trace("what holds", user=user, token_budget=400)
         async with User.system().owner as opened:
@@ -798,10 +794,10 @@ def test_recall_trace_preserves_access_history(
     assert diagnostic.timing.statement_rows == len(diagnostic.rows)
     assert sum(diagnostic.timing.statement_lanes.values()) == len(diagnostic.rows)
     assert sum(diagnostic.timing.selected_lanes.values()) == diagnostic.selected
-    assert "recall profile {}" in messages
+    assert "find profile {}" in messages
 
 
-def test_recall_access_recording_can_be_disabled(
+def test_find_access_recording_can_be_disabled(
     owner: UUID5 | UUID7,
     fake_embedder: RecordingEmbedder,
     fake_reranker: list[list[str]],
@@ -810,11 +806,11 @@ def test_recall_access_recording_can_be_disabled(
 ) -> None:
     user = User.private(owner)
     vector = deterministic_vector("query:what holds", settings.embed_dim)
-    monkeypatch.setattr(settings, "recall_access_recording_enabled", False)
+    monkeypatch.setattr(settings, "find_access_recording_enabled", False)
 
     async def probe() -> int:
         fact_id = await seed_fact(user, "diagnostic fact", vector)
-        await recall("what holds", user=user, token_budget=400)
+        await find("what holds", user=user, token_budget=400)
         async with User.system().owner as opened:
             return await opened.scalar(
                 select(Fact.Claim.access_count).where(Fact.Claim.id == fact_id)
@@ -942,10 +938,10 @@ def test_query_entity_seeding_controls_the_lowered_gate_names(
         return ["ada", "git"]
 
     stub_gate(monkeypatch, named)
-    monkeypatch.setattr(settings, "recall_graph_expansion_enabled", graph)
+    monkeypatch.setattr(settings, "find_graph_expansion_enabled", graph)
     monkeypatch.setattr(settings, "graph_entity_seeding", seeding)
 
-    assert dbutil.run(recall_module.query_entities("who uses what")) == expected
+    assert dbutil.run(find_module.query_entities("who uses what")) == expected
     assert calls == (["who uses what"] if graph and seeding else [])
 
 
@@ -960,10 +956,10 @@ def test_query_entities_seeds_without_an_ontology_or_a_database(
     monkeypatch.setattr(Ontology, "_cached", None)
     stub_gate(monkeypatch, named)
 
-    assert dbutil.run(recall_module.query_entities("ada")) == ["ada"]
+    assert dbutil.run(find_module.query_entities("ada")) == ["ada"]
 
 
-def test_recall_runs_the_maximal_plan_unless_the_caller_forces_one(
+def test_find_runs_the_maximal_plan_unless_the_caller_forces_one(
     owner: UUID5 | UUID7,
     fake_embedder: RecordingEmbedder,
     fake_reranker: list[list[str]],
@@ -976,15 +972,15 @@ def test_recall_runs_the_maximal_plan_unless_the_caller_forces_one(
 
     def spying_build(context: QueryContext, plan: Plan) -> Select:
         executed.append(plan)
-        return build_recall_statement(context, plan)
+        return build_find_statement(context, plan)
 
-    monkeypatch.setattr(recall_module, "build_recall_statement", spying_build)
+    monkeypatch.setattr(find_module, "build_find_statement", spying_build)
 
     async def probe() -> list[Candidate]:
         await seed_fact(user, "the forced answer", vector)
-        forced = await recall("what holds", user=user, token_budget=200, plan=Plan.focused())
+        forced = await find("what holds", user=user, token_budget=200, plan=Plan.focused())
         assert any("the forced answer" in candidate.line for candidate in forced)
-        return await recall("what holds", user=user, token_budget=200)
+        return await find("what holds", user=user, token_budget=200)
 
     candidates = dbutil.run(probe())
 
@@ -992,7 +988,7 @@ def test_recall_runs_the_maximal_plan_unless_the_caller_forces_one(
     assert executed == [Plan.focused(), Plan.maximal()]
 
 
-def test_recall_embeds_before_its_single_context_query(
+def test_find_embeds_before_its_single_context_query(
     owner: UUID5 | UUID7,
     fake_embedder: RecordingEmbedder,
     fake_reranker: list[list[str]],
@@ -1003,20 +999,20 @@ def test_recall_embeds_before_its_single_context_query(
     vector = deterministic_vector(f"query:{search_query}", settings.embed_dim)
 
     async def probe() -> list[Candidate]:
-        await seed_fact(user, "the remembered answer", vector)
-        return await recall("what holds", user=user, token_budget=200)
+        await seed_fact(user, "the kept answer", vector)
+        return await find("what holds", user=user, token_budget=200)
 
     candidates = dbutil.run(probe())
 
-    assert any("the remembered answer" in candidate.line for candidate in candidates)
+    assert any("the kept answer" in candidate.line for candidate in candidates)
     assert fake_embedder.calls == [([search_query], "query")]
-    assert fake_reranker, "the cross-encoder scores every recall"
+    assert fake_reranker, "the cross-encoder scores every find"
 
 
 async def seed_marked_fact(
     user: User, statement: str, attributes: dict[str, object]
 ) -> UUID5 | UUID7:
-    """One live fact whose claim carries the speaker and settledness marks recall renders."""
+    """One live fact whose claim carries the speaker and settledness marks find renders."""
     claim_id = await seed_fact(user, statement, basis())
     async with User.system().owner as session:
         await session.exec(

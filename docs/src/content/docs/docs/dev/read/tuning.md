@@ -5,11 +5,11 @@ description: "Every retrieval setting, what it trades away, and where it is read
 
 Every value below lives in `src/aizk/config/settings.py`, reads from the environment with the
 `AIZK_` prefix, and reaches the SQL as a named bind through `settings.for_statement`. Nothing here
-is compiled into the cached statement, so a changed setting takes effect on the very next recall.
-Read [how recall runs](/docs/dev/read/overview/) first, because the groups below follow its steps.
+is compiled into the cached statement, so a changed setting takes effect on the very next find.
+Read [how find runs](/docs/dev/read/overview/) first, because the groups below follow its steps.
 
 ```text
-  candidate generation   fusion_depth, recall_max_distance
+  candidate generation   fusion_depth, find_max_distance
           │
           ▼
   graph traversal        hops, mass, damping
@@ -24,7 +24,7 @@ Read [how recall runs](/docs/dev/read/overview/) first, because the groups below
   packing                chars_per_token, budget
 ```
 
-The one number that is not a setting is `k`, the per-lane candidate budget. It is a `recall()`
+The one number that is not a setting is `k`, the per-lane candidate budget. It is a `find()`
 argument defaulting to 8, so a caller changes it per request rather than per deployment.
 
 ## Candidate generation
@@ -34,16 +34,16 @@ argument defaulting to 8, so a caller changes it per request rather than per dep
 | `fusion_depth` | 50 | `Chunk.fused`, `LiveFact.dense` | deeper pools find more, but every ranking pays the scan and fusion cost |
 | `fusion_overfetch` | 3 | `Chunk.ranking` | how much deeper a chunk ranking reaches so live sources still fill the cut; lower risks a short lane on a corpus full of expiring documents, higher costs index walk |
 | `bm25_limit` | 150 | pinned on every app connection | the ceiling on rows one bm25 index scan returns; it must stay at or above `fusion_depth * fusion_overfetch` or the lexical ranking is cut short, which is why settings validation rejects the pair rather than letting it happen quietly |
-| `recall_max_distance` | 0.65 | `QueryContext.floor`, every dense ranking | lower is stricter and returns nothing off-corpus, higher lets weak matches through |
+| `find_max_distance` | 0.65 | `QueryContext.floor`, every dense ranking | lower is stricter and returns nothing off-corpus, higher lets weak matches through |
 | `fact_candidate_factor` | 2 | `FactLane.merged` | multiplies `k` for facts, so the reranker sees more graph evidence at more scoring cost |
-| `recall_per_document` | 3 | `Chunk.hybrid` | higher lets one document dominate the source lane |
-| `session_recall_k` | 5 | `VectorLane` working memory | fresh session notes versus room for everything else |
-| `profile_recall_k` | 1 | `VectorLane` profile | profiles are long, so more than one crowds the budget |
-| `community_recall_k` | 3 | `VectorLane` communities | breadth versus specific evidence |
+| `find_per_document` | 3 | `Chunk.hybrid` | higher lets one document dominate the source lane |
+| `session_find_k` | 5 | `VectorLane` working memory | fresh session notes versus room for everything else |
+| `profile_find_k` | 1 | `VectorLane` profile | profiles are long, so more than one crowds the budget |
+| `community_find_k` | 3 | `VectorLane` communities | breadth versus specific evidence |
 | `raptor_k` | 3 | `OverviewLane` | same trade at the top of the RAPTOR tree |
-| `recall_recency_weight` | 0.1 | `LiveFact.dense` | how far a recently used fact climbs over a semantically closer one |
-| `recall_recency_half_life_days` | 30.0 | `LiveFact.dense` | how fast that boost decays |
-| `recall_frequency_weight` | 0.02 | `LiveFact.dense` | rewards often-used facts, and too high entrenches whatever was popular |
+| `find_recency_weight` | 0.1 | `LiveFact.dense` | how far a recently used fact climbs over a semantically closer one |
+| `find_recency_half_life_days` | 30.0 | `LiveFact.dense` | how fast that boost decays |
+| `find_frequency_weight` | 0.02 | `LiveFact.dense` | rewards often-used facts, and too high entrenches whatever was popular |
 
 ### What the connection pins
 
@@ -63,7 +63,7 @@ it off. The trigger to turn it on is a deployment where many organizations each 
 small slice, and the way to confirm it is `EXPLAIN (ANALYZE, BUFFERS)` on a real caller's dense
 ranking with the setting both ways.
 
-The `recall_max_distance` default is calibrated, not guessed. The comment in the settings file
+The `find_max_distance` default is calibrated, not guessed. The comment in the settings file
 records that on real Qwen3-VL query and document embeddings, relevant chunks land at cosine
 distance 0.27 to 0.49 while off-corpus questions bottom out at 0.60 to 0.75, which puts 0.65
 between the two populations.
@@ -107,14 +107,14 @@ is a class marker rather than a weight. See [fusion and reranking](/docs/dev/rea
 | `rerank_url` | `http://localhost:8004` | `RerankClient` | where the cross-encoder sidecar lives |
 | `rerank_model` | `qwen3-reranker` | `RerankClient` | the served checkpoint |
 | `rerank_concurrency` | 8 | `RerankClient` | in-flight requests to one sidecar process |
-| `rerank_request_timeout` | 30.0 | `RerankClient` | how long a slow score blocks the whole recall |
+| `rerank_request_timeout` | 30.0 | `RerankClient` | how long a slow score blocks the whole find |
 | `rerank_query_max_tokens` | 512 | `RerankClient` | truncation point for the question |
 | `rerank_document_max_tokens` | 1408 | `RerankClient` | truncation point for one evidence line |
 | `rerank_instruction` | see settings | `RerankClient` | the judging instruction the scaffold wraps |
 | `rerank_query_template` | Qwen3 scaffold | `RerankClient` | changing it decalibrates every score |
 | `rerank_document_template` | Qwen3 scaffold | `RerankClient` | same |
 
-`rerank_document_max_tokens` is set above `chunk_size / recall_chars_per_token` on purpose, so a
+`rerank_document_max_tokens` is set above `chunk_size / find_chars_per_token` on purpose, so a
 full source chunk reaches the cross encoder whole and a late section is not silently cut off before
 it is judged.
 
@@ -122,22 +122,22 @@ it is judged.
 
 | Setting | Default | Read in | Trades away |
 |---|---|---|---|
-| `context_token_budget` | 2048 | `recall()`, the MCP tool default | the size of the answer |
-| `mcp_recall_budget_max_tokens` | 16384 | `src/aizk/mcp/server.py` | the ceiling a caller may raise the budget to |
-| `recall_chars_per_token` | 4.0 | `Candidate.token_count` | estimate accuracy, and it is wrong on CJK and on dense code |
+| `context_token_budget` | 2048 | `find()`, the MCP tool default | the size of the answer |
+| `mcp_find_budget_max_tokens` | 16384 | `src/aizk/mcp/server.py` | the ceiling a caller may raise the budget to |
+| `find_chars_per_token` | 4.0 | `Candidate.token_count` | estimate accuracy, and it is wrong on CJK and on dense code |
 | `chunk_size` | 2048 | `Chunk.source_line` | snippet length per source hit |
 | `display_timezone` | `UTC` | `Chunk.source_line` | which timezone observed and expiry dates render in |
 
 ## Which knobs are safe to move
 
 Move these freely, since they change how much you get rather than what wins.
-`context_token_budget`, `session_recall_k`, `profile_recall_k`, `community_recall_k`, `raptor_k`,
-`recall_per_document`, `display_timezone` and `chunk_size` are all in this group. The worst outcome
+`context_token_budget`, `session_find_k`, `profile_find_k`, `community_find_k`, `raptor_k`,
+`find_per_document`, `display_timezone` and `chunk_size` are all in this group. The worst outcome
 is a longer or shorter response.
 
-Move these behind an evaluation run. `recall_max_distance`, `rrf_k`, `rerank_depth`,
+Move these behind an evaluation run. `find_max_distance`, `rrf_k`, `rerank_depth`,
 `fusion_depth`, `promoted_bonus` and the three fact-blending weights all change which evidence
-wins, and the effect is not monotonic. `chefe run aizk-eval` is the tool, and
+wins, and the effect is not monotonic. `uv run --no-sync aizk-eval` is the tool, and
 [how we evaluate](/docs/dev/eval/approach/) explains the strata.
 
 :::caution[Rescore after touching the reranker]
@@ -147,7 +147,7 @@ longer mean anything.
 :::
 
 The graph settings sit in between. `multihop_max_hops` and `graph_ppr_frontier` are the two that
-dominate walk cost, so if recall latency is the problem, start there and measure before touching
+dominate walk cost, so if find latency is the problem, start there and measure before touching
 the mass weights.
 
 ## Next

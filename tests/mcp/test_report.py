@@ -18,7 +18,7 @@ import aizk.memory as memory_module
 from aizk.config import settings
 from aizk.memory import WriteResult
 from aizk.provenance import CaptureContext
-from aizk.retrieval import RecallEvidence
+from aizk.retrieval import FindEvidence
 from aizk.retrieval.models import Candidate, Lane
 from aizk.store.identity import User
 
@@ -147,7 +147,7 @@ def test_report_deduplicates_an_identical_retry_into_the_same_document(
 
     assert first == second
     assert dbutil.run(stored_copies()) == 1
-    # An identical retry never re-embeds, the same guard `remember` already relies on.
+    # An identical retry never re-embeds, the same guard `keep` already relies on.
     assert len(fake_embedder.calls) == calls_after_first
 
 
@@ -178,11 +178,11 @@ def test_report_reports_invalid_self_describing_metadata_as_a_tool_error(
         )
 
 
-def test_report_shares_remembers_monthly_quota_bucket(
+def test_report_shares_keeps_monthly_quota_bucket(
     monkeypatch: pytest.MonkeyPatch,
     tools: dict[str, FunctionTool],
 ) -> None:
-    monkeypatch.setattr(settings, "monthly_user_remember_limit", 1)
+    monkeypatch.setattr(settings, "monthly_user_keep_limit", 1)
     monkeypatch.setattr(
         memory_module.extract_ingest, "ingest_text", AsyncMock(return_value=uuid7())
     )
@@ -191,7 +191,7 @@ def test_report_shares_remembers_monthly_quota_bucket(
 
     dbutil.run(tools["keep"].fn(text="# First\n\nA kept note.", context=context_for(reporter)))
 
-    with pytest.raises(ToolError, match="monthly remember limit reached"):
+    with pytest.raises(ToolError, match="monthly keep limit reached"):
         dbutil.run(
             tools["report"].fn(
                 text="A confusing pair of facts filed right after the limit was spent.",
@@ -210,7 +210,7 @@ def test_report_text_annotation_enforces_the_configured_cap() -> None:
         adapter.validate_python("x" * (settings.mcp_report_max_chars + 1))
 
 
-def test_recall_names_the_report_scope_for_an_operator_reading_one_back(
+def test_find_names_the_report_scope_for_an_operator_reading_one_back(
     monkeypatch: pytest.MonkeyPatch,
     tools: dict[str, FunctionTool],
 ) -> None:
@@ -227,8 +227,8 @@ def test_recall_names_the_report_scope_for_an_operator_reading_one_back(
         scopes=frozenset({settings.reports_scope_id}),
     )
 
-    async def stub(query: str, user: User, token_budget: int | None = None) -> RecallEvidence:
-        return RecallEvidence(candidates=(candidate,))
+    async def stub(query: str, user: User, token_budget: int | None = None) -> FindEvidence:
+        return FindEvidence(candidates=(candidate,))
 
     monkeypatch.setattr(memory_module.retrieval, "evidence", stub)
 

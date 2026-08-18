@@ -98,7 +98,7 @@ class CertaintyOutcome(FrozenModel):
 
 
 def paired(stance: Stance) -> bool:
-    """Whether recall would still return the excerpt a derived claim at `stance` came from.
+    """Whether Find would still return the excerpt a derived claim at `stance` came from.
 
     Measured through the production packing walk with the derived fact ranked above its own
     grounding excerpt, which is the arrangement `docs/user/concepts/sources.md` says must
@@ -118,7 +118,7 @@ class CertaintyReport(FrozenModel):
     Three numbers decide it. `flattening_admitted` is how often a proposal that overstates
     its source is stored anyway, measured before and after. `false_rejection` is how often a
     faithful proposal is refused, the price paid for that. `source_paired` is whether an
-    unsettled claim actually changes what recall returns rather than only what it says.
+    unsettled claim actually changes what Find returns rather than only what it says.
     """
 
     cases: int

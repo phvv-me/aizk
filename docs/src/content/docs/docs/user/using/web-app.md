@@ -10,7 +10,7 @@ the same memory your assistant reads, so nothing here is required to use aizk.
 Sign in at your deployment's address and you land under `/app/`. Nine screens sit in four groups.
 
 ```text
-  Knowledge        Dashboard      Recall
+  Knowledge        Dashboard      Find
   Explore          Sources        Findings      Subjects     Themes
   Operations       Usage          Processing
   Collaboration    Organizations
@@ -27,7 +27,7 @@ entities, and Themes are communities. Sources keep their name.
 Four counters run across the top for sources, findings, subjects, and themes, each linking to its own
 screen. The counts cover the memory that is yours, your private notes plus every organization you
 belong to. A shared corpus anyone can read, and that you cannot write to, stays out of your numbers
-while staying fully readable and recallable.
+while staying fully readable and findable.
 
 Below that sits a processing card with two bars. Source conversion is preserved originals being
 turned into text, and graph enrichment is findings, subjects, and themes being built from that text.
@@ -35,15 +35,15 @@ Each shows an estimated range rather than a single number, and the card updates 
 in front.
 
 At the bottom you get the newest sources, each with a badge for who can see it, and a thirty day usage
-summary with requests, evidence items, recalls, and remembers.
+summary with requests, evidence items, finds, and keeps.
 
-## Recall
+## Find
 
 A box, a question, and the same evidence Markdown your assistant receives. This is the fastest way to
-see what recall really returns without reading a transcript, and it is handy for checking whether a
+see what find really returns without reading a transcript, and it is handy for checking whether a
 note you just wrote is findable yet.
 
-It behaves exactly like the tool, so [Asking memory well](/docs/user/using/recall/) applies here
+It behaves exactly like the tool, so [Asking memory well](/docs/user/using/find/) applies here
 unchanged. One focused question, no scope selector, evidence rather than an answer.
 
 ## Sources
@@ -80,7 +80,7 @@ generated summary, the number of subjects in the cluster, when it was last rebui
 member names that link back to Subjects.
 
 This screen stays empty for a while on a new memory, which is correct rather than broken. Themes are
-rebuilt after enough findings accumulate, so sources become recallable well before the next theme
+rebuilt after enough findings accumulate, so sources become findable well before the next theme
 pass runs. Once a memory grows large the screen pages through the biggest themes first and reports
 the total, since a big graph is cut into thousands.
 
@@ -88,7 +88,7 @@ the total, since a big graph is cut into thousands.
 
 Successful operations over the last 7, 30, 90 or 365 days. Four tiles cover successful requests, items
 handled, bytes uploaded, and bytes downloaded, then a chart over time, then a breakdown by operation
-into recalls, remembers, files, shares, and artifact reads.
+into finds, keeps, files, shares, and artifact reads.
 
 Only successful operations count. Failed calls and ordinary page views are excluded, and the numbers
 survive restarts because they are written down rather than held in memory.
@@ -96,11 +96,11 @@ survive restarts because they are written down rather than held in memory.
 ## Processing
 
 The detailed version of the dashboard's progress card. It reports whether processing is idle, active,
-or delayed, gives separate estimates for when content becomes recallable and when full enrichment
+or delayed, gives separate estimates for when content becomes findable and when full enrichment
 finishes, and lists recent preserved originals with a state badge.
 
 The four states are queued while it waits for secure processing, processing while it converts, ready
-when it can be recalled, and failed when it needs attention. A failed original is still findable by
+when it can be found, and failed when it needs attention. A failed original is still findable by
 name, which [Files, PDFs and web sources](/docs/user/using/files/) explains.
 
 Delayed does not mean broken. It means recent completions are too sparse to make an honest estimate,

@@ -15,7 +15,7 @@ import eval.database as database_module
 import eval.launcher as launcher_module
 import eval.service as service_module
 from aizk.config import Settings
-from aizk.retrieval import RecallTrace
+from aizk.retrieval import FindTrace
 from eval.cli import EvaluationCLI
 from eval.database import EvaluationDatabase
 from eval.gate import GateReport
@@ -121,10 +121,10 @@ class RecordingEvaluation:
         return Rendered(text="groupmem")
 
     async def scale(
-        self, sizes: tuple[int, ...], k: int, repeats: int, recall_p95_ms: float
+        self, sizes: tuple[int, ...], k: int, repeats: int, find_p95_ms: float
     ) -> Rendered:
         assert sizes in {(10,), (10, 20)}
-        assert (k, repeats, recall_p95_ms) == (3, 4, 50.0)
+        assert (k, repeats, find_p95_ms) == (3, 4, 50.0)
         return Rendered(text="scale")
 
 
@@ -258,7 +258,7 @@ def test_evaluation_orchestrates_live_diagnostics(monkeypatch: pytest.MonkeyPatc
         facts_lost=0,
         timed_out=0,
     )
-    traced = RecallTrace(query="why", budget=500, selected=0, rows=())
+    traced = FindTrace(query="why", budget=500, selected=0, rows=())
     production = AsyncMock(return_value=report)
     diagnostic = AsyncMock(return_value=report)
     management_run = AsyncMock(return_value=management)
@@ -359,7 +359,7 @@ def test_evaluation_orchestrates_isolated_benchmarks(
     runner = MagicMock()
     runner.configured.return_value.run = AsyncMock(return_value=benchmark)
     monkeypatch.setattr(service_module, "BenchmarkRunner", runner)
-    scale_report = ScaleReport(sizes=[], points=[], budget=Budget(recall_p95_ms=50), knees=[])
+    scale_report = ScaleReport(sizes=[], points=[], budget=Budget(find_p95_ms=50), knees=[])
     scale = AsyncMock(return_value=scale_report)
     monkeypatch.setattr(service_module, "run_scale_benchmark", scale)
     path = tmp_path / "cases.jsonl"
@@ -395,4 +395,4 @@ def test_evaluation_orchestrates_isolated_benchmarks(
     assert groupmem.call_args.kwargs == {"root": root}
     runner.configured.assert_called_with(k=10)
     assert runner.configured.return_value.run.await_count == 2
-    scale.assert_awaited_once_with(sizes=(10, 20), k=3, repeats=4, budget=Budget(recall_p95_ms=50))
+    scale.assert_awaited_once_with(sizes=(10, 20), k=3, repeats=4, budget=Budget(find_p95_ms=50))

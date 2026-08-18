@@ -37,8 +37,8 @@ These lost to something already in the tree, and the number is the reason.
 | swapping in `Qwen3-Embedding-4B` | it gave only a small ranking gain on the evaluation fixture and would remove the multimodal lane. The benefit did not justify that capability loss or the larger stored vectors |
 | Google LangExtract as the extractor | lost head to head on yield, latency, and vocabulary enforcement. Its character-interval grounding was worth taking, and it became `quote_start` and `quote_end` on the claim |
 | GLiNER2 as the graph authority | the large checkpoint is nearly as fast as base and somewhat more precise, but still much weaker than the LLM on relation meaning. It serves the cheap gate instead |
-| the recursive graph walk | replaced by an in-statement personalized PageRank, which lifted planted chain-fact recall from 32 of 128 to 123 of 128 inside the final pack and is faster |
-| a separate `uv sync` in CI | it drifted from the local environment. A stale lock plus three missing type stubs hid 187 pyrefly errors that the local gate never saw, so CI now builds the same chefe environment |
+| the recursive graph walk | replaced by an in-statement personalized PageRank, which lifted planted chain-fact find from 32 of 128 to 123 of 128 inside the final pack and is faster |
+| an unlocked CI solve | it drifted from the local environment. CI now installs the committed `uv.lock` with `--frozen`, then uses `--no-sync` for every gate |
 | pyright as a fourth type gate | its only distinct complaint is a false positive against the `patos` `sql.Field` and `sql.PK` stubs, so gating on it would buy nothing but inline suppressions. It can rejoin once that stub is fixed upstream |
 
 ## Rejected because something else already owns it
@@ -87,7 +87,7 @@ justifies letting the schema drift on its own.
 | a work orchestration layer | aizk supplies memory and does not own an agent's planning or action loop |
 | broad ingestion connectors | correctness, access, time, and evaluation come first |
 | cross-platform CI | macOS runners carry no service containers, so the suite is a Linux job until that is solved |
-| automatic PyPI publishing | the `rls` dependency is a direct git reference, which PyPI rejects. [Releasing](/docs/dev/contributing/release/) has the detail |
+| automatic PyPI publishing | AIZK exercises an unreleased SQLAlchemy row security API from one reviewed commit. [Releasing](/docs/dev/contributing/release/) has the detail |
 | freezing the MCP and operator surfaces | the benchmark results have to settle the defaults first |
 
 ## Next

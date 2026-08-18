@@ -7,7 +7,7 @@ from .candidate import Candidate
 from .lane import Lane
 
 
-class RecallTraceRow(FrozenModel):
+class FindTraceRow(FrozenModel):
     """One candidate's position before and after merit ordering and packing."""
 
     statement_rank: PositiveInt
@@ -19,8 +19,8 @@ class RecallTraceRow(FrozenModel):
     source_title: str | None = None
 
 
-class RecallTiming(FrozenModel):
-    """Wall time for each externally meaningful phase of one recall."""
+class FindTiming(FrozenModel):
+    """Wall time for each externally meaningful phase of one find."""
 
     total_ms: NonNegativeFloat = 0.0
     embedding_ms: NonNegativeFloat = 0.0
@@ -35,14 +35,14 @@ class RecallTiming(FrozenModel):
     selected_lanes: dict[str, NonNegativeInt] = Field(default_factory=dict)
 
 
-class RecallTrace(FrozenModel):
-    """A diagnostic account of one recall without strengthening surfaced facts."""
+class FindTrace(FrozenModel):
+    """A diagnostic account of one find without strengthening surfaced facts."""
 
     query: str
     budget: PositiveInt
     selected: NonNegativeInt
-    rows: tuple[RecallTraceRow, ...]
-    timing: RecallTiming = RecallTiming()
+    rows: tuple[FindTraceRow, ...]
+    timing: FindTiming = FindTiming()
 
     @classmethod
     def build(
@@ -53,8 +53,8 @@ class RecallTrace(FrozenModel):
         ranked: Sequence[Candidate],
         kept: Sequence[Candidate],
         scores: Mapping[UUID5 | UUID7 | None, float],
-        timing: RecallTiming | None = None,
-    ) -> RecallTrace:
+        timing: FindTiming | None = None,
+    ) -> FindTrace:
         """Build the trace from the three explicit retrieval phases."""
         merit_positions = {id(candidate): rank for rank, candidate in enumerate(ranked, 1)}
         selected = cls.packed_identities(ranked, kept)
@@ -62,9 +62,9 @@ class RecallTrace(FrozenModel):
             query=query,
             budget=budget,
             selected=len(kept),
-            timing=timing or RecallTiming(),
+            timing=timing or FindTiming(),
             rows=tuple(
-                RecallTraceRow(
+                FindTraceRow(
                     statement_rank=rank,
                     merit_rank=merit_positions[id(candidate)],
                     score=scores.get(candidate.evidence_id),

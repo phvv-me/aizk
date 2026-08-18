@@ -44,7 +44,7 @@ onward.
 
 ## Three doors
 
-`Memory.remember` in `src/aizk/memory.py` is the one entry point every transport calls, and it
+`Memory.keep` in `src/aizk/memory.py` is the one entry point every transport calls, and it
 routes on what you hand it.
 
 | Caller supplied | Path | Result |
@@ -54,18 +54,18 @@ routes on what you hand it.
 | an `upload` declaration | `UploadBox.mint` | one short-lived private upload URL |
 
 Nothing else is accepted. `preserve_source` without a URI raises, and an upload declaration mixed
-with `source_uri`, `preserve_source`, `observed_at` or `expires_at` is rejected in `remember_tool`
+with `source_uri`, `preserve_source`, `observed_at` or `expires_at` is rejected in `keep_tool`
 before any work begins.
 
 The MCP boundary in `src/aizk/mcp/server.py` reads its limits from settings, so a deployment can
-tighten them. Text is capped at `mcp_remember_max_chars`, default 5,000,000. A
+tighten them. Text is capped at `mcp_keep_max_chars`, default 5,000,000. A
 URI is capped at `mcp_source_uri_max_chars`, default 4096. A caller may name at most
 `mcp_scope_names_max` organizations, default 32. `User.write_scope` resolves and authorizes those
 names before anything is read or stored, so intake only ever writes to scopes the caller already
 held.
 
 ```text
-remember
+keep
   |- upload declared? --- yes --> mint capability (UploadTicketAccepted)
   |- no
        |- source_uri present?
@@ -122,7 +122,7 @@ not. On top of the locator, a source that declared an ontology subject also matc
 did not change.
 
 Matching always stays inside one exact scope set. `DocumentStore.find` adds
-`Document.scopes == sorted(plan.scopes)`, so the same note remembered privately and again into an
+`Document.scopes == sorted(plan.scopes)`, so the same note kept privately and again into an
 organization is two documents rather than one widened row. The content hash is a UUIDv8 of the
 UTF-8 bytes, computed in PostgreSQL through `pgcrypto` by `DocumentStore.hash_texts` in one
 statement per batch. An artifact-linked source instead passes the blob's own hash as
@@ -135,7 +135,7 @@ Markdown the converter produced.
 
 **Nothing.** `PreparedText.matches` compares content identity and the management metadata, meaning
 `source_uri`, `artifact_id`, `artifact_content_id`, `observed_at` and `expires_at`. When all of it
-agrees the row is returned untouched and the caller sees `created=False`. Re-remembering an
+agrees the row is returned untouched and the caller sees `created=False`. Re-keeping an
 unchanged note costs one hash and one lookup.
 
 **Validity-only refresh.** When `content_matches` holds but the metadata moved, re-embedding would
@@ -153,7 +153,7 @@ chunks and attaches the new ones. Everything pointing at the document id survive
 
 Embedding follows this split. `TextIngestor._vectors` embeds only the plans whose content changed,
 so a batch of mostly unchanged sources sends almost nothing. The two retraction reasons are worth
-remembering when reading history, since they tell you whether a fact disappeared because its source
+keeping when reading history, since they tell you whether a fact disappeared because its source
 was edited or only because its validity moved.
 
 ## Next

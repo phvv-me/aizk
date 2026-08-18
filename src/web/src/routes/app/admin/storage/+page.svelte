@@ -50,7 +50,7 @@
           <Card.Description>Originals</Card.Description>
           <InfoTip
             label="What an original is"
-            text="One stored revision of a file a caller remembered. Remembering the same file twice keeps two revisions, so this counts references rather than distinct content."
+            text="One stored revision of a file a caller kept. Keeping the same file twice creates two revisions, so this counts references rather than distinct content."
           />
         </div>
         <Card.Title class="text-3xl">{storage.originals.toLocaleString('en-US')}</Card.Title>

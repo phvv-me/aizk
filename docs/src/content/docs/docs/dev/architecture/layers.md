@@ -10,10 +10,10 @@ past its allowed door. So the diagram below is not a wish, it is what the build 
 page assumes you have read the [System map](/docs/dev/architecture/system-map/) and know roughly
 what each package does.
 
-Run the gate from the monorepo root.
+Run the gate from the repository root after bootstrapping the frozen environment.
 
 ```
-chefe run lint-imports-aizk
+uv run --no-sync lint-imports
 ```
 
 CI runs the same check as `lint-imports` inside the lint job.
@@ -144,10 +144,10 @@ more precise `Select` type.
 
 | Check | Command | Catches |
 |---|---|---|
-| layer stack | `chefe run lint-imports-aizk` | an upward import, an unassigned package |
-| SQL contract | `chefe run lint-imports-aizk` | a direct `sqlmodel` or `sqlalchemy` import outside the twelve |
-| split coverage | `chefe run test-aizk` | a new package in neither list |
-| call sites | `chefe run lint` | statement building or session opening inside a transport |
+| layer stack | `uv run --no-sync lint-imports` | an upward import, an unassigned package |
+| SQL contract | `uv run --no-sync lint-imports` | a direct `sqlmodel` or `sqlalchemy` import outside the twelve |
+| split coverage | `uv run --no-sync python -m pytest` | a new package in neither list |
+| call sites | `uv run --no-sync ruff check .` | statement building or session opening inside a transport |
 
 ## Next
 

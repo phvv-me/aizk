@@ -87,7 +87,7 @@ away.
 
 - [Communities](/docs/dev/passes/communities/) is the pass that produces these leaves.
 - [Profiles, insights, decay](/docs/dev/passes/profiles-insights/) covers the per-entity summaries and aging.
-- [The lanes](/docs/dev/read/lanes/) shows how recall actually reads the summary tree.
+- [The lanes](/docs/dev/read/lanes/) shows how find actually reads the summary tree.
 - [The job system](/docs/dev/passes/jobs/) has the schedules and the fan-out that trigger these.
 
 </div>

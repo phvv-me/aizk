@@ -17,8 +17,8 @@ rather than inherited from an earlier document.
 
 ## Code
 
-- `chefe run lint`, `chefe run lint-imports`, `chefe run typecheck` and `chefe run test` are all
-  green on the commit being deployed. CI runs the same four against a real VectorChord database.
+- Ruff, import-linter, pyrefly, ty, mypy, and pytest are all green on the commit being deployed.
+  CI runs the same gates against a real VectorChord database.
 - `tests/store/test_rls.py::test_chunk_write_requires_the_parent_document_scope` passes. This is
   the cross-tenant child-write regression and it is the one test that proves the foreign-key
   loophole is closed.
@@ -64,8 +64,8 @@ rather than inherited from an earlier document.
 - Per-caller rate limiting and the MCP request size limits are active with their configured
   values.
 - `SHOW data_checksums` returns `on`.
-- The health report finishes inside its bounds and its real recall returns candidates with no
-  `error`. The probe timeouts are 2 seconds per model endpoint and 3.5 for the recall.
+- The health report finishes inside its bounds and its real find returns candidates with no
+  `error`. The probe timeouts are 2 seconds per model endpoint and 3.5 for the find.
 - `aizk admin queue doctor` exits zero, meaning no current blockers.
 
 ## Disk and backups
@@ -77,7 +77,7 @@ rather than inherited from an earlier document.
 - A matching generation of the SeaweedFS object data exists off-host. There is no automated job
   for this in the repository, so it is a manual step and it is easy to skip.
 - A scratch restore has passed within the last month, all the way through PostgreSQL accepting
-  the archive, the RLS check passing, Logto starting and an authenticated recall returning
+  the archive, the RLS check passing, Logto starting and an authenticated find returning
   evidence.
 
 ## Edge

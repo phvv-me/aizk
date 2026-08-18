@@ -64,14 +64,14 @@ docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker a
 
 `ops.health()` fans out concurrently over the migration head, the RLS verifier, row counts, the
 queue overview, per scope-set corpus progress, usage totals and the four model endpoints, then
-runs one real recall. Endpoint probes time out at 2 seconds and the recall at 3.5, so the whole
+runs one real find. Endpoint probes time out at 2 seconds and the find at 3.5, so the whole
 report is bounded.
 
 Run it in `worker`, never in `server`. The public process has no owner credential by design.
 
 A healthy report has an up-to-date migration, no RLS violations, Logto identity mode, all four
 endpoints reachable with `matched` true, no retained queue failures, processed chunks catching up
-with stored chunks, and a `recall` block with candidates and no `error`.
+with stored chunks, and a `find` block with candidates and no `error`.
 
 ## A stuck queue
 

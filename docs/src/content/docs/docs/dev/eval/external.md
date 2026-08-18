@@ -33,7 +33,7 @@ first-person question resolves against the right speaker.
                         ├─▶ write path: ingest_texts into one deterministic scope
                         │        └─▶ build_graph over that scope
                         │
-                        ├─▶ recall: as the named asking user, k=10 ──▶ packed context
+                        ├─▶ find: as the named asking user, k=10 ──▶ packed context
                         │
                         ├─▶ adapter: answer from that context only
                         │
@@ -100,7 +100,7 @@ A small diagnostic run is the normal way to check that a corpus directory parses
 path still works end to end.
 
 ```sh
-chefe run aizk-eval groupmem /path/to/GroupMemBench \
+uv run --no-sync aizk-eval groupmem /path/to/GroupMemBench \
   --domain Finance --question-limit 2 --out /tmp/groupmem-smoke.json
 ```
 

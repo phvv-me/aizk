@@ -19,7 +19,7 @@ adds `IdentityMiddleware`, adds `CallerRateLimit`, then registers five tools and
 template.
 
 The tools are not module-level functions. Each is built by a method that closes over
-`self.settings`, so bounds like `mcp_recall_query_max_chars` and `mcp_remember_max_chars` are read
+`self.settings`, so bounds like `mcp_find_query_max_chars` and `mcp_keep_max_chars` are read
 when the server is constructed rather than at import time. That is what lets a deployment change a
 limit without a code change.
 
@@ -114,7 +114,7 @@ message reach a client.
 
 The tools do not implement memory. `AizkMCP.memory(user)` builds a `Memory` from
 `src/aizk/memory.py` bound to that caller, and the HTTP API builds the same object from the same
-class. Recall, ingestion, scope authorization and graph projection are defined once there, and each
+class. Find, ingestion, scope authorization and graph projection are defined once there, and each
 transport keeps only its own identity resolution and its own input limits.
 
 `src/aizk/mcp/ruff.toml` keeps that honest. It extends the root config and bans `sqlalchemy.select`,

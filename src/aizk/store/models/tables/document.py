@@ -189,10 +189,10 @@ class Document(Id, Scoped, Timestamped, TableBase, table=True):
 
     @classmethod
     async def retire(cls, session: Session, document_ids: Collection[UUID7]) -> list[UUID7]:
-        """Expire moved originals now so ordinary recall stops returning them.
+        """Expire moved originals now so ordinary find stops returning them.
 
         Expiry is the engine's one erasure for a source: every chunk ranking joins through
-        `is_active`, so an expired document leaves recall in the same statement that keeps
+        `is_active`, so an expired document leaves find in the same statement that keeps
         its rows, its bytes, and the `promoted_from` chain intact for provenance and for a
         move back. The guard leaves an already-expired original alone, which is what makes
         repeating a move a no-op.

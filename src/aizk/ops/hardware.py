@@ -84,7 +84,7 @@ class HardwareHealth(FrozenModel):
     """Host CPU, memory, and disk load and per-lane GPU occupancy already collected server-side.
 
     Read from VictoriaMetrics, which Alloy's built-in unix exporter and the vLLM lanes already
-    feed, rather than probed directly with `mainboard`. No aizk process holds NVML device access
+    feed, rather than probed directly inside AIZK. No AIZK process holds NVML device access
     to a GPU, so raw device telemetry (temperature, power, memory used) is not available from any
     process in this deployment; the per-lane KV-cache occupancy and queue depth below are the real
     GPU-adjacent signal that exists today. `reachable` is false whenever `metrics_url` is unset or
@@ -129,8 +129,8 @@ def _lanes(vectors: dict[str, tuple[_Sample, ...]]) -> tuple[ModelLaneLoad, ...]
     for field, samples in vectors.items():
         for sample in samples:
             service = sample.metric.get("service")
-            if service in by_service:
-                by_service[service][field] = float(sample.value[1])
+            if service is not None and (values := by_service.get(service)) is not None:
+                values[field] = float(sample.value[1])
     return tuple(
         ModelLaneLoad(
             service=lane,

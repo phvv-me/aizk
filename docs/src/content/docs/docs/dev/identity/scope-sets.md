@@ -120,7 +120,7 @@ grants a read.
 in its array is in your write set. Before SQL is reached, `User.write_scope(names)` already refuses
 an organization name you do not hold or cannot write to, raising `ScopeNotFoundError`.
 
-**Retrieval.** Recall takes no scope argument. It runs under the caller's whole read set, so one
+**Retrieval.** Find takes no scope argument. It runs under the caller's whole read set, so one
 question spans private memory, every organization, and every intersection at once, and the
 returned evidence is labeled by `User.scope_labels` as Private, the organization name, or Shared.
 

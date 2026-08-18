@@ -281,7 +281,7 @@
   <Card.Root>
     <Card.Header>
       <div class="flex items-center gap-2">
-        <Card.Title>Live recall probe</Card.Title>
+        <Card.Title>Live find probe</Card.Title>
         <InfoTip
           label="Why this is separate"
           text="A real retrieval over the largest visible corpus, which took roughly 3 seconds in production. It runs only when asked, never on page load."
@@ -290,15 +290,15 @@
       <Card.Description>
         Confirm end-to-end retrieval against real stored memory.
         <InfoTip
-          label="What the recall probe does"
-          text="Runs a real recall against the largest stored corpus, so it exercises embedding, retrieval and reranking rather than reporting configuration. It costs a few seconds, which is why it is a button rather than part of the page load."
+          label="What the find probe does"
+          text="Runs a real find against the largest stored corpus, so it exercises embedding, retrieval and reranking rather than reporting configuration. It costs a few seconds, which is why it is a button rather than part of the page load."
         />
       </Card.Description>
       <Card.Action>
         <form
           method="POST"
-          action="?/recall"
-          use:enhance={feedback('Recall probe complete.', {
+          action="?/find"
+          use:enhance={feedback('Find probe complete.', {
             reset: false,
             pending: (active) => (probing = active)
           })}
@@ -310,27 +310,27 @@
         </form>
       </Card.Action>
     </Card.Header>
-    {#if form?.recall !== undefined}
+    {#if form?.find !== undefined}
       <Card.Content>
-        {#if form.recall === null}
+        {#if form.find === null}
           <p class="text-muted-foreground text-sm">No corpus is stored yet to probe.</p>
         {:else}
           <dl class="grid gap-4 sm:grid-cols-3">
             <div>
               <dt class="text-muted-foreground text-xs">Candidates</dt>
-              <dd class="mt-1 text-xl">{form.recall.candidates}</dd>
+              <dd class="mt-1 text-xl">{form.find.candidates}</dd>
             </div>
             <div>
               <dt class="text-muted-foreground text-xs">Latency</dt>
-              <dd class="mt-1 text-xl">{form.recall.latency_ms.toFixed(0)} ms</dd>
+              <dd class="mt-1 text-xl">{form.find.latency_ms.toFixed(0)} ms</dd>
             </div>
             <div>
               <dt class="text-muted-foreground text-xs">Top source</dt>
-              <dd class="mt-1 truncate text-xl">{form.recall.top_source ?? 'N/A'}</dd>
+              <dd class="mt-1 truncate text-xl">{form.find.top_source ?? 'N/A'}</dd>
             </div>
           </dl>
-          {#if form.recall.error}
-            <p class="text-destructive mt-3 text-sm">{form.recall.error}</p>
+          {#if form.find.error}
+            <p class="text-destructive mt-3 text-sm">{form.find.error}</p>
           {/if}
         {/if}
       </Card.Content>

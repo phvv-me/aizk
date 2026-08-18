@@ -10,7 +10,7 @@ import type {
   OrganizationDirectory,
   Overview,
   ProcessingReport,
-  RecallHealth,
+  FindHealth,
   SourcePage,
   StoredDoctor,
   StoredHealth,
@@ -49,6 +49,15 @@ export async function reading<T>(load: () => Promise<T | null>): Promise<Reading
     return { value: await load(), unreachable: false };
   } catch {
     return { value: null, unreachable: true };
+  }
+}
+
+/** Load optional page data without letting one failed panel hide the rest of the page. */
+export async function available<T>(load: () => Promise<T>): Promise<T | null> {
+  try {
+    return await load();
+  } catch {
+    return null;
   }
 }
 
@@ -148,8 +157,8 @@ export class ApiClient {
     return unwrap(await sdk.graph({ client: await this.client(), query: { limit } }));
   }
 
-  async recall(query: string): Promise<Answer> {
-    return unwrap(await sdk.recall({ client: await this.client(), body: { query } }));
+  async find(query: string): Promise<Answer> {
+    return unwrap(await sdk.find({ client: await this.client(), body: { query } }));
   }
 
   async organizations(): Promise<OrganizationDirectory> {
@@ -199,9 +208,9 @@ export class ApiClient {
     return unwrap(await sdk.adminHealth({ client: await this.client() }));
   }
 
-  /** Run the live recall probe on demand, never during the page's own initial load. */
-  async adminRecall(): Promise<RecallHealth | null> {
-    return unwrap(await sdk.adminRecall({ client: await this.client() }));
+  /** Run the live find probe on demand, never during the page's own initial load. */
+  async adminFind(): Promise<FindHealth | null> {
+    return unwrap(await sdk.adminFind({ client: await this.client() }));
   }
 
   async adminHardware(): Promise<HardwareHealth> {

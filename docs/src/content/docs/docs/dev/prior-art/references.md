@@ -33,7 +33,7 @@ was checked against the tree.
 |---|---|---|---|
 | temporal entity and fact graph | adopted from [Zep and Graphiti](https://arxiv.org/abs/2501.13956) | immutable content plus valid-time and recorded-time claims | `store/models/tables/`, `store/models/views/live_fact.py` |
 | add, update, no-op consolidation | adapted from [Mem0](https://arxiv.org/abs/2504.19413) | rules settle the confident cases and only ambiguity reaches the LLM | `graph/consolidation.py`, `graph/writer.py` |
-| associative multi-hop recall | adapted from [HippoRAG 2](https://arxiv.org/abs/2502.14802) | personalized PageRank inside the SQL statement, over visible current facts only | `retrieval/lanes/facts.py` |
+| associative multi-hop find | adapted from [HippoRAG 2](https://arxiv.org/abs/2502.14802) | personalized PageRank inside the SQL statement, over visible current facts only | `retrieval/lanes/facts.py` |
 | community summaries | adapted from [GraphRAG](https://arxiv.org/abs/2404.16130) and [LightRAG](https://arxiv.org/abs/2410.05779) | communities as a rebuildable global-evidence projection | `graph/communities.py`, `retrieval/lanes/vector.py` |
 | recursive summary tree | adopted from [RAPTOR](https://arxiv.org/abs/2401.18059) | grounded summaries rolled into bounded higher levels | `graph/raptor.py`, `retrieval/lanes/overview.py` |
 | reflective observations | adapted from [A-MEM](https://arxiv.org/abs/2502.12110) | optional observations that never replace their grounding facts | `graph/insight.py` |
@@ -44,9 +44,9 @@ was checked against the tree.
 | forgetting-aware evaluation | adopted from [Memora](https://arxiv.org/abs/2604.20006) | scores current evidence without rewarding expired memory | `eval/metrics.py` |
 | workflow and premise categories | planned from [LongMemEval-V2](https://arxiv.org/abs/2605.12493) | kept in evaluation until a production schema earns them | `eval/` |
 | action-memory boundary | compared with [Mem2ActBench](https://aclanthology.org/2026.acl-long.370/) | no action-selection claim is made from a retrieval-only score | [External benchmarks](/docs/dev/eval/external/) |
-| dense and lexical fusion | adapted from [Reciprocal Rank Fusion](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/) | typed lane ranks fused inside one SQL recall program | `retrieval/recall/program.py`, `retrieval/lanes/sources.py` |
-| merit ordering and maximal recall | original | every lane stays available and one cross-encoder ranks the candidates together | `retrieval/recall/orchestrator.py`, `retrieval/rerank/rescore.py` |
-| public evidence provenance | original | internal lanes collapse into source, derived, and session evidence with exact scope descriptions | `retrieval/models/result.py`, `retrieval/templates/recall.md.j2` |
+| dense and lexical fusion | adapted from [Reciprocal Rank Fusion](https://research.google/pubs/reciprocal-rank-fusion-outperforms-condorcet-and-individual-rank-learning-methods/) | typed lane ranks fused inside one SQL find program | `retrieval/find/program.py`, `retrieval/lanes/sources.py` |
+| merit ordering and maximal find | original | every lane stays available and one cross-encoder ranks the candidates together | `retrieval/find/orchestrator.py`, `retrieval/rerank/rescore.py` |
+| public evidence provenance | original | internal lanes collapse into source, derived, and session evidence with exact scope descriptions | `retrieval/models/result.py`, `retrieval/templates/find.md.j2` |
 
 Paths in that table are relative to `src/`. RAPTOR supports hierarchical summaries, GraphRAG
 supports community summaries, HippoRAG supports associative graph retrieval, and GAM and A-MEM
@@ -97,7 +97,7 @@ token claims without storing an identity or membership mirror at all.
 | production embedding | [Qwen3-VL-Embedding-2B](https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B) | text and image vectors through a generic client |
 | production reranking | [Qwen3-Reranker-4B](https://huggingface.co/Qwen/Qwen3-Reranker-4B) | cross-encoder merit ordering across every lane |
 | production extraction | [Gemma 4 12B](https://huggingface.co/google/gemma-4-12B-it-qat-w4a16-ct) | grounded graph extraction through the generic `LLM` client |
-| profiling, environments, remote runs | the house `mainboard`, `chefe`, and `lote` packages | stage timing, reproducible tasks, and deployment |
+| tracing and reproducible environments | OpenTelemetry, `uv.lock`, and GitHub Actions | stage timing and repeatable verification |
 | typed patterns and SQL primitives | the house `patos` package | shared model, registry, and `patos.sql` column abstractions |
 
 Model names are deployment choices and not domain names in the code. Embedding, reranking, gating,
@@ -115,7 +115,7 @@ exactly the shape the artifact path takes.
 | [Docling formats](https://docling-project.github.io/docling/usage/supported_formats/) | emit normalized Markdown plus a lossless structured document | both derivatives are stored against the exact original revision |
 | [Unstructured elements](https://docs.unstructured.io/concepts/document-elements) | normalize many formats into typed elements with source metadata | source metadata is retained without adopting a second element store |
 | [ColPali](https://arxiv.org/abs/2407.01449) | retrieve pages visually rather than through lossy text | one supplemental image vector beside authoritative Docling structure |
-| [VisRAG](https://arxiv.org/abs/2410.10594) | answer from page images | authorized files stay available on demand, and recall transfers no bytes |
+| [VisRAG](https://arxiv.org/abs/2410.10594) | answer from page images | authorized files stay available on demand, and find transfers no bytes |
 | [M3DocRAG](https://arxiv.org/abs/2411.04952) | combine visual and textual evidence | page-level and video retrieval stay deferred until they measure better |
 
 ## Knowledge organization
@@ -132,17 +132,17 @@ Cite the following as design done here rather than attributing it to one upstrea
 
 - Arbitrary nonempty scope sets with intersection visibility under forced database RLS.
 - Content-addressed graph content held separate from scoped bi-temporal claims.
-- Full-authority recall paired with one explicit write destination.
+- Full-authority find paired with one explicit write destination.
 - A source-preserving `share` that creates provenance-linked copies rather than moving a row.
-- One maximal recall plan whose cross-encoder orders every lane by merit.
-- A single prompt-ready MCP recall string produced by a token-budget prefix.
+- One maximal find plan whose cross-encoder orders every lane by merit.
+- A single prompt-ready MCP find string produced by a token-budget prefix.
 - Exact artifact revision resources that stay authorized by PostgreSQL and transfer no bytes during
-  recall.
+  find.
 - An original-only blob model with database derivatives, metadata fallback, adaptive compression,
   shared physical bytes, a fail-closed scan gate, and no Redis anywhere.
 - Durable actor and scope usage accounting kept apart from expiring operational logs.
 - A health snapshot that checks schema, policy, jobs, models, scopes, graph freshness, and a real
-  recall in under five seconds.
+  find in under five seconds.
 
 ## Workflow influences
 

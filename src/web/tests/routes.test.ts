@@ -20,8 +20,8 @@ describe('operator console routes', () => {
   });
 
   it('builds encoded usage filter links from the canonical usage route', () => {
-    expect(adminHref(adminRoutes.usage, { operation: 'recall', actor_id: 'a b' })).toBe(
-      '/app/admin/usage?operation=recall&actor_id=a+b'
+    expect(adminHref(adminRoutes.usage, { operation: 'find', actor_id: 'a b' })).toBe(
+      '/app/admin/usage?operation=find&actor_id=a+b'
     );
     expect(adminHref(adminRoutes.overview)).toBe('/app/admin/overview');
   });

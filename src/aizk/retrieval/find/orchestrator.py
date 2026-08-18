@@ -5,10 +5,10 @@ from time import perf_counter
 from typing import cast
 
 from loguru import logger
-from mainboard.profiling import span
 from pydantic import UUID7
 from pydantic.types import PositiveInt
 
+from ...common.observability import span
 from ...config import settings
 from ...config.settings import StatementValue
 from ...serving.embed import EmbedClient
@@ -16,16 +16,16 @@ from ...serving.gate import GateClient
 from ...store import Fact
 from ...store.identity import User
 from ...types import Scopes
-from ..models import Candidate, Plan, QueryContext, RecallEvidence, RecallTiming, RecallTrace
+from ..models import Candidate, FindEvidence, FindTiming, FindTrace, Plan, QueryContext
 from ..packing import deduplicate, pack
 from ..rerank import MeritOrder, merit_order
-from .program import build_recall_statement
+from .program import build_find_statement
 
 _speaker_query_template = "{query}\nThe asking speaker is {label}."
 
 
 async def _timed[Result](name: str, operation: Awaitable[Result]) -> tuple[Result, float]:
-    """Await one recall phase under a matching mainboard span and wall clock."""
+    """Await one find phase under a matching OpenTelemetry span and wall clock."""
     started_at = perf_counter()
     with span(name):
         result = await operation
@@ -46,12 +46,12 @@ async def query_entities(query: str) -> list[str]:
     An off `graph_entity_seeding` skips the gate call entirely and seeds nothing, the
     diagnostic plan study's seeding ablation lever.
     """
-    if not settings.recall_graph_expansion_enabled or not settings.graph_entity_seeding:
+    if not settings.find_graph_expansion_enabled or not settings.graph_entity_seeding:
         return []
     return await GateClient.from_settings(settings).named_entities(query)
 
 
-async def recall(
+async def find(
     query: str,
     user: User,
     k: PositiveInt = 8,
@@ -62,7 +62,7 @@ async def recall(
 
         embed | entities
               |
-        recall statement, all lanes
+        find statement, all lanes
               |
         direct-source authority and cross-encoder rerank
               |
@@ -70,7 +70,7 @@ async def recall(
               |
         record fact access
 
-    Every recall runs the maximal plan, all lanes on in facts-first order, with no
+    Every find runs the maximal plan, all lanes on in facts-first order, with no
     query-time route classification. A misrouted query loses community and RAPTOR
     evidence the reranker cannot recover, overview-first packing buries fact evidence,
     and the zero-shot router measured 44% accuracy on the eval strata, so the plan is
@@ -97,8 +97,8 @@ async def evidence(
     k: PositiveInt = 8,
     token_budget: PositiveInt = settings.context_token_budget,
     plan: Plan | None = None,
-) -> RecallEvidence:
-    """The same retrieval `recall` runs, keeping the scores and mentions it computed.
+) -> FindEvidence:
+    """The same retrieval `find` runs, keeping the scores and mentions it computed.
 
     `find` reads both to decide whether the public web could add anything, so the decision
     costs one dictionary lookup rather than a second pass over the same evidence.
@@ -106,7 +106,7 @@ async def evidence(
     kept, ranking, named, _ = await _execute(
         query, user, k, token_budget, plan, record_access=True
     )
-    return RecallEvidence(candidates=kept, scores=ranking.scores, mentions=tuple(named))
+    return FindEvidence(candidates=kept, scores=ranking.scores, mentions=tuple(named))
 
 
 async def trace(
@@ -115,8 +115,8 @@ async def trace(
     k: PositiveInt = 8,
     token_budget: PositiveInt = settings.context_token_budget,
     plan: Plan | None = None,
-) -> RecallTrace:
-    """Explain one recall without changing fact access history."""
+) -> FindTrace:
+    """Explain one find without changing fact access history."""
     _, _, _, diagnostic = await _execute(query, user, k, token_budget, plan, record_access=False)
     return diagnostic
 
@@ -126,12 +126,12 @@ async def documents(
 ) -> list[UUID7]:
     """The distinct source documents one question names, in merit order, capped at `limit`.
 
-    Selection runs the same lanes and the same cross-encoder merit ordering `recall` runs and
+    Selection runs the same lanes and the same cross-encoder merit ordering `find` runs and
     then walks the whole ranking by document instead of by token budget, so a caller choosing
-    what to share sees the documents behind the evidence a recall would have shown it. The
+    what to share sees the documents behind the evidence a find would have shown it. The
     walk reads the ranking rather than the packed prefix because a prompt budget that hides
     the tenth document must not silently shrink a share. Selection never records fact access,
-    since choosing what to move is not remembering.
+    since choosing what to move is not keeping.
 
     scopes: keep only evidence standing in exactly this scope set. The source lane applies
         the same predicate inside its own rankings, so the per-lane cut is already spent on
@@ -143,7 +143,7 @@ async def documents(
     _, ranking, _, _ = await _execute(
         query,
         user,
-        k=limit * settings.recall_per_document,
+        k=limit * settings.find_per_document,
         token_budget=settings.context_token_budget,
         plan=None,
         record_access=False,
@@ -157,7 +157,6 @@ async def documents(
     return list(named)[:limit]
 
 
-@span("recall_context")
 async def _execute(
     query: str,
     user: User,
@@ -166,7 +165,7 @@ async def _execute(
     plan: Plan | None,
     record_access: bool,
     scopes: Scopes | None = None,
-) -> tuple[tuple[Candidate, ...], MeritOrder, list[str], RecallTrace]:
+) -> tuple[tuple[Candidate, ...], MeritOrder, list[str], FindTrace]:
     """Run the statement, merit ordering, packing, and optional access write.
 
     The packed prefix, the complete merit ordering with its scores, the query mentions, and
@@ -182,10 +181,10 @@ async def _execute(
     )
     embedded_result, entity_result = await asyncio.gather(
         _timed(
-            "recall_embedding",
+            "find_embedding",
             EmbedClient.from_settings(settings).embed([search_query], mode="query"),
         ),
-        _timed("recall_entity_detection", query_entities(query)),
+        _timed("find_entity_detection", query_entities(query)),
     )
     embedded, embedding_ms = embedded_result
     named, entity_detection_ms = entity_result
@@ -197,9 +196,9 @@ async def _execute(
         {} if scopes is None else {"qscopes": [str(scope) for scope in sorted(scopes)]}
     )
     rows, database_ms = await _timed(
-        "recall_database",
+        "find_database",
         user.exec[Candidate](
-            build_recall_statement(cast("Hashable", context), cast("Hashable", resolved)),
+            build_find_statement(cast("Hashable", context), cast("Hashable", resolved)),
             qvec=vector,
             qtext=search_query,
             qentities=named,
@@ -207,23 +206,23 @@ async def _execute(
             **restriction,
         ),
     )
-    ranking, rerank_ms = await _timed("recall_rerank", merit_order(rows, query))
+    ranking, rerank_ms = await _timed("find_rerank", merit_order(rows, query))
     packing_started_at = perf_counter()
-    with span("recall_packing"):
+    with span("find_packing"):
         kept = tuple(pack(deduplicate(ranking.candidates), token_budget))
     packing_ms = (perf_counter() - packing_started_at) * 1000
     access_recording_ms = 0.0
     if (
-        settings.recall_access_recording_enabled
+        settings.find_access_recording_enabled
         and record_access
         and (
             accessed := [candidate.fact_id for candidate in kept if candidate.fact_id is not None]
         )
     ):
         _, access_recording_ms = await _timed(
-            "recall_access_recording", _record_accesses(user, accessed)
+            "find_access_recording", _record_accesses(user, accessed)
         )
-    timing = RecallTiming(
+    timing = FindTiming(
         total_ms=(perf_counter() - started_at) * 1000,
         embedding_ms=embedding_ms,
         entity_detection_ms=entity_detection_ms,
@@ -237,9 +236,9 @@ async def _execute(
         selected_lanes=dict(Counter(candidate.lane.value for candidate in kept)),
     )
     if settings.profiling:
-        logger.info("recall profile {}", timing.model_dump_json())
+        logger.info("find profile {}", timing.model_dump_json())
     logger.info(
-        "recall selected {kept} candidates within the {budget} token budget",
+        "find selected {kept} candidates within the {budget} token budget",
         kept=len(kept),
         budget=token_budget,
     )
@@ -247,7 +246,7 @@ async def _execute(
         kept,
         ranking,
         named,
-        RecallTrace.build(
+        FindTrace.build(
             query,
             token_budget,
             rows,

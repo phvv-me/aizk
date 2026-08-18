@@ -37,8 +37,6 @@ const rasterExports = [
   ['social-card.svg', join(assets, 'social-card.png'), 1200, 630],
   ['social-card.svg', join(docs, 'public', 'social-card.png'), 1200, 630],
   ['social-card.svg', join(project, 'src', 'web', 'static', 'social-card.png'), 1200, 630],
-  ['thumbnail.svg', join(project, 'hackathon', 'thumbnail.png'), 1800, 1200],
-  ['thumbnail.svg', join(project, 'hackathon', 'media', 'thumbnail-devpost.png'), 1800, 1200],
 ];
 
 async function synchronize(target, expected) {

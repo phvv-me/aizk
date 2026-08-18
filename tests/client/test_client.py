@@ -434,7 +434,7 @@ def test_find_omits_an_unspecified_budget_and_scope(
     assert remote.calls == [("find", {"query": "question", "web": "auto", "fresh": False})]
 
 
-def test_remember_text_returns_the_typed_write_result(
+def test_keep_text_returns_the_typed_write_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     document = uuid7()
@@ -447,7 +447,7 @@ def test_remember_text_returns_the_typed_write_result(
     assert remote.calls == [("keep", {"text": "literal path.txt"})]
 
 
-def test_remember_rejects_upload_protocol_mismatches(
+def test_keep_rejects_upload_protocol_mismatches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -471,7 +471,7 @@ def test_remember_rejects_upload_protocol_mismatches(
         dbutil.run(client.keep(KeepRequest(upload=LocalUpload(path=source))))
 
 
-def test_remember_upload_hashes_streams_and_returns_the_final_receipt(
+def test_keep_upload_hashes_streams_and_returns_the_final_receipt(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -643,15 +643,15 @@ def test_command_text_does_not_block_a_tty_and_json_is_constant() -> None:
     assert CommandInput.text(None, terminal) is None
     assert CommandInput.text(None, pipe) == "piped"
     assert CommandInput.text("explicit", pipe) == "explicit"
-    assert ResultSerializer.json(UsageSummary(requests=2, recalls=1)) == (
+    assert ResultSerializer.json(UsageSummary(requests=2, finds=1)) == (
         "{\n"
         '  "artifact_reads": 0,\n'
         '  "downloaded_bytes": 0,\n'
         '  "duration_ms": 0.0,\n'
         '  "files": 0,\n'
+        '  "finds": 1,\n'
         '  "items": 0,\n'
-        '  "recalls": 1,\n'
-        '  "remembers": 0,\n'
+        '  "keeps": 0,\n'
         '  "request_bytes": 0,\n'
         '  "requests": 2,\n'
         '  "response_bytes": 0,\n'
@@ -677,7 +677,7 @@ def test_command_text_does_not_block_a_tty_and_json_is_constant() -> None:
         },
     ),
 )
-def test_remember_request_rejects_invalid_modes(
+def test_keep_request_rejects_invalid_modes(
     invalid: dict[str, JsonValue | LocalUpload | datetime],
 ) -> None:
     with pytest.raises(ValueError):

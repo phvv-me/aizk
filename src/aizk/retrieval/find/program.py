@@ -10,7 +10,7 @@ from sqlmodel.sql.expression import Select
 from ..models import Plan, QueryContext
 from ..models.lane import LaneSelect
 
-type RecallRow = tuple[
+type FindRow = tuple[
     str,
     UUID5 | UUID7,
     str,
@@ -29,12 +29,12 @@ type RecallRow = tuple[
     datetime | None,
     str,
 ]
-type RecallSelect = Select[RecallRow]
+type FindSelect = Select[FindRow]
 
 
 @cache
-def build_recall_statement(context: QueryContext, plan: Plan) -> RecallSelect:
-    """Build one recall as a single RLS-filtered SQL program returning ranked candidates.
+def build_find_statement(context: QueryContext, plan: Plan) -> FindSelect:
+    """Build one find as a single RLS-filtered SQL program returning ranked candidates.
 
         dense seeds -- neighbors -- ppr hops       dense -- bm25
                         |                               |
@@ -57,7 +57,7 @@ def build_recall_statement(context: QueryContext, plan: Plan) -> RecallSelect:
     return ordered([lane(context) for lane in plan.lanes])
 
 
-def ordered(lanes: list[LaneSelect]) -> RecallSelect:
+def ordered(lanes: list[LaneSelect]) -> FindSelect:
     """Union every lane and order the candidates by plan priority then lane rank.
 
     The materialized cut keeps the planner from re-evaluating the whole union per output
@@ -70,7 +70,7 @@ def ordered(lanes: list[LaneSelect]) -> RecallSelect:
     """
     candidates = union_all(*lanes).cte("ordered_context").prefix_with("MATERIALIZED")
     return cast(
-        "RecallSelect",
+        "FindSelect",
         select(
             candidates.c.lane,
             candidates.c.evidence_id,

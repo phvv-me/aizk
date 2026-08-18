@@ -34,7 +34,7 @@ belong in memory, and there is no clean way to take them back out once they are 
 
 ## One coherent topic per call
 
-Each call becomes one source document, and recall hands back sources as units. So the unit you
+Each call becomes one source document, and find hands back sources as units. So the unit you
 choose when writing is the unit somebody gets when asking.
 
 ```text
@@ -48,7 +48,7 @@ choose when writing is the unit somebody gets when asking.
 ```
 
 Keep related decisions and findings together. If three choices were made in the same review and
-they explain each other, they belong in one note, because splitting them means recall can return one
+they explain each other, they belong in one note, because splitting them means find can return one
 without the two that give it context.
 
 Split only for a real reason, and there are three.
@@ -62,7 +62,7 @@ Anything else is a preference, and the preference should be to keep it together.
 
 ## Give it a title
 
-The first level-one heading is what recall shows as the title, so make it the thing you would search
+The first level-one heading is what find shows as the title, so make it the thing you would search
 for rather than a label like Notes or Update.
 
 ```markdown
@@ -99,7 +99,7 @@ real date differs materially from today, such as recording a decision made three
 second only when the world supplies a genuine deadline, such as a contract that ends.
 
 Expiry is a hard boundary, not a reminder. Never use it to mean the note might go stale eventually,
-because when it passes the note stops showing up in ordinary recall.
+because when it passes the note stops showing up in ordinary find.
 [Time and history](/docs/user/concepts/time/) explains both clocks and what happens after expiry.
 
 ## Code, sparingly
@@ -139,7 +139,7 @@ later. Sharing later makes a copy, and copies drift.
 
 <div class="not-content">
 
-- [Asking memory well](/docs/user/using/recall/) is the other half of the loop.
+- [Asking memory well](/docs/user/using/find/) is the other half of the loop.
 - [Notes that stay useful](/docs/user/using/habits/) is the longer view on writing habits.
 - [Files, PDFs and web sources](/docs/user/using/files/) covers writing something you did not author.
 

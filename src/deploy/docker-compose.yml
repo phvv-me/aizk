@@ -142,7 +142,7 @@ services:
       - postgres
       - -c
       # pg_stat_statements rides alongside the vchord suite's own libraries so every profiling
-      # wave's Postgres-side query stats (Phase 2's build-slice and recall measurements) come
+      # wave's Postgres-side query stats for Phase 2 build slices and Find requests come
       # from the catalog view rather than an ad-hoc EXPLAIN ANALYZE per query; loading a shared
       # library only ever takes effect on the next Postgres start, `ops.setup`'s own
       # `CREATE EXTENSION IF NOT EXISTS pg_stat_statements` is the idempotent other half that
@@ -443,7 +443,7 @@ services:
               device_ids: ["${AIZK_LLM_GPU_DEVICE:-1}"]
               capabilities: ["gpu"]
 
-  # vLLM serves Qwen3-Reranker-4B over /v1/rerank, the cross-encoder second pass recall
+  # vLLM serves Qwen3-Reranker-4B over /v1/rerank, the cross-encoder second pass Find uses
   # uses to reorder its evidence lanes before packing. The hf-overrides block is the official
   # recipe that mounts the original Qwen3 reranker checkpoint as a sequence classifier scoring
   # yes/no token logits; score calibration additionally requires the official prompt scaffold,

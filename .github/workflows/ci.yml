@@ -1,12 +1,7 @@
 name: CI
 
-# One manifest, one environment. CI provisions the same chefe/pixi dev env the monorepo uses,
-# compiled from the `[tool.chefe]` table in pyproject.toml (plus `[project.dependencies]` and
-# `[dependency-groups]`), so a fresh solve reproduces the local gate instead of drifting. A
-# separate `uv sync` used to diverge here: a stale `uv.lock` and three missing type stubs left
-# 187 pyrefly errors that `chefe run typecheck` never saw. chefe closes that gap by building the
-# identical environment, pinning the fast-moving checkers, and routing the house packages to
-# their git source (PyPI lags their source at the same version number).
+# Python dependencies live in pyproject.toml and their exact resolutions live in uv.lock. The one
+# unreleased SQLAlchemy API is fixed to a reviewed commit in scripts/install-sqlalchemy.sh.
 on:
   pull_request:
   workflow_call: # publish.yml runs this exact gate on main before publishing
@@ -34,14 +29,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      # chefe owns dependencies, environments and tasks, and this action owns the bootstrap so
-      # the uv version, the cache paths and the cache key live in one repository rather than in
-      # each of ours. It installs the environment, so what follows is only the gates.
-      - uses: phvv-me/chefe/.github/actions/setup@main
-      - run: chefe run lint
-      - run: chefe run lint-imports
-      - run: chefe run typecheck
-      - run: chefe run infra-check
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --frozen --all-groups
+      - name: Install the reviewed SQLAlchemy row security revision
+        run: sh scripts/install-sqlalchemy.sh
+      - run: uv run --no-sync ruff check . && uv run --no-sync ruff format --check .
+      - run: uv run --no-sync lint-imports
+      - run: |
+          uv run --no-sync pyrefly check
+          uv run --no-sync ty check --python .venv --exit-zero-on-warning
+          uv run --no-sync mypy src/aizk src/eval
+      - run: |
+          CDK_OUTDIR=cdk.out uv run --no-sync python -m infra.aws.app
+          uv run --no-sync python -m pytest tests/deploy --no-cov
 
   # The suite is hermetic above the database seam (every model endpoint is faked), but the
   # database itself is real: the same VectorChord image the compose file ships, on the same host
@@ -71,7 +74,13 @@ jobs:
           --health-retries 12
     steps:
       - uses: actions/checkout@v6
-      - uses: phvv-me/chefe/.github/actions/setup@main
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --frozen --all-groups
+      - name: Install the reviewed SQLAlchemy row security revision
+        run: sh scripts/install-sqlalchemy.sh
       # the role bootstrap initdb/roles.sh performs against a compose volume; a service container
       # cannot mount repo files, so the same statements run here over the wire
       - name: bootstrap app role
@@ -84,7 +93,11 @@ jobs:
           ALTER DEFAULT PRIVILEGES IN SCHEMA public
             GRANT USAGE, SELECT ON SEQUENCES TO aizk_app;
           SQL
-      # `chefe run test` runs the two-pass coverage union: the default sysmon core cannot emit one
-      # async-with enter arc (graph/build.py retry loop), so that single test re-runs under the
-      # pytrace core and appends before the 100% gate is enforced on the union.
-      - run: chefe run test
+      # The default sysmon coverage core cannot emit one async-with enter arc in the graph build
+      # retry loop. That test runs once more under pytrace before the 100 percent gate is enforced.
+      - run: uv run --no-sync python -m pytest -n 4 --dist loadscope --benchmark-disable --cov-fail-under=0
+      - run: >-
+          COVERAGE_CORE=pytrace uv run --no-sync python -m pytest
+          tests/graph/test_build.py::test_write_graph_slice_retries_a_transient_db_conflict
+          -o addopts=--import-mode=importlib
+          --cov=aizk --cov-append --cov-report=term-missing

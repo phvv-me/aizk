@@ -30,19 +30,32 @@ Bedrock, ECS, EKS, S3, SageMaker, and other services that power the agent enviro
 | CockroachDB persistent memory | Documents, graph claims, temporal state, scopes, vectors, usage, and the durable queue use CockroachDB. | Cloud smoke passed |
 | Distributed Vector Indexing | C-SPANN powers the private scoped vector projection and the live cloud plan selected it in 7 milliseconds. | Ready in cloud |
 | ccloud CLI | The pinned CLI authenticates, inspects the cluster, and manages SQL users. | Ready, final deployment transcript pending |
-| Managed MCP | The official server has been authenticated and used for cluster inspection. | Ready, final read-only transcript pending |
+| Managed MCP | A fixed collector uses the official server for live cluster and bounded queue evidence through `get_cluster` and `select_query`. DeepSeek receives the normalized snapshot and no database tools. | Live service-key inspection passed |
+| Agent Skills | The queue steward loads the official cluster health and background job skills before it classifies evidence or recommends recovery. | Live skill-guided verdict passed |
 | AWS service | Two deployed Lambda functions serve the product and queue work. Private S3 stores original artifacts. EventBridge Scheduler wakes recovery work. | Cloud smoke passed |
-| Meaningful integration | The Logto protected Function URL completed modern discovery, all five tool discovery, private S3 upload, extraction, recall, and identity resolution against CockroachDB Cloud. | Cloud smoke passed |
+| Meaningful integration | The Logto protected Function URL completed modern discovery, all five tool discovery, private S3 upload, extraction, find, and identity resolution against CockroachDB Cloud. | Cloud smoke passed |
 | Working demo URL | The stable AWS Function URL serves the site, docs, browser UI, API, and MCP to invited Logto users. The public Native Codex client has no secret and reaches an accepted Logto sign-in request. | Ready for interactive rehearsal |
-| Public example material | Six curated public SWE reference notes exercise source, graph, community, and multihop recall in CockroachDB Cloud. They are the frozen demo corpus pending a final reference review. | Partial |
+| Public example material | Six curated public SWE reference notes exercise source, graph, community, and multihop find in CockroachDB Cloud. They are the frozen demo corpus pending a final reference review. | Partial |
 | Setup and run instructions | Product setup and local Lambda rehearsal are documented. A clean external rehearsal remains. | Partial |
 | Pre-existing work disclosure | [DISCLOSURE.md](DISCLOSURE.md) records shared code and development dates. | Ready |
 | Authorized third-party use | Dependencies, hosted services, and public data sources are identified in the disclosure. Final corpus terms still need review. | Partial |
 | English video under three minutes | [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md) targets two minutes and forty-five seconds. | Pending recording |
-| Video shows the project and memory layer working | The shot plan includes MCP writes, C-SPANN recall, the CockroachDB console, and Lambda. | Pending recording |
+| Video shows the project and memory layer working | The shot plan includes MCP writes, C-SPANN find, the CockroachDB console, and Lambda. | Pending recording |
 
-The entry does not claim the CockroachDB Agent Skills repository because it is not part of the
-application or operator workflow.
+The queue steward makes Managed MCP and the CockroachDB Agent Skills part of the operator workflow.
+Its service account is limited to Cluster Operator on the demonstration cluster. The runner makes
+only fixed read-only MCP calls and one fixed `SHOW JOBS` aggregate through a SQL login with only
+`VIEWJOB`. It sends only normalized operational evidence to DeepSeek and requires explicit
+approval before an AIZK domain command may retry work. The model has no database tools and cannot
+choose SQL.
+
+The redacted live verdict is in
+[`results/queue-steward-live.json`](results/queue-steward-live.json). It records the tools, skills,
+counts, safety boundary, and no-action conclusion without a credential, cluster identifier,
+organization value, source text, queue payload, or stored error.
+
+The matching gallery-safe capture is
+[`screenshots/queue-steward-live.png`](screenshots/queue-steward-live.png).
 
 ## Submission deliverables
 
@@ -77,7 +90,7 @@ The dated execution order and detailed acceptance criteria live in [PLAN.md](PLA
 - [x] Deploy the Lambda image and invoke setup successfully
 - [x] Load the bounded public SWE rehearsal corpus through the deployed MCP endpoint
 - [x] Confirm extraction drains without retained queue failures
-- [x] Capture cold and warm recall latency from AWS
+- [x] Capture cold and warm find latency from AWS
 - [x] Capture a redacted C-SPANN query plan from CockroachDB Cloud
 - [x] Run `status`, `keep`, and `find` as the judge-visible Maya identity
 - [ ] Verify the public demo without a local credential or private network

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-labelledby="title desc">
-  <title id="title">crAIZK</title>
+  <title id="title">AIZK</title>
   <desc id="desc">Shared memory for people, teams, and AI agents</desc>
   <rect width="1800" height="1200" fill="#fffaf1"/>
   <rect x="0" y="0" width="48" height="1200" fill="#315dff"/>
@@ -17,7 +17,7 @@
     </g>
     <circle cx="59" cy="56" r="5" fill="#ff6b4a" stroke="#fffaf1" stroke-width="2"/>
   </g>
-  <text x="574" y="548" fill="#17223b" font-family="'Space Grotesk', 'Noto Sans', sans-serif" font-size="236" font-weight="700" letter-spacing="-2.36">crAIZK</text>
+  <text x="574" y="548" fill="#17223b" font-family="'Space Grotesk', 'Noto Sans', sans-serif" font-size="236" font-weight="700" letter-spacing="-2.36">AIZK</text>
   <text x="590" y="640" fill="#17223b" opacity=".72" font-family="'Space Grotesk', 'Noto Sans', sans-serif" font-size="44" font-weight="500">Shared memory for people, teams, and AI agents</text>
   <g opacity=".9">
     <polyline points="590,850 832,782 1082,868 1330,752 1604,834" fill="none" stroke="#17223b" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>

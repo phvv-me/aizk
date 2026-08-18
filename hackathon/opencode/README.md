@@ -1,6 +1,6 @@
 # Isolated OpenCode rehearsal
 
-This directory is the complete nonsecret workspace used to test crAIZK as an external OpenCode
+This directory is the complete nonsecret workspace used to test AIZK as an external OpenCode
 client. Run it from the AIZK repository root on Linux. The image pin is deliberate because current
 OpenCode `1.18.18` does not negotiate MCP `2026-07-28`. The pinned `1.18.8` image passed direct
 Logto OAuth and an authenticated `status` call on August 13, 2026.

@@ -209,15 +209,15 @@ def test_rate_limit_drains_one_shared_burst_then_refuses_the_stranger() -> None:
     assert served == [context]  # only the admitted call ever reached the wrapped handler
 
 
-def test_identity_middleware_accounts_a_recall_tool_call_on_the_serving_span() -> None:
+def test_identity_middleware_accounts_a_find_tool_call_on_the_serving_span() -> None:
     user = User.private(uuid5())
     middleware = mcp_probe.transport_middleware(user)
-    context = tool_context(name="recall")
+    context = tool_context(name="find")
     reply = ToolResult(content=[mt.TextContent(type="text", text="evidence")])
 
     async def call_next(context: ToolContext) -> ToolResult:
         del context
-        annotate_operation(Usage.Event.Operation.recall)  # as the memory service stamps it
+        annotate_operation(Usage.Event.Operation.find_memory)  # as the memory service stamps it
         return reply
 
     result = dbutil.run(
@@ -227,7 +227,7 @@ def test_identity_middleware_accounts_a_recall_tool_call_on_the_serving_span() -
     assert result is reply
     capture = mcp_probe.captured.pop()
     assert not mcp_probe.captured
-    assert capture.operation is Usage.Event.Operation.recall
+    assert capture.operation is Usage.Event.Operation.find_memory
     assert capture.user_id == user.id
     assert capture.targets == (user.id,)
     assert context.message is not None
@@ -249,7 +249,7 @@ def test_unaccounted_tools_and_failed_calls_leave_no_capture() -> None:
 
     async def failing(context: ToolContext) -> ToolResult:
         del context
-        annotate_operation(Usage.Event.Operation.recall)  # stamped before the failure
+        annotate_operation(Usage.Event.Operation.find_memory)  # stamped before the failure
         raise ToolError("broken")
 
     dbutil.run(
@@ -260,7 +260,7 @@ def test_unaccounted_tools_and_failed_calls_leave_no_capture() -> None:
     with pytest.raises(ToolError, match="broken"):
         dbutil.run(
             mcp_probe.through_transport(
-                lambda: middleware.on_call_tool(tool_context(name="recall"), failing)
+                lambda: middleware.on_call_tool(tool_context(name="find"), failing)
             )
         )
     assert not mcp_probe.captured

@@ -4,7 +4,7 @@ description: "The passes that summarize an entity, reflect on it, and let it fad
 ---
 
 Three passes work on the graph after it exists. One keeps a readable summary per entity, one reflects
-over the graph as a whole, and one lets unused claims fade out of default recall. This page assumes
+over the graph as a whole, and one lets unused claims fade out of default find. This page assumes
 you know how a [scheduled job](/docs/dev/passes/jobs/) reaches one scope set and what the live view of
 a claim means, from [The bi-temporal model](/docs/dev/store/bitemporal/). In the web app an entity is
 a Subject and a fact is a Finding.
@@ -91,10 +91,10 @@ Relevance uses the database's own clock, so no timestamp crosses into Python.
 
 A claim is archived when its relevance falls under the floor. With the defaults a claim nobody has
 read is archived after two half lives, so 180 days, and a single read both resets the clock and
-doubles the multiplier, buying another 90 days. Reads keep memory alive, on the counters recall bumps.
+doubles the multiplier, buying another 90 days. Reads keep memory alive, on the counters find bumps.
 
 Archiving is not deleting. The update closes the claim's `recorded` range at `now()` and stamps
-`attributes` with a `decayed` timestamp. The row stays put, leaving the live view and default recall
+`attributes` with a `decayed` timestamp. The row stays put, leaving the live view and default find
 while staying readable to a history query or a past-date question. Only live claims with a valid
 period are eligible, so one already closed by a correction is untouched.
 
@@ -122,7 +122,7 @@ this runs under the database owner, since a merge spans what any one caller can 
 
 - [Communities](/docs/dev/passes/communities/) and [RAPTOR](/docs/dev/passes/raptor/) cluster the graph.
 - [The bi-temporal model](/docs/dev/store/bitemporal/) explains why archiving closes a range instead of deleting.
-- [The lanes](/docs/dev/read/lanes/) shows where profiles and observations enter recall.
+- [The lanes](/docs/dev/read/lanes/) shows where profiles and observations enter find.
 - [The job system](/docs/dev/passes/jobs/) has the schedules that trigger all of this.
 
 </div>

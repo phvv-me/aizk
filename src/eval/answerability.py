@@ -11,13 +11,13 @@ _JUDGE_MAX_TOKENS = 64
 
 
 class JudgeVerdict(FrozenModel):
-    """The judge's call on whether a recalled context answers a question."""
+    """The judge's call on whether retrieved context answers a question."""
 
     answerable: bool
 
 
 async def judge_answerable(question: str, context: str) -> bool:
-    """Ask the LLM whether a recalled context answers a question."""
+    """Ask the LLM whether retrieved context answers a question."""
     user = f"Question.\n{question}\n\nContext.\n{context}"
     verdict = await LLM.from_settings(settings).generate(
         _JUDGE_SYSTEM,

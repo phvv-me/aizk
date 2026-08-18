@@ -232,9 +232,9 @@ def test_processing_report_is_idle_only_after_backlog_and_failures_clear(
     )
 
     assert idle.state == "idle"
-    assert idle.recallable_lower_seconds == idle.enriched_lower_seconds == 0
+    assert idle.findable_lower_seconds == idle.enriched_lower_seconds == 0
     assert delayed.state == "delayed"
-    assert delayed.recallable_lower_seconds is None
+    assert delayed.findable_lower_seconds is None
     assert delayed.enriched_lower_seconds is None
 
 
@@ -248,7 +248,7 @@ def test_processing_report_does_not_predict_unmaterialized_downstream_work(
     )
 
     assert report.state == "active"
-    assert report.recallable_lower_seconds is not None
+    assert report.findable_lower_seconds is not None
     assert report.enriched_lower_seconds is None
     assert report.enriched_upper_seconds is None
 
@@ -337,7 +337,7 @@ def test_usage_report_reads_period_and_lifetime_from_the_durable_ledger(
         capture_key="recent-owner-operation",
         occurred_at=now - timedelta(days=1),
         user_id=owner,
-        operation=Usage.Event.Operation.recall,
+        operation=Usage.Event.Operation.find_memory,
         targets=(owner,),
         request_bytes=11,
         response_bytes=17,
@@ -371,7 +371,7 @@ def test_usage_report_reads_period_and_lifetime_from_the_durable_ledger(
     report = dbutil.run(body())
 
     assert report.summary.requests == 1
-    assert report.summary.recalls == 1
+    assert report.summary.finds == 1
     assert report.summary.shares == 0
     assert report.summary.items == 3
     assert report.summary.request_bytes == 11
@@ -379,5 +379,5 @@ def test_usage_report_reads_period_and_lifetime_from_the_durable_ledger(
     assert report.lifetime.requests == 2
     assert report.lifetime.shares == 1
     assert len(report.points) == 1
-    assert report.points[0].operation is Usage.Event.Operation.recall
+    assert report.points[0].operation == "find"
     assert report.points[0].bucket.date() == recent.occurred_at.date()

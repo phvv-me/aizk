@@ -3,7 +3,7 @@ title: "Communities"
 description: "Cutting the entity graph into themes small enough to summarize."
 ---
 
-Recall finds individual facts, so what is missing is the answer to a broad question no single fact
+Find finds individual facts, so what is missing is the answer to a broad question no single fact
 carries. This pass clusters the entity graph and summarizes each cluster. It assumes you know how a
 [scheduled job](/docs/dev/passes/jobs/) fans out per scope set and what the `community` and `entity`
 tables hold, from [Graph tables](/docs/dev/store/graph-tables/). The web app calls a community a
@@ -106,7 +106,7 @@ same swap across every stored scope set, the catch-up path after a deploy change
 
 - [RAPTOR](/docs/dev/passes/raptor/) rolls these summaries into a bounded tree.
 - [Profiles, insights, decay](/docs/dev/passes/profiles-insights/) covers the per-entity summaries and aging.
-- [The lanes](/docs/dev/read/lanes/) shows how recall actually reads communities.
+- [The lanes](/docs/dev/read/lanes/) shows how find actually reads communities.
 - [Graph tables](/docs/dev/store/graph-tables/) has the column-level detail.
 
 </div>

@@ -32,7 +32,7 @@ from aizk.integrations.web import (
     WebResult,
     WebSearcher,
 )
-from aizk.retrieval import RecallEvidence
+from aizk.retrieval import FindEvidence
 from aizk.store import Usage
 from aizk.store.identity import OrganizationStanding, User
 from aizk.web import (
@@ -121,7 +121,7 @@ def run(service: WebSearch, user: User, mode: WebMode = WebMode.auto, **kwargs: 
         service.run(
             user,
             cast("str", kwargs.get("query", "what changed upstream")),
-            RecallEvidence(),
+            FindEvidence(),
             mode,
             cast("bool", kwargs.get("fresh", False)),
             cast("list[str] | None", kwargs.get("scopes")),
@@ -394,7 +394,7 @@ def test_a_probe_reports_the_plan_without_calling_a_single_provider() -> None:
     searcher = ScriptedSearcher(results=(hit(),))
     service = Service(enabled(), planner(), searchers=(searcher,))
 
-    probe = dbutil.run(service.probe(caller, "what changed", RecallEvidence(), False, False))
+    probe = dbutil.run(service.probe(caller, "what changed", FindEvidence(), False, False))
 
     assert probe.egress_query == "how does a public thing work"
     assert probe.findings == ()
@@ -407,7 +407,7 @@ def test_a_probe_asked_to_execute_runs_one_real_search_for_an_operator_to_read()
     answering = ScriptedSearcher(results=(hit(),))
     service = Service(enabled(), planner(), searchers=(refusing, answering))
 
-    probe = dbutil.run(service.probe(caller, "what changed", RecallEvidence(), False, True))
+    probe = dbutil.run(service.probe(caller, "what changed", FindEvidence(), False, True))
 
     assert probe.findings == ("https://example.test/page",)
     assert answering.calls == ["how does a public thing work"]
@@ -419,7 +419,7 @@ def test_a_probe_that_the_router_refused_reports_the_refusal_and_stops() -> None
     caller = member()
     service = Service(enabled(), fake)
 
-    probe = dbutil.run(service.probe(caller, "what changed", RecallEvidence(), False, False))
+    probe = dbutil.run(service.probe(caller, "what changed", FindEvidence(), False, False))
 
     assert probe.refusal is Refusal.planner_declined
     assert probe.plan is None
@@ -432,7 +432,7 @@ def test_a_probe_the_sanitizer_refused_never_rehearses_a_provider() -> None:
         enabled(), planner(), searchers=(searcher,), gate=ScriptedGate(mentions=["a name"])
     )
 
-    probe = dbutil.run(service.probe(caller, "what changed", RecallEvidence(), False, True))
+    probe = dbutil.run(service.probe(caller, "what changed", FindEvidence(), False, True))
 
     assert probe.sanitizer is Refusal.sanitizer_refused
     assert probe.findings == ()

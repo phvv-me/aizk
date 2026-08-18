@@ -83,7 +83,7 @@ async def rebuild(
 
 
 async def decay(half_life_days: float = 90.0, user_id: UUID5 | None = None) -> int:
-    """Run the decay pass now, archiving stale facts that leave recall but stay in history."""
+    """Run the decay pass now, archiving stale facts that leave find but stay in history."""
     return await graph.decay(
         scopes=frozenset({user_id or system()}), half_life_days=half_life_days
     )
@@ -116,7 +116,7 @@ async def raptor(llm: LLM, embed: Embedder, user_id: UUID5 | None = None) -> int
 
 
 async def forget(query: str, k: int = 8, user_id: UUID5 | None = None) -> ForgetResult:
-    """Retract the claims a query's own source notes contributed, remember's erasure
+    """Retract the claims a query's own source notes contributed, keep's erasure
     counterpart."""
     actor = user_id or system()
     [vector] = await EmbedClient.from_settings(settings).embed([query], mode="query")

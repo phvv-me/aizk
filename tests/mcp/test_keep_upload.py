@@ -63,13 +63,13 @@ def upload() -> mcp_server.UploadDeclaration:
     )
 
 
-def test_remember_upload_mints_minimal_hash_bound_ticket() -> None:
+def test_keep_upload_mints_minimal_hash_bound_ticket() -> None:
     uploads = _MintingUploads()
     server = cast(AizkMCP, _Server(uploads))
-    remember = AizkMCP.keep_tool(server)
+    keep = AizkMCP.keep_tool(server)
 
     result = dbutil.run(
-        remember(
+        keep(
             context=cast(Context, object()),
             text="Companion context.",
             scopes=["Research"],
@@ -97,7 +97,7 @@ def test_remember_upload_mints_minimal_hash_bound_ticket() -> None:
         (None, False, None, datetime(2026, 1, 1, tzinfo=UTC)),
     ),
 )
-def test_remember_upload_rejects_uri_and_temporal_modes(
+def test_keep_upload_rejects_uri_and_temporal_modes(
     source_uri: str | None,
     preserve_source: bool,
     observed_at: datetime | None,
@@ -105,11 +105,11 @@ def test_remember_upload_rejects_uri_and_temporal_modes(
 ) -> None:
     uploads = _MintingUploads()
     server = cast(AizkMCP, _Server(uploads))
-    remember = AizkMCP.keep_tool(server)
+    keep = AizkMCP.keep_tool(server)
 
     with pytest.raises(ToolError, match="file upload cannot be combined"):
         dbutil.run(
-            remember(
+            keep(
                 context=cast(Context, object()),
                 source_uri=source_uri,
                 preserve_source=preserve_source,
@@ -143,12 +143,12 @@ def test_upload_declaration_advertises_and_validates_sha256() -> None:
         (UploadGrantLimitError("too many live upload grants"), "too many live upload grants"),
     ),
 )
-def test_remember_upload_translates_mint_failures(
+def test_keep_upload_translates_mint_failures(
     error: ValueError | UploadGrantLimitError,
     message: str,
 ) -> None:
     server = cast(AizkMCP, _Server(_FailingUploads(error)))
-    remember = AizkMCP.keep_tool(server)
+    keep = AizkMCP.keep_tool(server)
 
     with pytest.raises(ToolError, match=message):
-        dbutil.run(remember(context=cast(Context, object()), upload=upload()))
+        dbutil.run(keep(context=cast(Context, object()), upload=upload()))

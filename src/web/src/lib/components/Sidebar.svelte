@@ -45,7 +45,7 @@
 
   const icons: Record<NavIcon, typeof IconType> = {
     dashboard: LayoutDashboard,
-    recall: MessageCircleQuestion,
+    find: MessageCircleQuestion,
     explore: Compass,
     sources: FileText,
     findings: Lightbulb,

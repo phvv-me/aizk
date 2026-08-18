@@ -38,12 +38,12 @@ security matches a caller's scopes against those arrays.
 
    old ids on disk   ▓▓▓▓▓▓▓▓▓▓        rows still there, still intact
    new ids on caller           ░░░░░░  match nothing
-   what recall returns          (empty, and no error anywhere)
+   what find returns          (empty, and no error anywhere)
 ```
 
 So changing this value does not rename anything. It mints a second, disjoint universe of ids.
 Every stored row keeps pointing at scopes that no longer exist, every caller arrives holding
-scopes that match nothing, and row security correctly hides all of it. Nothing errors. Recall
+scopes that match nothing, and row security correctly hides all of it. Nothing errors. Find
 returns nothing, the dashboard shows an empty account, and the data is still sitting in the
 tables untouched. It is recoverable only by putting the old value back, which is why the failure
 is worse than a crash would be.
@@ -103,14 +103,14 @@ endpoint change against the same database.
    expected, it is not a fault to debug, and it is the one unavoidable interruption for users.
 
 6. **Verify before removing anything.** Sign in through the browser app, open the operator
-   console, and complete one MCP tool call. Then check that recall still returns rows, which is
+   console, and complete one MCP tool call. Then check that find still returns rows, which is
    the assertion that the namespace survived.
 
    ```sh
    docker exec aizk-worker-1 aizk admin health
    ```
 
-   `row_counts` unchanged and a `recall` block with candidates is the proof. Zero candidates
+   `row_counts` unchanged and a `find` block with candidates is the proof. Zero candidates
    against a populated `row_counts` is the namespace failure described above, and the fix is to
    put the constant back rather than to touch the data.
 

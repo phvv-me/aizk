@@ -1,6 +1,6 @@
 # Isolated Codex Luna rehearsal
 
-This directory holds the complete nonsecret workspace used to test crAIZK through Codex
+This directory holds the complete nonsecret workspace used to test AIZK through Codex
 `0.147.0` and `gpt-5.6-luna`. Run these commands from the AIZK repository root on Linux.
 
 Build the pinned client image.

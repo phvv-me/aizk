@@ -1,0 +1,57 @@
+{
+  "status": "passed",
+  "authentication": {
+    "method": "service_account_api_key_and_sql_monitor",
+    "cloud_role": "Cluster Operator",
+    "sql_privilege": "VIEWJOB",
+    "scope": "AIZK demonstration cluster only",
+    "cluster_auto_resolved": true
+  },
+  "architecture": {
+    "invocations": 1,
+    "model_calls": 1,
+    "evidence_collection": "fixed read-only Managed MCP calls and one fixed SHOW JOBS aggregate",
+    "model_access_to_database_tools": false,
+    "model_role": "typed advisory classification",
+    "effective_action_owner": "deterministic approval policy"
+  },
+  "verdict": {
+    "severity": "healthy",
+    "summary": "The cluster, current AIZK queue, and CockroachDB background jobs are healthy.",
+    "queue_failure_count": 0,
+    "cockroach_job_failure_count": 0,
+    "cockroach_job_paused_count": 0,
+    "cockroach_job_long_running_count": 0,
+    "action": "no_action",
+    "requires_approval": false
+  },
+  "evidence": [
+    "CockroachDB cluster state is CREATED on the BASIC plan",
+    "Current AIZK queue has 0 failed, 0 picked, and 0 queued tasks",
+    "Artifact conversions have 0 failed and 0 unreadable contents",
+    "Stored doctor reading is healthy, with 0 stale and 0 long-running picked tasks",
+    "Stored doctor history records 21 exception events, while the fixed two-hour history query returned 0; neither is a current failure",
+    "CockroachDB background jobs have 0 failed, 0 paused, and 0 running longer than two hours"
+  ],
+  "managed_mcp_tools": [
+    "get_cluster",
+    "select_query"
+  ],
+  "sql_statements": [
+    "SHOW JOBS"
+  ],
+  "agent_skills": [
+    "aizk-repair-queue",
+    "reviewing-cluster-health",
+    "monitoring-background-jobs"
+  ],
+  "privacy": {
+    "credentials_recorded": false,
+    "cluster_identifier_recorded": false,
+    "organization_data_recorded": false,
+    "source_text_recorded": false,
+    "queue_payloads_recorded": false,
+    "job_descriptions_recorded": false,
+    "stored_errors_recorded": false
+  }
+}

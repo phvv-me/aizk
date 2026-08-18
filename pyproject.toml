@@ -20,8 +20,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "sqlalchemy[asyncio]>=2.1.0b3,<3",
-    "sqlalchemy-cockroachdb>=2.0.4,<2.1",
+    "sqlalchemy[asyncio]==2.1.0b3",
+    "sqlalchemy-cockroachdb==2.0.4",
     "greenlet>=3,<4",
     "sqlmodel>=0.0.39,<0.1",
     "asyncpg>=0.31,<0.32",
@@ -45,8 +45,7 @@ dependencies = [
     "python-slugify>=8.0.4,<9",
     "inflection>=0.5.1,<0.6",
     "patos[sql]==0.0.12",
-    "rlsalchemy>=0.6.0,<0.7",
-    "mainboard>=0.0.9",
+    "rlsalchemy==0.6.0",
     "pgqueuer>=1.1.1,<2",
     "croniter>=6.2.4,<7",
     "pendulum>=3.2,<4",
@@ -77,7 +76,7 @@ aizk = "aizk.cli:main"
 aizk-eval = "eval.launcher:main"
 aizk-ocr-probe = "eval.ocr:main"
 
-# Dev-only Python deps (PEP 735). chefe reads this group into the pixi dev env, and the built
+# Dev-only Python deps (PEP 735). uv reads this group into the development environment, and the built
 # wheel never carries it. The checkers ride their latest releases now that the sqlmodel `Select`
 # imprecision is fixed at the source: statements handed to `AsyncSession.exec` carry sqlmodel's
 # `Select` (not SQLAlchemy's), so the ty 0.0.59 pin that once hid the 11 exec-overload mismatches
@@ -109,6 +108,7 @@ dev = [
     "boto3-stubs[lambda]>=1.40,<2",
     "aws-cdk-lib>=2.200,<3",
     "constructs>=10.4,<11",
+    "build>=1.3,<2",
     # checkers and linters, pinned to the versions the monorepo gate runs green on
     "ruff>=0.6",
     "pyrefly>=1.1.1,<2",
@@ -149,8 +149,9 @@ packages = ["src/aizk", "src/eval"]
 # `test_cockroach_ddl_quotes_grants_views_and_row_security` proves on every run. patos and rls
 # both require 2.1 for its CREATE VIEW construct, so the whole workspace resolves there and this
 # one stale cap is the only thing an override has to step over. Drop this when they ship 2.1.
-override-dependencies = ["sqlalchemy>=2.1.0b3,<3"]
+override-dependencies = ["sqlalchemy==2.1.0b3"]
 constraint-dependencies = ["fastmcp-slim==4.0.0b2"]
+prerelease = "allow"
 
 [tool.ruff]
 line-length = 99
@@ -166,7 +167,7 @@ known-first-party = ["aizk", "eval", "alembic"]
 "sqlalchemy.select".msg = "Use sqlmodel.select for every query."
 
 # The layered architecture below is enforced by import-linter (`lint-imports`, wired into
-# the CI lint job and `chefe run lint-imports-aizk`). docs/architecture.md defines the rules.
+# the CI lint job and `uv run --no-sync lint-imports`). docs/architecture.md defines the rules.
 [tool.importlinter]
 root_packages = ["aizk"]
 include_external_packages = true
@@ -232,11 +233,11 @@ allow_indirect_imports = true
 [tool.pyrefly]
 project-includes = ["src/aizk", "src/eval", "infra", "tests"]
 search-path = ["src", "tests", "."]
-python-interpreter-path = "../../.chefe/.pixi/envs/default/bin/python"
+python-interpreter-path = ".venv/bin/python"
 replace-imports-with-any = ["sqlmodel.ext.*"]
 
 [tool.ty.environment]
-python = "../../.chefe/.pixi/envs/default"
+python = ".venv"
 root = ["src"]
 
 # ty covers src as the second checker beside pyrefly, which also covers tests.
@@ -282,7 +283,7 @@ pythonpath = [".", "tests", "src"]
 markers = [
     "benchmark: statistical retrieval benchmarks requiring the frozen live corpus and model stack",
     "integration: tests that require real external service boundaries",
-    "artifact_stack: the complete PostgreSQL, PgQueuer, object, scan, conversion, model, recall, and resource path",
+    "artifact_stack: the complete PostgreSQL, PgQueuer, object, scan, conversion, model, Find, and resource path",
     "real_services: exercises real serving-client construction over an in-test transport double, opting out of the default model-lane stubbing",
 ]
 
@@ -301,51 +302,3 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "\\.\\.\\.",
 ]
-
-# chefe reads this table as the dev-env manifest (compiled to pixi). Runtime deps come from
-# [project.dependencies], dev tools from [dependency-groups].dev; this table adds only the conda
-# interpreter, the git routing for the house packages (PyPI lags their source at the same version
-# number), the sqlalchemy pre-release solver hint, and the CI tasks. The pyrefly/ty interpreter is
-# pointed at the compiled pixi env at task time, so it works standalone in CI and never depends on
-# the monorepo path baked into [tool.pyrefly]/[tool.ty] (which still serves the monorepo gates).
-[tool.chefe.workspace]
-platforms = ["linux-64"]
-
-[tool.chefe.conda]
-python = ">=3.14.6,<3.15"
-nodejs = ">=24,<25"
-
-[tool.chefe.nodejs]
-manager = "npm"
-
-[tool.chefe.nodejs.dev.deps]
-aws-cdk = ">=2.200, <3"
-
-[tool.chefe.python]
-prerelease-mode = "allow"
-
-[tool.chefe.python.dependency-overrides]
-sqlalchemy = { git = "https://github.com/Pedrexus/sqlalchemy.git", rev = "1bbe0d64d6017b346a5e6f7bf784ba7a3294662f" }
-
-[tool.chefe.sources]
-# Immutable public revisions keep standalone CI and local development on the same row security
-# implementation while the upstream changes are reviewed.
-sqlalchemy = { provider = "git", git = "https://github.com/Pedrexus/sqlalchemy.git", rev = "1bbe0d64d6017b346a5e6f7bf784ba7a3294662f" }
-rlsalchemy = { provider = "git", git = "https://github.com/phvv-me/rls.git", rev = "16a7798ffcae819a8bf3e7114344e9e99c1be8f6" }
-
-[tool.chefe.tasks]
-lint = { run = "ruff check . && ruff format --check ." }
-lint-imports = "lint-imports"
-typecheck = { run = "pyrefly check --python-interpreter-path \"$CONDA_PREFIX/bin/python\" && ty check --python \"$CONDA_PREFIX\" --exit-zero-on-warning && mypy src/aizk src/eval" }
-test = { run = "python -m pytest -n 4 --dist loadscope --benchmark-disable --cov-fail-under=0 && COVERAGE_CORE=pytrace python -m pytest 'tests/graph/test_build.py::test_write_graph_slice_retries_a_transient_db_conflict' -o addopts='--import-mode=importlib' --cov=aizk --cov-append --cov-report=term-missing" }
-infra-synth = { run = "python -m infra.aws.app", env = { CDK_OUTDIR = "cdk.out" } }
-infra-test = { run = "python -m pytest tests/deploy --no-cov" }
-infra-check = { depends = ["infra-synth", "infra-test"] }
-aizk-auth-check = { run = "python -m infra.aws.logto verify", description = "refuse deployment unless AIZK uses a distinct Native Logto client with every fixed agent callback" }
-infra-bootstrap = { run = "cdk bootstrap --app 'python -m infra.aws.app'" }
-infra-deploy = { run = "cdk deploy --app 'python -m infra.aws.app'", depends = ["aizk-auth-check"] }
-ccloud-build = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml build ccloud" }
-ccloud = { run = "sh -lc 'docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud \"$@\"' --" }
-ccloud-check = { run = "docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud version && docker run --rm --entrypoint cockroach-sql aizk-cockroachdb-ccloud:0.6.12 --version", depends = [
-    "ccloud-build",
-] }

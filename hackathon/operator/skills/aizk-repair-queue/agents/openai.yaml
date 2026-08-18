@@ -1,0 +1,13 @@
+interface:
+  display_name: "AIZK Queue Steward"
+  short_description: "Diagnose and safely recover AIZK queue failures"
+  default_prompt: "Use $aizk-repair-queue to diagnose the live AIZK queue and recommend the safest bounded recovery."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "cockroachdb-cloud"
+      description: "Read-only CockroachDB Cloud cluster and SQL diagnostics"
+      transport: "streamable_http"
+      url: "https://cockroachlabs.cloud/mcp"
+policy:
+  allow_implicit_invocation: false

@@ -12,7 +12,7 @@ from sqlmodel import select
 
 from ...mixins import TableBase
 
-type QuotaKind = Literal["operation", "remember", "web"]
+type QuotaKind = Literal["operation", "keep", "web"]
 
 
 class MonthlyQuotaCounter(TableBase, table=True):

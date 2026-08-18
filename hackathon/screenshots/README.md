@@ -1,19 +1,32 @@
-# Screenshot shot list
+# Owner screenshot shot list
 
-Every capture should be cropped tightly enough to read at Devpost thumbnail size. Use only the
-public demonstration account and corpus.
+Most gallery media is ready in `../media`. Only two authenticated captures remain. Crop each to a
+3 to 2 image at 1800 by 1200 pixels. Use only the fictional demonstration account and corpus.
 
-The default submission thumbnail is generated at `../thumbnail.png` from the canonical 3 to 2
-brand source. Replace it only when a stronger final product capture is ready.
+The redacted live queue steward capture is ready as
+[`queue-steward-live.png`](queue-steward-live.png). It was rendered from the successful staging
+verdict and contains no credential, cluster identifier, database name, or user data.
 
-1. A grounded `find` result with source excerpt, document handle, and privacy receipt
-2. CockroachDB tables for documents, chunks, temporal claims, scoped vectors, and queue state
-3. EXPLAIN ANALYZE showing C-SPANN on the scoped vector projection
-4. The completed worker Lambda invocation with duration and no error
-5. Lambda logs, the gross-cost budget, and the EventBridge recovery schedule
-6. ccloud cluster inspection with no credential or connection string visible
-7. The architecture diagram from [ARCHITECTURE.md](../ARCHITECTURE.md)
-8. Optional Managed MCP read-only schema or plan inspection
+## Authenticated dashboard
+
+1. Open the deployed `/app/` route and sign in as the fictional Maya account.
+2. Open the dashboard overview.
+3. Keep the navigation, organization summary, metrics, processing health, and recent sources in
+   view.
+4. Hide browser bookmarks, extensions, other tabs, and the full address bar if it contains state.
+5. Save the result as `../media/04-authenticated-dashboard.jpg`.
+
+## Agent Keep and Find
+
+1. Start Claude Code or Codex in the clean demonstration workspace.
+2. Confirm the AIZK MCP connection without showing OAuth codes or local configuration files.
+3. Keep a short fictional Project Atlas decision in a shared Northstar organization.
+4. Ask a differently worded question whose answer depends on that decision.
+5. Capture the Keep confirmation and the grounded Find answer together. The Find answer must show
+   a source excerpt or document handle and the privacy receipt.
+6. Make sure the output says Find and Keep only. It must not say Recall or Remember.
+7. Save the result as `../media/05-agent-keep-and-find.jpg`.
 
 Do not capture another production deployment, private notes, local shell history, SSM values,
-Logto identifiers, or OpenRouter keys.
+Logto identifiers, OAuth codes, passwords, internal database names, or OpenRouter keys. Do not show
+dates in the fictional content.

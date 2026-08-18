@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-labelledby="title desc">
+  <title id="title">AWS staging operations</title>
+  <desc id="desc">A privacy-safe operational summary of the AIZK AWS staging deployment, including Lambda memory, queue health, errors, throttles, and supporting services.</desc>
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.2" fill="#18233f" opacity=".09"/>
+    </pattern>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#18233f" flood-opacity=".10"/>
+    </filter>
+    <style>
+      .display { font: 700 58px Georgia, serif; fill: #18233f; }
+      .subtitle { font: 400 24px system-ui, sans-serif; fill: #5a6276; }
+      .eyebrow { font: 700 16px ui-monospace, monospace; letter-spacing: 3px; fill: #365ff7; }
+      .heading { font: 700 27px system-ui, sans-serif; fill: #18233f; }
+      .label { font: 700 16px ui-monospace, monospace; fill: #5a6276; letter-spacing: 1px; }
+      .value { font: 700 50px Georgia, serif; fill: #18233f; }
+      .detail { font: 400 18px system-ui, sans-serif; fill: #5a6276; }
+      .service { font: 700 21px system-ui, sans-serif; fill: #18233f; }
+      .service-detail { font: 400 16px system-ui, sans-serif; fill: #5a6276; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1200" rx="38" fill="#faf6ee"/>
+  <rect width="1800" height="1200" rx="38" fill="url(#dots)"/>
+
+  <text class="eyebrow" x="80" y="72">AWS STAGING EVIDENCE</text>
+  <text class="display" x="80" y="142">Bounded serverless operation in Singapore</text>
+  <text class="subtitle" x="82" y="190">Redacted CloudFormation, Lambda, queue, and logging checks for the live AIZK deployment</text>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="255" width="1640" height="150" rx="28" fill="#18233f"/>
+  </g>
+  <circle cx="135" cy="330" r="14" fill="#27c88b"/>
+  <text x="170" y="342" style="font:700 34px system-ui,sans-serif;fill:#fffaf0">CloudFormation UPDATE_COMPLETE</text>
+  <text x="1650" y="342" text-anchor="end" style="font:500 21px ui-monospace,monospace;fill:#dce5ff">ap-southeast-1</text>
+
+  <text class="heading" x="80" y="485">Operational snapshot</text>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="530" width="360" height="220" rx="26" fill="#ffffff" stroke="#d8cfbf" stroke-width="3"/>
+    <text class="label" x="125" y="585">ERRORS</text>
+    <text class="value" x="125" y="662">0</text>
+    <text class="detail" x="125" y="708">CloudWatch matches</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="480" y="530" width="360" height="220" rx="26" fill="#ffffff" stroke="#d8cfbf" stroke-width="3"/>
+    <text class="label" x="525" y="585">THROTTLES</text>
+    <text class="value" x="525" y="662">0</text>
+    <text class="detail" x="525" y="708">Lambda invocations</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="880" y="530" width="360" height="220" rx="26" fill="#ffffff" stroke="#d8cfbf" stroke-width="3"/>
+    <text class="label" x="925" y="585">WORK QUEUE</text>
+    <text class="value" x="925" y="662">0 · 0 · 0</text>
+    <text class="detail" x="925" y="708">pending · running · failed</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1280" y="530" width="440" height="220" rx="26" fill="#ffffff" stroke="#d8cfbf" stroke-width="3"/>
+    <text class="label" x="1325" y="585">MAX MEMORY USED</text>
+    <text class="value" x="1325" y="652">500 / 540 MB</text>
+    <text class="detail" x="1325" y="708">MCP Lambda · worker Lambda</text>
+  </g>
+
+  <text class="heading" x="80" y="850">Meaningfully integrated AWS services</text>
+
+  <rect x="80" y="895" width="242" height="190" rx="24" fill="#dfe7ff"/>
+  <text class="service" x="115" y="948">Lambda</text>
+  <text class="service-detail" x="115" y="985">Public MCP, web app,</text>
+  <text class="service-detail" x="115" y="1013">and durable worker</text>
+
+  <rect x="348" y="895" width="242" height="190" rx="24" fill="#ffe3d8"/>
+  <text class="service" x="383" y="948">Amazon S3</text>
+  <text class="service-detail" x="383" y="985">Encrypted private</text>
+  <text class="service-detail" x="383" y="1013">source originals</text>
+
+  <rect x="616" y="895" width="242" height="190" rx="24" fill="#dfe7ff"/>
+  <text class="service" x="651" y="948">EventBridge</text>
+  <text class="service-detail" x="651" y="985">Warm requests and</text>
+  <text class="service-detail" x="651" y="1013">queue recovery</text>
+
+  <rect x="884" y="895" width="242" height="190" rx="24" fill="#ffe3d8"/>
+  <text class="service" x="919" y="948">Amazon ECR</text>
+  <text class="service-detail" x="919" y="985">Immutable scanned</text>
+  <text class="service-detail" x="919" y="1013">container images</text>
+
+  <rect x="1152" y="895" width="242" height="190" rx="24" fill="#dfe7ff"/>
+  <text class="service" x="1187" y="948">CloudWatch</text>
+  <text class="service-detail" x="1187" y="985">Structured logs with</text>
+  <text class="service-detail" x="1187" y="1013">one-week retention</text>
+
+  <rect x="1420" y="895" width="300" height="190" rx="24" fill="#ffe3d8"/>
+  <text class="service" x="1455" y="948">SSM and Budgets</text>
+  <text class="service-detail" x="1455" y="985">Runtime secrets and</text>
+  <text class="service-detail" x="1455" y="1013">cost notifications</text>
+</svg>

@@ -15,7 +15,7 @@ from .models import EmbedImage, EmbedMode, ImageBytes
 
 @runtime_checkable
 class Embedder(Protocol):
-    """The text embedding surface recall and the graph builders consume."""
+    """The text embedding surface find and the graph builders consume."""
 
     async def embed(self, texts: list[str], mode: EmbedMode = "document") -> list[list[float]]: ...
 

@@ -90,7 +90,7 @@ class User(rls.Context, prefix="app"):
     scopes: ScopeTable = ScopeTable()
     # Written into the transaction alongside `scopes`, so row security can refuse the
     # operator readings to a caller without the role rather than trusting every endpoint to
-    # remember the check. Nothing may set it directly; `authorized` derives it from Logto.
+    # keep the check. Nothing may set it directly; `authorized` derives it from Logto.
     operator: bool = False
     organizations: tuple[OrganizationStanding, ...] = Field(default=(), exclude=True)
 

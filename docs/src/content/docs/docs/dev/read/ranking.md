@@ -3,7 +3,7 @@ title: "Fusion and reranking"
 description: "Reciprocal rank fusion in SQL, then one cross-encoder ordering everything by merit."
 ---
 
-Ranking happens twice. PostgreSQL fuses three chunk rankings into one score inside the recall
+Ranking happens twice. PostgreSQL fuses three chunk rankings into one score inside the find
 statement, and Python reorders the whole candidate list afterward with a cross encoder. This page
 assumes you have read [the lanes](/docs/dev/read/lanes/), since the first half is what
 `SourceLane` calls. The code is `src/aizk/store/models/tables/chunk.py` and
@@ -17,7 +17,7 @@ assumes you have read [the lanes](/docs/dev/read/lanes/), since the first half i
                         + promoted_bonus, + 1.0 when named
                                                   │
                                                   ▼
-                 at most recall_per_document per document, then k
+                 at most find_per_document per document, then k
                                                   │
                                                   ▼
                   cross encoder scores the first rerank_depth
@@ -33,7 +33,7 @@ merge. The dense and lexical rankings reach that cut through `Chunk.ranking`, wh
 each one an index walk instead of a scan.
 
 **Dense** ranks `embedding @ qvec` ascending, guarded by `embedding IS NOT NULL`,
-`distance < recall_max_distance` and `Document.is_active()`. The floor is what keeps an off-corpus
+`distance < find_max_distance` and `Document.is_active()`. The floor is what keeps an off-corpus
 question from returning its least bad match.
 
 **Lexical** is BM25 through VectorChord. The query goes through
@@ -103,7 +103,7 @@ which is deliberate because it is roughly two orders of magnitude larger than an
 functions as a class rather than as a weight.
 
 A `row_number()` partitioned by `document_id` and ordered by score then enforces
-`recall_per_document`, three by default, so one long document cannot fill the whole lane. The
+`find_per_document`, three by default, so one long document cannot fill the whole lane. The
 survivors order by score and cut at `k`. The lane also projects `named_in_query()` as `direct`,
 which is the only place that flag is set.
 

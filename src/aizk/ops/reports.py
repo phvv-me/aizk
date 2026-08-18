@@ -72,8 +72,8 @@ class ScopeHealth(FrozenModel):
     last_projection_at: datetime | None
 
 
-class RecallHealth(FrozenModel):
-    """Record one bounded real recall over the largest corpus visible to its scope set."""
+class FindHealth(FrozenModel):
+    """Record one bounded real find over the largest corpus visible to its scope set."""
 
     query: str
     scopes: tuple[UUID5, ...]
@@ -88,8 +88,8 @@ class ActorUsage(FrozenModel):
     """Aggregate successful work and transferred bytes for one authenticated caller."""
 
     actor_id: UUID5
-    recalls: int
-    remembers: int
+    finds: int
+    keeps: int
     files: int
     shares: int
     artifact_reads: int
@@ -101,8 +101,8 @@ class ScopeUsage(FrozenModel):
     """Attribute successful work to one private or organization target scope."""
 
     scope_id: UUID5
-    recalls: int
-    remembers: int
+    finds: int
+    keeps: int
     files: int
     shares: int
     artifact_reads: int
@@ -133,7 +133,7 @@ class ScopeStorage(FrozenModel):
 
 
 class HealthReport(FrozenModel):
-    """Combine schema, RLS, storage, queue, models, identity, corpora, and recall health."""
+    """Combine schema, RLS, storage, queue, models, identity, corpora, and find health."""
 
     migration: SchemaHealth
     rls_violations: list[str]
@@ -147,5 +147,5 @@ class HealthReport(FrozenModel):
     scopes: list[ScopeUsage]
     scope_storage: list[ScopeStorage]
     storage: StorageHealth
-    recall: RecallHealth | None
+    find: FindHealth | None
     duration_ms: float

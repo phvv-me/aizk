@@ -122,7 +122,7 @@ class ConvertedArtifact(FrozenModel):
 
 
 class ArtifactDocument(FrozenModel):
-    """Render one file revision into deterministic source text for recall."""
+    """Render one file revision into deterministic source text for find."""
 
     filename: str
     media_type: str

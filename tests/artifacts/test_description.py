@@ -312,6 +312,31 @@ def test_description_enricher_replaces_embedded_images_and_deduplicates_bytes() 
     assert restored.caption.provider == "CoreWeave"
 
 
+def test_description_enricher_keeps_svg_alt_text_without_captioning_icons() -> None:
+    captioner = Captioner()
+    svg = base64.b64encode(b'<svg aria-label="search"></svg>').decode()
+    raster = base64.b64encode(b"chart").decode()
+    markdown = (
+        f"Before ![architecture](data:image/svg+xml;base64,{svg}) "
+        f"![](data:image/svg+xml;base64,{svg}) "
+        f'<img class="icon" src="data:image/svg+xml;base64,{svg}" alt="system map"> '
+        f'<img alt="" src="data:image/svg+xml;base64,{svg}"> '
+        f"![latency](data:image/png;base64,{raster}) after."
+    )
+
+    described = asyncio.run(
+        ImageDescriptionEnricher(captioner, 100).enrich(original(), b"html", markdown)
+    )
+
+    assert "data:image" not in described.markdown
+    assert "*architecture*" in described.markdown
+    assert "*system map*" in described.markdown
+    assert "search" not in described.markdown
+    assert captioner.calls == [(b"chart", "image/png", "latency")]
+    assert len(described.figures) == 1
+    assert described.figures[0].ordinal == 2
+
+
 def test_description_enricher_appends_direct_image_caption_and_leaves_text_alone() -> None:
     captioner = Captioner()
     enricher = ImageDescriptionEnricher(captioner, 100)

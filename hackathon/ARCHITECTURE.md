@@ -1,6 +1,6 @@
-# crAIZK architecture
+# AIZK architecture
 
-crAIZK is the CockroachDB and AWS deployment of AIZK. It gives MCP agents durable, scoped,
+AIZK is the CockroachDB and AWS deployment of AIZK. It gives MCP agents durable, scoped,
 temporal memory while keeping source evidence, derived graph knowledge, authorization, vectors,
 and queue state transactionally consistent.
 
@@ -17,8 +17,11 @@ flowchart LR
     Worker --> Models[Embedding and extraction models]
     Worker --> CRDB
     Worker --> S3
-    Deploy[Deployment operator] -->|setup event| Worker
-    Operator[ccloud and Managed MCP] --> CRDB
+    Deploy[ccloud deployment agent] -->|setup event| Worker
+    Deploy --> CRDB
+    Steward[Queue steward] --> Skills[Agent Skills]
+    Steward -->|read-only Managed MCP| CRDB
+    Steward -->|approved AIZK retry| Worker
     CRDB --> MCP
     MCP --> Agent
 ```
@@ -50,9 +53,13 @@ returns source-labelled evidence. The answering agent remains responsible for sy
 ## CockroachDB tools
 
 Distributed Vector Indexing is in the user request path. The ccloud CLI manages the cluster and SQL
-users through a pinned, machine-readable command surface. CockroachDB Cloud Managed MCP gives the
-operator and development agent a read-only schema, plan, and performance inspection surface. The
-latter two are operator tools and never receive an end user's memory request.
+users through a pinned, machine-readable command surface. The queue steward uses fixed CockroachDB
+Cloud Managed MCP calls for live read-only cluster and bounded queue evidence. DeepSeek receives a
+normalized snapshot without database tools and applies the official cluster health and background
+job Agent Skills. The same steward invocation runs one fixed `SHOW JOBS` aggregate through a SQL
+login with only `VIEWJOB`, covering the operational state Managed MCP does not expose. A
+deterministic policy owns the effective action. Repairs remain bounded AIZK domain commands that
+require operator approval. These operator tools never receive an end user's memory request.
 
 ## AWS services
 
@@ -81,7 +88,7 @@ Direct scoped C-SPANN execution takes 3 to 7 milliseconds in the local corpus ra
 six-document SWE workload showed that this index is not the end-to-end limit. Warm query embedding
 had a 0.47 second warm median, while the composed CockroachDB stage had a 1.55 second median.
 The underlying scoped C-SPANN probe executed in 7 ms, so the remaining cost lives in connection,
-authority, and composed lane work rather than vector search. crAIZK
+authority, and composed lane work rather than vector search. AIZK
 therefore disables profiles, RAPTOR, reranking, and access recording, but retains source, community,
 entity catalog, and graph evidence because those lanes improved answer quality. Source-first packing
 prevents broad graph facts from burying direct evidence. [The dated cloud record](PERFORMANCE.md)

@@ -22,7 +22,7 @@
     callbackPath: string;
   };
 
-  const resources: Record<Exclude<AppView, 'overview' | 'recall'>, string> = {
+  const resources: Record<Exclude<AppView, 'overview' | 'find'>, string> = {
     explore: '/api/graph?limit=40',
     sources: '/api/sources',
     findings: '/api/findings',
@@ -34,7 +34,7 @@
   };
   const titles: Record<AppView, string> = {
     overview: 'Dashboard',
-    recall: 'Recall',
+    find: 'Find',
     explore: 'Explore',
     sources: 'Sources',
     findings: 'Findings',
@@ -104,7 +104,7 @@
     result = null;
     contentLoading = true;
     try {
-      if (next === 'recall') return;
+      if (next === 'find') return;
       if (next === 'overview') {
         const responses = await Promise.allSettled([
           request<Me>('/api/me'),
@@ -133,17 +133,17 @@
     }
   }
 
-  async function recall(): Promise<void> {
+  async function find(): Promise<void> {
     error = '';
     result = null;
     contentLoading = true;
     try {
-      result = await request<JsonValue>('/api/recall', {
+      result = await request<JsonValue>('/api/find', {
         method: 'POST',
         body: JSON.stringify({ query })
       });
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Recall failed.';
+      error = cause instanceof Error ? cause.message : 'Find failed.';
     } finally {
       contentLoading = false;
     }
@@ -186,7 +186,7 @@
       <div class="signin-copy">
         <p>Your knowledge workspace</p>
         <h1>Memory that stays connected</h1>
-        <span>Sign in to recall what your team knows, inspect sources and follow every connection back to evidence.</span>
+        <span>Sign in to find what your team knows, inspect sources and follow every connection back to evidence.</span>
         <button onclick={signIn}>Create account or sign in</button>
         <a href="/docs/user/quickstart/">Read the quickstart</a>
         {#if error}<div class="auth-error">{error}</div>{/if}
@@ -205,10 +205,10 @@
           {#if result !== null && itemCount(result) !== null}<span>{itemCount(result)} visible items</span>{/if}
         </header>
 
-        {#if view === 'recall'}
-          <section class="recall-card">
+        {#if view === 'find'}
+          <section class="find-card">
             <p>Ask across every source you can access. AIZK keeps evidence and scope attached.</p>
-            <form onsubmit={(event) => { event.preventDefault(); recall(); }}>
+            <form onsubmit={(event) => { event.preventDefault(); find(); }}>
               <input bind:value={query} required placeholder="What does the team know about…" />
               <button type="submit" disabled={contentLoading}>{contentLoading ? 'Searching' : 'Ask memory'}</button>
             </form>
@@ -253,13 +253,13 @@
   .resource-heading { display: flex; align-items: end; justify-content: space-between; margin-bottom: 1.5rem; }
   .resource-heading h1 { margin: 0; font-family: var(--font-brand); font-size: 2.5rem; letter-spacing: -.05em; }
   .resource-heading > span { border: 1px solid #dfe3eb; border-radius: 999px; background: white; padding: .4rem .7rem; color: #727b8d; font-size: .65rem; }
-  .recall-card, .loading-panel { border: 1px solid #dfd1b8; border-radius: .6rem; background: white; padding: 1.2rem; }
-  .recall-card p { margin: 0 0 1rem; color: #778093; font-size: .75rem; }
-  .recall-card form { display: flex; gap: .7rem; }
-  .recall-card input { min-width: 0; flex: 1; border: 1px solid #dce1e9; border-radius: .65rem; background: #f8f9fb; padding: .8rem 1rem; color: #172033; font: inherit; }
-  .recall-card button { border: 0; border-radius: .65rem; background: #315dff; padding: .75rem 1.1rem; color: white; font: inherit; font-size: .75rem; font-weight: 700; cursor: pointer; }
+  .find-card, .loading-panel { border: 1px solid #dfd1b8; border-radius: .6rem; background: white; padding: 1.2rem; }
+  .find-card p { margin: 0 0 1rem; color: #778093; font-size: .75rem; }
+  .find-card form { display: flex; gap: .7rem; }
+  .find-card input { min-width: 0; flex: 1; border: 1px solid #dce1e9; border-radius: .65rem; background: #f8f9fb; padding: .8rem 1rem; color: #172033; font: inherit; }
+  .find-card button { border: 0; border-radius: .65rem; background: #315dff; padding: .75rem 1.1rem; color: white; font: inherit; font-size: .75rem; font-weight: 700; cursor: pointer; }
   .loading-panel { display: flex; align-items: center; gap: .7rem; color: #7c8494; font-size: .75rem; }
   .loading-panel i { width: .8rem; height: .8rem; border: 2px solid #d6def8; border-top-color: #315dff; border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @media (max-width: 767px) { .app-main { width: 100%; margin-left: 0; padding: 1.25rem 1rem 2rem; } .sign-in-screen > section { margin-top: 2rem; grid-template-columns: 1fr; } .signin-cube { min-height: 17rem; max-height: 17rem; } .signin-copy { padding: 2rem; } .recall-card form { flex-direction: column; } }
+  @media (max-width: 767px) { .app-main { width: 100%; margin-left: 0; padding: 1.25rem 1rem 2rem; } .sign-in-screen > section { margin-top: 2rem; grid-template-columns: 1fr; } .signin-cube { min-height: 17rem; max-height: 17rem; } .signin-copy { padding: 2rem; } .find-card form { flex-direction: column; } }
 </style>

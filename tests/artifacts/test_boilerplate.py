@@ -133,7 +133,7 @@ and translate. In ICLR, 2015. [arXiv:1409.0473](https://arxiv.org/abs/1409.0473)
 # One substantial paragraph, which is what tells the cleaner where a page's article begins.
 ARTICLE = (
     "The engine keeps every conversion deterministic, so the same page converted twice produces "
-    "the same text, the same chunks and therefore the same recall ordering for any question an "
+    "the same text, the same chunks and therefore the same find ordering for any question an "
     "agent later asks about it, which is the whole point of preserving a source at all."
 )
 
@@ -224,7 +224,7 @@ def test_a_documentation_index_of_internal_links_is_the_page_and_survives_whole(
         "## API\n\n"
         "- [Sessions](https://docs.example.org/api/sessions)\n"
         "- [Documents](https://docs.example.org/api/documents)\n"
-        "- [Recall](https://docs.example.org/api/recall)\n"
+        "- [Find](https://docs.example.org/api/find)\n"
     )
 
     cleaned = WebBoilerplateCleaner().clean_page(
@@ -260,7 +260,7 @@ def test_only_a_fetched_web_page_is_cleaned_at_all() -> None:
 def test_an_article_opening_under_a_menu_heading_ends_the_chrome_section() -> None:
     article = (
         "The engine keeps every conversion deterministic, so the same page converted twice "
-        "produces the same text, the same chunks and therefore the same recall ordering for "
+        "produces the same text, the same chunks and therefore the same find ordering for "
         "any question an agent later asks about it, which is the whole point of the pipeline."
     )
     page = f"## Navigation Menu\n\n[Home](https://example.org/)\n\n{article}\n"

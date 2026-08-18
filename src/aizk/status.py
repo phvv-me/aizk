@@ -8,11 +8,11 @@ from pydantic import ConfigDict
 
 from .store import Artifact, Chunk, Usage
 from .store.identity import OrganizationStanding, User
-from .store.models.tables import UsageEvent
 
 type Confidence = Literal["high", "medium", "low", "unavailable"]
 type ETAStatus = Literal["complete", "estimating", "insufficient_history", "blocked"]
 type ProcessingState = Literal["idle", "active", "delayed"]
+type UsageOperation = Literal["find", "keep", "share", "artifact_read", "web_search", "web_fetch"]
 
 
 class StatusView(FrozenModel):
@@ -24,8 +24,8 @@ class StatusView(FrozenModel):
 class UsageSummary(StatusView):
     """Durable operation, item, transfer, and execution totals for one caller."""
 
-    recalls: int = 0
-    remembers: int = 0
+    finds: int = 0
+    keeps: int = 0
     files: int = 0
     shares: int = 0
     artifact_reads: int = 0
@@ -42,7 +42,7 @@ class UsagePoint(StatusView):
     """One operation's durable UTC daily usage bucket."""
 
     bucket: datetime
-    operation: UsageEvent.Operation
+    operation: UsageOperation
     requests: int
     items: int
     request_bytes: int
@@ -217,8 +217,8 @@ class ProcessingStatus(StatusView):
     generated_at: datetime
     state: ProcessingState
     stages: tuple[StageEstimate, ...]
-    recallable_lower_seconds: int | None = None
-    recallable_upper_seconds: int | None = None
+    findable_lower_seconds: int | None = None
+    findable_upper_seconds: int | None = None
     enriched_lower_seconds: int | None = None
     enriched_upper_seconds: int | None = None
 
@@ -273,8 +273,8 @@ class ProcessingStatus(StatusView):
             generated_at=now,
             state=state,
             stages=stages,
-            recallable_lower_seconds=conversion.lower_seconds,
-            recallable_upper_seconds=conversion.upper_seconds,
+            findable_lower_seconds=conversion.lower_seconds,
+            findable_upper_seconds=conversion.upper_seconds,
             # Pending conversions create chunks that do not exist yet. Predicting full
             # enrichment before that downstream workload materializes would undercount it.
             enriched_lower_seconds=projection.lower_seconds if conversion_clear else None,

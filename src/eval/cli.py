@@ -70,7 +70,7 @@ class EvaluationCLI:
         user: UUID5 | None = None,
         out: str | None = None,
     ) -> str:
-        """Show statement rank, cross-encoder merit, and packing for one recall."""
+        """Show statement rank, cross-encoder merit, and packing for one Find request."""
         return self.emit(asyncio.run(Evaluation(user_id=user).trace(query, k, budget)), out)
 
     def management(
@@ -176,7 +176,7 @@ class EvaluationCLI:
         sizes: str | int = "1000,10000",
         k: int = 8,
         repeats: int = 10,
-        recall_p95_ms: float = 200.0,
+        find_p95_ms: float = 200.0,
         out: str | None = None,
     ) -> str:
         """Measure the scaling curve in the dedicated evaluation database."""
@@ -185,7 +185,7 @@ class EvaluationCLI:
                 tuple(int(size) for size in str(sizes).split(",")),
                 k,
                 repeats,
-                recall_p95_ms,
+                find_p95_ms,
             )
         )
         return self.emit(report, out)

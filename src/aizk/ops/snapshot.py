@@ -64,7 +64,7 @@ class HealthSnapshotJob(SnapshotJob):
     reading: ClassVar[OperatorReading] = OperatorReading.health
 
     async def measure(self) -> HealthReport:
-        return await health(include_recall=False)
+        return await health(include_find=False)
 
 
 class DoctorSnapshotJob(SnapshotJob):

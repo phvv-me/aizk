@@ -185,6 +185,8 @@ class AizkAwsStack(Stack):
             "AIZK_SPA_CLIENT_ID": self.config.spa_client_id,
             "AIZK_STATIC_ROOT": "/var/task/static",
             "AIZK_CAPTION_ENABLED": "true",
+            "AIZK_CAPTION_PRIMARY_MODEL": "google/gemini-2.5-flash-lite",
+            "AIZK_CAPTION_FALLBACK_MODELS": '["qwen/qwen3-vl-8b-instruct"]',
             "AIZK_RERANK_ENABLED": "false",
             "AIZK_EXTRACT_BACKEND": "llm",
             "AIZK_EXTRACTION_GATE_ENABLED": "false",
@@ -204,23 +206,23 @@ class AizkAwsStack(Stack):
             "AIZK_SESSION_PROMOTE_ENABLED": "false",
             "AIZK_LOG_JSON": "true",
             "AIZK_PROFILING": "true",
-            "AIZK_RECALL_ACCESS_RECORDING_ENABLED": str(
-                self.config.recall_access_recording_enabled
+            "AIZK_FIND_ACCESS_RECORDING_ENABLED": str(
+                self.config.find_access_recording_enabled
             ).lower(),
-            "AIZK_RECALL_COMMUNITIES_ENABLED": str(self.config.recall_communities_enabled).lower(),
-            "AIZK_RECALL_ENTITY_CATALOG_ENABLED": str(
-                self.config.recall_entity_catalog_enabled
+            "AIZK_FIND_COMMUNITIES_ENABLED": str(self.config.find_communities_enabled).lower(),
+            "AIZK_FIND_ENTITY_CATALOG_ENABLED": str(
+                self.config.find_entity_catalog_enabled
             ).lower(),
-            "AIZK_RECALL_GRAPH_EXPANSION_ENABLED": str(
-                self.config.recall_graph_expansion_enabled
+            "AIZK_FIND_GRAPH_EXPANSION_ENABLED": str(
+                self.config.find_graph_expansion_enabled
             ).lower(),
-            "AIZK_RECALL_PROFILES_ENABLED": str(self.config.recall_profiles_enabled).lower(),
-            "AIZK_RECALL_RAPTOR_ENABLED": str(self.config.recall_raptor_enabled).lower(),
-            "AIZK_RECALL_SOURCES_FIRST": str(self.config.recall_sources_first).lower(),
+            "AIZK_FIND_PROFILES_ENABLED": str(self.config.find_profiles_enabled).lower(),
+            "AIZK_FIND_RAPTOR_ENABLED": str(self.config.find_raptor_enabled).lower(),
+            "AIZK_FIND_SOURCES_FIRST": str(self.config.find_sources_first).lower(),
             "AIZK_MONTHLY_TOTAL_OPERATION_LIMIT": "10000",
             "AIZK_MONTHLY_USER_OPERATION_LIMIT": "500",
-            "AIZK_MONTHLY_TOTAL_REMEMBER_LIMIT": "1000",
-            "AIZK_MONTHLY_USER_REMEMBER_LIMIT": "50",
+            "AIZK_MONTHLY_TOTAL_KEEP_LIMIT": "1000",
+            "AIZK_MONTHLY_USER_KEEP_LIMIT": "50",
         }
 
     def _logto_environment(self) -> dict[str, str]:
@@ -229,7 +231,7 @@ class AizkAwsStack(Stack):
         return {
             "AIZK_LOGTO_URL": self.config.logto_url,
             "AIZK_LOGTO_MANAGEMENT_RESOURCE": f"{self.config.logto_url.rstrip('/')}/api",
-            "AIZK_LOGTO_CLIENT_ID": self.config.logto_client_id,
+            "AIZK_LOGTO_CLIENT_ID": self.config.logto_management_client_id,
             "AIZK_MCP_PUBLIC_URL": self.config.public_url,
             "AIZK_REQUIRE_AUTH": "true",
         }

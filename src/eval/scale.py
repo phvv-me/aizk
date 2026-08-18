@@ -1,4 +1,5 @@
 import math
+import resource
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Hashable, Iterable, Iterator
@@ -9,7 +10,6 @@ from typing import cast
 import jinja2
 import numpy as np
 from loguru import logger
-from mainboard import meter
 from patos import FrozenModel, Model
 from pydantic import UUID5, UUID7, UUID8
 from sqlalchemy import BigInteger, String, column, func, insert, text
@@ -19,8 +19,8 @@ from sqlmodel import select
 from aizk.config import DatabaseBackend, settings
 from aizk.graph.communities import CommunityDetector
 from aizk.ontology import System
-from aizk.retrieval import Plan, QueryContext, recall
-from aizk.retrieval.recall import build_recall_statement
+from aizk.retrieval import Plan, QueryContext, find
+from aizk.retrieval.find import build_find_statement
 from aizk.serving.embed import EmbedClient
 from aizk.store import (
     Chunk,
@@ -142,9 +142,9 @@ class ScalePoint(FrozenModel):
     facts: int
     ingest_chunks_per_s: float
     ingest_facts_per_s: float
-    recall_p50_ms: float
-    recall_p95_ms: float
-    recall_p99_ms: float
+    find_p50_ms: float
+    find_p95_ms: float
+    find_p99_ms: float
     lanes: list[LaneLatency]
     multihop_query_ms: float
     community_detect_ms: float
@@ -161,7 +161,7 @@ class ScalePoint(FrozenModel):
 class Budget(FrozenModel):
     """The per-component latency ceilings the scaling curve is flagged against."""
 
-    recall_p95_ms: float = 200.0
+    find_p95_ms: float = 200.0
     lane_p95_ms: float = 100.0
     multihop_query_ms: float = 100.0
     community_detect_ms: float = 1_000.0
@@ -182,13 +182,13 @@ _TEMPLATE = jinja2.Template(
 {%- if not points %}
 scale measured no sizes, no corpus to grow
 {%- else -%}
-sizes={{ sizes }} budget_recall_p95={{ budget_recall_p95_ms }}ms
+sizes={{ sizes }} budget_find_p95={{ budget_find_p95_ms }}ms
 {% for point in points %}  {{
-    "size={} facts={} ingest={}ch/s recall_p50={}ms p95={}ms p99={}ms multihop={}ms detect={}ms"
+    "size={} facts={} ingest={}ch/s find_p50={}ms p95={}ms p99={}ms multihop={}ms detect={}ms"
     " store={}b index={}b host={}gb".format(
-        point.size, point.facts, point.ingest_chunks_per_s, point.recall_p50_ms,
-        point.recall_p95_ms,
-        point.recall_p99_ms,
+        point.size, point.facts, point.ingest_chunks_per_s, point.find_p50_ms,
+        point.find_p95_ms,
+        point.find_p99_ms,
         point.multihop_query_ms,
         point.community_detect_ms,
         point.storage_bytes, point.index_bytes, point.peak_host_gb,
@@ -229,9 +229,9 @@ class ScaleReport(FrozenModel):
                 "size": point.size,
                 "facts": point.facts,
                 "ingest_chunks_per_s": round(point.ingest_chunks_per_s),
-                "recall_p50_ms": round(point.recall_p50_ms, 1),
-                "recall_p95_ms": round(point.recall_p95_ms, 1),
-                "recall_p99_ms": round(point.recall_p99_ms, 1),
+                "find_p50_ms": round(point.find_p50_ms, 1),
+                "find_p95_ms": round(point.find_p95_ms, 1),
+                "find_p99_ms": round(point.find_p99_ms, 1),
                 "multihop_query_ms": round(point.multihop_query_ms, 1),
                 "community_detect_ms": round(point.community_detect_ms, 1),
                 "storage_bytes": point.storage_bytes,
@@ -256,7 +256,7 @@ class ScaleReport(FrozenModel):
             str,
             _TEMPLATE.render(
                 sizes=self.sizes,
-                budget_recall_p95_ms=self.budget.recall_p95_ms,
+                budget_find_p95_ms=self.budget.find_p95_ms,
                 points=points,
                 knees=knees,
             ).strip(),
@@ -443,7 +443,7 @@ async def measure_lanes(
 
     async def retrieve(plan: Plan) -> None:
         context = QueryContext(dimensions=len(vector), fuzzy=settings.graph_mention_fuzzy)
-        statement = build_recall_statement(cast("Hashable", context), cast("Hashable", plan))
+        statement = build_find_statement(cast("Hashable", context), cast("Hashable", plan))
         await session.exec(
             statement,
             params={
@@ -532,32 +532,29 @@ async def measure_point(
     k: int,
     repeats: int,
 ) -> ScalePoint:
-    """Measure one corpus size into a curve row, recall, per-lane, graph-op, and storage."""
-    with meter() as runtime:
-        recalled = await LaneLatency.timed("recall", partial(recall, query, user, k), repeats)
-        runtime.sample()
-        async with user as session:
-            lanes = await measure_lanes(session, query, vector, k, repeats)
-            multihop_ms = next(lane.p50_ms for lane in lanes if lane.name == "multihop")
-            detect_ms = await measure_community_detection(session)
-            footprint = await storage_footprint(session)
-            runtime.sample()
+    """Measure one corpus size into a curve row, find, per-lane, graph-op, and storage."""
+    found = await LaneLatency.timed("find", partial(find, query, user, k), repeats)
+    async with user as session:
+        lanes = await measure_lanes(session, query, vector, k, repeats)
+        multihop_ms = next(lane.p50_ms for lane in lanes if lane.name == "multihop")
+        detect_ms = await measure_community_detection(session)
+        footprint = await storage_footprint(session)
     return ScalePoint(
         size=scale.chunks,
         entities=scale.entities,
         facts=scale.facts,
         ingest_chunks_per_s=ingest_chunks_per_s,
         ingest_facts_per_s=ingest_chunks_per_s,
-        recall_p50_ms=recalled.p50_ms,
-        recall_p95_ms=recalled.p95_ms,
-        recall_p99_ms=recalled.p99_ms,
+        find_p50_ms=found.p50_ms,
+        find_p95_ms=found.p95_ms,
+        find_p99_ms=found.p99_ms,
         lanes=lanes,
         multihop_query_ms=multihop_ms,
         community_detect_ms=detect_ms,
         storage_bytes=max(0, footprint[0] - baseline_storage[0]),
         index_bytes=max(0, footprint[1] - baseline_storage[1]),
-        peak_host_gb=runtime.peak_host_gb,
-        peak_gpu_gb=runtime.peak_gpu_gb,
+        peak_host_gb=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024**2,
+        peak_gpu_gb=0.0,
     )
 
 
@@ -565,7 +562,7 @@ def find_knees(points: list[ScalePoint], budget: Budget) -> list[Knee]:
     """Flag the first size each tracked component crossed its budget at, the optimization
     targets."""
     readers: list[tuple[str, float, Callable[[ScalePoint], float]]] = [
-        ("recall_p95", budget.recall_p95_ms, lambda point: point.recall_p95_ms),
+        ("find_p95", budget.find_p95_ms, lambda point: point.find_p95_ms),
         (
             "multihop_query",
             budget.multihop_query_ms,
@@ -603,9 +600,9 @@ async def measure_size(
         user, query, vector, scale, ingest_rate, baseline_storage, k, repeats
     )
     logger.info(
-        "scale size={size} recall_p95={p95:.1f}ms multihop={multihop:.1f}ms detect={det:.1f}ms",
+        "scale size={size} find_p95={p95:.1f}ms multihop={multihop:.1f}ms detect={det:.1f}ms",
         size=size,
-        p95=point.recall_p95_ms,
+        p95=point.find_p95_ms,
         multihop=point.multihop_query_ms,
         det=point.community_detect_ms,
     )

@@ -4,8 +4,8 @@ from pydantic import UUID5, UUID7
 from .candidate import Candidate
 
 
-class RecallEvidence(FrozenModel):
-    """One recall's packed candidates together with the signals it computed on the way.
+class FindEvidence(FrozenModel):
+    """One find's packed candidates together with the signals it computed on the way.
 
     The scores and the query mentions are byproducts of retrieval that used to be thrown
     away. The egress router reads both, and reading them here is what keeps deciding

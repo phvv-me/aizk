@@ -4,7 +4,7 @@ description: "Three levels of evidence, and what each one is allowed to claim."
 ---
 
 aizk keeps three kinds of evidence apart and never lets one borrow the authority of another. This
-page assumes you know roughly [how recall runs](/docs/dev/read/overview/) and that you can open
+page assumes you know roughly [how find runs](/docs/dev/read/overview/) and that you can open
 `src/eval/`.
 
 ## The three levels
@@ -19,10 +19,10 @@ page assumes you know roughly [how recall runs](/docs/dev/read/overview/) and th
                │                         question set, under a paired statistical test
                │
   level 2   the production bench         measures the memory one deployment
-            chefe run aizk-eval bench    actually holds, on one day, on one machine
+            uv run --no-sync aizk-eval bench    actually holds, on one day, on one machine
                │
   level 3   an external benchmark        imports somebody else's corpus into an
-            chefe run aizk-eval groupmem isolated scope and answers their questions
+            uv run --no-sync aizk-eval groupmem isolated scope and answers their questions
 ```
 
 Each level answers a different question, so each one is allowed a different sentence.
@@ -42,8 +42,8 @@ in detail.
 
 ## The gate between level one and level two
 
-Sitting inside the suite is one benchmark that behaves like a measurement. `chefe run bench-aizk`
-runs the frozen retrieval ablation and writes reports, and `chefe run bench-aizk-gate` runs the same
+Sitting inside the suite is one benchmark that behaves like a measurement. The benchmark pytest
+marker runs the frozen retrieval ablation and writes reports. The gate variant runs the same
 arms and compares them against the blessed baseline in
 `tests/benchmark/data/retrieval_baseline.csv`. Both point at the `aizk_verify` database and both
 require `--eval-mode` explicitly, so a benchmark can never run by accident inside the ordinary gate.
@@ -58,14 +58,14 @@ usage error rather than silently compared.
 :::note[Two honest limits]
 The committed question corpus has only two placeholder questions, so the gate guards the plumbing
 and statistics rather than retrieval quality. It becomes a quality gate only after a representative
-corpus is frozen with `chefe run aizk-eval freeze`. A baseline is meaningful only against the same
+corpus is frozen with `uv run --no-sync aizk-eval freeze`. A baseline is meaningful only against the same
 corpus, so reblessing with `--force-regen` is a deliberate act.
 :::
 
 ## Level two, the production bench
 
-`chefe run aizk-eval bench` samples the memory a deployment already holds, turns each sample into a
-probe with the LLM, and scores the maximal plan that production recall always uses. That is a real
+`uv run --no-sync aizk-eval bench` samples the memory a deployment already holds, turns each sample into a
+probe with the LLM, and scores the maximal plan that production find always uses. That is a real
 corpus, which is exactly its strength and exactly its limit. It tells you whether this deployment
 got better or worse between two commits. It says nothing you can put next to another system's
 published number, because nobody else has your corpus.
@@ -75,7 +75,7 @@ published number, because nobody else has your corpus.
 
 Only a level three run compares aizk with anything. It brings its own conversations, imports them
 into a deterministic isolated scope in a separate database, and answers the released questions
-through the same write, recall, answer and judge path a person would use. That is the only level
+through the same write, find, answer and judge path a person would use. That is the only level
 whose score means the same thing to a stranger. AIZK has no published external benchmark score.
 [External benchmarks](/docs/dev/eval/external/) explains why and what would have to be true first.
 
@@ -100,7 +100,7 @@ Averaging incompatible runs into one headline figure would produce a number that
 system.
 
 An extraction latency on a 31B checkpoint with a dedicated RTX 3090 is not comparable to the same
-number on 12B. A recall p50 over a hundred thousand chunks is not the same measurement as one over
+number on 12B. A find p50 over a hundred thousand chunks is not the same measurement as one over
 two thousand. A retrieval hit rate on the vault is not one on planted synthetic ground truth.
 Averaging those would produce a number that describes no run that ever happened, and worse, would
 strip exactly the metadata a reader needs to decide whether it applies to them.

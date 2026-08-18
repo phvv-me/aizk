@@ -9,15 +9,15 @@ can hold up against another system. The commands live on [the eval CLI](/docs/de
 
 ## What the bench measures
 
-`chefe run aizk-eval bench` never invents a question. It reads what the corpus already holds, asks
-the LLM to turn each sample into a probe, and scores the one plan production recall always uses.
+`uv run --no-sync aizk-eval bench` never invents a question. It reads what the corpus already holds, asks
+the LLM to turn each sample into a probe, and scores the one plan production find always uses.
 
 ```text
   live facts ─────────▶ local probe ────┐
   summaries ──────────▶ global probe ───┤
   two-hop fact pairs ─▶ multihop probe ─┤
                                         ▼
-                        recall with Plan.maximal
+                        find with Plan.maximal
                                         │
               ┌─────────────────────────┼──────────────────────────┐
               ▼                          ▼                          ▼
@@ -33,7 +33,7 @@ candidate each.
 
 Answerability is separate and off by default. With `AIZK_EVAL_JUDGE` set, the packed context is
 rebuilt at a 1024 token budget and an LLM is asked whether it can answer the question. That is a
-second opinion on the packing, not a correctness score, because the judge sees only what recall
+second opinion on the packing, not a correctness score, because the judge sees only what find
 returned.
 
 ## The three strata
@@ -53,7 +53,7 @@ matches whole word runs rather than substrings, so a short anchor like `AI` cann
 
 ## The management contract
 
-`chefe run aizk-eval management` asks a narrower and harder question. It discovers every visible
+`uv run --no-sync aizk-eval management` asks a narrower and harder question. It discovers every visible
 Area and Project from declared source documents, renders twenty templated questions for each, and
 checks where that subject's own current brief ranked inside the packed context. Hit means the brief
 survived anywhere in the pack. First means it ranked first. Making the current brief its own
@@ -78,7 +78,7 @@ access to private memory.
 
 ## The plan ablation and the router
 
-`chefe run aizk-eval plans` keeps production honest about the plan it chose. It scores `maximal`
+`uv run --no-sync aizk-eval plans` keeps production honest about the plan it chose. It scores `maximal`
 beside `maximal_without_raptor`, `maximal_without_communities`, `maximal_without_profiles` and
 `focused` over the same questions, so removing one lane is a paired comparison rather than a rerun.
 The same command sweeps the graph seeding arms, which turn `graph_entity_seeding` off, force exact
@@ -87,7 +87,7 @@ mention matching, allow fuzzy matching, and vary the GLiNER confidence floor.
 Routing is measured here and nowhere else, because production stopped routing. `Route.classify`
 sends the question to GLiNER2's zero-shot text-classification head, and the arm compares the
 predicted route against the stratum label with a full confusion matrix. That classifier measured
-44 percent accuracy on the eval strata, which is why every production recall now runs the maximal
+44 percent accuracy on the eval strata, which is why every production find now runs the maximal
 plan and why the `Route` enum survives only as an instrument for what query-time routing would have
 chosen and cost.
 

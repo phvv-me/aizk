@@ -276,7 +276,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
     @classmethod
     def hybrid(cls, context: QueryContext) -> CTE:
         """The capped hybrid chunk cut: fused ranks scored with the promoted bonus, at
-        most `recall_per_document` hits per document, `k` hits in total."""
+        most `find_per_document` hits per document, `k` hits in total."""
         from .document import Document
 
         fused = cls.fused(context)
@@ -339,7 +339,7 @@ class Chunk(Id, Scoped, Embedded, TableBase, table=True):
                 chunk_scored.c.score,
                 chunk_scored.c.document_rank,
             )
-            .where(chunk_scored.c.document_rank <= bindparam("recall_per_document", type_=Integer))
+            .where(chunk_scored.c.document_rank <= bindparam("find_per_document", type_=Integer))
             .order_by(chunk_scored.c.score.desc())
             .limit(context.k)
             .cte("chunk_capped")

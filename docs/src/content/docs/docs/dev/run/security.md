@@ -3,7 +3,7 @@ title: "Self-hosted security model"
 description: "What the PostgreSQL Compose deployment protects, trusts and fails closed on."
 ---
 
-This page covers the self-hosted PostgreSQL security model. The crAIZK serverless boundaries are
+This page covers the self-hosted PostgreSQL security model. The AIZK serverless boundaries are
 documented on [AWS and CockroachDB Cloud](/docs/dev/run/aws/). This page assumes the Compose deployment from
 [Deployment topology](/docs/dev/run/topology/) and the scope model from
 [Scope sets in depth](/docs/dev/identity/scope-sets/).
@@ -100,9 +100,9 @@ default, and a process holds at most 4096 buckets. It is abuse control, not quot
 
 | Input | Default |
 |---|---|
-| Recall query | 16,384 characters |
-| Recall evidence budget | 16,384 tokens |
-| Remembered source | 5,000,000 characters |
+| Find query | 16,384 characters |
+| Find evidence budget | 16,384 tokens |
+| Kept source | 5,000,000 characters |
 | Source URI | 4,096 characters |
 | Scope names per call | 32 |
 | Shared documents per call | 100 |
@@ -129,9 +129,9 @@ verifies the digest, so a guess grants nothing.
 ## Stored text, secrets and supply chain
 
 An authorized source can still be malicious. aizk treats source text as data during extraction and
-returns recall as one evidence string, and the client skill sets that boundary once. That reduces
+returns find as one evidence string, and the client skill sets that boundary once. That reduces
 accidental instruction following but cannot guarantee model behavior, so client agents must never
-let recalled text outrank system or user instructions. Write authority also stays a real
+let found text outrank system or user instructions. Write authority also stays a real
 privilege, since an authorized writer can poison their own scope.
 
 Rotating the OAuth client secret is a full session reset, because FastMCP encrypts its `/oauth`

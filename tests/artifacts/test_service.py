@@ -689,7 +689,7 @@ def test_processor_describes_figures_before_text_embedding_and_persists_routing(
     assert restored.caption.usage.total_tokens == 5
 
 
-def test_processor_stores_postgres_derivatives_and_makes_one_file_document_recallable(
+def test_processor_stores_postgres_derivatives_and_makes_one_file_document_findable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = original()
@@ -881,7 +881,7 @@ def test_reconversion_rejection_preserves_the_live_derivative() -> None:
     assert repository.states[-1][2] is Artifact.Content.State.ready
 
 
-def test_processor_keeps_metadata_recallable_and_marks_conversion_failures(
+def test_processor_keeps_metadata_findable_and_marks_conversion_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = original()

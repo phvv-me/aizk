@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-labelledby="title desc">
+  <title id="title">AIZK project thumbnail</title>
+  <desc id="desc">AIZK, the open AI Zettelkasten, with its blue and violet memory cube.</desc>
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.2" fill="#18233f" opacity=".08"/>
+    </pattern>
+    <linearGradient id="wash" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#faf6ee"/>
+      <stop offset="1" stop-color="#eee9ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="180%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#18233f" flood-opacity=".18"/>
+    </filter>
+  </defs>
+
+  <rect width="1800" height="1200" rx="38" fill="url(#wash)"/>
+  <rect width="1800" height="1200" rx="38" fill="url(#dots)"/>
+  <rect x="0" y="0" width="34" height="1200" fill="#365ff7"/>
+
+  <text x="120" y="152" style="font:700 78px Georgia,serif;fill:#18233f">AIZK</text>
+  <text x="124" y="204" style="font:700 16px ui-monospace,monospace;letter-spacing:4px;fill:#365ff7">THE OPEN AI ZETTELKASTEN</text>
+
+  <text x="120" y="450" style="font:700 94px Georgia,serif;fill:#18233f">Memory with</text>
+  <text x="120" y="550" style="font:700 94px Georgia,serif;fill:#18233f">its shape intact</text>
+
+  <text x="126" y="654" style="font:400 31px system-ui,sans-serif;fill:#5a6276">Durable memory for people, teams, and AI agents</text>
+  <text x="126" y="703" style="font:400 31px system-ui,sans-serif;fill:#5a6276">with sources, history, and access boundaries attached</text>
+
+  <g transform="translate(120 836)">
+    <rect width="245" height="64" rx="32" fill="#18233f"/>
+    <text x="122.5" y="41" text-anchor="middle" style="font:700 19px ui-monospace,monospace;fill:#fffaf0">KEEP AND FIND</text>
+    <rect x="265" width="238" height="64" rx="32" fill="#dfe7ff"/>
+    <text x="384" y="41" text-anchor="middle" style="font:700 19px ui-monospace,monospace;fill:#18233f">SCOPED SHARING</text>
+    <rect x="523" width="250" height="64" rx="32" fill="#ffe3d8"/>
+    <text x="648" y="41" text-anchor="middle" style="font:700 19px ui-monospace,monospace;fill:#18233f">SOURCE EVIDENCE</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="1000" y="120" width="680" height="930" rx="70" fill="#fffaf0" stroke="#e0d5c4" stroke-width="3"/>
+    <image x="995" y="205" width="690" height="690" preserveAspectRatio="xMidYMid meet" xlink:href="../../docs/src/assets/brain-box-master.png"/>
+  </g>
+  <circle cx="1510" cy="925" r="16" fill="#ff6b4a"/>
+  <line x1="1135" y1="930" x2="1490" y2="930" stroke="#18233f" stroke-width="6"/>
+  <line x1="1530" y1="930" x2="1600" y2="930" stroke="#18233f" stroke-width="6"/>
+</svg>

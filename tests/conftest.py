@@ -85,7 +85,7 @@ DB_UP = _port_open(_db.hostname, _db.port)
 def stubbed_model_lanes() -> Iterator[None]:
     """Point every model lane at an in-process double for the duration of the block.
 
-    The suite is hermetic above the database seam, so ontology bootstrap, recall, extraction,
+    The suite is hermetic above the database seam, so ontology bootstrap, find, extraction,
     and every other path resolve their embedder, reranker, gate, and extraction model to a
     recording double instead of reaching a live service.
     """

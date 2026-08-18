@@ -17,7 +17,7 @@
     "keep_p95_ms": 9090.415,
     "keep_p99_ms": 12611.017
   },
-  "recall": {
+  "find": {
     "warm_ten_call_p50_ms": 1698.142,
     "warm_ten_call_p95_ms": 2641.458,
     "post_idle_five_query_p50_ms": 5681.149,
@@ -30,7 +30,7 @@
   "database": {
     "direct_cspann_345_vectors_ms": 3,
     "direct_cspann_2250_vectors_ms": 7,
-    "synthetic_1000_chunk_full_recall_p95_ms": 8285.5,
+    "synthetic_1000_chunk_full_find_p95_ms": 8285.5,
     "synthetic_1000_chunk_multihop_ms": 5443.2,
     "fresh_baseline_ingestion_chunks_per_second": 39
   },
@@ -42,6 +42,6 @@
   "limitations": [
     "These are local measurements and are not CockroachDB Cloud latency claims.",
     "One Lambda runtime emulator accepts one active invocation.",
-    "The composed graph recall plan remains the primary performance limit."
+    "The composed graph find plan remains the primary performance limit."
   ]
 }

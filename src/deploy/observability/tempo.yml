@@ -14,7 +14,7 @@ distributor:
 
 ingester:
   # Small blocks keep a just-finished request queryable in seconds rather than minutes, which is
-  # the whole point of opening a trace while the operator still remembers the query.
+  # the whole point of opening a trace while the query is still in view.
   max_block_duration: 5m
 
 compactor:

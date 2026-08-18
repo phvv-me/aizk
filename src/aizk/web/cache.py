@@ -28,7 +28,7 @@ class WebCache(FrozenFlexModel):
     therefore already sees what an earlier call paid for.
 
     Three rules keep the convenience from becoming contamination, and all three follow from
-    the origin marker rather than from anyone remembering them. The page is never enqueued
+    the origin marker rather than from anyone keeping them. The page is never enqueued
     for graph projection and the recovery sweep skips it, so no third-party claim ever
     becomes an entity, a fact, a profile, a community or an insight. It renders under the
     web provenance label wherever it surfaces, so it can never read as something the caller

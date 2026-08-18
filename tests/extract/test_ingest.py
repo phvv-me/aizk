@@ -131,7 +131,7 @@ def test_ingest_loads_the_ontology_in_a_fresh_server_process() -> None:
         Ontology.clear()
         return await ingest_text(
             User.system(),
-            "# First write\n\n- Type Project\n\nThe server can accept this before any recall.",
+            "# First write\n\n- Type Project\n\nThe server can accept this before any find.",
         )
 
     document_id = dbutil.run(body())
@@ -148,7 +148,7 @@ def test_ingest_text_dedupes_before_embedding(
 
     async def body() -> tuple[UUID5 | UUID7 | None, UUID5 | UUID7 | None, int, int, int]:
         await dbutil.reset_db()
-        note = "a remembered note about the bi-temporal memory spine across time"
+        note = "a kept note about the bi-temporal memory spine across time"
         first = await ingest_text(User.system(), note, title=title)
         calls_after_first = len(fake_embedder.calls)
         second = await ingest_text(User.system(), note, title=title)
@@ -467,7 +467,7 @@ def test_ingest_path_routes_each_lane_dedupes_and_skips_the_rest(
     settings: Settings, tmp_path: Path
 ) -> None:
     (tmp_path / "note.md").write_text(
-        "# note\n\nthe spine remembers facts across time.\n", encoding="utf-8"
+        "# note\n\nthe spine keeps facts across time.\n", encoding="utf-8"
     )
     (tmp_path / "code.py").write_text("def fn(value):\n    return value + 1\n", encoding="utf-8")
     (tmp_path / "empty.md").write_text("", encoding="utf-8")

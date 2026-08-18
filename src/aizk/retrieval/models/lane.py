@@ -85,7 +85,7 @@ class QueryContext(FrozenModel):
     @property
     def floor(self) -> ColumnElement[float]:
         """The cosine-distance ceiling bind every dense ranking guards under."""
-        return bindparam("recall_max_distance", type_=Float)
+        return bindparam("find_max_distance", type_=Float)
 
     @property
     def fusion_depth(self) -> ColumnElement[int]:
@@ -122,7 +122,7 @@ class QueryContext(FrozenModel):
 
 
 class Lane(FrozenModel, abc.ABC):
-    """One evidence lane of the recall union.
+    """One evidence lane of the find union.
 
     It carries the context section the lane fills and its priority under the plan,
     and every subclass renders its candidates into the one column shape all lanes
@@ -132,7 +132,7 @@ class Lane(FrozenModel, abc.ABC):
     """
 
     class Kind(StrEnum):
-        """The ordered evidence sections recall returns."""
+        """The ordered evidence sections find returns."""
 
         PROFILE = auto()
         OVERVIEW = auto()

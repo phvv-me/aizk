@@ -8,7 +8,7 @@ from pydantic import UUID5
 from aizk.config import settings
 from aizk.graph.build import GraphClients
 from aizk.ontology import Ontology
-from aizk.retrieval import RecallTrace, trace
+from aizk.retrieval import FindTrace, trace
 from aizk.store.identity import User
 
 from .corpus import (
@@ -71,8 +71,8 @@ class Evaluation(FrozenModel):
         query: str,
         k: int = 8,
         token_budget: int = settings.context_token_budget,
-    ) -> RecallTrace:
-        """Explain one production recall without updating access history."""
+    ) -> FindTrace:
+        """Explain one production Find request without updating access history."""
         return await trace(query, self.user, k=k, token_budget=token_budget)
 
     async def management(
@@ -141,7 +141,7 @@ class Evaluation(FrozenModel):
         prepare: bool = True,
         keep: bool = False,
     ) -> BenchmarkReport:
-        """Run GroupMemBench through the real write, recall, answer, and judge paths."""
+        """Run GroupMemBench through the real write, find, answer, and judge paths."""
         if prepare:
             await EvaluationDatabase().reset()
         dataset = GroupMemBench(root=root).load(
@@ -157,7 +157,7 @@ class Evaluation(FrozenModel):
         sizes: Sequence[int] = (1_000, 10_000),
         k: int = 8,
         repeats: int = 10,
-        recall_p95_ms: float = 200.0,
+        find_p95_ms: float = 200.0,
     ) -> ScaleReport:
         """Reset the isolated database and measure the synthetic scaling curve."""
         await EvaluationDatabase().reset()
@@ -165,5 +165,5 @@ class Evaluation(FrozenModel):
             sizes=tuple(sizes),
             k=k,
             repeats=repeats,
-            budget=Budget(recall_p95_ms=recall_p95_ms),
+            budget=Budget(find_p95_ms=find_p95_ms),
         )

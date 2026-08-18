@@ -20,7 +20,7 @@ from .ids import entity_id, fact_id
 from .models import InsightReport, Observation
 
 # the single node every observation hangs off, one per user, so the derived insights form one
-# small structural subgraph the recall fact lane already surfaces rather than a scattered set.
+# small structural subgraph the find fact lane already surfaces rather than a scattered set.
 OBSERVATION_NODE = "graph observations"
 
 # SQLModel synthesizes table-model keyword constructors outside the static signatures.

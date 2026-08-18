@@ -487,7 +487,7 @@ class ArtifactRepository:
         policy: str,
         error: str | None = None,
     ) -> None:
-        """Keep one proposed derivative without replacing recallable production text.
+        """Keep one proposed derivative without replacing findable production text.
 
         A rejected candidate stays available for diagnosis, while `candidate_policy` is the
         durable cursor that keeps the same policy pass from offering it forever.

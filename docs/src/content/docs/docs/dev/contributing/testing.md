@@ -3,9 +3,9 @@ title: "Testing"
 description: "The testing philosophy, the fixtures, and the coverage gate."
 ---
 
-This page assumes you have a working environment from
-[Development setup](/docs/dev/contributing/setup/). Everything below runs through `chefe run`, and
-the short version of the philosophy is in `tests/README.md`, which this page expands.
+This page assumes you have a frozen environment from
+[Development setup](/docs/dev/contributing/setup/). The short version of the philosophy is in
+`tests/README.md`, which this page expands.
 
 ## One contract per test
 
@@ -40,7 +40,7 @@ sooner rather than later.
 
 The suite is hermetic above the database seam. An autouse fixture points the embedder, reranker,
 gate, and extraction model at in-process doubles from `tests/doubles.py`, so ontology bootstrap,
-recall, and extraction all resolve to `RecordingEmbedder`, `NeutralReranker`, `NeutralGate`, and
+find, and extraction all resolve to `RecordingEmbedder`, `NeutralReranker`, `NeutralGate`, and
 `FakeLLM` instead of reaching a GPU. `tests/a_env.py` runs before aizk is even imported and blanks
 any ambient rerank endpoint from a developer's `.env`, so a live sidecar on the machine cannot
 quietly reroute a test. A test that genuinely needs real client construction opts out through the
@@ -82,7 +82,7 @@ The gate is 100 percent statement **and** branch coverage across both `aizk` and
 
 The gate runs in two passes and the reason is a real limitation rather than a workaround. The
 default `sysmon` coverage core cannot emit one `async with` enter arc inside the retry loop in
-`graph/build.py`, so `chefe run test-aizk-cov` runs the parallel suite first with the threshold
+`graph/build.py`, so CI runs the parallel suite first with the threshold
 disabled, then re-runs that single test under `COVERAGE_CORE=pytrace` with `--cov-append`. The
 union of the two passes is what has to reach 100.
 
@@ -96,7 +96,8 @@ One suite runs against the real services rather than doubles, and it runs inside
 network so the service names resolve the way they do in production.
 
 ```sh
-chefe run test-aizk-artifact-stack
+docker compose --profile integration --env-file .env -f src/deploy/docker-compose.yml \
+  run --rm artifact-integration
 ```
 
 That task starts `db`, `objects`, `clamav`, `docling`, `vllm-emb`, `vllm-rerank`, `vllm-llm`, and
@@ -113,8 +114,8 @@ describes the same services in their production arrangement.
 
 ## What CI runs
 
-CI is deliberately not a different thing. It installs chefe, runs `chefe install`, and then runs
-lint, the import contracts, typecheck, and `chefe run test` against a real PostgreSQL service
+CI is deliberately not a different thing. It installs the frozen `uv.lock`, installs the reviewed
+SQLAlchemy revision, and then runs lint, the import contracts, typecheck, and pytest against a real PostgreSQL service
 container using the same VectorChord image on the same port 5433, with the same restricted
 `aizk_app` role bootstrapped over the wire because a service container cannot mount
 `initdb/roles.sh`. The suite runs on Linux because the macOS runners provide no service containers.

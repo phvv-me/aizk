@@ -60,7 +60,7 @@ if cls.deletable:
 
 `mutable` and `deletable` are `ClassVar` booleans on the model, both defaulting to false. That
 is the point. Mutability is a property of the table declaration rather than something a policy
-file has to remember, so `usage_event` is an append-only ledger because it never sets either
+file has to keep, so `usage_event` is an append-only ledger because it never sets either
 flag, and `chunk` is the only source table that can be deleted because it sets both.
 
 The predicates themselves are the lattice. `read` requires a nonempty `scopes` array that is a
@@ -80,7 +80,7 @@ organization counts whether the caller writes there or not, and the public corpu
 the people who maintain it. `Standing.owned_total` wraps that into the scalar counts
 `Knowledge.totals` assembles, which is what the overview page and the browser dashboard show.
 
-This narrows numbers, never rows. Recall, the catalogs and every lane still read the whole public
+This narrows numbers, never rows. Find, the catalogs and every lane still read the whole public
 corpus, because a brand-new account should be able to ask questions of shared knowledge on its first
 day. What it should not see is that corpus counted as forty thousand things it wrote.
 
@@ -177,7 +177,7 @@ away deparser noise such as redundant casts and `= ANY(ARRAY[...])` versus `IN`,
 `RLSState.diff` then reports missing, drifted and undeclared policies, and any table where
 `enabled` or `forced` is wrong.
 
-Run it with `chefe run aizk database check-rls`, or read the test that fails the suite when it
+Run it with `uv run --no-sync aizk admin database check-rls`, or read the test that fails the suite when it
 regresses, `test_live_schema_forces_rls_with_no_violations` in `tests/store/test_catalog.py`,
 which asserts the drift list is empty against the migrated database.
 

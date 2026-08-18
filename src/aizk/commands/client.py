@@ -214,8 +214,8 @@ class ClientCommands:
             f"Usage over {usage.days} days",
             (
                 f"Requests  {usage.summary.requests}  "
-                f"Recalls  {usage.summary.recalls}  "
-                f"Remembers  {usage.summary.remembers}  "
+                f"Finds  {usage.summary.finds}  "
+                f"Keeps  {usage.summary.keeps}  "
                 f"Files  {usage.summary.files}  "
                 f"Shares  {usage.summary.shares}"
             ),

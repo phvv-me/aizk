@@ -88,12 +88,12 @@ export const vectors = {
 </svg>
 `,
   'thumbnail.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-labelledby="title desc">
-  <title id="title">crAIZK</title>
+  <title id="title">AIZK</title>
   <desc id="desc">${tagline}</desc>
   <rect width="1800" height="1200" fill="${colors.paper}"/>
   <rect x="0" y="0" width="48" height="1200" fill="${colors.cobalt}"/>
   ${mark(136, 300, 360)}
-  ${wordmark(574, 548, 236, 'crAIZK')}
+  ${wordmark(574, 548, 236, 'AIZK')}
   <text x="590" y="640" fill="${colors.ink}" opacity=".72" font-family="${font}" font-size="44" font-weight="500">${tagline}</text>
   <g opacity=".9">
     ${memoryLine(

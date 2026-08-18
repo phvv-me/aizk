@@ -2,7 +2,7 @@
 
 This plugin gives Claude Code and Codex the AIZK skill and its authenticated MCP connection.
 
-The bundled connection targets the public crAIZK demonstration. Installing the plugin never
+The bundled connection targets the public AIZK demonstration. Installing the plugin never
 stores credentials. The client opens Logto when the user first authenticates and keeps its own
 refreshed token.
 

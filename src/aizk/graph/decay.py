@@ -10,7 +10,7 @@ async def decay(
     scopes: Scopes | None = None,
     half_life_days: float = 90.0,
 ) -> int:
-    """Archive the stale, rarely accessed latest claims so default recall drops them, return
+    """Archive the stale, rarely accessed latest claims so default find drops them, return
     count."""
     key = frozenset(scopes or (settings.system_user_id,))
     async with User.system(key) as session:

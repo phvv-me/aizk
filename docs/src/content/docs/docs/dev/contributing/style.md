@@ -8,10 +8,10 @@ build if you break it, so a review here is about design rather than about format
 you can run the tasks from [Development setup](/docs/dev/contributing/setup/).
 
 ```text
-  chefe run lint            ruff check  +  ruff format --check   (plus pre-commit hygiene)
-  chefe run lint-imports    the two import-linter contracts
-  chefe run typecheck       pyrefly  ─▶  ty  ─▶  mypy --strict
-  chefe run test            pytest, 100% statement and branch
+  uv run --no-sync ruff          lint and format check
+  uv run --no-sync lint-imports  the two import-linter contracts
+  uv run --no-sync type checker  pyrefly  ─▶  ty  ─▶  mypy --strict
+  uv run --no-sync pytest        100% statement and branch
         │
         └── any one of these red means the change does not land
 ```
@@ -31,10 +31,8 @@ mistakes, and flake8-simplify for the ones that make code harder to read than it
 "sqlalchemy.select".msg = "Use sqlmodel.select for every query."
 ```
 
-Formatting is `ruff format` and it is checked rather than applied in the gate, so run
-`chefe run lint` before you push. At the monorepo level the same task also runs the pre-commit
-stack, which adds trailing whitespace and end-of-file fixes, YAML and TOML validation, a large-file
-guard, private key detection, a merge-conflict check, `codespell`, and a `lizard` complexity budget.
+Formatting is `ruff format` and it is checked rather than applied in the gate. Run
+`uv run --no-sync ruff check .` and `uv run --no-sync ruff format --check .` before you push.
 
 ## The SQLModel boundary
 
@@ -59,7 +57,7 @@ The other import-linter contract places every top-level `aizk` package in one en
 it is declared `exhaustive`, so adding a new package breaks the gate until somebody assigns it a
 layer deliberately. [Layers and import contracts](/docs/dev/architecture/layers/) explains the
 layering itself and why each package sits where it does. Both contracts run under
-`chefe run lint-imports-aizk`, with external packages included and type-checking-only imports
+`uv run --no-sync lint-imports`, with external packages included and type-checking-only imports
 excluded.
 
 ## Three type checkers

@@ -17,17 +17,8 @@ assets/external/
 site/
 
 # generated
-# The compiled manifest and its lock are the exception, because they are the resolved
-# environment rather than a build artifact. CI runs `chefe install`, which cannot solve, and
-# the cache only carries `.chefe/.pixi`, so an uncommitted lock left the environment to be
-# rebuilt from whatever a cache happened to hold. Committing them beside `uv.lock` is what
-# makes the gates, a remote host and an image resolve the same set.
-.chefe/*
-!.chefe/pixi.toml
-!.chefe/pixi.lock
-# Chefe keeps compilation and lock freshness in one atomic state snapshot. A clean checkout
-# needs it beside the generated manifest and lock so CI can verify rather than solve them.
-!.chefe/state.toml
+.chefe/
+.lote/
 dist/
 build/
 cdk.out/
@@ -56,7 +47,5 @@ archive/ts/.svelte-kit/
 archive/ts/.chefe/
 archive/ts/pnpm-lock.yaml
 
-# lote SQLite runtime sidecars
-.lote/*.sqlite-*
 # benchmark run outputs at the package root only, never the src/aizk/artifacts or tests/artifacts packages
 /artifacts/

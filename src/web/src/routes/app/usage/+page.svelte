@@ -53,7 +53,7 @@
           <Card.Description>Successful requests</Card.Description>
           <InfoTip
             label="What successful requests counts"
-            text="One completed Recall, Remember, Share, or artifact read. Failed calls and ordinary page views are excluded."
+            text="One completed Find, Keep, Share, or artifact read. Failed calls and ordinary page views are excluded."
           />
         </div>
         <Card.Title class="text-3xl"
@@ -122,7 +122,7 @@
         <Card.Title>Operation details</Card.Title>
         <InfoTip
           label="How to understand operation details"
-          text="The selected-period counts below come from the immutable PostgreSQL usage ledger. Remember and Share activity can come from connected clients even though source intake is not shown in the web navigation."
+          text="The selected-period counts below come from the immutable database usage ledger. Keep and Share activity can come from connected clients even though source intake is not shown in the web navigation."
         />
       </div>
       <Card.Description>
@@ -134,12 +134,12 @@
     <Card.Content>
       <dl class="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
         <div>
-          <dt class="text-muted-foreground text-xs">Recalls</dt>
-          <dd class="mt-1 text-xl">{data.usage.summary.recalls.toLocaleString('en-US')}</dd>
+          <dt class="text-muted-foreground text-xs">Finds</dt>
+          <dd class="mt-1 text-xl">{data.usage.summary.finds.toLocaleString('en-US')}</dd>
         </div>
         <div>
-          <dt class="text-muted-foreground text-xs">Remembers</dt>
-          <dd class="mt-1 text-xl">{data.usage.summary.remembers.toLocaleString('en-US')}</dd>
+          <dt class="text-muted-foreground text-xs">Keeps</dt>
+          <dd class="mt-1 text-xl">{data.usage.summary.keeps.toLocaleString('en-US')}</dd>
         </div>
         <div>
           <dt class="text-muted-foreground text-xs">Files</dt>

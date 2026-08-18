@@ -53,16 +53,13 @@ The CI job is reused rather than reimplemented. `publish.yml` calls `ci.yml` thr
 ## Why publishing is manual right now
 
 The release job carries `if: github.event_name == 'workflow_dispatch'`, so an ordinary push to
-`main` runs the full gate and stops. Two things block an unattended upload.
+`main` runs the full gate and stops. AIZK currently exercises a PostgreSQL row security API from one
+reviewed SQLAlchemy commit. The bootstrap script installs that commit after the frozen environment,
+but package metadata cannot require an unreleased commit while remaining a normal PyPI dependency.
 
-The first is the `rls` dependency. It is a direct git reference, because the PyPI name belongs to the
-upstream fork base rather than to the house package, and PyPI rejects any distribution that carries a
-direct-URL dependency. The second is SQLAlchemy. aizk pins the 2.1 beta, and expressing that needs a
-resolver override that plain `pip` has no way to state.
-
-Neither is permanent. Once the fork publishes under its own PyPI name and `pyproject.toml` can name
-it normally, the `if` line comes out and a version bump becomes the whole release again. Until then
-somebody triggers the run.
+This is temporary. Once the row security API ships in SQLAlchemy, `pyproject.toml` can name the
+released version directly. The manual guard can then come out and a version bump becomes the whole
+release again.
 
 ## Checklist
 
@@ -80,15 +77,17 @@ somebody triggers the run.
 
 ## Commands
 
-Everything goes through `chefe run` from the monorepo root. Bare `uv run`, `pip`, `python`, and
-`pytest` are not the environment the gate uses.
+Run every Python gate through the frozen `.venv` after the setup guide installs the reviewed
+SQLAlchemy revision.
 
 ```sh
-chefe run lint                 # ruff check, ruff format --check, and the pre-commit stack
-chefe run lint-imports-aizk    # the layered and SQL import contracts
-chefe run typecheck-aizk       # pyrefly and ty
-chefe run test-aizk-cov        # the suite plus the 100 percent coverage gate
-chefe run docs-aizk            # build the site and run the page gate
+uv run --no-sync ruff check . && uv run --no-sync ruff format --check .
+uv run --no-sync lint-imports
+uv run --no-sync pyrefly check
+uv run --no-sync ty check --python .venv --exit-zero-on-warning
+uv run --no-sync mypy src/aizk src/eval
+uv run --no-sync python -m pytest -n 4 --dist loadscope --benchmark-disable
+pnpm --dir docs check && pnpm --dir docs build
 ```
 
 Building the wheel is the one step CI owns rather than you, using `uv build` on a clean checkout

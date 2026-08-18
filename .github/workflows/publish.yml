@@ -19,10 +19,9 @@ jobs:
 
   release:
     needs: ci
-    # Manually gated for now: the `rls` dependency is a direct git reference (the PyPI name
-    # belongs to the upstream fork base), and PyPI rejects distributions carrying direct-URL
-    # dependencies. Flip back to automatic once the fork publishes under its own PyPI name
-    # and pyproject.toml names it. Every push to main still runs the full CI gate above.
+    # Manually gated while AIZK exercises an unreleased SQLAlchemy API from one reviewed commit.
+    # Flip back to automatic after that API ships in SQLAlchemy and pyproject.toml can name the
+    # released version directly. Every push to main still runs the full CI gate above.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: pypi

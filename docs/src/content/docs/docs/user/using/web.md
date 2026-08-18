@@ -3,10 +3,10 @@ title: "Finding on the web"
 description: "How find reaches the public web, what it refuses to send, and the receipt it always prints."
 ---
 
-`find` replaced `recall`. It does everything recall did and adds one thing, which is that a
-question memory cannot answer may reach the public web. This page is about that half. For phrasing
-and evidence see [Asking memory well](/docs/user/using/recall/), and for the full parameter list
-see [MCP tools](/docs/user/reference/tools/).
+`find` searches memory first. When memory falls short, a safe public question may also reach the
+web. This page explains that second path. For phrasing and evidence see
+[Asking memory well](/docs/user/using/find/), and for the full parameter list see
+[MCP tools](/docs/user/reference/tools/).
 
 Web egress is off until an operator turns it on, and even then only people in one Logto
 organization can use it. A receipt that says no web provider was contacted does not describe
@@ -102,7 +102,7 @@ out of date.
 A page that was fetched is stored as a document in `scopes`, which defaults to your private scope.
 That is the whole economy of the feature, since the next question finds it for free through
 ordinary retrieval. It also means three rules hold, and they hold because the document carries a
-marker rather than because anyone remembered them.
+marker rather than because anyone kept them.
 
 A cached page never enters the knowledge graph, so no stranger's claim becomes one of your
 entities, facts, profiles or insights. It always renders under the **Web page** label wherever it

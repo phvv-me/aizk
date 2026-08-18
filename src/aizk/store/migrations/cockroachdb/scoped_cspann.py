@@ -12,10 +12,24 @@ _DIRECT_SOURCES = {
 _KINDS = (*_DIRECT_SOURCES.values(), "entity", "fact")
 
 
-def scope_function() -> str:
+def authority(permission: str, *, definer_safe: bool) -> str:
+    """Render one scope array through the carrier visible at this privilege boundary."""
+    if not definer_safe:
+        return f"nullif(current_setting('app.scopes.{permission}', true), '')"
+    positions = {"read": 2, "public": 4}
+    return (
+        "nullif(split_part(current_setting('application_name', true), '|', "
+        f"{positions[permission]}), '')"
+    )
+
+
+def scope_function(*, definer_safe: bool = True, replace: bool = False) -> str:
     """Build the capability that lists exact visible scope partitions."""
-    return """
-CREATE FUNCTION aizk_private.cspann_scopes(requested_kind STRING)
+    create = "CREATE OR REPLACE" if replace else "CREATE"
+    read = authority("read", definer_safe=definer_safe)
+    public = authority("public", definer_safe=definer_safe)
+    return f"""
+{create} FUNCTION aizk_private.cspann_scopes(requested_kind STRING)
 RETURNS TABLE (scopes UUID[])
 LANGUAGE SQL
 SECURITY DEFINER
@@ -26,12 +40,12 @@ WHERE candidate.kind = requested_kind
   AND cardinality(candidate.scopes) > 0
   AND (
       candidate.scopes <@ CAST(
-          nullif(current_setting('app.scopes.read', true), '') AS UUID[]
+          {read} AS UUID[]
       )
       OR (
           cardinality(candidate.scopes) = 1
           AND candidate.scopes <@ CAST(
-              nullif(current_setting('app.scopes.public', true), '') AS UUID[]
+              {public} AS UUID[]
           )
       )
   )
@@ -39,11 +53,19 @@ $$
 """
 
 
-def search_function(dimensions: int) -> str:
+def search_function(
+    dimensions: int,
+    *,
+    definer_safe: bool = True,
+    replace: bool = False,
+) -> str:
     """Build the one capability routine allowed to read the private projection."""
     kinds = ", ".join(f"'{kind}'" for kind in _KINDS)
+    create = "CREATE OR REPLACE" if replace else "CREATE"
+    read = authority("read", definer_safe=definer_safe)
+    public = authority("public", definer_safe=definer_safe)
     return f"""
-CREATE FUNCTION aizk_private.cspann_search(
+{create} FUNCTION aizk_private.cspann_search(
     requested_kind STRING,
     requested_scopes UUID[],
     query_vector VECTOR({dimensions}),
@@ -64,12 +86,12 @@ BEGIN
     IF NOT coalesce(
         cardinality(requested_scopes) > 0 AND (
             requested_scopes <@ CAST(
-                nullif(current_setting('app.scopes.read', true), '') AS UUID[]
+                {read} AS UUID[]
             )
             OR (
                 cardinality(requested_scopes) = 1
                 AND requested_scopes <@ CAST(
-                    nullif(current_setting('app.scopes.public', true), '') AS UUID[]
+                    {public} AS UUID[]
                 )
             )
         ),

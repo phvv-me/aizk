@@ -165,12 +165,12 @@ class AizkMCP(FastMCP):
                 StringConstraints(
                     strip_whitespace=True,
                     min_length=1,
-                    max_length=config.mcp_recall_query_max_chars,
+                    max_length=config.mcp_find_query_max_chars,
                 ),
             ],
             context: Context,
             budget: Annotated[
-                int, Field(gt=0, le=config.mcp_recall_budget_max_tokens)
+                int, Field(gt=0, le=config.mcp_find_budget_max_tokens)
             ] = config.context_token_budget,
             scopes: Annotated[ScopeNames, Field(max_length=config.mcp_scope_names_max)]
             | None = None,
@@ -243,7 +243,7 @@ class AizkMCP(FastMCP):
                 StringConstraints(
                     strip_whitespace=True,
                     min_length=1,
-                    max_length=config.mcp_remember_max_chars,
+                    max_length=config.mcp_keep_max_chars,
                 ),
             ]
             | None = None,
@@ -258,7 +258,7 @@ class AizkMCP(FastMCP):
             preserve_source: bool = False,
             upload: UploadDeclaration | None = None,
         ) -> KeepResult:
-            """Keep something worth remembering, as text, a preserved original, or a file.
+            """Keep durable knowledge as text, a preserved original, or a file.
 
             This is the write. Everything kept becomes a source `find` can reach and `share`
             can carry, so keep what will still be worth knowing later rather than what is
@@ -332,7 +332,7 @@ class AizkMCP(FastMCP):
                 raise ToolError("this deployment accepts text memories only")
             user = await self.user(context, identified=True)
             try:
-                return await self.memory(user, client_label(context)).remember(
+                return await self.memory(user, client_label(context)).keep(
                     text,
                     source_uri=source_uri,
                     observed_at=observed_at,
@@ -419,7 +419,7 @@ class AizkMCP(FastMCP):
                 StringConstraints(
                     strip_whitespace=True,
                     min_length=1,
-                    max_length=config.mcp_recall_query_max_chars,
+                    max_length=config.mcp_find_query_max_chars,
                 ),
             ]
             | None = None,
@@ -457,7 +457,7 @@ class AizkMCP(FastMCP):
                 memory, which `query` and `move` both refuse since both start from private
                 documents and would be carrying a scope onto itself.
             move: transfer instead of copy, valid only with `documents`. The copy lands in the
-                destination and the original stops appearing in recall, so use it to relocate
+                destination and the original stops appearing in find results, so use it to relocate
                 private notes into an organization. A move only ever touches your own private
                 documents. Passing it with a `query` is refused rather than ignored, so that a
                 refusal can never read as a move that happened.

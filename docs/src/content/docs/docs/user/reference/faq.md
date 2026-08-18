@@ -19,7 +19,7 @@ including the rule against secrets. AIZK cannot prevent an agent from sending se
 
 There is no delete tool, and that is a real limitation. Correction is the mechanism instead. You store
 an updated statement, the new version becomes current, and the old one keeps its dates and stops
-appearing in ordinary recall. [Time and history](/docs/user/concepts/time/) covers it.
+appearing in ordinary find. [Time and history](/docs/user/concepts/time/) covers it.
 
 If something genuinely has to go, an operator can retract what a source contributed and remove the
 source at the database. That is a real capability, but it is an operator command, not something you or
@@ -32,12 +32,12 @@ knowledge. Preserved originals come back byte for byte. The active SQL backend h
 while the configured object store holds original file bytes. Export is an operator command rather
 than a user interface button, so a copy means asking whoever runs the deployment.
 
-## Why did recall not find my note?
+## Why did find not find my note?
 
 Four usual causes, most common first.
 
 ```text
-  recall missed it
+  find missed it
     │
     ├─ stored in the last few minutes ─▶ still processing, check status
     │
@@ -51,10 +51,10 @@ Four usual causes, most common first.
 ```
 
 Writing returns before the note is searchable, so `status` gives a range for when new material becomes
-recallable. Check it before concluding anything is wrong. If other things came back but not the one you
-wanted, it was found and beaten, since recall returns the best items that fit a token budget and a
+findable. Check it before concluding anything is wrong. If other things came back but not the one you
+wanted, it was found and beaten, since find returns the best items that fit a token budget and a
 thin note can lose to a rich one. A more specific question usually fixes it, and
-[Asking memory well](/docs/user/using/recall/) has the phrasing advice. If nothing relevant came back
+[Asking memory well](/docs/user/using/find/) has the phrasing advice. If nothing relevant came back
 at all, check whether the note lives in an organization you belong to, and whether it carried an
 expiry that has since passed.
 
@@ -69,7 +69,7 @@ keeps aizk out of the reasoning business, a job the assistant already does well.
 ## How is it different from putting notes in a repository?
 
 Four differences that matter, and one honest concession. A repository note is findable by exact string,
-while aizk is findable by meaning, which is what you have when you half remember a decision from six
+while aizk is findable by meaning, which is what you have when you half keep a decision from six
 months ago. A repository has no notion of who may read what beyond the whole repository, while aizk
 carries a scope on every row and the database enforces it. A repository has one timeline, the commit
 log, while aizk tracks when a file changed and when a statement was true separately. A repository note
@@ -81,7 +81,7 @@ setup once memory has to cross projects, people, or years. See [Scopes](/docs/us
 ## Does a model provider see my private memory?
 
 It depends on the deployment profile. The self-hosted PostgreSQL profile runs its model lanes on
-the deployment hardware by default. The crAIZK AWS demo uses hosted endpoints for text embedding,
+the deployment hardware by default. The AIZK AWS demo uses hosted endpoints for text embedding,
 captions and extraction, so accepted content reaches those providers. Ask the operator which
 profile and providers are active before storing sensitive material.
 
@@ -104,11 +104,11 @@ supersedes an earlier one. [Entities, facts, ontology](/docs/user/concepts/graph
 ## Is there a review step?
 
 No, and there is not going to be one. Nothing sits in a queue between `keep` and the moment that
-memory can be recalled. There is no approval state and no human gate.
+memory can be found. There is no approval state and no human gate.
 
 That is deliberate. A review queue only works if somebody drains it, and a memory that fills faster
 than a person can approve becomes a backlog. The correctness work moves to the agents instead. They
-recall before writing, update a maintained note rather than adding a competing one, and correct what
+find before writing, update a maintained note rather than adding a competing one, and correct what
 changed. [Who maintains memory](/docs/user/concepts/lifecycle/) explains the arrangement, and
 [Notes that stay useful](/docs/user/using/habits/) is the habit list.
 

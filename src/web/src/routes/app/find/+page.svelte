@@ -15,18 +15,18 @@
   let asking = $state(false);
 </script>
 
-<PageHeader title="Recall" description="Ask your memory a question and read the recalled answer." />
+<PageHeader title="Find" description="Ask your memory a question and read the grounded evidence." />
 
 <form
   method="POST"
   class="mb-8 space-y-3"
-  use:enhance={feedback('Recalled.', { reset: false, pending: (active) => (asking = active) })}
+  use:enhance={feedback('Found.', { reset: false, pending: (active) => (asking = active) })}
 >
   <div class="flex items-center gap-2">
     <Label for="query">Question</Label>
     <InfoTip
-      label="How Recall works"
-      text="Recall searches source excerpts, current findings, themes, and recent session memory that your scopes allow. Evidence is ordered by merit and includes provenance labels."
+      label="How Find works"
+      text="Find searches source excerpts, current findings, themes, and recent session memory that your scopes allow. Evidence is ordered by merit and includes provenance labels."
     />
   </div>
   <Textarea
@@ -43,7 +43,7 @@
     {/if}
     <Button type="submit" disabled={asking}>
       <Sparkles aria-hidden="true" />
-      {asking ? 'Recalling' : 'Recall'}
+      {asking ? 'Finding' : 'Find'}
     </Button>
   </div>
 </form>
@@ -63,8 +63,8 @@
         <Markdown source={form.markdown} />
       {:else}
         <p class="text-muted-foreground text-sm" role="status">
-          Nothing recalled for this question yet. Add sources through a connected AIZK client and
-          try again.
+          Nothing found for this question yet. Keep sources through a connected AIZK client and try
+          again.
         </p>
       {/if}
     </Card.Content>

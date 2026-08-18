@@ -1,12 +1,12 @@
 ---
 title: "AWS and CockroachDB Cloud"
-description: "How this crAIZK website, app, MCP server and worker run on AWS with CockroachDB Cloud."
+description: "How this AIZK website, app, MCP server and worker run on AWS with CockroachDB Cloud."
 ---
 
 import Diagram from '../../../../../components/Diagram.astro';
 import DeploymentEndpoints from '../../../../../components/DeploymentEndpoints.astro';
 
-This public site is part of the crAIZK hackathon deployment. The same AWS origin serves the
+This public site is part of the AIZK hackathon deployment. The same AWS origin serves the
 landing page, these docs, the browser app and the MCP endpoint.
 
 <DeploymentEndpoints />
@@ -15,7 +15,7 @@ Use the origin printed above for the website and MCP endpoint. Other AIZK deploy
 systems with their own users and memory.
 
 <Diagram
-  title="The live crAIZK deployment uses one public Lambda origin and one private worker"
+  title="The live AIZK deployment uses one public Lambda origin and one private worker"
   nodes={[
     { id: 'client', label: 'browser or MCP client', col: 1, row: 0 },
     { id: 'public', label: 'public Lambda', col: 1, row: 1, emphasis: true },

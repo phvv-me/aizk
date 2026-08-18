@@ -11,7 +11,7 @@ heading() {
 }
 
 printf '\033[2J\033[H'
-printf '\033[1;36mcrAIZK infrastructure evidence\033[0m\n\n'
+printf '\033[1;36mAIZK infrastructure evidence\033[0m\n\n'
 printf 'Live cloud state and committed redacted measurements\n'
 sleep 6
 
@@ -30,7 +30,7 @@ bat --style=plain --paging=never --color=always \
 sleep 12
 
 heading '4  Cloud workload, durable inventory and Lambda health'
-jq '{deployment, corpus, profile, ingestion: {documents: .ingestion.documents, elapsed_seconds: .ingestion.elapsed_seconds, queue_final: .ingestion.queue_final}, recall: {queries: .recall.queries, warm_lambda_find_p50_ms: .recall.warm_lambda_find_p50_ms, warm_lambda_find_p95_ms: .recall.warm_lambda_find_p95_ms}, database_inventory, lambda_observability}' \
+jq '{deployment, corpus, profile, ingestion: {documents: .ingestion.documents, elapsed_seconds: .ingestion.elapsed_seconds, queue_final: .ingestion.queue_final}, find: {queries: .find.queries, warm_lambda_find_p50_ms: .find.warm_lambda_find_p50_ms, warm_lambda_find_p95_ms: .find.warm_lambda_find_p95_ms}, database_inventory, lambda_observability}' \
   hackathon/results/craizk-swe-cloud-2026-08-12.json
 sleep 16
 

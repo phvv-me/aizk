@@ -36,14 +36,10 @@ docker compose --env-file .env -f src/deploy/docker-compose.yml up -d
 `up -d` recreates only what actually changed, so this is safe to run on the whole project. The
 same applies to `frontend` and `docs`, which are separate build targets in the same Dockerfile.
 
-The house packages `patos`, `rlsalchemy` and `mainboard` arrive from PyPI at the exact versions
-`pyproject.toml` pins, like every other dependency, so a build needs nothing beside this checkout
-and can run anywhere. That is deliberate and was not always true. The image used to reinstall
-those three from sibling working trees over whatever the lock had resolved, which meant the test
-suite and the shipped image ran different code from the same declaration. A base class that began
-rejecting unknown fields therefore reached production having never executed in a single test, and
-it rejected every real identity token. Changing a house package now takes a publish and a pin
-bump before it can reach an image, which is the cost of a green suite meaning something.
+`patos` and `rlsalchemy` arrive from PyPI at the exact versions `pyproject.toml` pins. The reviewed
+SQLAlchemy row security fork is fixed to one public revision and installed by the same bootstrap
+script CI runs. `uv.lock` fixes the rest of the graph. A build therefore never resolves a sibling
+working tree or an unreviewed package revision by accident.
 
 ## Image pinning
 
@@ -91,12 +87,12 @@ is shorter than 32 bytes or equal to the web or Management API client secret.
 
 Take both database archives and an object-store copy. Pull and rebuild. Bring the stack up so
 `setup` migrates. Run `aizk admin health` in `worker` and confirm the migration is at head, RLS
-reports no violations, the model endpoints match their configured aliases and the real recall
+reports no violations, the model endpoints match their configured aliases and the real find
 returns candidates. Only then restore public traffic.
 
 Upstream of all that, the same gate runs in CI on every pull request. `.github/workflows/ci.yml`
-runs `chefe run lint`, `chefe run lint-imports`, `chefe run typecheck` and `chefe run test`
-against a real VectorChord database with the same restricted app role, so forced row security is
+installs the frozen lock, then runs Ruff, import-linter, all three type checkers, and pytest against
+a real VectorChord database with the same restricted app role, so forced row security is
 exercised the way production has it. `.github/workflows/docs.yml` builds this site and runs the
 page gate. A change that has not passed both should not reach a deployment.
 

@@ -260,7 +260,7 @@ def test_lambda_web_application_forwards_only_browser_routes(
     application = mcp_mod.LambdaWebApplication("craizk-web")
 
     assert application.handles({"rawPath": "/app/dashboard"})
-    assert application.handles({"rawPath": "/_app/immutable/app.js"})
+    assert not application.handles({"rawPath": "/_app/immutable/app.js"})
     assert not application.handles({"rawPath": "/api/overview"})
     assert not application.handles({"rawPath": 3})
     assert application.forward({"rawPath": "/app/dashboard"}) == {

@@ -82,7 +82,7 @@ def annotate_operation(
     """Stamp the accounted operation, touched scopes, and produced item count."""
     exact_targets = tuple(sorted(set(targets), key=str))
     span = trace.get_current_span()
-    span.set_attribute(_OPERATION, operation.value)
+    span.set_attribute(_OPERATION, operation.public_name)
     span.set_attribute(_ITEMS, items)
     if exact_targets:
         span.set_attribute(_TARGETS, ",".join(map(str, exact_targets)))
@@ -112,7 +112,7 @@ class CallerAnnotator(SpanProcessor):
             span.set_attribute(_USER, str(state.user_id))
             span.set_attribute(_ANONYMOUS, "true" if state.anonymous else "false")
         if state.operation is not None:
-            span.set_attribute(_OPERATION, state.operation.value)
+            span.set_attribute(_OPERATION, state.operation.public_name)
         if state.targets:
             span.set_attribute(_TARGETS, ",".join(map(str, state.targets)))
 

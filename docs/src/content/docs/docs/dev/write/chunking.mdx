@@ -61,7 +61,7 @@ away from it.
 
 `ord` is the position inside the document, assigned by `enumerate` in `TextIngestor.document`, and
 what `Document.chunks` orders on. `provenance` is the JSONB record from `CaptureContext.record`,
-carrying the speaker label and role with `observed_at` and `expires_at`, and recall reads the
+carrying the speaker label and role with `observed_at` and `expires_at`, and find reads the
 speaker fields straight from it.
 
 `lexical` is the text the BM25 lane indexes when it should differ from `text`. `contextual_lexical`
@@ -118,7 +118,7 @@ There is no in-memory queue. A pending chunk is a row where `processed_at IS NUL
 `pending_chunks` in `src/aizk/graph/build.py` selects them inside one exact scope set, ordered by
 `id`.
 
-Three things drain that backlog. `Memory.remember` calls `enqueue_document` right after ingest, so a
+Three things drain that backlog. `Memory.keep` calls `enqueue_document` right after ingest, so a
 fresh document is queued immediately. `ChunkDispatchJob` runs on `chunk_dispatch_cron`, every
 minute, enqueuing up to `chunk_dispatch_batch_size` pending chunks, default 512, which recovers
 anything that missed the direct call. `ChunkRecoveryJob` requeues retained failures up to

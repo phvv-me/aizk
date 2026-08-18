@@ -429,12 +429,12 @@ class Settings(BaseSettings):
     logto_creator_role: str = "admin"
     louvain_seed: int = 7
     mcp_host: str = "127.0.0.1"
-    mcp_recall_budget_max_tokens: PositiveInt = 16_384
-    mcp_recall_query_max_chars: PositiveInt = 16_384
-    mcp_remember_max_chars: PositiveInt = 5_000_000
+    mcp_find_budget_max_tokens: PositiveInt = 16_384
+    mcp_find_query_max_chars: PositiveInt = 16_384
+    mcp_keep_max_chars: PositiveInt = 5_000_000
     # A report quotes the settled facts, the source excerpt, and a short explanation, which
     # a few paragraphs and two or three excerpts comfortably cover. It is a small fraction of
-    # `mcp_remember_max_chars`, which exists for preserved originals and long-form notes a
+    # `mcp_keep_max_chars`, which exists for preserved originals and long-form notes a
     # report is never meant to be, so a caller stuck retrying cannot back a corpus through it.
     mcp_report_max_chars: PositiveInt = 8_000
     mcp_request_rate_per_second: PositiveFloat = 5.0
@@ -444,10 +444,10 @@ class Settings(BaseSettings):
     mcp_public_url: AnyHttpUrl | None = None
     mcp_port: int = 8000
     monthly_total_operation_limit: PositiveInt | None = None
-    monthly_total_remember_limit: PositiveInt | None = None
+    monthly_total_keep_limit: PositiveInt | None = None
     monthly_total_web_limit: PositiveInt | None = None
     monthly_user_operation_limit: PositiveInt | None = None
-    monthly_user_remember_limit: PositiveInt | None = None
+    monthly_user_keep_limit: PositiveInt | None = None
     monthly_user_web_limit: PositiveInt | None = None
     oauth_scopes: frozenset[str] = frozenset({"control", "offline_access", "openid"})
     object_store_access_key: SecretStr = SecretStr("")
@@ -507,12 +507,12 @@ class Settings(BaseSettings):
     queue_lease_seconds: PositiveInt = 300
     queue_poll_seconds: PositiveFloat = 0.5
     queue_retry_base_seconds: PositiveFloat = 2.0
-    community_recall_k: int = 3
+    community_find_k: int = 3
     fact_candidate_factor: int = 2
     graph_dangling_factor: float = 0.5
     graph_entity_seed_weight: float = 1.0
     # Whether query entity mentions seed the graph expansion at all, the R2 ablation's
-    # off switch; off also skips the gate's extract call on every recall.
+    # off switch. Off also skips the gate's extract call on every find.
     graph_entity_seeding: bool = True
     graph_fact_seed_weight: float = 0.25
     graph_mass_window: int = 80
@@ -541,24 +541,24 @@ class Settings(BaseSettings):
     usage_snapshot_cron: str = "*/30 * * * *"
     usage_snapshot_enabled: bool = True
     usage_snapshot_stale_minutes: PositiveInt = 120
-    profile_recall_k: int = 1
-    # Recall feature switches stay independent of the workers that build their data. A
+    profile_find_k: int = 1
+    # Find feature switches stay independent of the workers that build their data. A
     # deployment may keep producing the complete graph while serving a narrower request path.
-    recall_access_recording_enabled: bool = True
-    recall_chars_per_token: float = 4.0
-    recall_communities_enabled: bool = True
-    recall_entity_catalog_enabled: bool = True
-    recall_frequency_weight: float = 0.02
-    recall_graph_expansion_enabled: bool = True
+    find_access_recording_enabled: bool = True
+    find_chars_per_token: float = 4.0
+    find_communities_enabled: bool = True
+    find_entity_catalog_enabled: bool = True
+    find_frequency_weight: float = 0.02
+    find_graph_expansion_enabled: bool = True
     # Calibrated on real Qwen3-VL query/document embeddings: relevant chunks land at cosine
     # distance 0.27-0.49 while off-corpus questions bottom out at 0.60-0.75.
-    recall_max_distance: float = 0.65
-    recall_per_document: int = 3
-    recall_profiles_enabled: bool = True
-    recall_raptor_enabled: bool = True
-    recall_sources_first: bool = False
-    recall_recency_half_life_days: float = 30.0
-    recall_recency_weight: float = 0.1
+    find_max_distance: float = 0.65
+    find_per_document: int = 3
+    find_profiles_enabled: bool = True
+    find_raptor_enabled: bool = True
+    find_sources_first: bool = False
+    find_recency_half_life_days: float = 30.0
+    find_recency_weight: float = 0.1
     rerank_api_key: str = ""
     rerank_concurrency: int = 8
     rerank_depth: int = 50
@@ -622,7 +622,7 @@ class Settings(BaseSettings):
     spa_client_id: str = ""
     static_root: Path = _PACKAGE_ROOT / "docs" / "dist"
     session_promote_threshold: int = 20
-    session_recall_k: int = 5
+    session_find_k: int = 5
     serve_with_worker: bool = True
     similar_facts: int = 5
     skip_live_gate: str = "aizk_skip_live_gate"

@@ -6,16 +6,14 @@
   let { points }: { points: UsagePoint[] } = $props();
 
   const categories = [
-    { key: 'recall', label: 'Recall', color: 'var(--series-1)' },
-    { key: 'remember', label: 'Remember', color: 'var(--series-2)' },
+    { key: 'find', label: 'Find', color: 'var(--series-1)' },
+    { key: 'keep', label: 'Keep', color: 'var(--series-2)' },
     { key: 'share', label: 'Share', color: 'var(--series-3)' },
     { key: 'artifact_read', label: 'Artifact read', color: 'var(--series-4)' }
   ] as const;
 
   function category(operation: string): (typeof categories)[number]['key'] {
-    return operation.startsWith('remember_')
-      ? 'remember'
-      : (operation as (typeof categories)[number]['key']);
+    return operation as (typeof categories)[number]['key'];
   }
 
   const days = $derived(
@@ -35,11 +33,11 @@
       Successful operations over time
       <InfoTip
         label="How to read successful operations"
-        text="Each column is one UTC day. The height is the number of successful AIZK operations. Remember combines text and file ingestion from connected clients. Failed requests and page views are not counted."
+        text="Each column is one UTC day. The height is the number of successful AIZK operations. Keep combines text and file ingestion from connected clients. Failed requests and page views are not counted."
       />
     </div>
     <p class="text-muted-foreground mt-1 text-sm">
-      Daily successful Recall, Remember, Share, and artifact read operations.
+      Daily successful Find, Keep, Share, and artifact read operations.
     </p>
   </figcaption>
   <div class="flex flex-wrap gap-4 text-xs" aria-label="Operation legend">

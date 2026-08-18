@@ -145,7 +145,7 @@ async def copies_of(source: UUID7, scopes: list[UUID5]) -> list[UUID7]:
 
 
 async def revise(user: User, document_id: UUID7, text: str) -> None:
-    """Re-remember one note: close the claims its old span grounded, then rewrite the span.
+    """Re-keep one note: close the claims its old span grounded, then rewrite the span.
 
     Ingestion retracts a source's live claims before its chunks change, so the revision
     mirrors that order rather than leaving the previous statements live beside the new ones.
@@ -332,10 +332,10 @@ def test_move_copies_into_the_organization_and_retires_the_private_original(
         # repeating the same move finds the standing copy and the expired original
         repeated = await memory(user).share([source], scopes=["Team"], move=True)
         remaining = await live_claims(source)
-        recalled = await (await memory(user).recall(QUESTION, budget=2048)).to_markdown()
-        return moved, repeated, remaining, recalled
+        found = await (await memory(user).find_memory(QUESTION, budget=2048)).to_markdown()
+        return moved, repeated, remaining, found
 
-    moved, repeated, remaining, recalled = dbutil.run(probe())
+    moved, repeated, remaining, found = dbutil.run(probe())
 
     (carried,) = moved.documents
     assert moved.moved and not moved.preview
@@ -345,27 +345,27 @@ def test_move_copies_into_the_organization_and_retires_the_private_original(
     # the repeat settles on the copy it already made rather than making a second one
     assert repeated == moved
     assert remaining == 0  # the source's claims are closed, not deleted
-    # the evidence survives the move, but recall now reaches it only through the organization
-    assert str(carried.id) not in recalled
-    assert f"Document `{carried.destination}" in recalled
-    assert "from scope `Team`" in recalled
+    # the evidence survives the move, but find now reaches it only through the organization
+    assert str(carried.id) not in found
+    assert f"Document `{carried.destination}" in found
+    assert "from scope `Team`" in found
 
 
-def test_copy_leaves_the_private_original_standing_in_recall(owner: UUID5) -> None:
+def test_copy_leaves_the_private_original_standing_in_find(owner: UUID5) -> None:
     user, team = team_caller(owner)
 
     async def probe() -> tuple[ShareResult, str]:
         source = await seed_note(user, "Interpretability", "probes and features", [owner])
         copied = await memory(user).share([source], scopes=["Team"])
-        recalled = await (await memory(user).recall(QUESTION, budget=2048)).to_markdown()
-        return copied, recalled
+        found = await (await memory(user).find_memory(QUESTION, budget=2048)).to_markdown()
+        return copied, found
 
-    copied, recalled = dbutil.run(probe())
+    copied, found = dbutil.run(probe())
 
     (carried,) = copied.documents
     assert not copied.moved
     assert dbutil.run(copies_of(carried.id, [team])) == [carried.destination]
-    assert "probes and features" in recalled
+    assert "probes and features" in found
 
 
 def test_query_selection_returns_distinct_documents_in_merit_order(owner: UUID5) -> None:
@@ -407,7 +407,7 @@ def test_a_source_revised_after_a_share_refreshes_its_copy_before_a_move_retires
         source = await seed_note(user, "Interpretability", "the first draft", [owner])
         await seed_grounded_fact(user, source, "the first claim")
         await memory(user).share([source], scopes=["Team"])
-        # the note is re-remembered with new content, then moved into the same organization
+        # the note is re-kept with new content, then moved into the same organization
         await revise(user, source, "the revised draft")
         await seed_grounded_fact(user, source, "the revised claim")
         moved = await memory(user).share([source], scopes=["Team"], move=True)
@@ -567,7 +567,7 @@ def test_packing_prices_the_document_line_it_will_render(owner: UUID5) -> None:
     # the annotation is priced at what it renders, not ignored until it overruns the budget
     assert annotated.token_count == ceil(
         (len(plain.line) + len(annotated.document_note) + len("\n\n    Document ``"))
-        / settings.recall_chars_per_token
+        / settings.find_chars_per_token
     )
     # a budget that holds the bare line does not hold the annotated one, so packing skips it
     assert pack([plain, annotated], plain.token_count + 1) == [plain]

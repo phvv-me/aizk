@@ -4,6 +4,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Self, cast
 
 import rls
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_sessionmaker,
@@ -12,7 +13,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from ..config import settings
 from ..exceptions import NoTenantContext
-from .backend import DatabaseRole, database_adapter
+from .backend import DatabaseRole, bind_cockroach_authority, database_adapter
 
 if TYPE_CHECKING:
     from .identity import User
@@ -28,6 +29,9 @@ class Session(AsyncSession):
         if not isinstance(user, rls.Context):
             raise NoTenantContext("database session has no user")
         return cast("User", user)
+
+
+event.listen(Session.sync_session_class, "after_begin", bind_cockroach_authority)
 
 
 class SessionScope:

@@ -74,14 +74,14 @@ change someday", or "review this quarterly". aizk has no reminders, no notificat
 queue, and no task list. Nothing happens when an expiry passes except that the statement stops
 counting as current.
 
-Concretely, once the time passes, ordinary recall stops returning that source and stops returning
+Concretely, once the time passes, ordinary find stops returning that source and stops returning
 the current facts derived from it. The history is untouched. Nothing is deleted and nothing is
 overwritten, so a question about what was known back then still finds it.
 
 ```text
   expiry passes
         │
-        ├─▶ ordinary recall no longer returns the source        ✓
+        ├─▶ ordinary find no longer returns the source        ✓
         ├─▶ its derived current facts stop being current        ✓
         ├─▶ history is preserved and still queryable            ✓
         │
@@ -90,7 +90,7 @@ overwritten, so a question about what was known back then still finds it.
         └─▶ the text is deleted                                 ✗
 ```
 
-Because expiry silently removes knowledge from recall, a wrong expiry is expensive. It does not
+Because expiry silently removes knowledge from find, a wrong expiry is expensive. It does not
 produce an error or a warning. It produces a memory that used to be found and now is not, with
 nothing pointing at why.
 
@@ -111,7 +111,7 @@ a new one beside it.
 
 Take the project lead again. When aizk is told Bo took over, the claim about Ada gets an end on
 the valid clock, and a new claim about Bo starts from the handover date. Both rows still exist.
-Ordinary recall returns Bo, because only the open claim counts as current, and the claim about
+Ordinary find returns Bo, because only the open claim counts as current, and the claim about
 Ada is still there for anybody who asks about March.
 
 The same thing happens on the recorded clock when a mistake is fixed rather than a change
@@ -138,7 +138,7 @@ source it came from is read again.
 
 <div class="not-content">
 
-- [Writing memory well](/docs/user/using/remember/) shows where these times go when you store something.
+- [Writing memory well](/docs/user/using/keep/) shows where these times go when you store something.
 - [Who maintains memory](/docs/user/concepts/lifecycle/) explains why corrections are an agent's job.
 - [The bi-temporal model](/docs/dev/store/bitemporal/) is the developer version of this page.
 

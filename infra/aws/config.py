@@ -22,19 +22,20 @@ class DeploymentConfig:
     web_image_digest: str = ""
     public_url: str | None = None
     logto_url: str | None = None
-    logto_client_id: str = ""
+    logto_management_client_id: str = ""
+    logto_public_client_id: str = ""
     spa_client_id: str = "rdxzy3laahdnyp1mgxndf"
     web_client_id: str = ""
     billing_email: str = ""
     monthly_budget_usd: int = 10
     db_null_pool: bool = False
-    recall_access_recording_enabled: bool = False
-    recall_communities_enabled: bool = True
-    recall_entity_catalog_enabled: bool = True
-    recall_graph_expansion_enabled: bool = True
-    recall_profiles_enabled: bool = False
-    recall_raptor_enabled: bool = False
-    recall_sources_first: bool = True
+    find_access_recording_enabled: bool = False
+    find_communities_enabled: bool = True
+    find_entity_catalog_enabled: bool = True
+    find_graph_expansion_enabled: bool = True
+    find_profiles_enabled: bool = False
+    find_raptor_enabled: bool = False
+    find_sources_first: bool = True
     database_url_parameter: str = "/craizk/staging/database-url"
     admin_database_url_parameter: str = "/craizk/staging/admin-database-url"
     openrouter_key_parameter: str = "/craizk/staging/openrouter-api-key"
@@ -53,7 +54,8 @@ class DeploymentConfig:
             (
                 self.public_url,
                 self.logto_url,
-                self.logto_client_id,
+                self.logto_management_client_id,
+                self.logto_public_client_id,
                 self.spa_client_id,
                 self.web_client_id,
             )
@@ -76,7 +78,8 @@ class DeploymentConfig:
             (
                 self.public_url,
                 self.logto_url,
-                self.logto_client_id,
+                self.logto_management_client_id,
+                self.logto_public_client_id,
                 self.web_client_id,
             )
         )
@@ -93,25 +96,26 @@ class DeploymentConfig:
             web_image_digest=get("AIZK_AWS_WEB_IMAGE_DIGEST", ""),
             public_url=get("AIZK_AWS_PUBLIC_URL") or None,
             logto_url=get("AIZK_AWS_LOGTO_URL") or None,
-            logto_client_id=get("AIZK_AWS_LOGTO_CLIENT_ID", ""),
+            logto_management_client_id=get("AIZK_AWS_LOGTO_MANAGEMENT_CLIENT_ID", ""),
+            logto_public_client_id=get("AIZK_AWS_LOGTO_PUBLIC_CLIENT_ID", ""),
             spa_client_id=get("AIZK_AWS_SPA_CLIENT_ID", cls.spa_client_id),
             web_client_id=get("AIZK_AWS_WEB_CLIENT_ID", ""),
             billing_email=get("AIZK_AWS_BILLING_EMAIL", ""),
             monthly_budget_usd=int(get("AIZK_AWS_MONTHLY_BUDGET_USD", "10")),
             db_null_pool=enabled(get("AIZK_AWS_DB_NULL_POOL", "false")),
-            recall_access_recording_enabled=enabled(
-                get("AIZK_AWS_RECALL_ACCESS_RECORDING_ENABLED", "false")
+            find_access_recording_enabled=enabled(
+                get("AIZK_AWS_FIND_ACCESS_RECORDING_ENABLED", "false")
             ),
-            recall_communities_enabled=enabled(get("AIZK_AWS_RECALL_COMMUNITIES_ENABLED", "true")),
-            recall_entity_catalog_enabled=enabled(
-                get("AIZK_AWS_RECALL_ENTITY_CATALOG_ENABLED", "true")
+            find_communities_enabled=enabled(get("AIZK_AWS_FIND_COMMUNITIES_ENABLED", "true")),
+            find_entity_catalog_enabled=enabled(
+                get("AIZK_AWS_FIND_ENTITY_CATALOG_ENABLED", "true")
             ),
-            recall_graph_expansion_enabled=enabled(
-                get("AIZK_AWS_RECALL_GRAPH_EXPANSION_ENABLED", "true")
+            find_graph_expansion_enabled=enabled(
+                get("AIZK_AWS_FIND_GRAPH_EXPANSION_ENABLED", "true")
             ),
-            recall_profiles_enabled=enabled(get("AIZK_AWS_RECALL_PROFILES_ENABLED", "false")),
-            recall_raptor_enabled=enabled(get("AIZK_AWS_RECALL_RAPTOR_ENABLED", "false")),
-            recall_sources_first=enabled(get("AIZK_AWS_RECALL_SOURCES_FIRST", "true")),
+            find_profiles_enabled=enabled(get("AIZK_AWS_FIND_PROFILES_ENABLED", "false")),
+            find_raptor_enabled=enabled(get("AIZK_AWS_FIND_RAPTOR_ENABLED", "false")),
+            find_sources_first=enabled(get("AIZK_AWS_FIND_SOURCES_FIRST", "true")),
             database_url_parameter=get(
                 "AIZK_AWS_DATABASE_URL_PARAMETER", cls.database_url_parameter
             ),

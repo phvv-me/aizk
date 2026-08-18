@@ -11,7 +11,7 @@ from .background.wake import NoopWorkerWake, WorkerWake
 from .config import settings
 from .extract import ingest as extract_ingest
 from .provenance import CaptureContext
-from .retrieval import Evidence, RecallEvidence, RecallResult
+from .retrieval import Evidence, FindEvidence, FindResult
 from .store import Document, Usage
 from .store.identity import User
 from .types import UUID7, ScopeNames, Scopes
@@ -95,26 +95,26 @@ class Memory:
         """Return the caller and its current Logto-derived authority."""
         return self.user
 
-    async def recall(self, query: str, budget: int) -> RecallResult:
+    async def find_memory(self, query: str, budget: int) -> FindResult:
         """Return structured merit-ordered evidence visible to this caller."""
-        _, result = await self.remembered(query, budget)
+        _, result = await self.find_evidence(query, budget)
         return result
 
-    async def remembered(self, query: str, budget: int) -> tuple[RecallEvidence, RecallResult]:
+    async def find_evidence(self, query: str, budget: int) -> tuple[FindEvidence, FindResult]:
         """Run the memory half of a question, keeping the signals an egress router reads."""
-        await quota.consume(self.user.id, Usage.Event.Operation.recall)
+        await quota.consume(self.user.id, Usage.Event.Operation.find_memory)
         evidence = await retrieval.evidence(query.strip(), self.user, token_budget=budget)
         candidates = evidence.candidates
         annotate_operation(
-            Usage.Event.Operation.recall,
+            Usage.Event.Operation.find_memory,
             frozenset().union(*(candidate.scopes for candidate in candidates)),
             len(candidates),
         )
         reports = settings.reports_scope_id
         scope_details = (
-            {self.user.id: RecallResult.Scope(name="private")}
+            {self.user.id: FindResult.Scope(name="private")}
             | {
-                organization.id: RecallResult.Scope(
+                organization.id: FindResult.Scope(
                     name=organization.name,
                     description=organization.description,
                 )
@@ -124,7 +124,7 @@ class Memory:
             # would otherwise meet a catalog that cannot name the scope its evidence stands in.
             | (
                 {
-                    reports: RecallResult.Scope(
+                    reports: FindResult.Scope(
                         name="reports",
                         description="Reports agents filed about memory, readable by operators.",
                     )
@@ -133,7 +133,7 @@ class Memory:
                 else {}
             )
         )
-        return evidence, RecallResult.from_candidates(candidates, scope_details)
+        return evidence, FindResult.from_candidates(candidates, scope_details)
 
     async def find(
         self,
@@ -142,7 +142,7 @@ class Memory:
         scopes: ScopeNames | None = None,
         web: WebMode = WebMode.auto,
         fresh: bool = False,
-    ) -> RecallResult:
+    ) -> FindResult:
         """Answer one question from memory, and from the public web when memory cannot.
 
             memory retrieval, always, free
@@ -160,7 +160,7 @@ class Memory:
         service wired refuses in the same shape a disabled one does, which keeps the
         receipt honest on every path.
         """
-        evidence, result = await self.remembered(query, budget)
+        evidence, result = await self.find_evidence(query, budget)
         outcome = (
             WebOutcome.refused(Refusal.not_permitted)
             if self.web is None
@@ -177,8 +177,8 @@ class Memory:
     def web_evidence(findings: tuple[WebFinding, ...]) -> tuple[Evidence, ...]:
         """Render fetched pages as evidence carrying their provider and retrieval date."""
         return tuple(
-            RecallResult.Evidence(
-                provenance=RecallResult.Provenance.WEB,
+            FindResult.Evidence(
+                provenance=FindResult.Provenance.WEB,
                 text=finding.text,
                 provider=finding.provider,
                 retrieved_at=finding.retrieved_at,
@@ -187,7 +187,7 @@ class Memory:
             for finding in findings
         )
 
-    async def remember(
+    async def keep(
         self,
         text: str | None = None,
         source_uri: str | None = None,
@@ -198,13 +198,13 @@ class Memory:
     ) -> WriteResult | ArtifactReceipt:
         """Store text directly or preserve a URI original with optional companion text."""
         if text is None and source_uri is None:
-            raise ValueError("remember requires text or a source URI")
+            raise ValueError("keep requires text or a source URI")
         if preserve_source and source_uri is None:
             raise ValueError("preserve_source requires a source URI")
         operation = (
-            Usage.Event.Operation.remember_file
+            Usage.Event.Operation.keep_file
             if source_uri is not None and (text is None or preserve_source)
-            else Usage.Event.Operation.remember_text
+            else Usage.Event.Operation.keep_text
         )
         await quota.consume(self.user.id, operation)
         if source_uri is not None and (text is None or preserve_source):
@@ -229,9 +229,9 @@ class Memory:
     async def report(self, text: str) -> WriteResult:
         """File one confusing or contradictory memory finding into the operator-only scope.
 
-        Mechanically this is `remember`'s text write with the destination fixed to the one
+        Mechanically this is `keep`'s text write with the destination fixed to the one
         scope every authenticated caller may write and only an operator may read, so it shares
-        `remember`'s monthly quota and, because the exact same content hashes to the exact same
+        `keep`'s monthly quota and, because the exact same content hashes to the exact same
         document within that one scope, the same dedupe that already protects a stuck retry
         from filing the same document twice.
 
@@ -241,7 +241,7 @@ class Memory:
         its own transaction could write the document but never the chunks under it. `created_by`
         still names the real caller, since only the transaction's authority moves.
         """
-        await quota.consume(self.user.id, Usage.Event.Operation.remember_text)
+        await quota.consume(self.user.id, Usage.Event.Operation.keep_text)
         target = self.user.report_scope()
         return await self._ingest_document(text, target, actor=User.system(target))
 
@@ -259,7 +259,7 @@ class Memory:
         actor: transaction identity the write runs as, the caller unless one is given.
         """
         declaration = extract_ingest.SourceDeclaration.from_text(text)
-        annotate_operation(Usage.Event.Operation.remember_text, target)
+        annotate_operation(Usage.Event.Operation.keep_text, target)
         document_id = await extract_ingest.ingest_text(
             actor or self.user,
             text,
@@ -358,7 +358,7 @@ class Memory:
         target: Scopes,
         limit: int,
     ) -> tuple[SharedDocument, ...]:
-        """The documents one share will carry, ordered as the caller named or recalled them.
+        """The documents one share will carry, ordered as the caller named or found them.
 
         A document already standing in the destination is dropped rather than carried, since
         the end state the caller asked for already holds and promoting a document into its

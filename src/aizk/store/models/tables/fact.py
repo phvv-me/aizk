@@ -345,7 +345,7 @@ class FactClaim(Id, Scoped, TableBase, table=True):
 
     @classmethod
     async def dispute(cls, session: Session, claim_ids: Sequence[UUID7], evidence: UUID7) -> None:
-        """Mark live claims a new fact contests, so recall can never render them settled.
+        """Mark live claims a new fact contests, so find can never render them settled.
 
         The claims stay live and keep answering, because a source that only doubts an
         earlier one is no grounds to withdraw it. What changes is that both sides now

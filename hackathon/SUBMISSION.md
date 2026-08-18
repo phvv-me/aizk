@@ -1,11 +1,11 @@
-# crAIZK Devpost submission
+# AIZK Devpost submission
 
 Copy each section into the matching Devpost field. Replace only the marked credential and video
 placeholders. Keep the testing credentials inside the private testing field.
 
 ## Project name
 
-crAIZK
+AIZK
 
 ## Elevator pitch
 
@@ -19,13 +19,13 @@ Most agent memory is a vector index filled with detached text. It can find a sim
 it cannot always explain who wrote it, who may read it, or whether it is still true. That becomes a
 serious problem when several people and agents share one memory.
 
-We built crAIZK to make memory inspectable. A useful memory should preserve the original source,
+We built AIZK to make memory inspectable. A useful memory should preserve the original source,
 record changes instead of overwriting them, and apply the same access boundary to keyword, vector,
 graph, and temporal retrieval.
 
-### What crAIZK does
+### What AIZK does
 
-crAIZK gives MCP agents five memory tools. `keep` stores a note, public source, or bounded file.
+AIZK gives MCP agents five memory tools. `keep` stores a note, public source, or bounded file.
 `find` retrieves evidence even when the question uses different wording. `status` reports identity,
 usage, and processing health. `share` moves approved memories into team scopes. `report` records a
 memory problem for the operator.
@@ -36,7 +36,7 @@ Row level security keeps personal memory private and allows controlled sharing w
 organizations.
 
 The demonstration starts when an agent stores a short Project Atlas release policy. After durable
-background processing finishes, the agent asks a differently worded question. crAIZK returns the
+background processing finishes, the agent asks a differently worded question. AIZK returns the
 exact source and the answer without sending the private question to the web.
 
 ### How we built it
@@ -56,11 +56,16 @@ Logto provides OAuth and organization membership. The public MCP clients use PKC
 shared secret. OpenRouter routes the bounded demonstration workload to hosted extraction and
 embedding models.
 
+A separate queue steward handles operational failures. It reads the live cluster through
+CockroachDB Cloud Managed MCP, follows the official cluster health and background job Agent Skills,
+and asks DeepSeek V4 Flash for a typed diagnosis. It cannot write through MCP. Any retry remains a
+bounded AIZK command that requires operator approval.
+
 ### Challenges we ran into
 
 The hardest problem was not nearest-neighbor search. A direct scoped C-SPANN query took only a few
 milliseconds, but an ordinary vector filter combined with row level security could force a scan.
-The full recall statement then spent seconds evaluating parent visibility and composing graph
+The full find statement then spent seconds evaluating parent visibility and composing graph
 evidence.
 
 We solved the candidate-search problem with a private vector projection keyed by vector kind and
@@ -81,13 +86,15 @@ tested the flow from isolated Codex and OpenCode containers.
 - The live scoped C-SPANN plan selected the distributed vector index and executed in 7 milliseconds.
 - The bounded six-note cloud workload produced 40 facts, 19 entities, and four communities with no
   retained queue failure.
-- Warm end-to-end recall measured a 2.14 second median and a 3.16 second p95 on the recorded cloud
+- Warm end-to-end find measured a 2.14 second median and a 3.16 second p95 on the recorded cloud
   workload.
 - The same workload answered all 29 expected points after semantic review while preserving the
   unchanged 26 of 29 exact-phrase score.
 - CloudWatch reported no Lambda errors or throttles during the measured run.
-- Direct Logto OAuth, all five MCP tools, private S3 upload, worker extraction, and grounded recall
+- Direct Logto OAuth, all five MCP tools, private S3 upload, worker extraction, and grounded find
   work from one public AWS URL.
+- The queue steward distinguishes application work failures from CockroachDB jobs through Managed
+  MCP and names the official Agent Skills and evidence used in every verdict.
 - The public repository includes the complete infrastructure, migrations, documentation, bounded
   corpus, redacted query plans, and machine-readable result files.
 
@@ -108,9 +115,9 @@ Finally, serverless simplicity comes from strict boundaries. The public Lambda c
 database. The application role cannot bypass row security or read the private vector projection.
 The worker receives bounded capabilities and every external service has a narrow purpose.
 
-### What's next for crAIZK
+### What's next for AIZK
 
-The next database pass will reduce the cost of the composed CockroachDB recall statement while
+The next database pass will reduce the cost of the composed CockroachDB find statement while
 preserving the source, community, entity, graph, and authorization behavior demonstrated here. We
 also want to contribute the reusable PostgreSQL row security DDL building blocks upstream to
 SQLAlchemy and keep the CockroachDB integration as small as possible.
@@ -123,6 +130,8 @@ benchmarks and larger public corpora also need their own measured studies.
 ## Built with
 
 - CockroachDB Cloud
+- CockroachDB Cloud Managed MCP
+- CockroachDB Agent Skills
 - CockroachDB Distributed Vector Indexing
 - ccloud CLI
 - AWS Lambda
@@ -165,7 +174,7 @@ Recommended Devpost tags
 
 ## Testing credentials and instructions
 
-Paste the credentials from the secure crAIZK demo directory into the private Devpost field.
+Paste the credentials from the secure AIZK demo directory into the private Devpost field.
 
 ```text
 Account label
@@ -222,12 +231,12 @@ The repository uses the canonical Apache License 2.0 text. The README links the 
 
 ## CockroachDB tools used
 
-Select these two options.
+Select these four options.
 
 - CockroachDB Distributed Vector Indexing
+- CockroachDB Cloud Managed MCP Server
+- CockroachDB Agent Skills Repo
 - ccloud CLI
-
-Do not select Managed MCP Server or Agent Skills Repo for the final entry.
 
 ## AWS services used
 
@@ -249,6 +258,21 @@ The ccloud CLI was used to inspect cluster health, manage the restricted SQL ide
 CockroachDB version and migration state, and capture redacted operational evidence. Its structured
 output made those checks reproducible without exposing a connection string.
 
+The AIZK queue steward uses fixed CockroachDB Cloud Managed MCP calls to inspect the live cluster,
+sanitized operator reading, queue counts, conversion states, and recent failure history. DeepSeek
+V4 Flash applies the official `reviewing-cluster-health` and `monitoring-background-jobs` Agent
+Skills to classify the normalized snapshot. In that same invocation, a SQL login with only
+`VIEWJOB` runs one fixed `SHOW JOBS` aggregate because Managed MCP does not expose the statement.
+The model receives no database tools and cannot choose SQL. A deterministic policy produces the
+effective action and requires explicit approval before any repair. Removing Managed MCP removes
+the live cluster and AIZK evidence, while removing the Agent Skills removes the operational
+procedure and safety rules.
+
+The live service-key run returned a healthy verdict with zero current AIZK queue failures and zero
+failed, paused, or unusually long CockroachDB jobs. It used `get_cluster`, `select_query`, and
+`SHOW JOBS`, then named all three applied skills in its typed output. The public redacted result is
+in `hackathon/results/queue-steward-live.json`.
+
 AWS Lambda runs both the public MCP application and the private worker. The MCP Lambda commits each
 accepted memory operation to CockroachDB, then wakes the worker. The worker converts and enriches
 the memory before it records every durable stage back in CockroachDB. Amazon S3 stores the original
@@ -265,13 +289,12 @@ public history on July 23, 2026. Both fall inside the event's submission window.
 
 ## Pre-existing code or work
 
-AIZK itself began during the event's submission window. crAIZK is the CockroachDB and AWS deployment of
+AIZK itself began during the event's submission window. AIZK is the CockroachDB and AWS deployment of
 that project, not a separately renamed earlier product.
 
-The project uses four general-purpose house packages that existed before the event. `chefe` manages
-reproducible environments and tasks. `patos` provides typed models and SQL model primitives.
-`rlsalchemy` generates and audits row level security policies. `mainboard` provides hardware
-inspection and profiling. These packages are independently versioned dependencies and are not
+The project uses two general-purpose libraries that existed before the event. `patos` provides
+typed models and SQL model primitives. `rlsalchemy` generates and audits row level security
+policies. These libraries are independently versioned dependencies and are not
 counted as hackathon features.
 
 AIZK also builds on the open-source and hosted dependencies listed in
@@ -295,10 +318,10 @@ would be valuable, especially when the filter is derived from database authoriza
 trusted application input.
 
 The ccloud CLI worked well for agent-driven operations because its noun and verb structure is
-predictable and its JSON output is easy to redact and verify. Managed MCP was useful for read-only
-inspection during development, but frequent interactive reauthorization made it less suitable for
-repeatable automated checks. Longer-lived device authorization or service-account support would
-make it a stronger operational tool for agents.
+predictable and its JSON output is easy to redact and verify. Managed MCP OAuth was inconvenient
+for repeatable checks because its refresh token needed frequent renewal. Service account API key
+authentication solved that for the queue steward. A narrower read-only service role than Cluster
+Operator would make unattended diagnostic agents even easier to deploy with least privilege.
 
 ## Submitter information
 
@@ -350,18 +373,15 @@ and remains below the 5 MB image limit. The separate architecture upload keeps i
 readability and remains below its 35 MB limit.
 
 Use `thumbnail-devpost.png` as the project thumbnail. It is a dedicated 3 to 2 composition with
-the crAIZK name and short product promise.
+the AIZK name and short product promise.
 
-1. `00-hero.jpg` with the AIZK identity and product promise
-2. `01-one-action-onboarding.jpg` with the deployed landing page
-3. `02-agent-setup-guide.jpg` with the machine-readable setup page
-4. `03-agent-configures-aizk.jpg` with the clean Codex setup
-5. `05-authenticated-status.jpg` with the Maya identity and MCP status
-6. `06-live-memory-write.jpg` with the Project Atlas write
-7. `07-grounded-recall.jpg` with the source excerpt and privacy receipt
-8. `08-memory-console.jpg` with the authenticated evidence browser
-9. `10-cspann-plan.jpg` with the redacted CockroachDB index plan
-10. `11-lambda-operations.jpg` with the redacted Lambda evidence
-11. `00-architecture.png` as the optional architecture upload
+1. `01-live-landing.jpg` with the deployed landing page and agent setup
+2. `02-product-overview.jpg` with the product dashboard
+3. `03-scoped-sharing.jpg` with access and temporal semantics
+4. `04-authenticated-dashboard.jpg` with the fictional demonstration identity
+5. `05-agent-keep-and-find.jpg` with one live Keep and grounded Find flow
+6. `10-cockroachdb-cspann.jpg` with the redacted CockroachDB index plan
+7. `11-aws-operations.jpg` with the redacted AWS operational evidence
+8. `00-architecture.png` as the optional architecture upload
 
 The image captions are recorded in `hackathon/media/README.md`.

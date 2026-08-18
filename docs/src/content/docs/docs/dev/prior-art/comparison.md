@@ -48,7 +48,7 @@ together.
 | belief, preference, or observation | aizk | it keeps the statement attached to its speaker and kind |
 | knowledge shared by two teams | aizk | one item can require membership in both organizations |
 | earlier state of a fact | aizk | claims retain when they were valid and when they were recorded |
-| sourced context for an agent | aizk | recall returns bounded evidence with source provenance |
+| sourced context for an agent | aizk | find returns bounded evidence with source provenance |
 
 ### Reproducible comparison questions
 

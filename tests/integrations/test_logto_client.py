@@ -38,6 +38,28 @@ def request(method: str, retryable: bool | None = None) -> httpx.Request:
     return httpx.Request(method, "https://auth.test/api/things", extensions=extensions)
 
 
+def test_transport_binds_request_before_retry_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+
+    async def fail(transport: httpx.AsyncHTTPTransport, req: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", fail)
+    client = lt.LogtoClient()
+
+    async def probe() -> None:
+        with pytest.raises(httpx.ConnectError):
+            await client.http.get("https://auth.test/api/things")
+        await client.close()
+
+    dbutil.run(probe())
+    assert attempts == 3
+
+
 @pytest.mark.parametrize(
     ("method", "retryable", "expected"),
     [
@@ -55,6 +77,11 @@ def test_retries_default_to_idempotent_methods_with_explicit_opt_in(
 ) -> None:
     timeout = httpx.ReadTimeout("slow", request=request(method, retryable))
     assert lt.LogtoClient._retryable(timeout) is expected
+
+
+def test_retry_classification_rejects_unbound_transport_errors() -> None:
+    """A third-party transport error without a request must never break an API page."""
+    assert lt.LogtoClient._retryable(httpx.ConnectError("down")) is False
 
 
 def test_token_request_opts_back_into_retries(monkeypatch: pytest.MonkeyPatch) -> None:

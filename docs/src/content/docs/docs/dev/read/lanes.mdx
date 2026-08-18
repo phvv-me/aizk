@@ -3,12 +3,12 @@ title: "The lanes"
 description: "Every retrieval lane, what it selects, and the SQL shape it contributes."
 ---
 
-A lane is one source of evidence inside the single recall statement. This page assumes you have
-read [how recall runs](/docs/dev/read/overview/) and know that step four builds one cached
+A lane is one source of evidence inside the single find statement. This page assumes you have
+read [how find runs](/docs/dev/read/overview/) and know that step four builds one cached
 `Select` from a `Plan`. Everything here lives in `src/aizk/retrieval/lanes/` and
 `src/aizk/retrieval/models/lane.py`.
 
-`build_recall_statement` in `src/aizk/retrieval/recall/program.py` carries the picture.
+`build_find_statement` in `src/aizk/retrieval/find/program.py` carries the picture.
 
 ```text
     dense seeds -- neighbors -- ppr hops       dense -- bm25
@@ -64,9 +64,9 @@ priority. Under `Plan.maximal()` all seven are present.
 | `FactLane` | `facts` | live facts from dense seeds, one-hop neighbors and the PageRank walk | `k * fact_candidate_factor` |
 | `SourceLane` | `sources` | fused chunk hits with document attribution | `k` |
 | `EntityCatalogLane` | `sources` | live entities grouped by ontology type and exact scope set | `k` kinds |
-| `VectorLane` | `working_memory` | unpromoted `session_item` rows | `session_recall_k` |
-| `VectorLane` | `profile` | entity profile summaries | `profile_recall_k` |
-| `VectorLane` | `communities` | community label and summary lines | `community_recall_k` |
+| `VectorLane` | `working_memory` | unpromoted `session_item` rows | `session_find_k` |
+| `VectorLane` | `profile` | entity profile summaries | `profile_find_k` |
+| `VectorLane` | `communities` | community label and summary lines | `community_find_k` |
 | `OverviewLane` | `overview` | RAPTOR summaries at the deepest level | `raptor_k` |
 
 The last three follow the plan toggles `profiles`, `communities` and `raptor`. The first four are
@@ -80,7 +80,7 @@ select over `live_fact`.
 
 The **dense seeds** come from `Fact.Live.dense`. A MATERIALIZED `dense_fact_content` CTE takes the
 vector index scan over `fact_content` alone, cut at `fusion_depth` and floored at
-`recall_max_distance`, then joins `live_fact` for visibility and access history. The ordering is
+`find_max_distance`, then joins `live_fact` for visibility and access history. The ordering is
 not raw distance but a blend, `distance - recency_weight * 0.5 ** (age / half_life) -
 frequency_weight * ln(1 + access_count)`, so a warm fact climbs.
 
@@ -130,11 +130,11 @@ database-derived, so current work never depends on an extractor reading a checkb
 
 `VectorLane` serves three kinds from one class. The `match` on `self.kind` picks the table, the
 rendered line, the guards and the limit bind, then delegates to `Lane.by_vector`, which floors on
-`recall_max_distance`, orders by distance and limits. Working memory adds the guard
-`promoted_at IS NULL` so a promoted item is not recalled twice.
+`find_max_distance`, orders by distance and limits. Working memory adds the guard
+`promoted_at IS NULL` so a promoted item is not found twice.
 
 `OverviewLane` reads RAPTOR summaries. It computes the maximum `level` attribute across
-`RAPTOR_SUMMARY` entities as a scalar subquery and keeps only entities at that depth, so recall
+`RAPTOR_SUMMARY` entities as a scalar subquery and keeps only entities at that depth, so find
 always reads the tree's roots rather than an arbitrary level. See
 [RAPTOR](/docs/dev/passes/raptor/) for how that tree is built.
 

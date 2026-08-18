@@ -526,7 +526,7 @@ async def ingest_texts(user: User, sources: Sequence[TextSource]) -> list[UUID7 
     return [document_id for document_id, _ in await TextIngestor(user).ingest_many(sources)]
 
 
-async def remember_session(
+async def keep_session(
     user: User,
     text: str,
     kind: str = "note",
@@ -534,7 +534,7 @@ async def remember_session(
     scopes: Scopes = frozenset(),
     capture: CaptureContext | None = None,
 ) -> UUID7:
-    """Store a remembered blob as one working-memory item and return its id, the cheap front
+    """Store a kept blob as one working-memory item and return its id, the cheap front
     write."""
     created_by = created_by or settings.system_user_id
     key = frozenset(scopes or (created_by,))
@@ -551,5 +551,5 @@ async def remember_session(
         )
         session.add(item)
         await session.flush()
-        logger.info("remembered session item {} kind={}", item.id, kind)
+        logger.info("kept session item {} kind={}", item.id, kind)
         return item.id

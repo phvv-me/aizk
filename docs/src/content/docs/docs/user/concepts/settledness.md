@@ -76,6 +76,6 @@ mistakes.
 
 - [Evidence and provenance](/docs/user/concepts/evidence/) covers the rest of what a line carries.
 - [Time and history](/docs/user/concepts/time/) explains what closing a claim means.
-- [Writing memory well](/docs/user/using/remember/) is the guide to notes worth deriving from.
+- [Writing memory well](/docs/user/using/keep/) is the guide to notes worth deriving from.
 
 </div>

@@ -260,7 +260,7 @@ class Workload:
     async def _evaluate(
         self, query_file: Path, repeats: int, include_answers: bool
     ) -> dict[str, Json]:
-        """Run a labeled recall set and retain answers beside simple expectation coverage."""
+        """Run a labeled find set and retain answers beside simple expectation coverage."""
         loaded = json.loads(query_file.read_text(encoding="utf-8"))
         if not isinstance(loaded, list):
             raise ValueError("query file must contain a JSON list")

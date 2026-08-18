@@ -2,13 +2,13 @@ from sqlalchemy.dialects import postgresql
 
 from aizk.config import settings
 from aizk.retrieval import Plan, QueryContext
-from aizk.retrieval.recall import build_recall_statement
+from aizk.retrieval.find import build_find_statement
 
 
 def compiled(owned: bool = False) -> str:
-    """The recall statement one context compiles to, as PostgreSQL text."""
+    """The find statement one context compiles to, as PostgreSQL text."""
     context = QueryContext(dimensions=settings.embed_dim, fuzzy=True, owned=owned)
-    statement = build_recall_statement(context, Plan.focused())
+    statement = build_find_statement(context, Plan.focused())
     return str(statement.compile(dialect=postgresql.dialect()))
 
 
@@ -23,7 +23,7 @@ def ranking_window(sql: str, lane: str) -> str:
     raise AssertionError(f"{lane}_window is unbalanced")
 
 
-def test_recall_compiles_the_vchord_bm25_lexical_lane() -> None:
+def test_find_compiles_the_vchord_bm25_lexical_lane() -> None:
     sql = compiled()
     assert "to_bm25query" in sql
     assert "tokenize" in sql

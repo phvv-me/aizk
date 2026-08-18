@@ -2,7 +2,7 @@ import { adminRoutes, appRoutes } from './routes';
 
 export type NavIcon =
   | 'dashboard'
-  | 'recall'
+  | 'find'
   | 'explore'
   | 'sources'
   | 'findings'
@@ -39,7 +39,7 @@ export function navigation(operator: boolean = false): NavSection[] {
       label: 'Knowledge',
       links: [
         { label: 'Dashboard', href: appRoutes.dashboard, icon: 'dashboard' },
-        { label: 'Recall', href: appRoutes.recall, icon: 'recall' }
+        { label: 'Find', href: appRoutes.find, icon: 'find' }
       ]
     },
     {

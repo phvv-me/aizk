@@ -63,10 +63,7 @@ class FakeRuntime:
 class Seams:
     def __init__(self) -> None:
         self.runtime = FakeRuntime()
-        self.profile = MagicMock()
-        self.profile.report.return_value = "profile"
-        self.profiler = Mock(return_value=self.profile)
-        self.profiler.Feature = commands.Profiler.Feature
+        self.span = Mock(return_value=MagicMock())
         self.observe = Mock()
         self.setup = AsyncMock(return_value=SimpleNamespace(migrated_to="head"))
         self.worker = AsyncMock()
@@ -76,7 +73,7 @@ class Seams:
 @pytest.fixture
 def seams(monkeypatch: pytest.MonkeyPatch) -> Seams:
     seams = Seams()
-    monkeypatch.setattr(commands, "Profiler", seams.profiler)
+    monkeypatch.setattr(commands, "span", seams.span)
     monkeypatch.setattr(commands, "observe", seams.observe)
     monkeypatch.setattr(commands.ops, "setup", seams.setup)
     monkeypatch.setattr(commands, "run_worker", seams.worker)
@@ -518,7 +515,7 @@ def test_doctor_is_stable_json_and_fails_for_live_errors(
 
 
 @pytest.mark.parametrize("profiling", [True, False])
-def test_worker_runs_through_optional_profiler(
+def test_worker_runs_through_optional_tracing(
     seams: Seams,
     monkeypatch: pytest.MonkeyPatch,
     profiling: bool,
@@ -528,8 +525,7 @@ def test_worker_runs_through_optional_profiler(
     dispatch(["server", "worker", "--batch-size", "7"])
 
     assert seams.worker.call_args.kwargs == {"batch_size": 7}
-    assert seams.profiler.call_count == int(profiling)
-    assert seams.profile.report.call_count == int(profiling)
+    assert seams.span.call_count == int(profiling)
     assert seams.runtime.closes == 1
 
 

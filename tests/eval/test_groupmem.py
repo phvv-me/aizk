@@ -256,7 +256,7 @@ def test_answer_binds_scope_authority_and_asker_context(
         standings.append(user.scopes.read)
         return (Candidate(lane="facts", line="User_1 selected the current plan."),)
 
-    monkeypatch.setattr(runner_module, "recall", context)
+    monkeypatch.setattr(runner_module, "find", context)
     dataset = sample_dataset()
     benchmark = runner()
     answer = dbutil.run(benchmark.answer(dataset, dataset.questions[0]))

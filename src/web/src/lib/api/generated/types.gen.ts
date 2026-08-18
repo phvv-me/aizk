@@ -15,13 +15,13 @@ export type ActorUsage = {
      */
     actor_id: string;
     /**
-     * Recalls
+     * Finds
      */
-    recalls: number;
+    finds: number;
     /**
-     * Remembers
+     * Keeps
      */
-    remembers: number;
+    keeps: number;
     /**
      * Files
      */
@@ -71,7 +71,7 @@ export type AdminLinks = {
 /**
  * Answer
  *
- * One recall answer rendered as merit-ordered Markdown evidence.
+ * One find answer rendered as merit-ordered Markdown evidence.
  */
 export type Answer = {
     /**
@@ -406,6 +406,42 @@ export type ExtractionHealth = {
 };
 
 /**
+ * FindHealth
+ *
+ * Record one bounded real find over the largest corpus visible to its scope set.
+ */
+export type FindHealth = {
+    /**
+     * Query
+     */
+    query: string;
+    /**
+     * Scopes
+     */
+    scopes: Array<string>;
+    /**
+     * Candidates
+     */
+    candidates: number;
+    /**
+     * Top Source
+     */
+    top_source: string | null;
+    /**
+     * Sample
+     */
+    sample: string;
+    /**
+     * Latency Ms
+     */
+    latency_ms: number;
+    /**
+     * Error
+     */
+    error?: string | null;
+};
+
+/**
  * FindingPage
  *
  * One bounded chronological finding page.
@@ -561,7 +597,7 @@ export type HttpValidationError = {
  * Host CPU, memory, and disk load and per-lane GPU occupancy already collected server-side.
  *
  * Read from VictoriaMetrics, which Alloy's built-in unix exporter and the vLLM lanes already
- * feed, rather than probed directly with `mainboard`. No aizk process holds NVML device access
+ * feed, rather than probed directly inside AIZK. No AIZK process holds NVML device access
  * to a GPU, so raw device telemetry (temperature, power, memory used) is not available from any
  * process in this deployment; the per-lane KV-cache occupancy and queue depth below are the real
  * GPU-adjacent signal that exists today. `reachable` is false whenever `metrics_url` is unset or
@@ -702,18 +738,6 @@ export type ModelLaneLoad = {
      */
     requests_waiting: number | null;
 };
-
-/**
- * Operation
- *
- * Public AIZK operations whose resource use needs attribution.
- *
- * `recall` is the stored name of what the `find` tool does. The value predates the
- * rename and stays, because it is the label every published usage report column, the
- * browser dashboard, and the generated TypeScript client already key on, and renaming
- * a stored enum to match a tool name would break all of them for no accounting gain.
- */
-export type Operation = 'recall' | 'remember_text' | 'remember_file' | 'share' | 'artifact_read' | 'web_search' | 'web_fetch';
 
 /**
  * OrganizationChange
@@ -910,13 +934,13 @@ export type ProcessingReport = {
      */
     stages: Array<StageEstimate>;
     /**
-     * Recallable Lower Seconds
+     * Findable Lower Seconds
      */
-    recallable_lower_seconds: number | null;
+    findable_lower_seconds: number | null;
     /**
-     * Recallable Upper Seconds
+     * Findable Upper Seconds
      */
-    recallable_upper_seconds: number | null;
+    findable_upper_seconds: number | null;
     /**
      * Enriched Lower Seconds
      */
@@ -949,13 +973,13 @@ export type ProcessingStatus = {
      */
     stages: Array<StageEstimate>;
     /**
-     * Recallable Lower Seconds
+     * Findable Lower Seconds
      */
-    recallable_lower_seconds: number | null;
+    findable_lower_seconds: number | null;
     /**
-     * Recallable Upper Seconds
+     * Findable Upper Seconds
      */
-    recallable_upper_seconds: number | null;
+    findable_upper_seconds: number | null;
     /**
      * Enriched Lower Seconds
      */
@@ -1042,42 +1066,6 @@ export type QueueIssue = {
 };
 
 export type QueueIssueKind = 'stale_picked' | 'long_running_picked';
-
-/**
- * RecallHealth
- *
- * Record one bounded real recall over the largest corpus visible to its scope set.
- */
-export type RecallHealth = {
-    /**
-     * Query
-     */
-    query: string;
-    /**
-     * Scopes
-     */
-    scopes: Array<string>;
-    /**
-     * Candidates
-     */
-    candidates: number;
-    /**
-     * Top Source
-     */
-    top_source: string | null;
-    /**
-     * Sample
-     */
-    sample: string;
-    /**
-     * Latency Ms
-     */
-    latency_ms: number;
-    /**
-     * Error
-     */
-    error?: string | null;
-};
 
 /**
  * RecentDocument
@@ -1206,13 +1194,13 @@ export type ScopeUsage = {
      */
     scope_id: string;
     /**
-     * Recalls
+     * Finds
      */
-    recalls: number;
+    finds: number;
     /**
-     * Remembers
+     * Keeps
      */
-    remembers: number;
+    keeps: number;
     /**
      * Files
      */
@@ -1542,7 +1530,7 @@ export type StoredHealth = {
      */
     scope_storage: Array<ScopeStorage>;
     storage: StorageHealth;
-    recall: RecallHealth | null;
+    find: FindHealth | null;
     /**
      * Duration Ms
      */
@@ -1748,6 +1736,8 @@ export type ThemeView = {
 
 export type Uuid7 = string;
 
+export type UsageOperation = 'find' | 'keep' | 'share' | 'artifact_read' | 'web_search' | 'web_fetch';
+
 /**
  * UsagePoint
  *
@@ -1758,7 +1748,7 @@ export type UsagePoint = {
      * Bucket
      */
     bucket: string;
-    operation: Operation;
+    operation: UsageOperation;
     /**
      * Requests
      */
@@ -1844,13 +1834,13 @@ export type UsageStatus = {
  */
 export type UsageSummary = {
     /**
-     * Recalls
+     * Finds
      */
-    recalls: number;
+    finds: number;
     /**
-     * Remembers
+     * Keeps
      */
-    remembers: number;
+    keeps: number;
     /**
      * Files
      */
@@ -1900,13 +1890,13 @@ export type UsageSummary = {
  */
 export type UsageTotals = {
     /**
-     * Recalls
+     * Finds
      */
-    recalls: number;
+    finds: number;
     /**
-     * Remembers
+     * Keeps
      */
-    remembers: number;
+    keeps: number;
     /**
      * Files
      */
@@ -2269,11 +2259,11 @@ export type GraphResponses = {
 
 export type GraphResponse = GraphResponses[keyof GraphResponses];
 
-export type RecallData = {
+export type FindData = {
     /**
-     * RecallRequest
+     * FindRequest
      *
-     * One browser recall question with an optional evidence budget.
+     * One browser find question with an optional evidence budget.
      */
     body: {
         /**
@@ -2287,17 +2277,17 @@ export type RecallData = {
     };
     path?: never;
     query?: never;
-    url: '/api/recall';
+    url: '/api/find';
 };
 
-export type RecallResponses = {
+export type FindResponses = {
     /**
      * Successful Response
      */
     200: Answer;
 };
 
-export type RecallResponse = RecallResponses[keyof RecallResponses];
+export type FindResponse = FindResponses[keyof FindResponses];
 
 export type ReceiveUploadData = {
     body: Blob | File;
@@ -2531,23 +2521,23 @@ export type AdminHealthResponses = {
 
 export type AdminHealthResponse = AdminHealthResponses[keyof AdminHealthResponses];
 
-export type AdminRecallData = {
+export type AdminFindData = {
     body?: never;
     path?: never;
     query?: never;
-    url: '/api/admin/health/recall';
+    url: '/api/admin/health/find';
 };
 
-export type AdminRecallResponses = {
+export type AdminFindResponses = {
     /**
-     * Response Admin Recall
+     * Response Admin Find
      *
      * Successful Response
      */
-    200: RecallHealth | null;
+    200: FindHealth | null;
 };
 
-export type AdminRecallResponse = AdminRecallResponses[keyof AdminRecallResponses];
+export type AdminFindResponse = AdminFindResponses[keyof AdminFindResponses];
 
 export type AdminHardwareData = {
     body?: never;

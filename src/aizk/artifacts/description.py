@@ -3,6 +3,7 @@ import base64
 import binascii
 import hashlib
 import re
+from html import unescape
 from time import perf_counter
 from typing import Protocol, cast
 
@@ -17,6 +18,15 @@ _EMBEDDED_IMAGE = re.compile(
     r"!\[(?P<alt>[^\]\n]*)\]\(\s*"
     r"data:(?P<media_type>image/[a-zA-Z0-9.+-]+);base64,"
     r"(?P<data>[a-zA-Z0-9+/=\s]+)\s*\)",
+)
+_EMBEDDED_SVG_HTML = re.compile(
+    r"<img\b(?P<attributes>[^>]*\bsrc\s*=\s*(?P<quote>[\"'])\s*"
+    r"data:image/svg\+xml;base64,[^\"']*(?P=quote)[^>]*)/?>",
+    re.IGNORECASE,
+)
+_HTML_ALT = re.compile(
+    r"\balt\s*=\s*(?P<quote>[\"'])(?P<text>.*?)(?P=quote)",
+    re.IGNORECASE | re.DOTALL,
 )
 _RETRYABLE_STATUS = frozenset({408, 409, 425, 429})
 
@@ -329,6 +339,12 @@ class ImageDescriptionEnricher:
         markdown: str,
     ) -> DescribedArtifact:
         """Describe every embedded figure, or the original when it is itself an image."""
+        html_svg_matches = tuple(_EMBEDDED_SVG_HTML.finditer(markdown))
+        for match in reversed(html_svg_matches):
+            alt_match = _HTML_ALT.search(match.group("attributes"))
+            alt_text = unescape(alt_match.group("text")).strip() if alt_match else ""
+            replacement = f"\n\n*{alt_text}*\n\n" if alt_text else ""
+            markdown = f"{markdown[: match.start()]}{replacement}{markdown[match.end() :]}"
         matches = tuple(_EMBEDDED_IMAGE.finditer(markdown))
         if matches:
             return await self.embedded(markdown, matches)
@@ -359,6 +375,10 @@ class ImageDescriptionEnricher:
         cached: dict[tuple[str, bytes], ImageCaption] = {}
         for ordinal, match in enumerate(matches):
             media_type = match.group("media_type").casefold()
+            alt_text = match.group("alt").strip()
+            if media_type == "image/svg+xml":
+                replacements.append(f"\n\n*{alt_text}*\n\n" if alt_text else "")
+                continue
             try:
                 content = base64.b64decode(
                     "".join(match.group("data").split()),
@@ -369,16 +389,10 @@ class ImageDescriptionEnricher:
             key = (media_type, content)
             caption = cached.get(key)
             if caption is None:
-                caption = await self.describe(content, media_type, match.group("alt"))
+                caption = await self.describe(content, media_type, alt_text)
                 cached[key] = caption
-            descriptions.append(
-                self.figure(ordinal, content, media_type, match.group("alt"), caption)
-            )
-            label = (
-                f"Figure description for {match.group('alt').strip()}"
-                if match.group("alt").strip()
-                else "Figure description"
-            )
+            descriptions.append(self.figure(ordinal, content, media_type, alt_text, caption))
+            label = f"Figure description for {alt_text}" if alt_text else "Figure description"
             replacements.append(f"\n\n**{label}**\n\n{caption.text}\n\n")
         pieces: list[str] = []
         cursor = 0

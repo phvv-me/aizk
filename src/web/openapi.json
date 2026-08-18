@@ -525,11 +525,11 @@
         }
       }
     },
-    "/api/recall": {
+    "/api/find": {
       "post": {
-        "summary": "Recall",
-        "description": "Answer one recall question with merit-ordered Markdown evidence.",
-        "operationId": "recall",
+        "summary": "Find",
+        "description": "Answer one find question with merit-ordered Markdown evidence.",
+        "operationId": "find",
         "requestBody": {
           "content": {
             "application/json": {
@@ -558,8 +558,8 @@
                 "required": [
                   "query"
                 ],
-                "title": "RecallRequest",
-                "description": "One browser recall question with an optional evidence budget."
+                "title": "FindRequest",
+                "description": "One browser find question with an optional evidence budget."
               }
             }
           },
@@ -974,11 +974,11 @@
         ]
       }
     },
-    "/api/admin/health/recall": {
+    "/api/admin/health/find": {
       "get": {
-        "summary": "Admin Recall",
-        "description": "Run the live recall probe over the largest corpus the stored reading names.\n\nWhich corpora exist is a platform-wide count only the owner may take, so it is read\nfrom the worker's reading rather than measured here. The retrieval itself runs under\nan ordinary scoped session, which is what makes the probe a real exercise of the same\npath a caller takes. Nothing until a worker pass has named a corpus.",
-        "operationId": "admin_recall",
+        "summary": "Admin Find",
+        "description": "Run the live find probe over the largest corpus the stored reading names.\n\nWhich corpora exist is a platform-wide count only the owner may take, so it is read\nfrom the worker's reading rather than measured here. The retrieval itself runs under\nan ordinary scoped session, which is what makes the probe a real exercise of the same\npath a caller takes. Nothing until a worker pass has named a corpus.",
+        "operationId": "admin_find",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -987,13 +987,13 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/RecallHealth"
+                      "$ref": "#/components/schemas/FindHealth"
                     },
                     {
                       "type": "null"
                     }
                   ],
-                  "title": "Response Admin Recall"
+                  "title": "Response Admin Find"
                 }
               }
             }
@@ -1104,13 +1104,13 @@
             "format": "uuid5",
             "title": "Actor Id"
           },
-          "recalls": {
+          "finds": {
             "type": "integer",
-            "title": "Recalls"
+            "title": "Finds"
           },
-          "remembers": {
+          "keeps": {
             "type": "integer",
-            "title": "Remembers"
+            "title": "Keeps"
           },
           "files": {
             "type": "integer",
@@ -1137,8 +1137,8 @@
         "type": "object",
         "required": [
           "actor_id",
-          "recalls",
-          "remembers",
+          "finds",
+          "keeps",
           "files",
           "shares",
           "artifact_reads",
@@ -1186,7 +1186,7 @@
           "markdown"
         ],
         "title": "Answer",
-        "description": "One recall answer rendered as merit-ordered Markdown evidence."
+        "description": "One find answer rendered as merit-ordered Markdown evidence."
       },
       "ArtifactReceipt": {
         "properties": {
@@ -1789,6 +1789,68 @@
         "title": "ExtractionHealth",
         "description": "Show the configured extraction window and output budget beside its backend."
       },
+      "FindHealth": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "scopes": {
+            "items": {
+              "type": "string",
+              "format": "uuid5"
+            },
+            "type": "array",
+            "title": "Scopes"
+          },
+          "candidates": {
+            "type": "integer",
+            "title": "Candidates"
+          },
+          "top_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top Source"
+          },
+          "sample": {
+            "type": "string",
+            "title": "Sample"
+          },
+          "latency_ms": {
+            "type": "number",
+            "title": "Latency Ms"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query",
+          "scopes",
+          "candidates",
+          "top_source",
+          "sample",
+          "latency_ms"
+        ],
+        "title": "FindHealth",
+        "description": "Record one bounded real find over the largest corpus visible to its scope set."
+      },
       "FindingPage": {
         "properties": {
           "total": {
@@ -2135,7 +2197,7 @@
           "lanes"
         ],
         "title": "HardwareHealth",
-        "description": "Host CPU, memory, and disk load and per-lane GPU occupancy already collected server-side.\n\nRead from VictoriaMetrics, which Alloy's built-in unix exporter and the vLLM lanes already\nfeed, rather than probed directly with `mainboard`. No aizk process holds NVML device access\nto a GPU, so raw device telemetry (temperature, power, memory used) is not available from any\nprocess in this deployment; the per-lane KV-cache occupancy and queue depth below are the real\nGPU-adjacent signal that exists today. `reachable` is false whenever `metrics_url` is unset or\nVictoriaMetrics cannot be reached, in which case every measurement stays absent rather than a\nstale or fabricated zero. Every field but `reachable` defaults, so the generated client keeps\nthem required rather than optional too."
+        "description": "Host CPU, memory, and disk load and per-lane GPU occupancy already collected server-side.\n\nRead from VictoriaMetrics, which Alloy's built-in unix exporter and the vLLM lanes already\nfeed, rather than probed directly inside AIZK. No AIZK process holds NVML device access\nto a GPU, so raw device telemetry (temperature, power, memory used) is not available from any\nprocess in this deployment; the per-lane KV-cache occupancy and queue depth below are the real\nGPU-adjacent signal that exists today. `reachable` is false whenever `metrics_url` is unset or\nVictoriaMetrics cannot be reached, in which case every measurement stays absent rather than a\nstale or fabricated zero. Every field but `reachable` defaults, so the generated client keeps\nthem required rather than optional too."
       },
       "IdentityHealth": {
         "properties": {
@@ -2294,20 +2356,6 @@
         ],
         "title": "ModelLaneLoad",
         "description": "One vLLM serving lane's scrape reachability and live GPU occupancy.\n\nEvery field but `service` defaults, so the browser API's generated client keeps them\nrequired rather than optional, since a defaulted field is always present in the response."
-      },
-      "Operation": {
-        "type": "string",
-        "enum": [
-          "recall",
-          "remember_text",
-          "remember_file",
-          "share",
-          "artifact_read",
-          "web_search",
-          "web_fetch"
-        ],
-        "title": "Operation",
-        "description": "Public AIZK operations whose resource use needs attribution.\n\n`recall` is the stored name of what the `find` tool does. The value predates the\nrename and stays, because it is the label every published usage report column, the\nbrowser dashboard, and the generated TypeScript client already key on, and renaming\na stored enum to match a tool name would break all of them for no accounting gain."
       },
       "OrganizationChange": {
         "properties": {
@@ -2620,7 +2668,7 @@
             "type": "array",
             "title": "Stages"
           },
-          "recallable_lower_seconds": {
+          "findable_lower_seconds": {
             "anyOf": [
               {
                 "type": "integer"
@@ -2629,9 +2677,9 @@
                 "type": "null"
               }
             ],
-            "title": "Recallable Lower Seconds"
+            "title": "Findable Lower Seconds"
           },
-          "recallable_upper_seconds": {
+          "findable_upper_seconds": {
             "anyOf": [
               {
                 "type": "integer"
@@ -2640,7 +2688,7 @@
                 "type": "null"
               }
             ],
-            "title": "Recallable Upper Seconds"
+            "title": "Findable Upper Seconds"
           },
           "enriched_lower_seconds": {
             "anyOf": [
@@ -2679,8 +2727,8 @@
           "generated_at",
           "state",
           "stages",
-          "recallable_lower_seconds",
-          "recallable_upper_seconds",
+          "findable_lower_seconds",
+          "findable_upper_seconds",
           "enriched_lower_seconds",
           "enriched_upper_seconds",
           "recent"
@@ -2713,7 +2761,7 @@
             "type": "array",
             "title": "Stages"
           },
-          "recallable_lower_seconds": {
+          "findable_lower_seconds": {
             "anyOf": [
               {
                 "type": "integer"
@@ -2722,9 +2770,9 @@
                 "type": "null"
               }
             ],
-            "title": "Recallable Lower Seconds"
+            "title": "Findable Lower Seconds"
           },
-          "recallable_upper_seconds": {
+          "findable_upper_seconds": {
             "anyOf": [
               {
                 "type": "integer"
@@ -2733,7 +2781,7 @@
                 "type": "null"
               }
             ],
-            "title": "Recallable Upper Seconds"
+            "title": "Findable Upper Seconds"
           },
           "enriched_lower_seconds": {
             "anyOf": [
@@ -2764,8 +2812,8 @@
           "generated_at",
           "state",
           "stages",
-          "recallable_lower_seconds",
-          "recallable_upper_seconds",
+          "findable_lower_seconds",
+          "findable_upper_seconds",
           "enriched_lower_seconds",
           "enriched_upper_seconds"
         ],
@@ -2906,68 +2954,6 @@
           "stale_picked",
           "long_running_picked"
         ]
-      },
-      "RecallHealth": {
-        "properties": {
-          "query": {
-            "type": "string",
-            "title": "Query"
-          },
-          "scopes": {
-            "items": {
-              "type": "string",
-              "format": "uuid5"
-            },
-            "type": "array",
-            "title": "Scopes"
-          },
-          "candidates": {
-            "type": "integer",
-            "title": "Candidates"
-          },
-          "top_source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Top Source"
-          },
-          "sample": {
-            "type": "string",
-            "title": "Sample"
-          },
-          "latency_ms": {
-            "type": "number",
-            "title": "Latency Ms"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "query",
-          "scopes",
-          "candidates",
-          "top_source",
-          "sample",
-          "latency_ms"
-        ],
-        "title": "RecallHealth",
-        "description": "Record one bounded real recall over the largest corpus visible to its scope set."
       },
       "RecentDocument": {
         "properties": {
@@ -3149,13 +3135,13 @@
             "format": "uuid5",
             "title": "Scope Id"
           },
-          "recalls": {
+          "finds": {
             "type": "integer",
-            "title": "Recalls"
+            "title": "Finds"
           },
-          "remembers": {
+          "keeps": {
             "type": "integer",
-            "title": "Remembers"
+            "title": "Keeps"
           },
           "files": {
             "type": "integer",
@@ -3182,8 +3168,8 @@
         "type": "object",
         "required": [
           "scope_id",
-          "recalls",
-          "remembers",
+          "finds",
+          "keeps",
           "files",
           "shares",
           "artifact_reads",
@@ -3719,10 +3705,10 @@
           "storage": {
             "$ref": "#/components/schemas/StorageHealth"
           },
-          "recall": {
+          "find": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RecallHealth"
+                "$ref": "#/components/schemas/FindHealth"
               },
               {
                 "type": "null"
@@ -3758,7 +3744,7 @@
           "scopes",
           "scope_storage",
           "storage",
-          "recall",
+          "find",
           "duration_ms",
           "measured_at",
           "stale"
@@ -4060,6 +4046,17 @@
         "type": "string",
         "format": "uuid"
       },
+      "UsageOperation": {
+        "type": "string",
+        "enum": [
+          "find",
+          "keep",
+          "share",
+          "artifact_read",
+          "web_search",
+          "web_fetch"
+        ]
+      },
       "UsagePoint": {
         "properties": {
           "bucket": {
@@ -4068,7 +4065,7 @@
             "title": "Bucket"
           },
           "operation": {
-            "$ref": "#/components/schemas/Operation"
+            "$ref": "#/components/schemas/UsageOperation"
           },
           "requests": {
             "type": "integer",
@@ -4198,14 +4195,14 @@
       },
       "UsageSummary": {
         "properties": {
-          "recalls": {
+          "finds": {
             "type": "integer",
-            "title": "Recalls",
+            "title": "Finds",
             "default": 0
           },
-          "remembers": {
+          "keeps": {
             "type": "integer",
-            "title": "Remembers",
+            "title": "Keeps",
             "default": 0
           },
           "files": {
@@ -4262,8 +4259,8 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "recalls",
-          "remembers",
+          "finds",
+          "keeps",
           "files",
           "shares",
           "artifact_reads",
@@ -4280,14 +4277,14 @@
       },
       "UsageTotals": {
         "properties": {
-          "recalls": {
+          "finds": {
             "type": "integer",
-            "title": "Recalls",
+            "title": "Finds",
             "default": 0
           },
-          "remembers": {
+          "keeps": {
             "type": "integer",
-            "title": "Remembers",
+            "title": "Keeps",
             "default": 0
           },
           "files": {
@@ -4309,8 +4306,8 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "recalls",
-          "remembers",
+          "finds",
+          "keeps",
           "files",
           "uploaded_bytes",
           "downloaded_bytes"

@@ -252,7 +252,7 @@ def test_png_keeps_a_direct_multimodal_embedding_on_its_converted_document() -> 
     dbutil.run(verify())
 
 
-def test_unsupported_binary_becomes_recallable_metadata_without_false_content() -> None:
+def test_unsupported_binary_becomes_findable_metadata_without_false_content() -> None:
     user = User.private(settings.default_user_id)
 
     async def verify() -> None:
@@ -271,7 +271,7 @@ def test_unsupported_binary_becomes_recallable_metadata_without_false_content() 
         assert "Media type application/octet-stream" in rendered
         assert "Conversion state failed" in rendered
         assert all(chunk.embedding is not None for chunk in chunks)
-        result = await Memory(user=user, intake=mcp_probe.runtime.artifacts.intake).recall(
+        result = await Memory(user=user, intake=mcp_probe.runtime.artifacts.intake).find_memory(
             "What is artifact-integration-unsupported.aizkbin?",
             4000,
         )
@@ -350,7 +350,7 @@ def test_changed_source_bytes_create_a_revision_and_refresh_the_stable_document(
     dbutil.run(verify())
 
 
-def test_recall_exposes_exact_provenance_and_resource_returns_original_bytes() -> None:
+def test_find_exposes_exact_provenance_and_resource_returns_original_bytes() -> None:
     organization_id = settings.scope_id("artifact-integration-organization")
     organization = OrganizationStanding(
         id=organization_id,
@@ -367,7 +367,7 @@ def test_recall_exposes_exact_provenance_and_resource_returns_original_bytes() -
     )
     body = (
         b"# Provenance fixture\n\n"
-        b"The silver osprey proves recall and resource provenance round-trip.\n"
+        b"The silver osprey proves find and resource provenance round-trip.\n"
     )
     context = context_for(user)
 
@@ -379,7 +379,7 @@ def test_recall_exposes_exact_provenance_and_resource_returns_original_bytes() -
             "text/markdown",
             scopes=["Artifact Integration"],
         )
-        result = await Memory(user=user, intake=mcp_probe.runtime.artifacts.intake).recall(
+        result = await Memory(user=user, intake=mcp_probe.runtime.artifacts.intake).find_memory(
             "What does artifact-integration-provenance.md say about the silver osprey?",
             4000,
         )

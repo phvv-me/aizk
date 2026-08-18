@@ -27,8 +27,8 @@ const report: ProcessingReport = {
   generated_at: '2026-07-20T00:00:00Z',
   state: 'idle',
   stages: [],
-  recallable_lower_seconds: null,
-  recallable_upper_seconds: null,
+  findable_lower_seconds: null,
+  findable_upper_seconds: null,
   enriched_lower_seconds: null,
   enriched_upper_seconds: null,
   recent: []

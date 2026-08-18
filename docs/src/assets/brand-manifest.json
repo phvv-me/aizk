@@ -5,8 +5,7 @@
     "icon.svg": "acf2e5a09cf0449c026a6d2ce2ebb2aa383eb2024b0e9f6c7f513e4995060714",
     "logo.svg": "971bb24a2aa7d7c3ad0b3a0154a1705032856dc7b01186b5c9fad3bd9e303744",
     "banner.svg": "04887da8d486c3f383d8fe862ca408eca14b58a8a5235083f0ee27c40734dc74",
-    "social-card.svg": "9f8fc041508f3d4d5de5c88b2bce4eeada82ebb1e3ec0300d12886e9624d6996",
-    "thumbnail.svg": "727bf48438f26739e756f087e05d7ee2b2f212e3e8b3eca7f7b228acceddcf2b"
+    "social-card.svg": "9f8fc041508f3d4d5de5c88b2bce4eeada82ebb1e3ec0300d12886e9624d6996"
   },
   "targets": {
     "docs/public/brain-box.webp": {
@@ -68,18 +67,6 @@
       "sha256": "08d8c4b1ac0692c101513e8e1e8dc982740dd706139248dac36e9784241f3fee",
       "width": 1200,
       "height": 630
-    },
-    "hackathon/thumbnail.png": {
-      "source": "thumbnail.svg",
-      "sha256": "dae477d543b6f46b6e72da349776308b6f8d917b83258f56fe2165321eda10b7",
-      "width": 1800,
-      "height": 1200
-    },
-    "hackathon/media/thumbnail-devpost.png": {
-      "source": "thumbnail.svg",
-      "sha256": "dae477d543b6f46b6e72da349776308b6f8d917b83258f56fe2165321eda10b7",
-      "width": 1800,
-      "height": 1200
     }
   }
 }

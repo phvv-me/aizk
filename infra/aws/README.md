@@ -1,6 +1,6 @@
 # AWS deployment
 
-This CDK stack deploys the isolated crAIZK staging profile in AWS Singapore. CockroachDB Cloud
+This CDK stack deploys an isolated AIZK staging profile in AWS Singapore. CockroachDB Cloud
 remains external to the AWS account. One Logto protected Lambda Function URL serves the product
 site, documentation, browser application, HTTP API, and modern MCP endpoint. It
 never reuses another AIZK deployment or its identity boundary.
@@ -24,11 +24,11 @@ is raised above the ten executions it requires to remain unreserved.
 
 ## AWS login
 
-The pinned AWS CLI image stores the crAIZK login outside the repository.
+The pinned AWS CLI image stores the AIZK staging login outside the repository.
 
 ```sh
-AWS_PROFILE=craizk chefe run aws -- login --remote
-AWS_PROFILE=craizk chefe run aws -- sts get-caller-identity --region ap-southeast-1
+AWS_PROFILE=aizk sh infra/aws/aws-cli.sh login --remote
+AWS_PROFILE=aizk sh infra/aws/aws-cli.sh sts get-caller-identity --region ap-southeast-1
 ```
 
 CDK currently needs exported short-lived credentials because its Node SDK does not consume the new
@@ -39,16 +39,17 @@ AWS CLI login session directly. Export them only into the deployment shell and n
 The first deployment creates only the ECR repository.
 
 ```sh
-chefe run infra-check
-chefe run infra-bootstrap
-chefe run infra-deploy
+CDK_OUTDIR=cdk.out uv run --no-sync python -m infra.aws.app
+uv run --no-sync python -m pytest tests/deploy --no-cov
+npx --yes aws-cdk@2.1136.0 bootstrap --app 'uv run --no-sync python -m infra.aws.app'
+npx --yes aws-cdk@2.1136.0 deploy --app 'uv run --no-sync python -m infra.aws.app'
 ```
 
 Verify that the bundled public client is Native, distinct from the Management API client and owns
 every exact agent callback before building anything.
 
 ```sh
-chefe run aizk-auth-check
+uv run --no-sync python -m infra.aws.logto verify
 ```
 
 Build both Lambda targets for one architecture without provenance metadata. Push an immutable tag
@@ -61,6 +62,7 @@ docker buildx build \
   --provenance=false \
   --target lambda \
   --build-arg AIZK_DOCS_SITE_URL="$AIZK_AWS_PUBLIC_URL" \
+  --build-arg AIZK_DOCS_MCP_CLIENT_ID="$(jq -r '.mcpServers.aizk.oauth.client_id' plugins/aizk/.codex-plugin/plugin.json)" \
   --build-context sqlalchemy=../sqlalchemy \
   -f src/deploy/Dockerfile \
   -t "$ECR_REPOSITORY:$IMMUTABLE_TAG" \
@@ -104,8 +106,10 @@ export AIZK_AWS_REGION=ap-southeast-1
 export AIZK_AWS_IMAGE_DIGEST=REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS
 export AIZK_AWS_WEB_IMAGE_DIGEST=REPLACE_WITH_64_LOWERCASE_HEX_CHARACTERS
 export AIZK_AWS_MONTHLY_BUDGET_USD=10
-chefe run infra-check
-chefe run infra-deploy
+CDK_OUTDIR=cdk.out uv run --no-sync python -m infra.aws.app
+uv run --no-sync python -m pytest tests/deploy --no-cov
+uv run --no-sync python -m infra.aws.logto verify
+npx --yes aws-cdk@2.1136.0 deploy --app 'uv run --no-sync python -m infra.aws.app'
 ```
 
 `AIZK_AWS_PUBLIC_URL` is the Function URL origin with no path. AIZK appends `/mcp` when it
@@ -147,7 +151,7 @@ Database setup is an explicit event on the worker function. Missing or unknown e
 closed.
 
 ```sh
-AWS_PROFILE=craizk chefe run aws -- lambda invoke \
+AWS_PROFILE=aizk sh infra/aws/aws-cli.sh lambda invoke \
   --region ap-southeast-1 \
   --function-name craizk-staging-worker \
   --cli-binary-format raw-in-base64-out \
@@ -173,8 +177,9 @@ public AIZK URL are complete. Partial authentication configuration fails synthes
 The client ID embedded in the documentation must belong to a separate Native public application.
 Never use the Management API machine-to-machine client. Register
 `http://localhost:8912/callback` for Claude Code and `http://127.0.0.1:8912/callback` for clients
-that use the numeric loopback address. Set that Native application ID as
-`AIZK_DEMO_MCP_PUBLIC_CLIENT_ID` before building the image.
+that use the numeric loopback address. Record that Native application ID in both bundled plugin
+manifests. The image build reads it from the Codex manifest and verifies that the Claude manifest
+and generated setup guide agree.
 
 The browser application uses its own Traditional Web client. Register the exact callback at
 `$AIZK_AWS_PUBLIC_URL/auth/sign-in-callback`, store its application secret in

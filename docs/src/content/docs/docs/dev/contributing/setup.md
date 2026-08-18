@@ -8,58 +8,51 @@ about aizk itself. [Repository tour](/docs/dev/architecture/repository/) explain
 find inside `src/`, and [First start](/docs/dev/run/first-start/) covers bringing up a real
 deployment rather than a development one.
 
-## chefe owns everything
+## One locked Python environment
 
-There is one rule and it saves a lot of confusion.
+`pyproject.toml` declares every Python dependency and `uv.lock` records the exact working solve.
+CI installs that lock directly.
 
-:::danger[Everything runs through chefe]
-Every command runs through `chefe run`. Never call `uv run`, `pip`, `pytest`, `python`, or `pixi`
-directly, because that environment is not the one the gate uses, and the divergence is not
-theoretical. CI once ran a separate `uv sync`, and a stale lock plus three missing type stubs hid
-187 type errors from the local gate for weeks.
+:::danger[Keep the environment frozen]
+Run `uv sync --frozen --all-groups` once, install the reviewed SQLAlchemy revision, then use
+`uv run --no-sync` for every check. A later implicit sync would replace the reviewed fork with the
+registry wheel and remove the row security API AIZK is exercising.
 :::
 
 ```text
   pyproject.toml
     [project.dependencies]     runtime deps
     [dependency-groups].dev    checkers, pytest, hypothesis, eval stack
-    [tool.chefe]               interpreter, git sources, task list
             │
-            │  chefe install
+            │  uv sync --frozen --all-groups
             ▼
-  .chefe/pixi.toml  ──▶  .chefe/.pixi/envs/default   one solved env
+       uv.lock  ──▶  .venv   one solved env
             │
-            │  chefe run <task>
+            │  scripts/install-sqlalchemy.sh
             ▼
-     lint · typecheck · lint-imports · test · migrate
+   reviewed SQLAlchemy fork, then lint · typecheck · test
 ```
 
 Bootstrap is two commands.
 
 ```sh
-uv tool install "chefe>=0.0.25"
-chefe install
+uv sync --frozen --all-groups
+sh scripts/install-sqlalchemy.sh
 ```
 
-`chefe install` compiles the `[tool.chefe]` table, `[project.dependencies]`, and
-`[dependency-groups].dev` into `.chefe/pixi.toml` and solves one environment from them. CI runs the
-exact same two commands, so a green local gate means a green CI gate.
+The bootstrap script builds one immutable public SQLAlchemy revision and installs its wheel into
+`.venv`. It fails if a supplied local checkout is on any other revision.
 
 ## The house packages
 
-Three independently published house packages sit below aizk in the dependency graph and matter
-when you change them.
+Two independently published project libraries sit below AIZK in the dependency graph.
 
 `patos` supplies the typed base models and the `patos.sql` column primitives that every store model
 is built from. `rlsalchemy` is the row level security engine, and note that the distribution is
-named `rlsalchemy` while the import is `rls`, which trips people up once each. `mainboard` supplies
-the hardware probe and the profiler.
+named `rlsalchemy` while the import is `rls`.
 
-In a standalone aizk checkout, `pyproject.toml` and `uv.lock` resolve the exact published versions.
-The production image installs those same artifacts, so a green standalone gate tests the dependency
-graph that ships. Inside the life monorepo the root `chefe.toml` replaces them with editable path
-dependencies, which makes a sibling change live immediately. Publish that dependency and bump its
-pin before expecting a standalone checkout or image to contain the new behavior.
+`patos` and `rlsalchemy` are exact pins in `pyproject.toml`. The SQLAlchemy row security fork is an
+exact commit pin in `scripts/install-sqlalchemy.sh` and the production image builds the same source.
 
 ## A database
 
@@ -84,7 +77,7 @@ than it looks. `aizk_app` is `NOBYPASSRLS`, so development exercises the same fo
 security that production does, rather than quietly running as an owner who can see everything.
 [PostgreSQL and storage](/docs/dev/run/postgres/) has the rest of the configuration.
 
-Apply the schema with `chefe run migrate-aizk`. The test suite does not need this step, because it
+Apply the schema with `uv run --no-sync aizk admin database migrate`. The test suite does not need this step, because it
 creates and migrates its own database per process, which
 [Testing](/docs/dev/contributing/testing/) explains.
 
@@ -94,7 +87,7 @@ You can be productive with only PostgreSQL. The suite is hermetic above the data
 `tests/conftest.py` points the embedder, reranker, gate, and extraction model at in-process doubles
 for every test. Nothing reaches a live service and no GPU is required to run the gate.
 
-Real ingestion and real recall need the sidecars, and they are ordinary Compose services you can
+Real ingestion and real find need the sidecars, and they are ordinary Compose services you can
 start selectively.
 
 | Service | Lane | Setting |
@@ -107,40 +100,31 @@ start selectively.
 | `clamav` | fail-closed malware scan | `AIZK_CLAMAV_*` |
 | `objects` | SeaweedFS artifact bytes | `AIZK_OBJECT_STORE_*` |
 
-Rerank is part of every recall now rather than an optional pass, so a working rerank endpoint is
+Rerank is part of every find now rather than an optional pass, so a working rerank endpoint is
 needed for anything past the test doubles. `AIZK_EXTRACT_BACKEND` switches between the production
 LLM extractor and the experimental GLiNER graph route without any code change, which is the knob to
 reach for when comparing them.
 
-## The tasks you actually need
+## The commands you actually need
 
-From the monorepo root the aizk tasks carry an `-aizk` suffix, since the root manifest holds every
-package.
-
-| Task | What it does |
+| Command | What it does |
 |---|---|
-| `chefe run test-aizk` | the fast suite, four workers, no coverage |
-| `chefe run test-aizk-cov` | the same suite plus the 100 percent coverage gate |
-| `chefe run typecheck-aizk` | pyrefly and ty over `src` |
-| `chefe run lint-imports-aizk` | the layered import contracts |
-| `chefe run lint` | ruff, formatting, spelling, and the rest of pre-commit |
-| `chefe run migrate-aizk` | apply pending migrations |
-| `chefe run makemigrations-aizk -- "add foo column"` | autogenerate a migration from the model diff |
-| `chefe run test-aizk-artifact-stack` | the real-services integration run |
-| `chefe run docs-aizk` | build this documentation site and run its page gate |
-| `chefe run aizk-web-check` | svelte-check, prettier, and the web smoke tests |
-| `chefe run aizk-eval` | the evaluation and diagnostics CLI |
-| `chefe run rls-report` | a posture snapshot of the live policies |
-
-A standalone aizk checkout uses the shorter names from the package's own `[tool.chefe.tasks]`,
-which are `chefe run lint`, `chefe run lint-imports`, `chefe run typecheck`, and `chefe run test`.
-Those four are what CI executes.
+| `uv run --no-sync python -m pytest -n 4 --dist loadscope --benchmark-disable` | the fast parallel suite |
+| `uv run --no-sync pyrefly check` | source and test typing |
+| `uv run --no-sync ty check --python .venv --exit-zero-on-warning` | independent source typing |
+| `uv run --no-sync mypy src/aizk src/eval` | strict source typing |
+| `uv run --no-sync lint-imports` | the layered import contracts |
+| `uv run --no-sync ruff check .` | Python linting |
+| `uv run --no-sync aizk admin database migrate` | apply pending migrations |
+| `pnpm --dir docs check && pnpm --dir docs build` | check and build the documentation |
+| `pnpm --dir src/web check && pnpm --dir src/web test` | check and test the web application |
+| `uv run --no-sync aizk-eval` | the evaluation and diagnostics CLI |
 
 While editing, the fastest loop is a focused run without coverage.
 
 ```sh
-chefe run -- pytest tests/store/test_rls.py --no-cov
-chefe run -- ruff check src/aizk/store
+uv run --no-sync python -m pytest tests/store/test_rls.py --no-cov
+uv run --no-sync ruff check src/aizk/store
 ```
 
 ## Next

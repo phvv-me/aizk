@@ -8,7 +8,9 @@ runner=$(realpath hackathon/video/full-ops-demo.sh)
 
 mkdir -p "$output_root"
 
-timeout --signal=TERM --kill-after=5s 60s chefe run ccloud -- -q -o json cluster list |
+timeout --signal=TERM --kill-after=5s 60s \
+  docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml \
+  run --rm ccloud -q -o json cluster list |
   sed -n '/^\[/,$p' |
   jq '[.[] | {name, plan: .plan, state, cloud_provider: .cloud_provider, cockroach_version: .cockroach_version, regions: [.regions[]?.name]}]' \
     > /tmp/craizk-full-ccloud.json

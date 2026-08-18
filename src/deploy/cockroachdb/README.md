@@ -65,14 +65,16 @@ CockroachDB Cloud MCP server gives the operator a guarded schema and query surfa
 CLI image and checking its version are local and create no cloud resources.
 
 ```sh
-chefe run ccloud-check
+docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml build ccloud
+docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud version
 ```
 
 The following login is headless friendly. It persists the CockroachDB Cloud login in the isolated
 `aizk-cockroachdb-cloud` volume.
 
 ```sh
-chefe run ccloud -- auth login --no-redirect
+docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml \
+  run --rm ccloud auth login --no-redirect
 ```
 
 The target cluster is a CockroachDB Cloud cluster in AWS Singapore. Keep Lambda in
@@ -80,8 +82,9 @@ The target cluster is a CockroachDB Cloud cluster in AWS Singapore. Keep Lambda 
 a second one.
 
 ```sh
-chefe run ccloud -- cluster list
-chefe run ccloud -- cluster info aizk-cockroachdb
+docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml run --rm ccloud cluster list
+docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml \
+  run --rm ccloud cluster info aizk-cockroachdb
 ```
 
 Keep the console-created `aizk` SQL user as the migration owner. Create `aizk_app` separately, then
@@ -90,7 +93,8 @@ Cloud UI and `ccloud` create SQL users as administrators by default, so this rev
 for row security to have a meaningful application boundary.
 
 ```sh
-chefe run ccloud -- cluster user create aizk-cockroachdb aizk_app
+docker compose -f src/deploy/cockroachdb/docker-compose.ccloud.yml \
+  run --rm ccloud cluster user create aizk-cockroachdb aizk_app
 ```
 
 Run the following statement as `aizk`, followed by `CREATE DATABASE craizk_staging` if the
@@ -123,13 +127,16 @@ inverted scope index without running one parent visibility query for every row.
 The August 2026 Lambda emulator run loaded 87 public AIZK documents as 345 chunks. Ten warm `find`
 calls measured 1.70 seconds at p50 and 2.64 seconds at p95 after the row security optimization.
 Direct scoped C-SPANN execution took 3 to 7 milliseconds. The full graph plan still measured 8.29
-seconds at p95 on a synthetic 1,000 chunk corpus, so deep composed recall remains the main
+seconds at p95 on a synthetic 1,000 chunk corpus, so the deep composed Find plan remains the main
 CockroachDB performance limit. These numbers describe one local node and the public demonstration
 shape. They are not CockroachDB Cloud latency claims.
 
-The managed MCP connection uses `https://cockroachlabs.cloud/mcp` with the cluster ID header. Start
-with read access during OAuth authorization. It is an operator surface, not part of
-the user request path and not a replacement for the application SQL roles.
+The managed MCP connection uses `https://cockroachlabs.cloud/mcp` with the cluster ID header. The
+hackathon queue steward uses a service account with Cluster Operator limited to this cluster, plus
+a local seven-tool read-only allowlist. Interactive OAuth remains useful for one-time development
+inspection. Managed MCP is an operator surface, not part of the user request path and not a
+replacement for the application SQL roles. The self-contained service key and steward procedure is
+in [`hackathon/operator/README.md`](../../../hackathon/operator/README.md).
 
 The Cloud Console Jobs page shows CockroachDB internal work such as schema changes, index builds,
 statistics, backups, and imports. It does not execute AIZK background tasks. Those remain durable

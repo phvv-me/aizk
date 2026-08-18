@@ -50,20 +50,20 @@ def test_monthly_quota_selects_only_configured_operation_classes() -> None:
         Settings(
             monthly_total_operation_limit=10,
             monthly_user_operation_limit=2,
-            monthly_total_remember_limit=4,
-            monthly_user_remember_limit=1,
+            monthly_total_keep_limit=4,
+            monthly_user_keep_limit=1,
         )
     )
 
-    assert quota.limits(owner, Usage.Event.Operation.recall) == (
+    assert quota.limits(owner, Usage.Event.Operation.find_memory) == (
         (quota.config.system_user_id, "operation", 10),
         (owner, "operation", 2),
     )
-    assert quota.limits(owner, Usage.Event.Operation.remember_text) == (
+    assert quota.limits(owner, Usage.Event.Operation.keep_text) == (
         (quota.config.system_user_id, "operation", 10),
         (owner, "operation", 2),
-        (quota.config.system_user_id, "remember", 4),
-        (owner, "remember", 1),
+        (quota.config.system_user_id, "keep", 4),
+        (owner, "keep", 1),
     )
     assert quota.period().day == 1
 
@@ -134,7 +134,7 @@ def test_monthly_quota_retries_serialization_conflicts(
         backoff_seconds=0,
     )
 
-    dbutil.run(quota.consume(uuid5(), Usage.Event.Operation.recall))
+    dbutil.run(quota.consume(uuid5(), Usage.Event.Operation.find_memory))
 
     assert len(calls) == 2
 
@@ -149,7 +149,7 @@ def test_monthly_quota_propagates_terminal_database_failures(
     quota = MonthlyQuota(Settings(monthly_total_operation_limit=1), attempts=2)
 
     with pytest.raises(DBAPIError):
-        dbutil.run(quota.consume(uuid5(), Usage.Event.Operation.recall))
+        dbutil.run(quota.consume(uuid5(), Usage.Event.Operation.find_memory))
 
     assert len(calls) == expected_calls
 
@@ -167,7 +167,7 @@ def test_monthly_quota_is_atomic_when_a_caller_limit_is_exhausted(
 
     async def body() -> list[tuple[str, int]]:
         await dbutil.reset_db()
-        await quota.consume(owner, Usage.Event.Operation.recall)
+        await quota.consume(owner, Usage.Event.Operation.find_memory)
         with pytest.raises(QuotaExceededError, match="monthly operation"):
             await quota.consume(owner, Usage.Event.Operation.share)
         async with dbutil.admin_engine().connect() as connection:
@@ -179,7 +179,7 @@ def test_monthly_quota_is_atomic_when_a_caller_limit_is_exhausted(
     assert dbutil.run(body()) == [("operation", 1), ("operation", 1)]
 
 
-def test_monthly_remember_quota_rolls_back_other_counters_on_exhaustion(
+def test_monthly_keep_quota_rolls_back_other_counters_on_exhaustion(
     migrated_db: None,
 ) -> None:
     owner = uuid5()
@@ -187,16 +187,16 @@ def test_monthly_remember_quota_rolls_back_other_counters_on_exhaustion(
         Settings(
             monthly_total_operation_limit=10,
             monthly_user_operation_limit=10,
-            monthly_total_remember_limit=1,
-            monthly_user_remember_limit=10,
+            monthly_total_keep_limit=1,
+            monthly_user_keep_limit=10,
         )
     )
 
     async def body() -> dict[str, int]:
         await dbutil.reset_db()
-        await quota.consume(owner, Usage.Event.Operation.remember_file)
-        with pytest.raises(QuotaExceededError, match="monthly remember"):
-            await quota.consume(owner, Usage.Event.Operation.remember_text)
+        await quota.consume(owner, Usage.Event.Operation.keep_file)
+        with pytest.raises(QuotaExceededError, match="monthly keep"):
+            await quota.consume(owner, Usage.Event.Operation.keep_text)
         async with dbutil.admin_engine().connect() as connection:
             rows = await connection.execute(
                 text(
@@ -205,7 +205,7 @@ def test_monthly_remember_quota_rolls_back_other_counters_on_exhaustion(
             )
             return {kind: total for kind, total in rows}
 
-    assert dbutil.run(body()) == {"operation": 2, "remember": 2}
+    assert dbutil.run(body()) == {"operation": 2, "keep": 2}
 
 
 def capture(
@@ -219,7 +219,7 @@ def capture(
         capture_key=capture_key,
         occurred_at=datetime(2026, 7, 19, 23, 59, tzinfo=UTC),
         user_id=owner,
-        operation=Usage.Event.Operation.recall,
+        operation=Usage.Event.Operation.find_memory,
         targets=(owner,),
         request_bytes=request_bytes,
         response_bytes=5,
@@ -236,12 +236,12 @@ def test_accounting_context_builds_exact_captures_and_never_leaks_state() -> Non
 
     with accounting_context(), tracer.start_as_current_span("request", kind=SpanKind.SERVER):
         annotate_caller(user)
-        annotate_operation(Usage.Event.Operation.recall, (team, owner, team), items=7)
+        annotate_operation(Usage.Event.Operation.find_memory, (team, owner, team), items=7)
         derived = capture_usage(10, 20, 3.5, 200)
 
     assert derived is not None
     assert derived.user_id == owner
-    assert derived.operation is Usage.Event.Operation.recall
+    assert derived.operation is Usage.Event.Operation.find_memory
     assert derived.targets == tuple(sorted((owner, team), key=str))
     assert derived.items == 7
     assert derived.request_bytes == 10
@@ -259,7 +259,7 @@ def test_capture_usage_rejects_every_nonbillable_request(case: str) -> None:
         if case != "unidentified":
             annotate_caller(user)
         if case != "unannotated":
-            annotate_operation(Usage.Event.Operation.recall)
+            annotate_operation(Usage.Event.Operation.find_memory)
         derived = capture_usage(1, 2, 0.0, 500 if case == "failed" else 200)
     assert derived is None
 
@@ -407,7 +407,7 @@ def test_account_usage_records_only_when_capture_is_billable(
             await account_usage(1, 2, perf_counter(), 200)
         with accounting_context():
             annotate_caller(user)
-            annotate_operation(Usage.Event.Operation.recall)
+            annotate_operation(Usage.Event.Operation.find_memory)
             await account_usage(1, 2, perf_counter(), 200)
 
     dbutil.run(body())
@@ -416,7 +416,7 @@ def test_account_usage_records_only_when_capture_is_billable(
 
 
 class RecordingSpan:
-    """A span that only remembers what was stamped on it."""
+    """A span that only keeps what was stamped on it."""
 
     def __init__(self) -> None:
         self.attributes: dict[str, object] = {}
@@ -468,11 +468,11 @@ def test_caller_annotator_carries_the_operation_and_touched_scopes() -> None:
     target = uuid5()
 
     attributes = annotated(
-        lambda: annotate_operation(Usage.Event.Operation.recall, (target,), items=3)
+        lambda: annotate_operation(Usage.Event.Operation.find_memory, (target,), items=3)
     )
 
     assert attributes == {
-        "aizk.operation": Usage.Event.Operation.recall.value,
+        "aizk.operation": Usage.Event.Operation.find_memory.public_name,
         "aizk.scopes": str(target),
     }
 

@@ -23,7 +23,7 @@ without a routing rule per page.
   /auth/sign-out        POST only, so a link cannot end a session
   /auth/sign-in-callback  handled by the Logto hook
   /events/processing    server-sent events, proxied from the API
-  /app/dashboard        /app/recall
+  /app/dashboard        /app/find
   /app/sources          /app/findings   /app/subjects   /app/themes
   /app/usage            /app/processing
   /app/organizations
@@ -85,12 +85,12 @@ its own route at `/events/processing` rather than the browser opening the API's
 connection string in `src/lib/server/settings.ts`. The settings module reads seven `AIZK_*`
 variables and fails fast on any missing one, and none of them is a DSN.
 
-**It duplicates no logic.** No recall ranking, no extraction, no graph traversal, no permission
+**It duplicates no logic.** No Find ranking, no extraction, no graph traversal, no permission
 check and no scope arithmetic exists in TypeScript. A page renders what a route returned. If a view
 needs a number the API does not have, the fix is a new field on a Python response model, not a
 computation in a `+page.server.ts`.
 
-**It renders Markdown safely.** Recall answers come back as Markdown and go through `marked` and
+**It renders Markdown safely.** Find answers come back as Markdown and go through `marked` and
 then `dompurify` before reaching the DOM.
 
 ## The user-facing renaming

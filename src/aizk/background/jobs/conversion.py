@@ -18,7 +18,7 @@ from .models import ArtifactConversionJob, ArtifactReindexJob
 
 
 class ArtifactProcessor(Protocol):
-    """Turn one durable original into stored and recallable derivatives."""
+    """Turn one durable original into stored and findable derivatives."""
 
     async def process(self, content_id: UUID7, scopes: Scopes, policy: str) -> None:
         """Process one original under its exact queued scopes."""

@@ -19,7 +19,7 @@
 
   const rerankers: Model[] = [
     { label: 'Qwen3-Reranker-4B fp8', vram: 6.0, note: 'pooling runner, 0.25 of a 24 GB card' },
-    { label: 'none', vram: 0, note: 'recall falls back to statement order past the fusion stage' },
+    { label: 'none', vram: 0, note: 'find falls back to statement order past the fusion stage' },
   ];
 
   const gates: Model[] = [

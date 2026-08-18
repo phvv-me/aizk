@@ -24,7 +24,7 @@ class VectorLane(Lane):
                     SessionItem.id,
                     SessionItem.created_by,
                     SessionItem.scopes,
-                    bindparam("session_recall_k", type_=Integer),
+                    bindparam("session_find_k", type_=Integer),
                     SessionItem.promoted_at.is_(None),
                     vector=context.vector,
                     floor=context.floor,
@@ -37,7 +37,7 @@ class VectorLane(Lane):
                     Profile.id,
                     Profile.created_by,
                     Profile.scopes,
-                    bindparam("profile_recall_k", type_=Integer),
+                    bindparam("profile_find_k", type_=Integer),
                     vector=context.vector,
                     floor=context.floor,
                 )
@@ -49,7 +49,7 @@ class VectorLane(Lane):
                     Community.id,
                     Community.created_by,
                     Community.scopes,
-                    bindparam("community_recall_k", type_=Integer),
+                    bindparam("community_find_k", type_=Integer),
                     vector=context.vector,
                     floor=context.floor,
                 )

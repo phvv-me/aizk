@@ -73,8 +73,8 @@ def test_whitespace_variants_map_back_to_source_offsets() -> None:
 
 
 def test_markdown_backticks_do_not_hide_verbatim_evidence() -> None:
-    text = "The public `remember` tool stopped accepting `kind`."
-    quote = "The public remember tool stopped accepting kind"
+    text = "The public `keep` tool stopped accepting `kind`."
+    quote = "The public keep tool stopped accepting kind"
 
     interval = quote_interval(quote, text)
 
@@ -373,12 +373,12 @@ def test_the_kestrel_supersession_incident_is_a_regression_case() -> None:
     # meaning the correction would have been stored alongside the stale claim instead of
     # superseding it.
     may_note = (
-        "The 0.81 recall at 10 figure reported for Kestrel in March is invalid. The held "
+        "The 0.81 find at 10 figure reported for Kestrel in March is invalid. The held "
         "out set had leaked into Kestrel's training shards through the sharding rework."
     )
     fact = proposed(
-        "The 0.81 recall at 10 figure reported for Kestrel in March is invalid",
-        "The 0.81 recall at 10 figure reported for Kestrel in March is invalid.",
+        "The 0.81 find at 10 figure reported for Kestrel in March is invalid",
+        "The 0.81 find at 10 figure reported for Kestrel in March is invalid.",
     )
 
     qualification = Qualification.read(fact, may_note)

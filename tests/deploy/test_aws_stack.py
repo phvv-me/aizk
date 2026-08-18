@@ -21,7 +21,8 @@ def template(
         web_image_digest=_DIGEST if compute and logto else "",
         public_url="https://memory.example.com" if logto else None,
         logto_url="https://tenant.logto.app" if logto else None,
-        logto_client_id="management-client" if logto else "",
+        logto_management_client_id="management-client" if logto else "",
+        logto_public_client_id="public-client" if logto else "",
         web_client_id="web-client" if logto else "",
         billing_email=billing_email,
     )
@@ -137,20 +138,20 @@ def test_runtime_is_serverless_bounded_and_recovers_every_fifteen_minutes() -> N
                     {
                         "FASTMCP_HOME": "/tmp/fastmcp",
                         "AIZK_MONTHLY_TOTAL_OPERATION_LIMIT": "10000",
-                        "AIZK_MONTHLY_USER_REMEMBER_LIMIT": "50",
+                        "AIZK_MONTHLY_USER_KEEP_LIMIT": "50",
                         "AIZK_ARTIFACT_INGEST_ENABLED": "true",
                         "AIZK_ARTIFACT_MALWARE_SCAN_ENABLED": "false",
                         "AIZK_OBJECT_STORE_AWS_NATIVE": "true",
                         "AIZK_OBJECT_STORE_UPLOAD_BYTE_LIMIT": "4194304",
                         "AIZK_OBJECT_STORE_USER_BYTE_LIMIT": "1073741824",
                         "AIZK_PROFILING": "true",
-                        "AIZK_RECALL_ACCESS_RECORDING_ENABLED": "false",
-                        "AIZK_RECALL_COMMUNITIES_ENABLED": "true",
-                        "AIZK_RECALL_ENTITY_CATALOG_ENABLED": "true",
-                        "AIZK_RECALL_GRAPH_EXPANSION_ENABLED": "true",
-                        "AIZK_RECALL_PROFILES_ENABLED": "false",
-                        "AIZK_RECALL_RAPTOR_ENABLED": "false",
-                        "AIZK_RECALL_SOURCES_FIRST": "true",
+                        "AIZK_FIND_ACCESS_RECORDING_ENABLED": "false",
+                        "AIZK_FIND_COMMUNITIES_ENABLED": "true",
+                        "AIZK_FIND_ENTITY_CATALOG_ENABLED": "true",
+                        "AIZK_FIND_GRAPH_EXPANSION_ENABLED": "true",
+                        "AIZK_FIND_PROFILES_ENABLED": "false",
+                        "AIZK_FIND_RAPTOR_ENABLED": "false",
+                        "AIZK_FIND_SOURCES_FIRST": "true",
                         "AIZK_AWS_PARAMETER_ENV": Match.string_like_regexp(
                             "/craizk/staging/database-url"
                         ),
@@ -198,6 +199,7 @@ def test_logto_makes_the_function_url_public_only_after_app_auth_is_enabled() ->
                 "Variables": Match.object_like(
                     {
                         "AIZK_LOGTO_URL": "https://tenant.logto.app",
+                        "AIZK_LOGTO_CLIENT_ID": "management-client",
                         "AIZK_LOGTO_MANAGEMENT_RESOURCE": "https://tenant.logto.app/api",
                         "AIZK_MCP_PUBLIC_URL": "https://memory.example.com",
                         "AIZK_REQUIRE_AUTH": "true",
@@ -297,7 +299,8 @@ def test_deployment_config_rejects_unready_compute_or_partial_logto() -> None:
             image_digest=_DIGEST,
             public_url="https://memory.example.com",
             logto_url="https://tenant.logto.app",
-            logto_client_id="mcp-client",
+            logto_management_client_id="management-client",
+            logto_public_client_id="public-client",
             web_client_id="web-client",
         )
 
@@ -314,18 +317,18 @@ def test_deployment_defaults_to_isolated_singapore_staging(
     monkeypatch.setenv("AIZK_AWS_REGION", "ap-northeast-1")
     assert DeploymentConfig.from_environment().region == "ap-northeast-1"
 
-    monkeypatch.setenv("AIZK_AWS_RECALL_ACCESS_RECORDING_ENABLED", "false")
-    monkeypatch.setenv("AIZK_AWS_RECALL_COMMUNITIES_ENABLED", "false")
-    monkeypatch.setenv("AIZK_AWS_RECALL_ENTITY_CATALOG_ENABLED", "false")
-    monkeypatch.setenv("AIZK_AWS_RECALL_GRAPH_EXPANSION_ENABLED", "false")
-    monkeypatch.setenv("AIZK_AWS_RECALL_PROFILES_ENABLED", "false")
-    monkeypatch.setenv("AIZK_AWS_RECALL_RAPTOR_ENABLED", "false")
-    monkeypatch.setenv("AIZK_AWS_RECALL_SOURCES_FIRST", "true")
+    monkeypatch.setenv("AIZK_AWS_FIND_ACCESS_RECORDING_ENABLED", "false")
+    monkeypatch.setenv("AIZK_AWS_FIND_COMMUNITIES_ENABLED", "false")
+    monkeypatch.setenv("AIZK_AWS_FIND_ENTITY_CATALOG_ENABLED", "false")
+    monkeypatch.setenv("AIZK_AWS_FIND_GRAPH_EXPANSION_ENABLED", "false")
+    monkeypatch.setenv("AIZK_AWS_FIND_PROFILES_ENABLED", "false")
+    monkeypatch.setenv("AIZK_AWS_FIND_RAPTOR_ENABLED", "false")
+    monkeypatch.setenv("AIZK_AWS_FIND_SOURCES_FIRST", "true")
     lean = DeploymentConfig.from_environment()
-    assert not lean.recall_access_recording_enabled
-    assert not lean.recall_communities_enabled
-    assert not lean.recall_entity_catalog_enabled
-    assert not lean.recall_graph_expansion_enabled
-    assert not lean.recall_profiles_enabled
-    assert not lean.recall_raptor_enabled
-    assert lean.recall_sources_first
+    assert not lean.find_access_recording_enabled
+    assert not lean.find_communities_enabled
+    assert not lean.find_entity_catalog_enabled
+    assert not lean.find_graph_expansion_enabled
+    assert not lean.find_profiles_enabled
+    assert not lean.find_raptor_enabled
+    assert lean.find_sources_first

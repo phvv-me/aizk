@@ -4,7 +4,7 @@ description: "What the self-hosted PostgreSQL backup covers, what restoring brin
 ---
 
 A backup is only as good as the last time somebody restored it. This page applies to the
-self-hosted PostgreSQL profile. The crAIZK AWS demo disables application-managed backups and
+self-hosted PostgreSQL profile. The AIZK AWS demo disables application-managed backups and
 relies on CockroachDB Cloud and S3 service controls. This page covers what
 `src/aizk/backup.py` actually writes, what a restore brings back, and the several things it does
 not. It assumes you know the role split from
@@ -121,7 +121,7 @@ live device uses LUKS.
 
 Run a scratch restore every month. An archive is trusted only after PostgreSQL accepts it, the
 schema and RLS checks pass, Logto starts against its own restored database, and a real
-authenticated recall returns evidence.
+authenticated find returns evidence.
 
 ## Next
 

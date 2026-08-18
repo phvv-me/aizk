@@ -3,12 +3,12 @@ import json
 import sys
 from collections.abc import Awaitable
 from pathlib import Path
+from time import perf_counter
 from typing import TYPE_CHECKING, cast
 
 import uvicorn
 from cyclopts import App
 from loguru import logger
-from mainboard.profiling import Profiler
 from pydantic import UUID5, UUID7, JsonValue, TypeAdapter
 
 from alembic import command
@@ -26,6 +26,7 @@ from ..background.jobs.maintenance import retry_failed_profile_projections
 from ..background.jobs.projection import retry_failed_chunks
 from ..background.queue import install_queue_schema
 from ..background.schedule import run_worker
+from ..common.observability import span
 from ..config import Settings, settings
 from ..integrations.logto import LogtoClient, LogtoPolicy
 from ..mcp.server import AizkMCP
@@ -79,15 +80,15 @@ for subcommand in (
 
 
 async def _run_profiled[Result](operation: Awaitable[Result]) -> Result:
-    """Run one operation with optional low-impact process profiling."""
+    """Run one operation with optional low-impact tracing and wall-clock reporting."""
     if not settings.profiling:
         return await operation
-    profiler = Profiler(features=Profiler.Feature.SPANS | Profiler.Feature.DEVICE)
+    started_at = perf_counter()
     try:
-        with profiler:
+        with span("admin_operation"):
             return await operation
     finally:
-        logger.info("{}", profiler.report())
+        logger.info("profile duration_ms={:.2f}", (perf_counter() - started_at) * 1000)
 
 
 def _json(payload: dict[str, JsonValue]) -> str:

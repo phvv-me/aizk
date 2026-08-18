@@ -18,7 +18,7 @@ ADDED = ("web_search", "web_fetch")
 def upgrade() -> None:
     """Add the two metered web operations and the document origin the cache marks.
 
-    The `recall` operation keeps its stored name even though the tool is now called `find`.
+    The `find` operation keeps its stored name even though the tool is now called `find`.
     That value is the key every published usage report column, the browser dashboard, and
     the generated TypeScript client already read, so renaming it would break all of them to
     buy nothing an accountant would notice. The tool rename lives on the surfaces callers

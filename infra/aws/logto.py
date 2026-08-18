@@ -59,6 +59,7 @@ class LogtoDeploymentGuard:
     management_client_id: str
     management_client_secret: SecretStr
     public_client_id: str
+    deployment_client_id: str | None = None
     transport: httpx.BaseTransport | None = None
 
     @classmethod
@@ -75,12 +76,18 @@ class LogtoDeploymentGuard:
                 os.environ["CRAIZK_LOGTO_MANAGEMENT_CLIENT_SECRET"]
             ),
             public_client_id=plugin.mcp_servers["aizk"].oauth.client_id,
+            deployment_client_id=os.environ.get("AIZK_AWS_LOGTO_PUBLIC_CLIENT_ID"),
         )
 
     def verify(self) -> dict[str, str | list[str]]:
         """Verify distinct client types and every exact loopback redirect required by agents."""
         if self.public_client_id == self.management_client_id:
             raise ValueError("public OAuth client must differ from the Management API client")
+        if (
+            self.deployment_client_id is not None
+            and self.deployment_client_id != self.public_client_id
+        ):
+            raise ValueError("deployment OAuth client must match the bundled agent client")
 
         with httpx.Client(timeout=20, transport=self.transport) as client:
             token = Token.model_validate(
@@ -131,7 +138,7 @@ class LogtoDeploymentGuard:
 
 
 class LogtoCli:
-    """Expose the fail-closed Logto deployment check through Chefe."""
+    """Expose the fail-closed Logto deployment check to deployment automation."""
 
     def verify(self) -> dict[str, str | list[str]]:
         """Verify the live tenant against the bundled public client."""

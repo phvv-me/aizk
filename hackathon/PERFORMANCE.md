@@ -1,4 +1,4 @@
-# Cloud recall performance
+# Cloud find performance
 
 This record separates Lambda startup, query embedding, CockroachDB execution, and response work.
 The staging corpus is still small, so these measurements guide the demo configuration rather than
@@ -14,7 +14,7 @@ claim is inferred from the deployment-only update.
 Five calls against the full self-hosted profile measured about 3.4 seconds of server time per call. Observed connector time
 ranged from 3.5 to 3.9 seconds.
 
-The first crAIZK configuration never became warm because its 25 second timeout killed each new
+The first AIZK configuration never became warm because its 25 second timeout killed each new
 environment during cold initialization. A 60 second timeout removed that failure loop.
 
 ## Impact map
@@ -22,9 +22,9 @@ environment during cold initialization. A 60 second timeout removed that failure
 | Operation | Tiny smoke corpus | SWE reference corpus | Decision |
 | --- | --- | --- | --- |
 | Query embedding | Commonly 0.29 to 0.65 seconds | 0.32 second warm median | Pin DeepInfra without fallback |
-| CockroachDB recall | 0.65 to 0.81 seconds | 1.55 second pooled warm median | Keep quality-safe lanes and optimize the composed statement next |
-| Access recording | Disabled | Disabled | Keep enabled by default and disable only for crAIZK |
-| Reranking | Disabled | Disabled | Keep the full profile behavior and omit it in crAIZK |
+| CockroachDB find | 0.65 to 0.81 seconds | 1.55 second pooled warm median | Keep quality-safe lanes and optimize the composed statement next |
+| Access recording | Disabled | Disabled | Keep enabled by default and disable only for AIZK |
+| Reranking | Disabled | Disabled | Keep the full profile behavior and omit it in AIZK |
 | Packing | Below 1 millisecond | Below 1 millisecond | Keep it |
 | Cold initialization | About 25 to 28 seconds | 32.68 second post-deployment find | Use 2048 MB and a five-minute warm event |
 
@@ -52,7 +52,7 @@ The remaining tail risk comes from the external embedding request rather than Co
 ## Initial live result
 
 The final five-call sample measured 2.66, 2.69, 2.76, 3.11, and 4.91 seconds through the AWS CLI
-wrapper. The median was 2.76 seconds. Internal steady recall commonly measured 1.07 to 1.43 seconds.
+wrapper. The median was 2.76 seconds. Internal steady find commonly measured 1.07 to 1.43 seconds.
 The modern MCP response still returned the same three facts with their source document handle.
 
 That pass used image digest
@@ -60,19 +60,19 @@ That pass used image digest
 
 ## Settings
 
-All recall settings default to true. This preserves the full profile behavior.
+All find settings default to true. This preserves the full profile behavior.
 
-- `AIZK_RECALL_GRAPH_EXPANSION_ENABLED`
-- `AIZK_RECALL_COMMUNITIES_ENABLED`
-- `AIZK_RECALL_ENTITY_CATALOG_ENABLED`
-- `AIZK_RECALL_PROFILES_ENABLED`
-- `AIZK_RECALL_RAPTOR_ENABLED`
-- `AIZK_RECALL_SOURCES_FIRST`
-- `AIZK_RECALL_ACCESS_RECORDING_ENABLED`
+- `AIZK_FIND_GRAPH_EXPANSION_ENABLED`
+- `AIZK_FIND_COMMUNITIES_ENABLED`
+- `AIZK_FIND_ENTITY_CATALOG_ENABLED`
+- `AIZK_FIND_PROFILES_ENABLED`
+- `AIZK_FIND_RAPTOR_ENABLED`
+- `AIZK_FIND_SOURCES_FIRST`
+- `AIZK_FIND_ACCESS_RECORDING_ENABLED`
 
-The AWS CDK inputs use the matching `AIZK_AWS_RECALL_*` names. The quality-safe crAIZK profile keeps
+The AWS CDK inputs use the matching `AIZK_AWS_FIND_*` names. The quality-safe AIZK profile keeps
 communities, the entity catalog, and graph expansion. It disables profiles, RAPTOR, and access
-recording. Because crAIZK has no cross-encoder reranker, it also serves dense sources before graph
+recording. Because AIZK has no cross-encoder reranker, it also serves dense sources before graph
 facts. The full self-hosted profile keeps facts first and every default enabled.
 
 ## SWE reference workload
@@ -98,13 +98,13 @@ The initial sixteen cloud finds repeated the eight-query set twice. The overall 
 seconds and the warm-only median was 2.80 seconds. Warm p95 was 3.28 seconds. Internal warm medians
 separated into 0.32 seconds for embedding and 2.08 seconds for the CockroachDB statement.
 
-That profile exposed a fresh TLS connection on every find. Changing the crAIZK setting from a null
+That profile exposed a fresh TLS connection on every find. Changing the AIZK setting from a null
 pool to one reusable connection per warm Lambda environment reduced the warm end-to-end median to
 2.14 seconds and the database median to 1.55 seconds. Warm p95 remained 3.16 seconds. The exact same
 query set retained the same answer coverage. `AIZK_AWS_DB_NULL_POOL` keeps the old behavior available
 as a diagnostic fallback.
 
-The first call immediately after the environment update took 32.68 seconds. Its internal recall was
+The first call immediately after the environment update took 32.68 seconds. Its internal find was
 8.05 seconds, leaving about 24 seconds in process and application initialization. The five-minute
 warm schedule normally pays that startup before a user request, but the result remains recorded as
 the honest cold maximum.

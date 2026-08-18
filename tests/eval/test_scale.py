@@ -57,7 +57,7 @@ def rows_for(
 
 def point(
     size: int,
-    recall_p95_ms: float = 0.0,
+    find_p95_ms: float = 0.0,
     multihop_query_ms: float = 0.0,
     community_detect_ms: float = 0.0,
     lane_p95_ms: float = 0.0,
@@ -68,9 +68,9 @@ def point(
         facts=size,
         ingest_chunks_per_s=100.0,
         ingest_facts_per_s=100.0,
-        recall_p50_ms=recall_p95_ms / 2,
-        recall_p95_ms=recall_p95_ms,
-        recall_p99_ms=recall_p95_ms,
+        find_p50_ms=find_p95_ms / 2,
+        find_p95_ms=find_p95_ms,
+        find_p99_ms=find_p95_ms,
         lanes=[LaneLatency(name="vector", p50_ms=0.0, p95_ms=lane_p95_ms, p99_ms=lane_p95_ms)],
         multihop_query_ms=multihop_query_ms,
         community_detect_ms=community_detect_ms,
@@ -223,7 +223,7 @@ def scale_curves(draw: st.DrawFn) -> tuple[list[ScalePoint], Budget]:
     points = [
         point(
             size,
-            recall_p95_ms=draw(latency),
+            find_p95_ms=draw(latency),
             multihop_query_ms=draw(latency),
             community_detect_ms=draw(latency),
             lane_p95_ms=draw(latency),
@@ -232,7 +232,7 @@ def scale_curves(draw: st.DrawFn) -> tuple[list[ScalePoint], Budget]:
     ]
     limit = st.floats(min_value=50.0, max_value=300.0, allow_nan=False, allow_infinity=False)
     budget = Budget(
-        recall_p95_ms=draw(limit),
+        find_p95_ms=draw(limit),
         lane_p95_ms=draw(limit),
         multihop_query_ms=draw(limit),
         community_detect_ms=draw(limit),
@@ -246,7 +246,7 @@ def test_find_knees_flags_each_components_first_crossing(
 ) -> None:
     points, budget = curve
     readers = {
-        "recall_p95": (budget.recall_p95_ms, lambda p: p.recall_p95_ms),
+        "find_p95": (budget.find_p95_ms, lambda p: p.find_p95_ms),
         "multihop_query": (
             budget.multihop_query_ms,
             lambda point: point.multihop_query_ms,
@@ -281,16 +281,16 @@ def test_scale_point_lane_p95_reads_a_present_lane_and_zeros_an_absent_one() -> 
         (
             ScaleReport(
                 sizes=[1000],
-                points=[point(1000, recall_p95_ms=300.0, multihop_query_ms=10.0)],
+                points=[point(1000, find_p95_ms=300.0, multihop_query_ms=10.0)],
                 budget=Budget(),
-                knees=find_knees([point(1000, recall_p95_ms=300.0)], Budget()),
+                knees=find_knees([point(1000, find_p95_ms=300.0)], Budget()),
             ),
-            ["size=1000", "p95=300.0ms", "vector_p95=", "knee recall_p95 at size=1000"],
+            ["size=1000", "p95=300.0ms", "vector_p95=", "knee find_p95 at size=1000"],
         ),
         (ScaleReport(sizes=[], points=[], budget=Budget(), knees=[]), ["no corpus"]),
         (
             ScaleReport(
-                sizes=[1000], points=[point(1000, recall_p95_ms=50.0)], budget=Budget(), knees=[]
+                sizes=[1000], points=[point(1000, find_p95_ms=50.0)], budget=Budget(), knees=[]
             ),
             ["no knee"],
         ),
@@ -329,7 +329,7 @@ def test_run_scale_benchmark_measures_a_tiny_curve(
 
         assert [pt.size for pt in report.points] == list(sizes)
         for pt in report.points:
-            assert pt.recall_p95_ms >= 0.0
+            assert pt.find_p95_ms >= 0.0
             assert {lane.name for lane in pt.lanes} == {
                 "local",
                 "global",

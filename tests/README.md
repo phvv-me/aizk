@@ -38,16 +38,18 @@ transaction. Keep each example rollback-safe and never depend on execution order
 Coverage is a backstop for missing behavior, not a reason to preserve repetitive tests. The gate
 requires 100 percent statement and branch coverage across `aizk` and `eval`.
 
-Run focused feedback through `chefe` while editing.
+Run focused feedback through the frozen project environment while editing.
 
 ```sh
-chefe run -- pytest tests/path/test_file.py --no-cov
-chefe run -- ruff check tests/path/test_file.py
+uv run --no-sync python -m pytest tests/path/test_file.py --no-cov
+uv run --no-sync ruff check tests/path/test_file.py
 ```
 
 Run the complete serialized gate before handoff.
 
 ```sh
-chefe run test-aizk-cov
-chefe run typecheck-aizk
+uv run --no-sync python -m pytest -n 4 --dist loadscope --benchmark-disable
+uv run --no-sync pyrefly check
+uv run --no-sync ty check --python .venv --exit-zero-on-warning
+uv run --no-sync mypy src/aizk src/eval
 ```

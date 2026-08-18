@@ -2,45 +2,55 @@
 set -euo pipefail
 
 media_root="hackathon/media"
-video="$media_root/../video/full/craizk-complete-demo.mp4"
-hero="$media_root/../thumbnail.png"
 architecture_source="$media_root/architecture.svg"
+cspann_source="$media_root/cockroachdb-cspann.svg"
+aws_source="$media_root/aws-operations.svg"
+thumbnail_source="$media_root/thumbnail.svg"
 
 mkdir -p "$media_root"
-
-render_frame() {
-  local timestamp="$1"
-  local output="$2"
-
-  ffmpeg -hide_banner -loglevel error -y \
-    -ss "$timestamp" -i "$video" -frames:v 1 \
-    -vf "scale=1800:1200:force_original_aspect_ratio=decrease,pad=1800:1200:(ow-iw)/2:(oh-ih)/2:color=0xf4e8d0" \
-    -q:v 2 "$media_root/$output"
-}
-
-ffmpeg -hide_banner -loglevel error -y \
-  -i "$hero" \
-  -vf "scale=1800:1200:force_original_aspect_ratio=decrease,pad=1800:1200:(ow-iw)/2:(oh-ih)/2:color=0xf4e8d0" \
-  -q:v 2 "$media_root/00-hero.jpg"
-
-render_frame "00:00:02" "01-one-action-onboarding.jpg"
-render_frame "00:00:27" "02-agent-setup-guide.jpg"
-render_frame "00:00:56" "03-agent-configures-aizk.jpg"
-render_frame "00:01:20" "04-logto-sign-in.jpg"
-render_frame "00:02:25" "05-authenticated-status.jpg"
-render_frame "00:02:36" "06-live-memory-write.jpg"
-render_frame "00:03:36" "07-grounded-recall.jpg"
-render_frame "00:05:58" "08-memory-console.jpg"
-render_frame "00:07:02" "09-aws-architecture.jpg"
-render_frame "00:08:30" "10-cspann-plan.jpg"
-render_frame "00:08:52" "11-lambda-operations.jpg"
 
 ffmpeg -hide_banner -loglevel error -y \
   -i "$architecture_source" \
   -vf "scale=1800:1200" \
   "$media_root/00-architecture.png"
 
-for image in "$media_root"/*.jpg
+ffmpeg -hide_banner -loglevel error -y \
+  -i "$cspann_source" \
+  -vf "scale=1800:1200" \
+  -q:v 2 "$media_root/10-cockroachdb-cspann.jpg"
+
+ffmpeg -hide_banner -loglevel error -y \
+  -i "$aws_source" \
+  -vf "scale=1800:1200" \
+  -q:v 2 "$media_root/11-aws-operations.jpg"
+
+ffmpeg -hide_banner -loglevel error -y \
+  -i "$thumbnail_source" \
+  -i "docs/public/brain-box.webp" \
+  -filter_complex "[0:v]scale=1800:1200[base];[1:v]scale=690:690[mark];[base][mark]overlay=995:205" \
+  "$media_root/thumbnail-devpost.png"
+
+cp "$media_root/thumbnail-devpost.png" "hackathon/thumbnail.png"
+
+gallery=(
+  "$media_root/01-live-landing.jpg"
+  "$media_root/02-product-overview.jpg"
+  "$media_root/03-scoped-sharing.jpg"
+  "$media_root/10-cockroachdb-cspann.jpg"
+  "$media_root/11-aws-operations.jpg"
+)
+
+for owner_capture in \
+  "$media_root/04-authenticated-dashboard.jpg" \
+  "$media_root/05-agent-keep-and-find.jpg"
+do
+  if test -f "$owner_capture"
+  then
+    gallery+=("$owner_capture")
+  fi
+done
+
+for image in "${gallery[@]}"
 do
   dimensions=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height \
     -of csv=s=x:p=0 "$image")

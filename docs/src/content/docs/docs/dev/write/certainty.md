@@ -73,7 +73,7 @@ none.
 ```
 
 The label is not the whole defense. Published 2026 work finds the evidential register barely
-discounted by downstream readers, so an unsettled claim also changes what recall returns.
+discounted by downstream readers, so an unsettled claim also changes what find returns.
 `deduplicate` stops treating a source excerpt as a repetition of an unsettled fact from the same
 span, which is what makes the source-wins rule in
 [Sources and derived knowledge](/docs/user/concepts/sources/) a property of the answer rather than
@@ -109,7 +109,7 @@ the evidence that closed it.
 
 ## Measured, not asserted
 
-`chefe run aizk-eval certainty` scores this on a committed corpus where every quote is a contiguous,
+`uv run --no-sync aizk-eval certainty` scores this on a committed corpus where every quote is a contiguous,
 character-exact substring, so each case already passes quote verification. The before arm is the
 same audit without the comparison, which is what the code did when the defect was reported.
 

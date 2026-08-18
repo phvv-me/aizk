@@ -4,7 +4,7 @@ description: "How stored artifacts are compressed, which formats are accepted, a
 ---
 
 AIZK keeps artifact bytes outside the SQL database in an S3-compatible object store. The `blob`
-table holds their metadata. crAIZK uses Amazon S3, while the self-hosted profile uses SeaweedFS.
+table holds their metadata. AIZK uses Amazon S3, while the self-hosted profile uses SeaweedFS.
 This page explains compression, accepted formats, and safe migration of older objects.
 
 ## Everything readable is compressed, losslessly
@@ -92,7 +92,7 @@ compact toward.
 ## Formats are refused at the door
 
 Aizk stores information, not files. A format it cannot open is one it cannot convert, index, or
-ever recall, so it is refused while the caller still holds it instead of becoming an opaque blob
+ever find, so it is refused while the caller still holds it instead of becoming an opaque blob
 that only costs storage.
 
 `FormatPolicy` in `src/aizk/artifacts/formats.py` decides from the bytes. A declared media type
@@ -109,4 +109,4 @@ text family covers plain text, Markdown, HTML, XHTML, XML, AsciiDoc, JSON, CSV, 
 else is refused with a message that identifies the declared type and detected content.
 
 Video is not accepted because AIZK has no video reader. Storing it would create an opaque object
-that recall cannot search.
+that find cannot search.

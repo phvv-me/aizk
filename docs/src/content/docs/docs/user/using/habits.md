@@ -4,7 +4,7 @@ description: "The writing habits that keep a memory worth reading a year from no
 ---
 
 This page assumes you know the mechanics from
-[Writing memory well](/docs/user/using/remember/). Those rules are about one note. These are about
+[Writing memory well](/docs/user/using/keep/). Those rules are about one note. These are about
 what a year of notes turns into, which is a different problem, and the one that decides whether
 anybody still trusts the memory later.
 
@@ -23,7 +23,7 @@ Six habits do most of the work.
 
 ## One coherent source beats many fragments
 
-Recall returns sources as units, so the unit you wrote is the unit somebody gets. A single note that
+Find returns sources as units, so the unit you wrote is the unit somebody gets. A single note that
 covers a decision, its reason, and its consequences comes back whole and reads like something a
 colleague wrote. The same content chopped into eight one-line notes comes back as whichever three
 lines scored highest, and those three rarely explain each other.
@@ -49,7 +49,7 @@ plus your own summary usually beats a stored copy.
 When something changes, rewrite the note. Do not add a second note saying the first is out of date,
 and do not leave both standing so a reader has to work out which is newer.
 
-aizk keeps history for you. The old version keeps its dates and stays available, ordinary recall
+aizk keeps history for you. The old version keeps its dates and stays available, ordinary find
 favors the current one, and asking what the team believed six months ago still works.
 [Time and history](/docs/user/concepts/time/) explains the two clocks that make this safe.
 
@@ -111,8 +111,8 @@ keeping, and in a year it will still be worth keeping.
 
 <div class="not-content">
 
-- [Writing memory well](/docs/user/using/remember/) is the per-note version of this page.
+- [Writing memory well](/docs/user/using/keep/) is the per-note version of this page.
 - [Who maintains memory](/docs/user/concepts/lifecycle/) covers whose job the upkeep is.
-- [Asking memory well](/docs/user/using/recall/) closes the loop.
+- [Asking memory well](/docs/user/using/find/) closes the loop.
 
 </div>

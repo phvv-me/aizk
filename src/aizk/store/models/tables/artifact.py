@@ -25,7 +25,7 @@ class ArtifactContent(Id, Scoped, Timestamped, TableBase, table=True):
     remains the source of truth for queue leases and retries. The `Blob` contains only
     the losslessly encoded original. Companion text and normalized Markdown stay
     queryable in PostgreSQL, and `indexed_at` records when that Markdown was last split,
-    embedded and made recallable, which is what the re-chunk sweep walks.
+    embedded and made findable, which is what the re-chunk sweep walks.
     """
 
     class State(sql.PGEnum):

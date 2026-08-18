@@ -5,7 +5,6 @@ from itertools import batched
 from typing import cast
 
 from loguru import logger
-from mainboard.profiling import span
 from networkx.algorithms.community.modularity_max import greedy_modularity_communities
 from networkx.classes import Graph
 from patos import FlexModel, sql
@@ -15,6 +14,7 @@ from sqlalchemy import Integer, any_, column, delete, func, or_
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 
+from ..common.observability import span
 from ..config import settings
 from ..ontology import System
 from ..serving.embed import Embedder
@@ -39,7 +39,7 @@ _fact_content = cast("Callable[..., FactContent]", Fact.Content)
 def to_floats(vector: HalfVector | Vector | list[float] | None) -> list[float]:
     """Materialize a stored embedding as ordinary float values."""
     assert vector is not None
-    return vector.to_list() if isinstance(vector, (HalfVector, Vector)) else vector
+    return vector.to_list() if isinstance(vector, HalfVector | Vector) else vector
 
 
 def cosine(a: list[float], b: list[float]) -> float:

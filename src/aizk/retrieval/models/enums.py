@@ -44,7 +44,7 @@ class Plan(FrozenModel):
 
     Production always runs `maximal`; the narrower presets survive as the eval plan
     study's comparison arms. New retrieval behavior becomes a new Plan value rather
-    than new query code, and the recall statement caches per plan since equal plans
+    than new query code, and the find statement caches per plan since equal plans
     compile identical SQL.
     """
 
@@ -85,30 +85,30 @@ class Plan(FrozenModel):
     def maximal(cls) -> Plan:
         """The production plan, every lane on in facts-first order with the configured
         hops, read fresh so a changed setting takes effect immediately."""
-        graph = settings.recall_graph_expansion_enabled
+        graph = settings.find_graph_expansion_enabled
         return cls(
-            order=_sources_first if settings.recall_sources_first else _facts_first,
-            communities=settings.recall_communities_enabled,
-            entity_catalog=settings.recall_entity_catalog_enabled,
+            order=_sources_first if settings.find_sources_first else _facts_first,
+            communities=settings.find_communities_enabled,
+            entity_catalog=settings.find_entity_catalog_enabled,
             neighbors=graph,
-            profiles=settings.recall_profiles_enabled,
-            raptor=settings.recall_raptor_enabled,
+            profiles=settings.find_profiles_enabled,
+            raptor=settings.find_raptor_enabled,
             hops=settings.multihop_max_hops if graph else 0,
         )
 
     @classmethod
     def maximal_without_raptor(cls) -> Plan:
-        """The maximal plan without RAPTOR overview recall."""
+        """The maximal plan without RAPTOR overview find."""
         return cls.maximal().model_copy(update={"raptor": False})
 
     @classmethod
     def maximal_without_communities(cls) -> Plan:
-        """The maximal plan without community-summary recall."""
+        """The maximal plan without community-summary find."""
         return cls.maximal().model_copy(update={"communities": False})
 
     @classmethod
     def maximal_without_profiles(cls) -> Plan:
-        """The maximal plan without entity-profile recall."""
+        """The maximal plan without entity-profile find."""
         return cls.maximal().model_copy(update={"profiles": False})
 
     @classmethod

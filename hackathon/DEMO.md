@@ -8,7 +8,7 @@ shows that CockroachDB and AWS own the durable path.
 
 The current reproducible corpus is the public AIZK documentation under
 `docs/src/content/docs`. It contains architecture, security, retrieval, evaluation, and operator
-material with enough cross-document relationships to exercise vector and graph recall. The final
+material with enough cross-document relationships to exercise vector and graph find. The final
 cloud corpus may add public papers and projects, but every item must record its public source.
 
 ## Local Lambda rehearsal
@@ -32,7 +32,7 @@ docker compose \
 Load the bounded public corpus through locally emulated Lambda events and modern MCP.
 
 ```sh
-chefe run python hackathon/workload.py load \
+uv run --no-sync python hackathon/workload.py load \
   --root docs/src/content/docs \
   --limit 87 \
   --concurrency 1
@@ -46,8 +46,8 @@ Run the five-question latency and evidence probe twice. The first pass records c
 the immediate second pass records the warm path.
 
 ```sh
-chefe run python hackathon/workload.py benchmark --repeats 1
-chefe run python hackathon/workload.py benchmark --repeats 1
+uv run --no-sync python hackathon/workload.py benchmark --repeats 1
+uv run --no-sync python hackathon/workload.py benchmark --repeats 1
 ```
 
 Inspect durable counts and recent failures.
@@ -107,8 +107,30 @@ What should Atlas verify before promoting a release? Search only memory and keep
 6. Open the cited source and compare it with the returned excerpt.
 7. Show the C-SPANN query plan and matching scoped vector rows in CockroachDB.
 8. Show the Lambda invocation, duration, and absence of errors in CloudWatch.
-9. Use ccloud for the required cluster inspection. Add Managed MCP only if its final read-only
-   authorization is available.
+9. Run the queue steward and show its typed healthy verdict, Managed MCP tools, and official Agent
+   Skills. Use ccloud for the separate cluster management evidence.
+
+## Queue steward rehearsal
+
+Create the cluster-scoped service account key by following
+[`operator/README.md`](operator/README.md). Keep the key and cluster ID in the ignored AIZK `.env`
+file, then run the live diagnosis from the monorepo root.
+
+```sh
+uv run --no-sync python hackathon/operator/steward.py diagnose
+```
+
+The clean demonstration result must name `reviewing-cluster-health` and
+`monitoring-background-jobs`, show the Managed MCP tools that supplied its evidence, and recommend
+no action when the queue is healthy. Never record the key, cluster UUID, raw queue errors, source
+text, or an interactive authorization page.
+
+The redacted live result is committed as
+[`results/queue-steward-live.json`](results/queue-steward-live.json). It is the safe terminal view
+for the video and gallery.
+
+A matching 3 to 2 capture is ready as
+[`screenshots/queue-steward-live.png`](screenshots/queue-steward-live.png).
 
 ## Codex Luna clean-room rehearsal
 
@@ -116,7 +138,7 @@ The judge client rehearsal passed on August 12, 2026 with Codex `0.147.0`,
 `gpt-5.6-luna`, and MCP `2026-07-28`. The modern Codex protocol path is still an explicit
 `mcp_2026_07_28` feature in this release.
 
-On August 13, crAIZK replaced its embedded OAuth proxy with direct Logto verification. The public
+On August 13, AIZK replaced its embedded OAuth proxy with direct Logto verification. The public
 Native client has no secret. Codex now discovers Logto through the raw Function URL, generates the
 stable server-specific callback, and reaches an accepted PKCE authorization request. The current
 configuration is in [`codex/config.oauth.toml`](codex/config.oauth.toml). A final interactive browser
@@ -128,7 +150,7 @@ mounted a disposable read-only workspace, disposable Codex state, and only the e
 authentication file as a read-only credential. It could not see the host home, AIZK source tree,
 Docker socket, AWS credentials, or a writable host workspace.
 
-Codex called `status` as Maya Chen, kept one private note, and recalled it with a differently worded
+Codex called `status` as Maya Chen, kept one private note, and found it with a differently worded
 `find` using `web="off"` and `fresh=false`. The resulting document was
 the returned document receipt, and it appeared as the first evidence item. Complete agent
 turns took 16.98 seconds for `status`, 18.46 seconds for `keep`, and 37.33 seconds for `find`.
@@ -159,7 +181,7 @@ the browser could return to OpenCode's fixed loopback callback. Every MCP call a
 ordinary isolated Docker bridge.
 
 The run completed DCR and OAuth as Maya Chen, connected over MCP `2026-07-28`, called `status`, kept
-one private note, and recalled it with a differently worded `find` using `web="off"` and
+one private note, and found it with a differently worded `find` using `web="off"` and
 `fresh=false`. The resulting document identifier was redacted. The MCP portion
 of `status` took 2.86 seconds, `keep` took 4.82 seconds, and `find` took 7.26 seconds. The three
 DeepSeek V4 Flash conversations cost about $0.0048 through OpenRouter.
@@ -171,7 +193,7 @@ while it resolved compatibility regressions with legacy servers. The August 13 r
 the MCP connection timed out because the client still sent the legacy protocol shape. The pinned
 `1.18.8` image then connected with that same direct Logto token and called `status` successfully.
 Keep this digest pinned until a later OpenCode release restores MCP `2026-07-28` support. Do not
-weaken crAIZK by re-enabling an obsolete protocol for one client.
+weaken AIZK by re-enabling an obsolete protocol for one client.
 
 The machine-readable result is in
 [`results/opencode-clean-room-2026-08-12.json`](results/opencode-clean-room-2026-08-12.json). The

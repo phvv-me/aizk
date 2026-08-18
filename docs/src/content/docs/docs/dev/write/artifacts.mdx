@@ -45,7 +45,7 @@ and bounds the URI reader, the upload body, the scanner and every decompression.
 
 :::caution[10 MiB is the real limit]
 A file the scanner refuses is a file aizk refuses, so 10 MiB is the practical ceiling and 96 MiB
-only theoretical. Raise the three ClamAV variables together for more, and remember the whole
+only theoretical. Raise the three ClamAV variables together for more, and keep the whole
 artifact stays in memory, since scanning, hashing and storing each need the complete bytes.
 :::
 
@@ -111,7 +111,7 @@ Companion text is the caller's own prose about the file, capped by
 `web_artifact_companion_max_chars`, default 65,536, stored on the `artifact_content` row and
 rendered at the top of the document. `ArtifactDocument.semantic` is true only when there is
 companion text or Markdown, and only a semantic document is enqueued for graph projection, so a
-metadata-only shell is recallable but never becomes facts.
+metadata-only shell is findable but never becomes facts.
 
 ## Two policies ride on every conversion
 

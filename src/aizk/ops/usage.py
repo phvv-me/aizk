@@ -26,7 +26,7 @@ class PlatformUsage(FrozenModel):
     """Durable usage across every scope at once, measured in one pass.
 
     Each offered window carries its own measured totals rather than a sum the browser
-    computes, so what counts as an upload or a remember is decided once, beside the
+    computes, so what counts as an upload or a keep is decided once, beside the
     aggregate columns that define it, and never restated in the page.
     """
 

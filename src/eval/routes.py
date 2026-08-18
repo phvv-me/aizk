@@ -8,7 +8,7 @@ from aizk.serving.gate import GateClient
 class Route(StrEnum):
     """The retrieval shape GLiNER2 would pick for one question, an eval-side instrument.
 
-    Production recall stopped routing when the zero-shot classifier measured 44%
+    Production Find stopped routing when the zero-shot classifier measured 44%
     accuracy on the eval strata, so this enum survives only to measure what query-time
     routing would have chosen and what it would have cost.
     """

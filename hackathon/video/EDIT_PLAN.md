@@ -14,7 +14,7 @@ the narrated submission edit.
 | 18 to 38 seconds | Public setup guide | Machine-readable setup discovery |
 | 38 to 70 seconds | Real Codex Luna setup | Agent-created skill, MCP configuration and project guidance |
 | 70 to 86 seconds | Application and Logto handoff | Account creation or sign-in entry point |
-| 86 to 233 seconds | Live OpenCode workflow | Maya identity, private Atlas write, queue drain and grounded recall |
+| 86 to 233 seconds | Live OpenCode workflow | Maya identity, private Atlas write, queue drain and grounded find |
 | 233 to 310 seconds | Two grounded questions | Different wording resolved to the same source and privacy receipt |
 | 310 to 415 seconds | Authenticated console | Processing, sources, findings, subjects and themes |
 | 415 to 470 seconds | AWS architecture | Minimal deployment, routes, limits and reproduction path |

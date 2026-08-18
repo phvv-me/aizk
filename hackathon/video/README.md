@@ -13,8 +13,8 @@ the final narration, captions, pauses and cuts can be changed without re-recordi
 | `raw/04-account-flow.mp4` | Browser application and Logto handoff | Show where sign-in or account creation happens |
 | `derived/03-codex-setup-fast.mp4` | Clean opening followed by accelerated agent work | Short edits where the complete run is too long |
 | `rough-cut.mp4` | Silent assembly of the four scenes | Starting point for the editor |
-| `full/raw/05-live-agent-workflow.mp4` | Real OAuth identity, write, queue drain and recall | Long-form agent evidence |
-| `full/raw/05b-grounded-examples.mp4` | Two more grounded questions against the new source | Recall variation evidence |
+| `full/raw/05-live-agent-workflow.mp4` | Real OAuth identity, write, queue drain and find | Long-form agent evidence |
+| `full/raw/05b-grounded-examples.mp4` | Two more grounded questions against the new source | Find variation evidence |
 | `full/raw/06-authenticated-console.mp4` | Authenticated sources, findings, subjects and themes | Product console evidence |
 | `full/raw/07-aws-architecture.mp4` | Public AWS architecture and deployment guide | Infrastructure explanation |
 | `full/raw/08-cloud-evidence.mp4` | Live endpoint, ccloud, C-SPANN and Lambda evidence | Cloud proof |
@@ -33,17 +33,17 @@ hackathon edit can choose its own pauses and evidence cuts.
 
 ## Rebuild
 
-Run each task with a hard outer timeout from the monorepo root.
+Run each capture with a hard outer timeout from the repository root.
 
 ```sh
-timeout --signal=TERM --kill-after=10s 180s chefe run aizk-video-browser
-timeout --signal=TERM --kill-after=10s 240s chefe run aizk-video-terminal
-chefe run aizk-video-montage
-timeout --signal=TERM --kill-after=10s 420s chefe run aizk-video-full-agent
-timeout --signal=TERM --kill-after=10s 180s chefe run aizk-video-full-agent-examples
-timeout --signal=TERM --kill-after=10s 300s chefe run aizk-video-full-browser
-timeout --signal=TERM --kill-after=10s 180s chefe run aizk-video-full-ops
-chefe run aizk-video-full-montage
+timeout --signal=TERM --kill-after=10s 180s bash hackathon/video/capture-browser.sh
+timeout --signal=TERM --kill-after=10s 240s bash hackathon/video/capture-terminal.sh
+bash hackathon/video/montage.sh
+timeout --signal=TERM --kill-after=10s 420s bash hackathon/video/capture-full-agent.sh
+timeout --signal=TERM --kill-after=10s 180s bash hackathon/video/capture-full-agent-examples.sh
+timeout --signal=TERM --kill-after=10s 300s bash hackathon/video/capture-full-browser.sh
+timeout --signal=TERM --kill-after=10s 180s bash hackathon/video/capture-full-ops.sh
+bash hackathon/video/full-montage.sh
 ```
 
 Record narration separately. Keep the raw clips unchanged and make editorial cuts from copies.

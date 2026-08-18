@@ -110,7 +110,7 @@ Tables are assembled from mixins in `src/aizk/store/mixins/` rather than repeati
 
 `Scoped` is the one that matters most. It emits `rls_select` and `rls_insert` always, plus
 `rls_update` when the table is declared mutable and `rls_delete` when it is deletable, so
-mutability is a property of the model rather than something a policy file has to remember.
+mutability is a property of the model rather than something a policy file has to keep.
 
 It also supports `read_through`, which makes a child table inherit its parent's visibility. A
 `chunk` is visible when its `document` is, and the child's scopes must match the parent's, so a

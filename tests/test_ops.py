@@ -57,8 +57,8 @@ def test_usage_health_attributes_operations_and_deduplicated_storage() -> None:
         await dbutil.reset_db()
         actor, team = uuid5(), uuid5()
         events = (
-            (Usage.Event.Operation.recall, (actor, team), 4, 10),
-            (Usage.Event.Operation.remember_file, (team,), 100, 0),
+            (Usage.Event.Operation.find_memory, (actor, team), 4, 10),
+            (Usage.Event.Operation.keep_file, (team,), 100, 0),
             (Usage.Event.Operation.share, (team,), 0, 0),
             (Usage.Event.Operation.artifact_read, (actor,), 0, 12),
         )
@@ -108,8 +108,8 @@ def test_usage_health_attributes_operations_and_deduplicated_storage() -> None:
     assert len(actors) == 1
     assert actors[0].model_dump() == {
         "actor_id": actors[0].actor_id,
-        "recalls": 1,
-        "remembers": 1,
+        "finds": 1,
+        "keeps": 1,
         "files": 1,
         "shares": 1,
         "artifact_reads": 1,
@@ -117,7 +117,7 @@ def test_usage_health_attributes_operations_and_deduplicated_storage() -> None:
         "response_bytes": 22,
     }
     scope_usage = {item.scope_id: item for item in scopes}
-    assert sorted((item.recalls, item.files, item.shares) for item in scopes) == [
+    assert sorted((item.finds, item.files, item.shares) for item in scopes) == [
         (1, 0, 0),
         (1, 1, 1),
     ]
@@ -372,7 +372,7 @@ def test_probe_endpoint_keeps_the_row_when_the_endpoint_returns_non_json(
 
 
 def corpus() -> ops.ScopeHealth:
-    """Build one deterministic health row for recall and report tests."""
+    """Build one deterministic health row for find and report tests."""
     now = datetime.now(UTC)
     return ops.ScopeHealth(
         scopes=(settings.system_user_id,),
@@ -406,7 +406,7 @@ def test_corpus_health_groups_storage_by_creator_and_scope(migrated_db: None) ->
 
 
 @pytest.mark.parametrize("failure", [False, True], ids=["candidate", "connection-error"])
-def test_recall_health_reports_candidates_and_expected_failures(
+def test_find_health_reports_candidates_and_expected_failures(
     monkeypatch: pytest.MonkeyPatch, failure: bool
 ) -> None:
     candidate = CandidateFactory.build(
@@ -415,7 +415,7 @@ def test_recall_health_reports_candidates_and_expected_failures(
         source_title="Aizk",
     )
 
-    async def recalled(query: str, user: User, k: int, token_budget: int) -> list[Candidate]:
+    async def found(query: str, user: User, k: int, token_budget: int) -> list[Candidate]:
         if failure:
             raise httpx.ConnectError("refused")
         assert query
@@ -424,9 +424,9 @@ def test_recall_health_reports_candidates_and_expected_failures(
         assert token_budget == 512
         return [candidate]
 
-    monkeypatch.setattr(ops.probes, "recall", recalled)
+    monkeypatch.setattr(ops.probes, "find_candidates", found)
 
-    report = dbutil.run(ops.recall_health(corpus()))
+    report = dbutil.run(ops.find_health(corpus()))
 
     assert report.candidates == (0 if failure else 1)
     assert report.top_source == (None if failure else "Aizk")
@@ -666,7 +666,7 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
         projection_pending=2,
     )
     expected_corpus = corpus()
-    recall = ops.RecallHealth(
+    find = ops.FindHealth(
         query="probe",
         scopes=expected_corpus.scopes,
         candidates=1,
@@ -686,14 +686,14 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
     async def fake_corpora() -> list[ops.ScopeHealth]:
         return [expected_corpus]
 
-    async def fake_recall(selected: ops.ScopeHealth) -> ops.RecallHealth:
+    async def fake_find(selected: ops.ScopeHealth) -> ops.FindHealth:
         assert selected == expected_corpus
-        return recall
+        return find
 
     monkeypatch.setattr(ops.probes, "probe_endpoint", fake_probe)
     monkeypatch.setattr(ops.probes, "tasks_overview", fake_overview)
     monkeypatch.setattr(ops.probes, "corpus_health", fake_corpora)
-    monkeypatch.setattr(ops.probes, "recall_health", fake_recall)
+    monkeypatch.setattr(ops.probes, "find_health", fake_find)
 
     report = dbutil.run(ops.health())
 
@@ -722,7 +722,7 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
         output_tokens=settings.llm_extract_max_tokens,
     )
     assert report.corpora == [expected_corpus]
-    assert report.recall == recall
+    assert report.find == find
     assert report.identity.mode == "local"
     assert report.duration_ms >= 0
     assert [endpoint.name for endpoint in report.endpoints] == [
@@ -734,7 +734,7 @@ def test_health_reads_every_section(migrated_db: None, monkeypatch: pytest.Monke
     assert all(endpoint.reachable for endpoint in report.endpoints)
 
 
-def test_health_skips_the_live_recall_probe_when_asked(
+def test_health_skips_the_live_find_probe_when_asked(
     migrated_db: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     expected_corpus = corpus()
@@ -758,19 +758,19 @@ def test_health_skips_the_live_recall_probe_when_asked(
     async def fake_corpora() -> list[ops.ScopeHealth]:
         return [expected_corpus]
 
-    async def unreachable_recall(selected: ops.ScopeHealth) -> ops.RecallHealth:
+    async def unreachable_find(selected: ops.ScopeHealth) -> ops.FindHealth:
         nonlocal called
         called = True
-        raise AssertionError("the live recall probe must not run")
+        raise AssertionError("the live find probe must not run")
 
     monkeypatch.setattr(ops.probes, "probe_endpoint", fake_probe)
     monkeypatch.setattr(ops.probes, "tasks_overview", fake_overview)
     monkeypatch.setattr(ops.probes, "corpus_health", fake_corpora)
-    monkeypatch.setattr(ops.probes, "recall_health", unreachable_recall)
+    monkeypatch.setattr(ops.probes, "find_health", unreachable_find)
 
-    report = dbutil.run(ops.health(include_recall=False))
+    report = dbutil.run(ops.health(include_find=False))
 
-    assert report.recall is None
+    assert report.find is None
     assert called is False
 
 
@@ -806,7 +806,7 @@ def _measured(row_counts: dict[str, int] | None = None) -> ops.HealthReport:
             failed_integrity_blobs=0,
             last_integrity_check=None,
         ),
-        recall=None,
+        find=None,
         duration_ms=1.0,
     )
 
@@ -833,10 +833,10 @@ def _aggregated() -> ops.PlatformUsage:
             ops.PeriodUsage(
                 days=7,
                 start=datetime(2026, 6, 25, tzinfo=UTC),
-                summary=UsageSummary(recalls=3),
+                summary=UsageSummary(finds=3),
             ),
         ),
-        lifetime=UsageSummary(recalls=9),
+        lifetime=UsageSummary(finds=9),
         points=(),
         by_actor=(),
         by_scope=(),
@@ -1011,7 +1011,7 @@ def test_readings_are_kept_apart_rather_than_overwriting_each_other(
 
     assert health is not None and health.row_counts == {"pass": 1}
     assert doctor is not None and doctor.detail_limit == 50
-    assert usage is not None and usage.lifetime.recalls == 9
+    assert usage is not None and usage.lifetime.finds == 9
 
 
 @pytest.mark.parametrize("case", READINGS)

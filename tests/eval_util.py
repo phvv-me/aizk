@@ -22,10 +22,10 @@ def fact_bundle(statements: list[str]) -> tuple[Candidate, ...]:
     )
 
 
-def install_constant_recall(
+def install_constant_find(
     monkeypatch: pytest.MonkeyPatch, module: types.ModuleType, statement: str
 ) -> None:
-    async def stub_recall(
+    async def stub_find(
         query: str,
         user: User,
         k: int = 8,
@@ -35,4 +35,4 @@ def install_constant_recall(
         del query, user, k, token_budget, plan
         return fact_bundle([statement])
 
-    monkeypatch.setattr(module, "recall", stub_recall)
+    monkeypatch.setattr(module, "find", stub_find)

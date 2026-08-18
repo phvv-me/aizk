@@ -83,16 +83,16 @@ class MonthlyQuota:
             (user_id, "operation", self.config.monthly_user_operation_limit),
         )
         if operation in {
-            UsageEvent.Operation.remember_text,
-            UsageEvent.Operation.remember_file,
+            UsageEvent.Operation.keep_text,
+            UsageEvent.Operation.keep_file,
         }:
             configured += (
                 (
                     self.config.system_user_id,
-                    "remember",
-                    self.config.monthly_total_remember_limit,
+                    "keep",
+                    self.config.monthly_total_keep_limit,
                 ),
-                (user_id, "remember", self.config.monthly_user_remember_limit),
+                (user_id, "keep", self.config.monthly_user_keep_limit),
             )
         if operation in {
             UsageEvent.Operation.web_search,

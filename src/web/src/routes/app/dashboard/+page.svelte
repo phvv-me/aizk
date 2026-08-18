@@ -30,7 +30,7 @@
             label: 'Documents',
             value: overview.totals.documents,
             href: appHref(appRoutes.sources, { origin: 'document' }),
-            help: 'Text remembered directly through AIZK clients.'
+            help: 'Text kept directly through AIZK clients.'
           },
           {
             label: 'Files',
@@ -171,7 +171,7 @@
           <StageProgress
             stage={conversion}
             label="Source conversion"
-            description="Conversion scans and normalizes preserved originals. A converted source can be recalled before every graph finding and theme has finished building."
+            description="Conversion scans and normalizes preserved originals. A converted source can be found before every graph finding and theme has finished building."
           />
         {/if}
         {#if projection}
@@ -196,10 +196,10 @@
               <Card.Title>Recent documents</Card.Title>
               <InfoTip
                 label="What recent documents shows"
-                text="The newest text remembered directly through your private and organization scopes. Preserved files are listed separately."
+                text="The newest text kept directly through your private and organization scopes. Preserved files are listed separately."
               />
             </div>
-            <Card.Description>Recently remembered text without a preserved file.</Card.Description>
+            <Card.Description>Recently kept text without a preserved file.</Card.Description>
             <Card.Action>
               <a
                 href={appHref(appRoutes.sources, { origin: 'document' })}
@@ -248,7 +248,7 @@
               <Card.Title>Recent files</Card.Title>
               <InfoTip
                 label="What recent files shows"
-                text="Uploaded or fetched originals kept by AIZK. Their status shows whether conversion made the contents recallable."
+                text="Uploaded or fetched originals kept by AIZK. Their status shows whether conversion made the contents findable."
               />
             </div>
             <Card.Description>Preserved originals and their conversion status.</Card.Description>
@@ -302,11 +302,11 @@
               <Card.Title>Usage in 30 days</Card.Title>
               <InfoTip
                 label="What usage counts"
-                text="Usage counts successful memory operations. Page views and failed requests are excluded. Remember and Share activity can come from connected clients."
+                text="Usage counts successful memory operations. Page views and failed requests are excluded. Keep and Share activity can come from connected clients."
               />
             </div>
             <Card.Description
-              >Successful operations recorded durably in PostgreSQL.</Card.Description
+              >Successful operations recorded durably in the database.</Card.Description
             >
             <Card.Action>
               <a href={appRoutes.usage} class="text-primary text-sm font-medium hover:underline"
@@ -325,12 +325,12 @@
                 <dd class="mt-1 text-2xl">{usage.summary.items.toLocaleString('en-US')}</dd>
               </div>
               <div>
-                <dt class="text-muted-foreground text-xs">Recalls</dt>
-                <dd class="mt-1 text-lg">{usage.summary.recalls.toLocaleString('en-US')}</dd>
+                <dt class="text-muted-foreground text-xs">Finds</dt>
+                <dd class="mt-1 text-lg">{usage.summary.finds.toLocaleString('en-US')}</dd>
               </div>
               <div>
-                <dt class="text-muted-foreground text-xs">Remembers</dt>
-                <dd class="mt-1 text-lg">{usage.summary.remembers.toLocaleString('en-US')}</dd>
+                <dt class="text-muted-foreground text-xs">Keeps</dt>
+                <dd class="mt-1 text-lg">{usage.summary.keeps.toLocaleString('en-US')}</dd>
               </div>
             </dl>
           </Card.Content>

@@ -548,6 +548,7 @@ def test_client_filters_exact_public_flags_across_pages(
     ("error", "expected"),
     [
         (ValueError("not HTTP"), False),
+        (httpx.ConnectError("down"), False),
         (httpx.ConnectError("down", request=httpx.Request("GET", "https://x")), True),
         (
             httpx.ConnectError(

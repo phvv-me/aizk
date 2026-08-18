@@ -332,7 +332,7 @@ async def transfer(
     a copy and then lose the retirement to a crash, which would leave the same knowledge live
     in two scopes with no record that anything was owed. What retires is the source's live
     claims, closed with a `moved` marker that keeps their history, and the document itself,
-    expired so recall stops returning it while its rows, bytes and provenance chain stay.
+    expired so find stops returning it while its rows, bytes and provenance chain stay.
     """
     async with user as session:
         promotions = await Promoter(session, sorted(scopes), user.id).carry(document_ids)

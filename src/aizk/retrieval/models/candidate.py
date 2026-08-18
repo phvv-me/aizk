@@ -17,7 +17,7 @@ _TRIM_MARKER = "…"
 
 
 class Candidate(FrozenModel):
-    """One evidence row of a context pack, cut by the recall statement.
+    """One evidence row of a context pack, cut by the Find statement.
 
     The visible fields are the prompt-ready evidence and its provenance. The excluded
     `evidence_id` is the ranking identity the reranker keys its scores by between the
@@ -85,7 +85,7 @@ class Candidate(FrozenModel):
         """The source document's share handle and capture day, rendered as one terse line."""
         if self.document_id is None or self.document_created_at is None:
             return None
-        return f"{self.document_id} remembered {self.document_created_at:%Y-%m-%d}"
+        return f"{self.document_id} kept {self.document_created_at:%Y-%m-%d}"
 
     @property
     def resource_uri(self) -> str | None:
@@ -111,7 +111,7 @@ class Candidate(FrozenModel):
     @property
     def token_count(self) -> int:
         """Estimate this evidence's rendered tokens with the configured packing heuristic."""
-        return ceil((len(self.line) + self.annotation_chars) / settings.recall_chars_per_token)
+        return ceil((len(self.line) + self.annotation_chars) / settings.find_chars_per_token)
 
     def trimmed(self, budget: int) -> Self:
         """This evidence cut to one token budget, marked so a reader sees the text was cut.
@@ -122,7 +122,7 @@ class Candidate(FrozenModel):
         this evidence's floor: a budget too small to hold the handles alone cannot be met, and
         the marker then stands by itself rather than the evidence disappearing entirely.
         """
-        room = floor((budget - 1) * settings.recall_chars_per_token)
+        room = floor((budget - 1) * settings.find_chars_per_token)
         keep = max(0, room - self.annotation_chars - len(_TRIM_MARKER))
         return self.model_copy(update={"line": self.line[:keep] + _TRIM_MARKER})
 

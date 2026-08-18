@@ -1,7 +1,7 @@
-# crAIZK submission workspace
+# AIZK submission workspace
 
-The submission thumbnail is generated from the canonical 3 to 2 brand source at `thumbnail.png`. Run
-`chefe run aizk-brand` from the monorepo root after changing any brand source.
+The submission thumbnail is generated from the canonical 3 to 2 brand source at `thumbnail.png`.
+Run `pnpm --dir docs brand` after changing any brand source.
 
 This directory contains event-specific material for the CockroachDB and AWS Build with Agentic
 Memory Hackathon. The product README and documentation remain useful without this directory.

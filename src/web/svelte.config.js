@@ -7,7 +7,7 @@ const config = {
   kit: {
     adapter: adapter(),
     // Everything the app needs is same-origin behind Caddy. https: in img-src keeps
-    // remote images inside recalled Markdown rendering while scripts stay nonce-gated.
+    // remote images inside Find Markdown rendering while scripts stay nonce-gated.
     csp: {
       mode: 'auto',
       directives: {

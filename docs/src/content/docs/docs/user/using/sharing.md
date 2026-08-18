@@ -103,7 +103,7 @@ why you write into the scope in the first place.
 ## Moving a topic you already wrote privately
 
 Sometimes the fork is exactly what you do not want. A body of private notes turns out to belong to a
-team, and the team's copy should be the only one anyone recalls. That is `move`, and it takes two
+team, and the team's copy should be the only one anyone finds. That is `move`, and it takes two
 calls.
 
 ```text
@@ -117,13 +117,13 @@ A query cannot move, and asking it to is refused rather than ignored, so a refus
 move that happened.
 
 A move copies into the destination first and then retires the private original, so the note keeps
-its rows, its bytes, and its provenance chain while ordinary recall returns only the team's copy.
+its rows, its bytes, and its provenance chain while ordinary find returns only the team's copy.
 Both halves commit together, so a move that fails partway leaves nothing to reconcile, and running
 the same move twice changes nothing. If you revised the note after an earlier share, the move
 refreshes the team's copy onto your current text first, so it can never strand the team on an older
 draft.
 
-Because a move takes something out of recall, it only ever touches your own private documents. It
+Because a move takes something out of find, it only ever touches your own private documents. It
 can never pull evidence out from under the other members of a shared scope, and it needs a real
 organization as its destination, since moving a private note into the private scope it already
 occupies is not a move at all.

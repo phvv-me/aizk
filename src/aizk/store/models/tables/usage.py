@@ -5,7 +5,18 @@ from typing import ClassVar, Self, cast
 from patos import sql
 from patos.sql import NonNegativeFloat, NonNegativeInt
 from pydantic import UUID5
-from sqlalchemy import BigInteger, CheckConstraint, ColumnElement, Index, Label, Uuid, func, or_
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ColumnElement,
+    Index,
+    Label,
+    String,
+    Uuid,
+    case,
+    func,
+    or_,
+)
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.dialects.postgresql import ARRAY, Insert, insert
 from sqlmodel import select
@@ -19,21 +30,24 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
     """One immutable successful operation for durable cost and quota accounting."""
 
     class Operation(sql.PGEnum):
-        """Public AIZK operations whose resource use needs attribution.
+        """AIZK operations whose resource use needs attribution."""
 
-        `recall` is the stored name of what the `find` tool does. The value predates the
-        rename and stays, because it is the label every published usage report column, the
-        browser dashboard, and the generated TypeScript client already key on, and renaming
-        a stored enum to match a tool name would break all of them for no accounting gain.
-        """
-
-        recall = auto()
-        remember_text = auto()
-        remember_file = auto()
+        find_memory = "recall"
+        keep_text = "remember_text"
+        keep_file = "remember_file"
         share = auto()
         artifact_read = auto()
         web_search = auto()
         web_fetch = auto()
+
+        @property
+        def public_name(self) -> str:
+            """Return the Find and Keep label exposed outside the durable ledger."""
+            if self is self.find_memory:
+                return "find"
+            if self in {self.keep_text, self.keep_file}:
+                return "keep"
+            return self.value
 
     mutable: ClassVar[bool] = False
 
@@ -78,11 +92,22 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
     ) -> Select[tuple[datetime, str, int, int, int, int, float]]:
         """Daily operation buckets recorded on or after one UTC instant."""
         bucket = func.date_trunc("day", cls.created_at)
+        operation = case(
+            (cls.operation == cls.Operation.find_memory, "find"),
+            (
+                or_(
+                    cls.operation == cls.Operation.keep_text,
+                    cls.operation == cls.Operation.keep_file,
+                ),
+                "keep",
+            ),
+            else_=sql_cast(cls.operation, String()),
+        ).label("operation")
         return cast(
             "Select[tuple[datetime, str, int, int, int, int, float]]",
             select(
                 bucket.label("bucket"),
-                cls.operation,
+                operation,
                 cls.id.count().label("requests"),
             )
             .add_columns(
@@ -92,8 +117,8 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
                 cls.duration_ms.sum(default=0.0).label("duration_ms"),
             )
             .where(cls.created_at >= start)
-            .group_by(bucket, cls.operation)
-            .order_by(bucket, cls.operation),
+            .group_by(bucket, operation)
+            .order_by(bucket, operation),
         )
 
     @classmethod
@@ -109,14 +134,14 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
     def aggregate(cls) -> tuple[Label[int], ...]:
         """The shared per-operation count and byte aggregates every usage report reads."""
         operation = cls.operation
-        remembered = or_(
-            operation == cls.Operation.remember_text,
-            operation == cls.Operation.remember_file,
+        kept = or_(
+            operation == cls.Operation.keep_text,
+            operation == cls.Operation.keep_file,
         )
         return (
-            cls.id.count().filter(operation == cls.Operation.recall).label("recalls"),
-            cls.id.count().filter(remembered).label("remembers"),
-            cls.id.count().filter(operation == cls.Operation.remember_file).label("files"),
+            cls.id.count().filter(operation == cls.Operation.find_memory).label("finds"),
+            cls.id.count().filter(kept).label("keeps"),
+            cls.id.count().filter(operation == cls.Operation.keep_file).label("files"),
             cls.id.count().filter(operation == cls.Operation.share).label("shares"),
             cls.id.count()
             .filter(operation == cls.Operation.artifact_read)
@@ -124,7 +149,7 @@ class UsageEvent(Id, Scoped, CreatedAt, TableBase, table=True):
             cls.integer_sum(func.sum(cls.request_bytes), "request_bytes"),
             cls.integer_sum(func.sum(cls.response_bytes), "response_bytes"),
             cls.integer_sum(
-                func.sum(cls.request_bytes).filter(operation == cls.Operation.remember_file),
+                func.sum(cls.request_bytes).filter(operation == cls.Operation.keep_file),
                 "uploaded_bytes",
             ),
             cls.integer_sum(

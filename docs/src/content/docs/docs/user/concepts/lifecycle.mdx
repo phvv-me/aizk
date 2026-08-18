@@ -29,9 +29,9 @@ unread within a month, and then the queue itself becomes the stale thing.
     { id: 'op', label: 'operator', col: 2, row: 1 },
   ]}
   edges={[
-    { from: 'agent', to: 'store', label: 'recall, then write' },
+    { from: 'agent', to: 'store', label: 'find, then write' },
     { from: 'store', to: 'derived', label: 'background passes' },
-    { from: 'derived', to: 'agent', label: 'sharper recall' },
+    { from: 'derived', to: 'agent', label: 'sharper find' },
     { from: 'op', to: 'store', label: 'infrastructure', dashed: true },
   ]}
 />
@@ -44,7 +44,7 @@ the responsibility a queue would otherwise pretend to hold.
 Five habits carry the whole lifecycle. An assistant using aizk well does all five. One doing none
 of them fills memory with duplicates and contradictions, no matter how good the retrieval is.
 
-**Recall before writing.** Ask what is already known before adding anything. This stops the fourth
+**Find before writing.** Ask what is already known before adding anything. This stops the fourth
 copy of a decision from being written, and it turns a new note into an update of an existing one
 when that is the right move.
 
@@ -55,14 +55,14 @@ later. [Scopes](/docs/user/concepts/scopes/) explains what the choice means.
 **Preserve provenance.** Keep the original wording, the source URL, and enough context that a reader
 six months from now can tell where a claim came from. A memory stripped of its origin is a rumor.
 
-**Correct what changed.** When new evidence contradicts a stored note, the agent recalls the current
+**Correct what changed.** When new evidence contradicts a stored note, the agent finds the current
 version and writes the correction rather than leaving both standing. Correcting costs nothing,
 because aizk closes the old claim instead of deleting it and the history survives.
 [Time and history](/docs/user/concepts/time/) has that mechanism.
 
 **Use temporal bounds only when the world supplies them.** An expiry says something stops being true
 on a date, and almost nothing in ordinary documentation qualifies. Guessing at one quietly removes
-knowledge from recall later. The same page owns that rule.
+knowledge from find later. The same page owns that rule.
 
 ## Why the agent rather than the person
 
@@ -72,7 +72,7 @@ The agent is already there. It is reading the new evidence at the moment it arri
 only moment when correcting a note is cheap. An hour later the context is gone and the correction
 becomes a chore somebody has to schedule.
 
-The agent also does not mind the work. Recalling before writing, checking whether a note already
+The agent also does not mind the work. Finding before writing, checking whether a note already
 exists, and rewriting a stale paragraph are exactly the tasks people postpone and machines do not.
 Moving that labor to the agent is the only version of knowledge maintenance that survives a busy
 week.
@@ -113,7 +113,7 @@ itself enforces, so an operator is not a gatekeeper between a writer and a reade
 
 Very little, which is the point.
 
-Write through your assistant and let it handle recall, destination and provenance. When you notice
+Write through your assistant and let it handle find, destination and provenance. When you notice
 something in memory is wrong, say so in the conversation and let the assistant write the correction,
 because that is a two second interruption rather than a maintenance session.
 

@@ -239,7 +239,7 @@ class WebBoilerplateCleaner(FrozenModel):
         )
 
     def chrome(self, block: MarkdownBlock, host: str, placement: BlockPlacement) -> bool:
-        """Whether one block reads as site chrome instead of content worth recalling.
+        """Whether one block reads as site chrome instead of content worth finding.
 
         Prose value comes first, so a long block survives whatever its links look like. A block
         whose readable text is mostly link labels pointing back into the same site is only a

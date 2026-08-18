@@ -86,3 +86,16 @@ def test_logto_guard_rejects_management_client_reuse_before_network() -> None:
 
     with pytest.raises(ValueError, match="must differ"):
         reused.verify()
+
+
+def test_logto_guard_rejects_deployment_client_drift_before_network() -> None:
+    drifted = LogtoDeploymentGuard(
+        endpoint="https://tenant.logto.app",
+        management_client_id=_management_id,
+        management_client_secret=SecretStr("secret"),
+        public_client_id=_public_id,
+        deployment_client_id="older-client",
+    )
+
+    with pytest.raises(ValueError, match="must match"):
+        drifted.verify()

@@ -46,7 +46,7 @@ const groups = [
         <img src="/brain-box-icon.webp" alt="" class="size-7 rounded-lg" width="28" height="28" />
         <span style="font-family: var(--font-brand)">aizk</span>
       </a>
-      <p class="text-base-content/60 max-w-xs text-sm">
+      <p class="text-base-content/65 max-w-xs text-sm">
         The open AI Zettelkasten for people, teams and agents.
       </p>
       <div class="flex gap-2">
@@ -59,9 +59,9 @@ const groups = [
     {
       groups.map((group) => (
         <nav class="space-y-2 text-sm">
-          <p class="font-mono text-xs opacity-50">{group.title}</p>
+          <p class="text-base-content/65 font-mono text-xs">{group.title}</p>
           {group.links.map((link) => (
-            <a href={link.href} class="hover:text-base-content block opacity-75">
+            <a href={link.href} class="text-base-content/75 hover:text-base-content block">
               {link.label}
             </a>
           ))}
@@ -71,7 +71,7 @@ const groups = [
   </div>
 
   <div
-    class="border-base-300 text-base-content/50 mt-12 flex flex-wrap items-center justify-between gap-3 border-t pt-6 text-xs"
+    class="border-base-300 text-base-content/65 mt-12 flex flex-wrap items-center justify-between gap-3 border-t pt-6 text-xs"
   >
     <p>Apache 2.0 licensed.</p>
     <p><a href="https://github.com/phvv-me/aizk/security" class="underline underline-offset-4">Security</a></p>

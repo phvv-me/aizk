@@ -151,7 +151,7 @@ ENTRYPOINT ["python", "-m", "pytest"]
 CMD ["tests/integration/test_artifact_stack.py", "-m", "integration and artifact_stack", "--no-cov"]
 
 # AIZK exercises the proposed PostgreSQL row security API before it is available in an upstream
-# SQLAlchemy release. Keep the release image on the exact reviewed fork used by the Chefe workspace.
+# SQLAlchemy release. Keep the release image on the exact revision CI installs.
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS sqlalchemy-build
 WORKDIR /src
 COPY --from=sqlalchemy . /tmp/sqlalchemy
@@ -178,6 +178,11 @@ RUN uv pip uninstall --python .venv sqlalchemy \
     && rm -rf /tmp/sqlalchemy-dist
 COPY src ./src
 COPY --from=docs-build /app/dist ./static
+# SvelteKit content hashes make these assets immutable. Serving them from the public Lambda avoids
+# spending a second synchronous Lambda invocation on every browser JavaScript and CSS request.
+# The page-rendering image comes from the same `web-build` stage, so its HTML names these exact
+# files and the two images cannot drift within one build.
+COPY --from=web-build /app/build/client/_app ./static/_app
 RUN uv pip install --python .venv --reinstall --no-deps .
 ENV PYTHONPATH="${LAMBDA_TASK_ROOT}/.venv/lib/python3.14/site-packages:${LAMBDA_TASK_ROOT}/src"
 CMD ["aizk.commands.aws_mcp.mcp_handler"]

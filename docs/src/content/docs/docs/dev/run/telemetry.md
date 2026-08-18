@@ -59,7 +59,7 @@ explorer. Both sit behind the same operator sign-in.
 1. Start on the **AIZK overview** dashboard and find the spike, whether that is a slow operation,
    a failing peer or a user spending more tokens than expected.
 2. Open the trace explorer and select **AIZK traces**. Narrow with TraceQL, for example
-   `{span.aizk.operation = "recall"}` for one operation, `{span.aizk.user_id = "..."}` for one
+   `{span.aizk.operation = "find"}` for one operation, `{span.aizk.user_id = "..."}` for one
    caller, or `{duration > 3s}` for the slow ones.
 3. Open a trace. One request expands into the MCP server span, the retrieval lanes, each SQL
    statement, each outbound call to the embedder and the reranker, and each model turn with its

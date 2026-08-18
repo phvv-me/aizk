@@ -1,6 +1,6 @@
 export const appRoutes = {
   dashboard: '/app/dashboard',
-  recall: '/app/recall',
+  find: '/app/find',
   explore: '/app/explore',
   sources: '/app/sources',
   findings: '/app/findings',

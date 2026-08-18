@@ -32,8 +32,8 @@ class KnowledgeTotals(View):
 class UsageTotals(View):
     """Caller-owned operation and transfer totals suitable for cost awareness."""
 
-    recalls: int = 0
-    remembers: int = 0
+    finds: int = 0
+    keeps: int = 0
     files: int = 0
     uploaded_bytes: int = 0
     downloaded_bytes: int = 0

@@ -4,15 +4,20 @@ from enum import StrEnum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sqlalchemy import NullPool
-from sqlalchemy.engine import URL, make_url
+from pydantic import UUID5
+from sqlalchemy import NullPool, bindparam, func
+from sqlalchemy.engine import URL, Connection, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.orm import Session as OrmSession
+from sqlalchemy.orm import SessionTransaction
+from sqlmodel import select
 
 from ..config import DatabaseBackend, settings
 
 if TYPE_CHECKING:
     from .identity import User
+
+_COCKROACH_AUTHORITY = "aizk.cockroach_authority"
 
 type ConnectArgs = dict[str, ssl.SSLContext | bool | str | dict[str, str]]
 
@@ -80,7 +85,7 @@ class PostgreSQLAdapter(DatabaseAdapter):
 
 
 class CockroachDBAdapter(DatabaseAdapter):
-    """Build CockroachDB engines while sharing RLSAlchemy's context transport."""
+    """Build CockroachDB engines with typed RLS and a definer-safe authority carrier."""
 
     @staticmethod
     def cloud_connection(
@@ -115,6 +120,45 @@ class CockroachDBAdapter(DatabaseAdapter):
         normalized, ssl_config = self.cloud_connection(url)
         connect_args: ConnectArgs = {} if ssl_config is None else {"ssl": ssl_config}
         return self.pooled_engine(normalized, role, connect_args)
+
+    def configure_session(self, session: OrmSession, user: User) -> None:
+        """Bind typed RLS settings and the carrier visible inside security definers."""
+
+        def array(permission: frozenset[UUID5]) -> str:
+            return "{" + ",".join(str(scope) for scope in sorted(permission)) + "}"
+
+        super().configure_session(session, user)
+        session.info[_COCKROACH_AUTHORITY] = "|".join(
+            (
+                "aizk",
+                array(user.scopes.read),
+                array(user.scopes.write),
+                array(user.scopes.public),
+                str(user.operator).lower(),
+            )
+        )
+
+
+def bind_cockroach_authority(
+    session: OrmSession,
+    transaction: SessionTransaction,
+    connection: Connection,
+) -> None:
+    """Write the transaction-local carrier CockroachDB security definers preserve."""
+    del transaction
+    authority = session.info.get(_COCKROACH_AUTHORITY)
+    if not isinstance(authority, str):
+        return
+    connection.execute(
+        select(
+            func.set_config(
+                "application_name",
+                bindparam("aizk_cockroach_authority"),
+                True,
+            )
+        ),
+        {"aizk_cockroach_authority": authority},
+    )
 
 
 def database_adapter() -> DatabaseAdapter:

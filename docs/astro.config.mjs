@@ -93,8 +93,8 @@ export default defineConfig({
         {
           label: 'Using aizk',
           items: [
-            { label: 'Writing memory well', slug: 'docs/user/using/remember' },
-            { label: 'Asking memory well', slug: 'docs/user/using/recall' },
+            { label: 'Keeping memory well', slug: 'docs/user/using/keep' },
+            { label: 'Finding memory well', slug: 'docs/user/using/find' },
             { label: 'Finding on the web', slug: 'docs/user/using/web' },
             { label: 'Files, PDFs and web sources', slug: 'docs/user/using/files' },
             { label: 'Sharing and organizations', slug: 'docs/user/using/sharing' },
@@ -170,7 +170,7 @@ export default defineConfig({
           label: 'The read path',
           badge: { text: 'dev', variant: 'note' },
           items: [
-            { label: 'How recall runs', slug: 'docs/dev/read/overview' },
+            { label: 'How find runs', slug: 'docs/dev/read/overview' },
             { label: 'The lanes', slug: 'docs/dev/read/lanes' },
             { label: 'Fusion and reranking', slug: 'docs/dev/read/ranking' },
             { label: 'Budget packing', slug: 'docs/dev/read/packing' },

@@ -21,7 +21,7 @@
       label: 'Knowledge',
       links: [
         { id: 'overview', label: 'Dashboard', glyph: 'D' },
-        { id: 'recall', label: 'Recall', glyph: 'R' }
+        { id: 'find', label: 'Find', glyph: 'F' }
       ]
     },
     {

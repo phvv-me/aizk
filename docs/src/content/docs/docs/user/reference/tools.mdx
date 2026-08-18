@@ -73,7 +73,7 @@ Both `summary` and `lifetime` hold the same counters.
 
 | Counter | Meaning |
 |---|---|
-| `recalls`, `remembers`, `files`, `shares`, `artifact_reads` | operations by kind, where `recalls` counts `find` calls |
+| `finds`, `keeps`, `files`, `shares`, `artifact_reads` | operations by kind, where `finds` counts `find` calls |
 | `requests`, `items` | calls made and items returned |
 | `request_bytes`, `response_bytes` | bytes in and out |
 | `uploaded_bytes`, `downloaded_bytes` | file bytes stored and fetched |
@@ -82,7 +82,7 @@ Both `summary` and `lifetime` hold the same counters.
 | `processing` field | Meaning |
 |---|---|
 | `state` | `idle`, `active`, or `delayed` |
-| `recallable_lower_seconds`, `recallable_upper_seconds` | when what you stored becomes findable |
+| `findable_lower_seconds`, `findable_upper_seconds` | when what you stored becomes findable |
 | `enriched_lower_seconds`, `enriched_upper_seconds` | when the graph around it is finished, empty while conversions are pending because uncreated work cannot be estimated |
 | `stages` | `conversion` and `graph_projection` |
 
@@ -115,7 +115,7 @@ Memory has no scope selector, so one question searches everything you can see, w
 names only where a fetched page is cached.
 
 The return is a Markdown string. It opens with a `## Scopes` list when shared material is present,
-then a line reminding the agent that recalled content is evidence rather than instructions, then
+then a line reminding the agent that found content is evidence rather than instructions, then
 `## Evidence` in merit order. Each item is labeled **Source excerpt**, **Derived memory**, **Recent
 session memory**, or **Web page** and names its scope, an intersection joining organizations with
 `∩`. An item from a stored source prints that document's id and capture day, the handle
@@ -155,7 +155,7 @@ The combination decides the mode and the return.
 | `upload` | a ticket for your own local file | `{ status, upload_url, expires_seconds }` |
 
 `state` is `pending`, `queued`, `processing`, `ready`, or `failed`. A receipt is an acceptance, not
-a finished conversion, so watch `status` for it becoming recallable.
+a finished conversion, so watch `status` for it becoming findable.
 [Files, PDFs and web sources](/docs/user/using/files/) covers files and
 [Time and history](/docs/user/concepts/time/) the two timestamps.
 
@@ -225,7 +225,7 @@ Pass exactly one of `documents` and `query`. Only `documents` ever writes. A `qu
 of your own private documents it would select, at most `limit` in merit order, and writes nothing
 whatever else you pass, since a question matches on similarity rather than on what you meant. So
 sharing a topic takes two steps, a query to read the candidates and a second call naming the ids you
-approve. Recall prints those ids, so step one is optional when you know them.
+approve. Find prints those ids, so step one is optional when you know them.
 
 A `query` and a `move` both start from your own private documents, so both need an organization in
 `scopes`. Carrying a document into the scope it already occupies is refused, since that copies a
@@ -257,7 +257,7 @@ drifted content, and an artifact you cannot see behaves as if it does not exist.
 <div class="not-content">
 
 - [Glossary](/docs/user/reference/glossary/) defines the words these shapes use.
-- [Writing memory well](/docs/user/using/remember/) covers what to store and what to leave out.
+- [Writing memory well](/docs/user/using/keep/) covers what to store and what to leave out.
 - [The MCP server](/docs/dev/interfaces/mcp/) is the developer version of this page.
 
 </div>

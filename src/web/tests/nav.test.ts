@@ -12,7 +12,7 @@ describe('navigation', () => {
     ]);
     expect(sections.flatMap((section) => section.links).map((link) => link.href)).toEqual([
       '/app/dashboard',
-      '/app/recall',
+      '/app/find',
       '/app/explore',
       '/app/sources',
       '/app/findings',

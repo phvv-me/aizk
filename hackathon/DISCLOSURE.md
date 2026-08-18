@@ -13,21 +13,19 @@ git log --reverse --format='%ad %h %s' --date=iso-strict
 git log --all --regexp-ignore-case --grep='cockroach\|c-spann\|ccloud\|lambda\|aws'
 ```
 
-crAIZK is not presented as a separate codebase invented after AIZK. It is the CockroachDB and AWS
+AIZK is not presented as a separate codebase invented after AIZK. It is the CockroachDB and AWS
 deployment of the same new project. The PostgreSQL deployment, browser, artifact pipeline,
 retrieval engine, temporal graph, and authorization model are shared product work created during
 the same submission period.
 
-## Pre-existing house packages
+## Pre-existing project libraries
 
 AIZK depends on general-purpose packages that existed before this event.
 
-- `chefe` manages reproducible environments and tasks.
 - `patos` provides typed models and SQL model primitives.
 - `rlsalchemy` generates and audits row level security policies.
-- `mainboard` provides hardware inspection and profiling.
 
-These packages are independently published, versioned dependencies. They were not created for the
+These libraries are independently published, exactly pinned dependencies. They were not created for the
 submission and are not counted as hackathon features.
 
 ## Third-party software and services
@@ -36,6 +34,12 @@ The project builds on open-source Python, PostgreSQL, CockroachDB, SQLAlchemy, S
 FastAPI, Alembic, pgvector, PgQueuer, Docling, ClamAV, SeaweedFS, Logto, Astro, SvelteKit, and their
 transitive dependencies. The cloud path uses CockroachDB Cloud, AWS, and OpenRouter under their
 respective service terms.
+
+The queue steward includes the official `reviewing-cluster-health` and
+`monitoring-background-jobs` skills from `cockroachlabs/cockroachdb-skills` at commit
+`e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd`. They retain their Cockroach Labs authorship and Apache
+License 2.0 terms. The AIZK-specific queue workflow and read-only DeepSeek runner are new submission
+work.
 
 No third-party project is represented as original AIZK work. Apache 2.0 covers the AIZK source,
 while dependencies retain their own licenses.
@@ -47,13 +51,13 @@ The cloud demonstration corpus contains the six authored synthesis notes under
 delivery, observability, evidence-led performance, and their shared practice map. The notes link to
 the public references that informed them. They do not preserve or reproduce the referenced books,
 papers, or websites as uploaded artifacts. The recorded demo adds one short original Project Atlas
-note solely to show a live write and differently worded recall.
+note solely to show a live write and differently worded find.
 
 Private production memory, private scans, and third-party PDFs are excluded from
-crAIZK. The larger 87-document AIZK documentation corpus remains local reproducibility evidence and
+AIZK. The larger 87-document AIZK documentation corpus remains local reproducibility evidence and
 is not part of the final cloud demo corpus.
 
-Production AIZK retains its direct visual embedding interface. crAIZK does not call it. The demo
+Production AIZK retains its direct visual embedding interface. AIZK does not call it. The demo
 uses bounded figure descriptions and embeds the resulting text so image handling remains affordable
 and compatible with the selected hosted endpoint.
 

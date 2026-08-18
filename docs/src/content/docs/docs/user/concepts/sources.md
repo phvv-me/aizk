@@ -81,7 +81,7 @@ there.
 
 ## Why the split matters when evidence disagrees
 
-Recall returns both layers mixed into one ranked list, and every item says which layer it came
+Find returns both layers mixed into one ranked list, and every item says which layer it came
 from. Sooner or later two items will disagree.
 
 When they do, **the source wins**. A source is a human statement that somebody committed to memory
@@ -133,7 +133,7 @@ matters, the text belongs in a source.
 <div class="not-content">
 
 - [Entities, facts, ontology](/docs/user/concepts/graph/) shows how prose becomes the derived layer.
-- [Writing memory well](/docs/user/using/remember/) is the practical guide to authoring sources.
+- [Writing memory well](/docs/user/using/keep/) is the practical guide to authoring sources.
 - [Time and history](/docs/user/concepts/time/) explains the clocks every source and fact carries.
 
 </div>

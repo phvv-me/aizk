@@ -63,7 +63,7 @@ ENTITY_KINDS: tuple[tuple[str, str, str, bool], ...] = (
     ("Person", "A specific individual.", "general", False),
     ("Decision", "A choice made and the reasoning behind it.", "general", False),
     ("Pattern", "A reusable approach or standing preference.", "general", False),
-    ("Gotcha", "A trap or surprising behavior worth remembering.", "general", False),
+    ("Gotcha", "A trap or surprising behavior worth keeping.", "general", False),
     ("Goal", "An aim being worked toward.", "general", False),
     # Coding
     ("Module", "A source code module or file.", "coding", False),

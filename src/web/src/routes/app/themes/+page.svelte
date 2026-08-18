@@ -38,7 +38,7 @@
         <Card.Title>No themes yet</Card.Title>
         <InfoTip
           label="When themes appear"
-          text="Themes are rebuilt after enough new findings accumulate. Sources can be recallable before the next theme pass finishes."
+          text="Themes are rebuilt after enough new findings accumulate. Sources can be findable before the next theme pass finishes."
         />
       </div>
       <Card.Description>

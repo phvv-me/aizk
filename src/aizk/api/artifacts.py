@@ -48,7 +48,7 @@ class ArtifactView(ScopedRow):
             case ArtifactContent.State.processing:
                 return "processing", "Converting and indexing this source."
             case ArtifactContent.State.ready:
-                return "ready", "Available to recall."
+                return "ready", "Available to find."
             case ArtifactContent.State.failed:
                 return "failed", "Processing failed. You can try this source again."
             case ArtifactContent.State.unreadable:

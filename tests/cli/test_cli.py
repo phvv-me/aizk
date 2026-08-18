@@ -73,8 +73,8 @@ def report(
             start=now,
             summary=UsageSummary(
                 requests=7,
-                recalls=2,
-                remembers=3,
+                finds=2,
+                keeps=3,
                 files=1,
                 shares=1,
             ),
@@ -572,7 +572,7 @@ def test_duration_avoids_false_precision(seconds: int, expected: str) -> None:
     assert commands.ClientCommands.duration(seconds) == expected
 
 
-def test_remember_renderers_cover_every_protocol_result() -> None:
+def test_keep_renderers_cover_every_protocol_result() -> None:
     receipt = ArtifactReceipt(
         artifact_id=uuid7(),
         content_id=uuid7(),

@@ -109,7 +109,7 @@ built from a `ContextVar` that mirrors the span attributes, because a span is wr
 accounting state lives in two places on purpose.
 
 **7. Template-owned markdown.** Real, and narrower than it sounds. There are exactly two
-templates, `src/aizk/retrieval/templates/recall.md.j2` for the recall answer and
+templates, `src/aizk/retrieval/templates/find.md.j2` for the find answer and
 `src/aizk/artifacts/templates/source.md.j2` for the artifact header, both rendered through the
 async Jinja environment in `src/aizk/common/templates.py`. The rule is that a new user-facing
 markdown surface adds a third template rather than a formatting function.

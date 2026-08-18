@@ -53,7 +53,7 @@ them loads a model in-process.
 Each has a `client.py` and typed `models.py`, so a sidecar's wire format never leaks into the
 engine.
 
-`retrieval/` splits into `lanes/`, `recall/` for the orchestrator, `rerank/`, `packing/` for the
+`retrieval/` splits into `lanes/`, `find/` for the orchestrator, `rerank/`, `packing/` for the
 budget walk, `models/` for the candidate and result types, and `templates/` for the single Jinja
 template that renders the answer.
 
@@ -87,7 +87,7 @@ communities. [The web app](/docs/dev/interfaces/web/) has the detail.
 
 `src/deploy/` holds the container builds and Compose profile. `docker-compose.yml` defines the
 self-hosted services, `Dockerfile` builds both container and Lambda targets, and `cockroachdb/`
-holds the cloud database setup. `infra/aws/` declares the crAIZK ECR, Lambda, S3, Scheduler,
+holds the cloud database setup. `infra/aws/` declares the AIZK ECR, Lambda, S3, Scheduler,
 Parameter Store, logging and budget resources.
 
 ## `docs/` and `tests/`
@@ -122,25 +122,22 @@ whole tree.
 | how facts are grounded or merged | `src/aizk/graph/grounding.py`, `consolidation.py` |
 | a retrieval lane | `src/aizk/retrieval/lanes/` |
 | how results are ranked or packed | `src/aizk/retrieval/rerank/`, `packing/` |
-| the wording of a recall response | `src/aizk/retrieval/templates/recall.md.j2` |
+| the wording of a find response | `src/aizk/retrieval/templates/find.md.j2` |
 | a scheduled pass or its priority | `src/aizk/background/jobs/`, `schedule.py` |
 | a setting or its default | `src/aizk/config/settings.py` |
 | which services run | `src/deploy/docker-compose.yml` |
 | a CLI command | `src/aizk/commands/` |
-| a dependency or a task | `chefe.toml` at the monorepo root |
+| a Python dependency | `pyproject.toml`, then refresh `uv.lock` |
 
 ## What it is built on
 
-aizk is one package in a monorepo and it leans on three sibling house packages instead of
-reinventing them. `patos` supplies the typed base models, so `Model`, `FrozenModel` and the SQL
-field helpers. `rls`, distributed as `rlsalchemy`, owns all the generic row level security
-machinery, and aizk registers its tables with it and keeps only the scope lattice locally.
-`mainboard` supplies the profiling spans you will see as `from mainboard.profiling import span` in
-the graph and recall hot paths.
+AIZK uses `patos` for typed base models and SQL field helpers. `rls`, distributed as
+`rlsalchemy`, owns the generic row level security machinery. AIZK registers its tables with it and
+keeps only the scope lattice locally. OpenTelemetry records graph and Find spans without a separate
+hardware profiling dependency.
 
-`chefe` owns dependencies and tasks. Every command in these docs is `chefe run something` from the
-monorepo root, never a bare `python`, `pip`, `pytest` or `pixi`. Run `chefe tree` to see what is
-available.
+Python dependencies live in `pyproject.toml` and exact resolved versions live in `uv.lock`.
+The development setup explains the one pinned SQLAlchemy fork installation step.
 
 ## Next
 

@@ -1,5 +1,5 @@
 ---
-title: "How recall runs"
+title: "How find runs"
 description: "The seven steps between a question arriving and evidence going back."
 ---
 
@@ -8,13 +8,13 @@ the seven steps in between. It assumes you know what a [scope set](/docs/dev/ide
 is, since every step runs inside one, and that [the data model](/docs/dev/store/data-model/) has
 already told you what a claim is.
 
-The entry point is `recall()` in `src/aizk/retrieval/recall/orchestrator.py`, and its docstring
+The entry point is `find()` in `src/aizk/retrieval/find/orchestrator.py`, and its docstring
 carries the shape.
 
 ```text
   embed | entities
         |
-  recall statement, all lanes
+  find statement, all lanes
         |
   direct-source authority and cross-encoder rerank
         |
@@ -23,7 +23,7 @@ carries the shape.
   record fact access
 ```
 
-Everything below happens in `_execute`, which both `recall()` and `trace()` call.
+Everything below happens in `_execute`, which both `find()` and `trace()` call.
 
 ## 1. Resolve the plan
 
@@ -44,7 +44,7 @@ graph walk with the asker rather than the subject.
 
 `asyncio.gather` runs `EmbedClient.embed([search_query], mode="query")` beside
 `query_entities(query, user)`. They hit two different sidecars and neither needs the other, so
-recall pays one round trip rather than two.
+find pays one round trip rather than two.
 
 `query_entities` returns an empty list immediately when `AIZK_GRAPH_ENTITY_SEEDING` is off, which
 also skips the gate call entirely. Otherwise it makes sure the ontology is loaded with
@@ -62,8 +62,8 @@ context = QueryContext(dimensions=len(vector), fuzzy=settings.graph_mention_fuzz
 Two fields, and both of them change the SQL tree rather than a value inside it. The vector width
 types the `qvec` bind and `fuzzy` decides whether the trigram mention branch is compiled at all.
 That is why `QueryContext` is half of the statement cache key, with `Plan` as the other half.
-`build_recall_statement` is wrapped in `functools.cache`, so one `Select` object is built per
-distinct context and plan and every later recall of the same shape reuses it. Construction costs
+`build_find_statement` is wrapped in `functools.cache`, so one `Select` object is built per
+distinct context and plan and every later find of the same shape reuses it. Construction costs
 tens of milliseconds, which is worth avoiding on every call.
 
 Every tunable value stays a named bind rather than being baked into the tree, so changing a
@@ -77,7 +77,7 @@ rows = await user.exec[Candidate](statement, qvec=vector, qtext=search_query, qe
 
 `RowStatement.__call__` in `src/aizk/store/identity/user.py` merges
 `settings.for_statement(statement)` underneath the explicit binds. The statement itself names the
-settings fields it needs, so `rrf_k`, `recall_max_distance`, `graph_ppr_damping` and the rest
+settings fields it needs, so `rrf_k`, `find_max_distance`, `graph_ppr_damping` and the rest
 travel automatically while the explicit four win on conflict. The whole thing runs as one caller
 transaction with row security on, and the rows validate into `Candidate` objects.
 
@@ -97,8 +97,8 @@ increments `access_count` for every kept candidate carrying a `fact_id`. This cl
 because the fact ranking blends a recency half life over `last_accessed` with an
 `ln(1 + access_count)` frequency term, so a fact only stays warm while it keeps being surfaced.
 
-`trace()` runs this exact path with `record_access=False` and returns a `RecallTrace` instead of
-candidates. That is what makes `chefe run aizk-eval trace "some question"` safe to run repeatedly.
+`trace()` runs this exact path with `record_access=False` and returns a `FindTrace` instead of
+candidates. That is what makes `uv run --no-sync aizk-eval trace "some question"` safe to run repeatedly.
 Reading a diagnostic must not warm the memory it is diagnosing.
 
 ## Why there is no query-time router
@@ -109,7 +109,7 @@ removed for three reasons that reinforce each other.
 A misrouted query loses community and RAPTOR evidence outright, and no reranker can recover
 evidence the SQL never returned. Overview-first packing buries fact evidence under summaries. And
 the zero-shot router itself measured 44 percent accuracy on the eval strata, a figure carried over
-from the plan study and repeated in the `recall()` docstring, so read it as the reason the router
+from the plan study and repeated in the `find()` docstring, so read it as the reason the router
 was retired rather than as a fresh benchmark.
 
 Running every lane and letting the cross encoder sort them out costs one wider statement and

@@ -99,7 +99,7 @@
       <h2 id="source-kinds-heading" class="font-medium">Two kinds of source</h2>
       <InfoTip
         label="Documents and files"
-        text="Documents are text remembered directly. Files are preserved originals such as PDFs, images, and fetched web pages. AIZK converts files into text without losing the original."
+        text="Documents are text kept directly. Files are preserved originals such as PDFs, images, and fetched web pages. AIZK converts files into text without losing the original."
       />
     </div>
     <div class="grid gap-4 sm:grid-cols-2">
@@ -110,7 +110,7 @@
             <Card.Title
               >{data.overview.totals.documents.toLocaleString('en-US')} documents</Card.Title
             >
-            <Card.Description>Text remembered directly through AIZK clients.</Card.Description>
+            <Card.Description>Text kept directly through AIZK clients.</Card.Description>
           </Card.Header>
         </Card.Root>
       </a>

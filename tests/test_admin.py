@@ -23,7 +23,7 @@ from aizk.extract.extractor import Extractor
 from aizk.extract.models import ExtractedEntity, Extraction, TimedFact
 from aizk.ontology import Ontology
 from aizk.ops import HealthReport, ResetReport, SetupReport
-from aizk.retrieval import RecallEvidence
+from aizk.retrieval import FindEvidence
 from aizk.store import Relation
 from aizk.store.identity import User
 from aizk.web import MemorySignals, RouterProbe, WebSearch
@@ -398,9 +398,9 @@ def test_probe_web_reads_real_memory_and_asks_the_real_router(
 ) -> None:
     """The operator rehearsal runs the whole decision without calling one provider."""
     seen: dict[str, object] = {}
-    evidence = RecallEvidence(mentions=("atlas",))
+    evidence = FindEvidence(mentions=("atlas",))
 
-    async def stub_evidence(query: str, user: User) -> RecallEvidence:
+    async def stub_evidence(query: str, user: User) -> FindEvidence:
         seen["query"], seen["user"] = query, user
         return evidence
 
@@ -411,7 +411,7 @@ def test_probe_web_reads_real_memory_and_asks_the_real_router(
             self,
             user: User,
             query: str,
-            given: RecallEvidence,
+            given: FindEvidence,
             fresh: bool,
             execute: bool,
         ) -> RouterProbe:

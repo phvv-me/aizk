@@ -52,7 +52,7 @@ class LiveFact(ViewBase):
     """Security-invoker view joining current fact claims with immutable content.
 
     The view earns its migration over a per-statement CTE. One definition serves the ORM
-    entity, the raw recall SQL, and psql alike, and since it is a plain security-invoker
+    entity, the raw find SQL, and psql alike, and since it is a plain security-invoker
     relation the planner inlines it into every calling statement exactly as a CTE would
     while row security still runs as the caller. A CTE would need no migration but would be
     retyped in each statement, drift between the Python and SQL copies, and stay invisible
@@ -221,15 +221,15 @@ class LiveFact(ViewBase):
         )
         blended = (
             distance
-            - bindparam("recall_recency_weight", type_=Float)
+            - bindparam("find_recency_weight", type_=Float)
             * half_life_decay(
                 type_coerce(
                     extract("epoch", func.now() - last_seen) / 86_400.0,
                     Float,
                 ),
-                bindparam("recall_recency_half_life_days", type_=Float),
+                bindparam("find_recency_half_life_days", type_=Float),
             )
-            - bindparam("recall_frequency_weight", type_=Float) * log_frequency(cls.access_count)
+            - bindparam("find_frequency_weight", type_=Float) * log_frequency(cls.access_count)
         )
         return (
             statement.add_columns(blended.label("blended"))

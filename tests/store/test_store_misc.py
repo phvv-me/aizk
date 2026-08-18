@@ -20,7 +20,9 @@ from sqlalchemy.dialects.postgresql import (
     Policy,
 )
 from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
+from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session as OrmSession
+from sqlalchemy.orm import SessionTransaction
 from sqlalchemy_cockroachdb.asyncpg import CockroachDBDialect_asyncpg
 from sqlmodel import select
 
@@ -33,6 +35,7 @@ from aizk.store.backend import (
     CockroachDBAdapter,
     DatabaseRole,
     PostgreSQLAdapter,
+    bind_cockroach_authority,
     database_adapter,
 )
 from aizk.store.ddl import CreateView, DropView, Grant, GrantTarget, postgresql_sql
@@ -124,7 +127,7 @@ def test_cockroach_operator_policy_uses_the_shared_context_setting() -> None:
     assert "SELECT" not in rendered
 
 
-def test_cockroach_migrations_keep_native_base_and_incremental_retirement() -> None:
+def test_cockroach_migrations_keep_native_base_and_ordered_repairs() -> None:
     versions = (
         Path(__file__).parents[2]
         / "src"
@@ -139,6 +142,7 @@ def test_cockroach_migrations_keep_native_base_and_incremental_retirement() -> N
         "0001_cockroachdb.py",
         "0002_policy_names.py",
         "0003_object_retirement.py",
+        "0004_definer_authority.py",
     ]
 
 
@@ -146,6 +150,8 @@ def test_scoped_cspann_function_keeps_authority_outside_the_ann_query() -> None:
     rendered = scoped_cspann.search_function(settings.embed_dim)
     ann = rendered[rendered.index("RETURN QUERY") :]
 
+    assert "application_name" in rendered[: rendered.index("RETURN QUERY")]
+    assert "app.scopes.read" not in rendered
     assert "current_setting" not in ann
     assert "candidate.kind = requested_kind" in ann
     assert "candidate.scopes = requested_scopes" in ann
@@ -220,6 +226,17 @@ def test_database_adapters_build_pools_and_share_rls_context(
     )
     assert ("app.scopes.read", f'{{"{read_scope}"}}') in context.settings
     assert ("app.operator", "false") in context.settings
+    executed: list[tuple[str, dict[str, str]]] = []
+    connection = cast(
+        "Connection",
+        SimpleNamespace(
+            execute=lambda statement, parameters: executed.append((str(statement), parameters))
+        ),
+    )
+    bind_cockroach_authority(session, cast("SessionTransaction", None), connection)
+    assert "set_config" in executed[0][0]
+    assert str(read_scope) in executed[0][1]["aizk_cockroach_authority"]
+    assert executed[0][1]["aizk_cockroach_authority"].endswith("|false")
 
     monkeypatch.setattr(settings, "database_backend", DatabaseBackend.postgresql)
     assert isinstance(database_adapter(), PostgreSQLAdapter)

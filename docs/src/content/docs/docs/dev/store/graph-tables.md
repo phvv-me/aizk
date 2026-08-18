@@ -99,7 +99,7 @@ no object.
 `FactClaim` is the interesting one. It carries `valid` and `recorded` as `tstzrange`,
 `perspective_key` which defaults to `world` and separates an assertion about the world from one
 attributed to a speaker, `source_chunk_id` back to the evidence, and the `last_accessed` and
-`access_count` counters that recall updates. Its indexes are all declared on the model in
+`access_count` counters that find updates. Its indexes are all declared on the model in
 `fact.py`, including the two GiST range indexes and the partial unique index that makes a
 correction append-only.
 
@@ -122,7 +122,7 @@ def log_frequency(access_count):
     return func.ln(1 + access_count)
 ```
 
-Four classmethods build the query shapes recall uses.
+Four classmethods build the query shapes find uses.
 
 | Helper | What it returns |
 |---|---|
@@ -137,7 +137,7 @@ subject side and the object side rather than writing one `OR`, because an `OR` a
 endpoints falls back to scanning every fact.
 
 :::note[Where this comes from]
-`diffused` and `connected` adapt the associative personalized PageRank recall of
+`diffused` and `connected` adapt the associative personalized PageRank find of
 [HippoRAG 2](https://arxiv.org/abs/2502.14802) into one SQL statement over visible current facts.
 The community projections below follow [GraphRAG](https://arxiv.org/abs/2404.16130) and
 [LightRAG](https://arxiv.org/abs/2410.05779). The full map is at
@@ -183,11 +183,11 @@ communities.
 increments arriving mid-pass are never erased.
 
 `UsageEvent` is an append-only ledger of successful operations for cost and quota accounting.
-`UsageEvent.Operation` has seven values, `recall`, `remember_text`, `remember_file`, `share`,
-`artifact_read`, `web_search` and `web_fetch`. The `recall` value keeps its stored name even
-though the tool is now `find`, since every published report column already reads it. It is `Scoped` but neither mutable nor deletable, so the app role can read and
-insert and nothing else. `capture_key` carries a unique index and is what makes a capture
-idempotent across worker restarts, which is the entire subject of the second migration.
+`UsageEvent.Operation` has seven values, `find_memory`, `keep_text`, `keep_file`, `share`,
+`artifact_read`, `web_search` and `web_fetch`. Reports combine the first three into the public
+Find and Keep totals. It is `Scoped` but neither mutable nor deletable, so the app role can read
+and insert and nothing else. `capture_key` carries a unique index and makes a capture idempotent
+across worker restarts, which is the entire subject of the second migration.
 
 ## Next
 

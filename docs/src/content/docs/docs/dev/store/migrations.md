@@ -123,9 +123,9 @@ before request traffic starts.
 ## Adding a migration
 
 ```bash
-chefe run aizk database make-migration "add the thing"
-chefe run aizk database migrate
-chefe run aizk database check-rls
+uv run --no-sync aizk admin database make-migration "add the thing"
+uv run --no-sync aizk admin database migrate
+uv run --no-sync aizk admin database check-rls
 ```
 
 :::caution[Autogenerate is a drafter, not an author]
@@ -134,7 +134,7 @@ applying it. Autogenerate does not understand every extension or policy exclusio
 often needs a hand-written migration line.
 :::
 
-`chefe run aizk database migrate --sql` writes the offline script instead of applying it, the
+`uv run --no-sync aizk admin database migrate --sql` writes the offline script instead of applying it, the
 fastest way to see what a revision will do.
 
 ## Next

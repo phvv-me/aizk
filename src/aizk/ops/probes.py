@@ -13,7 +13,8 @@ from sqlmodel import select
 
 from ..background.status import tasks_overview
 from ..config import settings
-from ..retrieval import RecallResult, recall
+from ..retrieval import FindResult
+from ..retrieval import find as find_candidates
 from ..store import (
     Artifact,
     Blob,
@@ -33,9 +34,9 @@ from .reports import (
     ActorUsage,
     EndpointHealth,
     ExtractionHealth,
+    FindHealth,
     HealthReport,
     IdentityHealth,
-    RecallHealth,
     SchemaHealth,
     ScopeHealth,
     ScopeStorage,
@@ -74,8 +75,8 @@ _SERVING_ENDPOINTS = (
 )
 
 _PROBE_TIMEOUT = 2.0
-_RECALL_PROBE_QUERY = "What are the current active projects and their next actions?"
-_RECALL_PROBE_TIMEOUT = 3.5
+_FIND_PROBE_QUERY = "What are the current active projects and their next actions?"
+_FIND_PROBE_TIMEOUT = 3.5
 
 
 class ServedEntry(FrozenOpenModel):
@@ -342,20 +343,20 @@ async def probe_endpoint(
     return identity.endpoint_health(name, url, response.status_code < 500, configured_as)
 
 
-async def recall_health(corpus: ScopeHealth) -> RecallHealth:
+async def find_health(corpus: ScopeHealth) -> FindHealth:
     """Run one bounded real retrieval over the largest stored corpus."""
     started = perf_counter()
     try:
-        async with asyncio.timeout(_RECALL_PROBE_TIMEOUT):
-            candidates = await recall(
-                _RECALL_PROBE_QUERY,
+        async with asyncio.timeout(_FIND_PROBE_TIMEOUT):
+            candidates = await find_candidates(
+                _FIND_PROBE_QUERY,
                 User.system(corpus.scopes),
                 k=2,
                 token_budget=512,
             )
-        result = RecallResult.from_candidates(candidates)
-        return RecallHealth(
-            query=_RECALL_PROBE_QUERY,
+        result = FindResult.from_candidates(candidates)
+        return FindHealth(
+            query=_FIND_PROBE_QUERY,
             scopes=corpus.scopes,
             candidates=len(candidates),
             top_source=candidates[0].source_title if candidates else None,
@@ -363,8 +364,8 @@ async def recall_health(corpus: ScopeHealth) -> RecallHealth:
             latency_ms=round((perf_counter() - started) * 1000, 1),
         )
     except (TimeoutError, httpx.HTTPError, OpenAIError, DBAPIError) as error:
-        return RecallHealth(
-            query=_RECALL_PROBE_QUERY,
+        return FindHealth(
+            query=_FIND_PROBE_QUERY,
             scopes=corpus.scopes,
             candidates=0,
             top_source=None,
@@ -374,12 +375,12 @@ async def recall_health(corpus: ScopeHealth) -> RecallHealth:
         )
 
 
-async def health(include_recall: bool = True) -> HealthReport:
+async def health(include_find: bool = True) -> HealthReport:
     """Read one bounded operational and end-to-end regression snapshot.
 
-    include_recall: run the live retrieval probe, which took roughly 3 seconds in
+    include_find: run the live retrieval probe, which took roughly 3 seconds in
         production. The browser overview endpoint sets this false and fetches
-        `RecallHealth` from its own lazily-loaded endpoint instead.
+        `FindHealth` from its own lazily-loaded endpoint instead.
     """
     started = perf_counter()
     head = alembic_head(alembic_config())
@@ -400,7 +401,7 @@ async def health(include_recall: bool = True) -> HealthReport:
     corpora = await corpora_task
     actors, scopes, scope_storage, storage = await usage_task
     endpoints = [await task for task in endpoint_tasks]
-    recall_report = await recall_health(corpora[0]) if include_recall and corpora else None
+    find_report = await find_health(corpora[0]) if include_find and corpora else None
     return HealthReport(
         migration=SchemaHealth(current=current, head=head, up_to_date=current == head),
         rls_violations=violations,
@@ -423,6 +424,6 @@ async def health(include_recall: bool = True) -> HealthReport:
         scopes=scopes,
         scope_storage=scope_storage,
         storage=storage,
-        recall=recall_report,
+        find=find_report,
         duration_ms=round((perf_counter() - started) * 1000, 1),
     )

@@ -51,7 +51,7 @@ The adapters live in `src/aizk/store/backend.py`, `src/aizk/store/vector.py` and
 | Lexical search | portable SQL ranking | VectorChord BM25 |
 | Durable work | AIZK queue tables and portable worker | PgQueuer |
 | Original files | Amazon S3 in the AWS deployment | SeaweedFS through an S3-compatible API |
-| Model calls | hosted OpenAI-compatible endpoints in crAIZK | local model services by default |
+| Model calls | hosted OpenAI-compatible endpoints in AIZK | local model services by default |
 | Schema history | one CockroachDB baseline migration | PostgreSQL Alembic revisions |
 
 The CockroachDB vector adapter searches exact visible scope partitions through
@@ -73,7 +73,7 @@ Neither profile is presented as a drop-in replacement for the other.
 
 <div class="not-content">
 
-- [AWS and CockroachDB Cloud](/docs/dev/run/aws/) documents the live crAIZK deployment.
+- [AWS and CockroachDB Cloud](/docs/dev/run/aws/) documents the live AIZK deployment.
 - [PostgreSQL profile](/docs/dev/run/postgres/) covers the self-hosted database in depth.
 - [Row level security](/docs/dev/store/rls/) explains the shared authorization contract.
 - [The job system](/docs/dev/passes/jobs/) explains both durable queue implementations.

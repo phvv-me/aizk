@@ -42,7 +42,7 @@ class Standing:
         scope and every member organization always count, and so does a row a caller filed
         into one of its own scopes alongside a public one, since that row is its own work.
         Reading is untouched, so this narrows the numbers presented as the caller's memory
-        and never what recall may retrieve.
+        and never what find may retrieve.
         """
         borrowed = sa.func.unnest(cls.authority("public")).table_valued("scope").render_derived()
         unwritable = sa.func.array(

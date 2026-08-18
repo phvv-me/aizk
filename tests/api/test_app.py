@@ -81,7 +81,7 @@ _PROTECTED = (
     ("GET", "/api/subjects", "/api/subjects"),
     ("GET", "/api/themes", "/api/themes"),
     ("GET", "/api/graph", "/api/graph"),
-    ("POST", "/api/recall", "/api/recall"),
+    ("POST", "/api/find", "/api/find"),
     ("GET", "/api/organizations", "/api/organizations"),
     ("POST", "/api/organizations", "/api/organizations"),
     ("POST", "/api/organizations/{name}/members", "/api/organizations/Lab/members"),
@@ -97,7 +97,7 @@ _PROTECTED = (
     ),
     ("GET", "/api/admin/links", "/api/admin/links"),
     ("GET", "/api/admin/health", "/api/admin/health"),
-    ("GET", "/api/admin/health/recall", "/api/admin/health/recall"),
+    ("GET", "/api/admin/health/find", "/api/admin/health/find"),
     ("GET", "/api/admin/hardware", "/api/admin/hardware"),
     ("GET", "/api/admin/doctor", "/api/admin/doctor"),
     ("GET", "/api/admin/usage", "/api/admin/usage"),
@@ -233,7 +233,7 @@ def test_bearer_verification_receives_only_bearer_scheme_tokens(
 
     first = call(service, "GET", "/api/me", headers={"Authorization": "Bearer abc"})
     second = call(service, "GET", "/api/overview", headers={"Authorization": "Basic abc"})
-    third = call(service, "POST", "/api/recall")
+    third = call(service, "POST", "/api/find")
 
     assert (first.status_code, second.status_code, third.status_code) == (401, 401, 401)
     assert [request.args for request in bearer.await_args_list] == [("abc",), ("",), ("",)]
@@ -435,7 +435,7 @@ def test_catalog_routes_execute_the_optional_search(
 
 
 @pytest.mark.parametrize("budget", [512, None], ids=["explicit", "default"])
-def test_recall_forwards_the_query_budget_and_caller(
+def test_find_forwards_the_query_budget_and_caller(
     monkeypatch: pytest.MonkeyPatch, budget: int | None
 ) -> None:
     who = verified()
@@ -446,7 +446,7 @@ def test_recall_forwards_the_query_budget_and_caller(
             del intake
             seen["user"] = user
 
-        async def recall(self, query: str, budget: int) -> SimpleNamespace:
+        async def find_memory(self, query: str, budget: int) -> SimpleNamespace:
             seen["query"], seen["budget"] = query, budget
 
             async def to_markdown() -> str:
@@ -459,7 +459,7 @@ def test_recall_forwards_the_query_budget_and_caller(
     if budget is not None:
         body["budget"] = budget
 
-    response = call(service_as(monkeypatch, who), "POST", "/api/recall", json=body)
+    response = call(service_as(monkeypatch, who), "POST", "/api/find", json=body)
 
     assert response.status_code == 200
     assert response.json() == {"markdown": "## Evidence"}
@@ -478,7 +478,7 @@ def test_recall_forwards_the_query_budget_and_caller(
 def test_invalid_json_bodies_are_unprocessable(
     monkeypatch: pytest.MonkeyPatch, content: bytes
 ) -> None:
-    response = call(service_as(monkeypatch, verified()), "POST", "/api/recall", content=content)
+    response = call(service_as(monkeypatch, verified()), "POST", "/api/find", content=content)
 
     assert response.status_code == 422
     assert "detail" in response.json()
@@ -488,9 +488,9 @@ def test_invalid_json_bodies_are_unprocessable(
     ("failure", "status", "detail"),
     [
         (
-            ValueError("remember requires text or a source URI"),
+            ValueError("keep requires text or a source URI"),
             400,
-            "remember requires text or a source URI",
+            "keep requires text or a source URI",
         ),
         (
             ScopeNotFoundError("no writable scope named 'Lab'"),
@@ -524,8 +524,8 @@ def test_invalid_json_bodies_are_unprocessable(
         ),
         (
             httpx.ConnectError("[Errno -2] Name or service not known"),
-            502,
-            "an upstream request could not be completed",
+            503,
+            "an upstream service is temporarily unavailable",
         ),
     ],
 )
@@ -534,6 +534,27 @@ def test_expected_domain_failures_map_to_stable_sanitized_details(
 ) -> None:
     assert AizkAPI.status_for(failure) == status
     assert AizkAPI.detail_for(failure) == detail
+
+
+def test_logto_transport_failure_becomes_a_stable_service_unavailable_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = api()
+    monkeypatch.setattr(
+        service.auth,
+        "bearer",
+        AsyncMock(side_effect=httpx.ConnectError("identity provider unavailable")),
+    )
+
+    response = call(
+        service,
+        "GET",
+        "/api/me",
+        headers={"Authorization": "Bearer valid-looking-token"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "an upstream service is temporarily unavailable"}
 
 
 @pytest.mark.parametrize(
@@ -546,9 +567,9 @@ def test_expected_domain_failures_map_to_stable_sanitized_details(
 def test_request_models_enforce_the_deployment_bounds_at_validation_time(
     monkeypatch: pytest.MonkeyPatch, body: dict, field: str
 ) -> None:
-    monkeypatch.setattr(settings, "mcp_recall_query_max_chars", 10)
+    monkeypatch.setattr(settings, "mcp_find_query_max_chars", 10)
 
-    response = call(service_as(monkeypatch, verified()), "POST", "/api/recall", json=body)
+    response = call(service_as(monkeypatch, verified()), "POST", "/api/find", json=body)
 
     assert response.status_code == 422
     assert field in response.json()["detail"]
@@ -634,10 +655,10 @@ def test_upload_put_maps_an_object_store_outage_to_a_stable_503(
 def test_json_routes_refuse_bodies_past_the_api_byte_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "mcp_remember_max_chars", 2)  # budget becomes 16 bytes
+    monkeypatch.setattr(settings, "mcp_keep_max_chars", 2)  # budget becomes 16 bytes
     service = service_as(monkeypatch, verified())
 
-    declared = call(service, "POST", "/api/recall", content=b"x" * 32)
+    declared = call(service, "POST", "/api/find", content=b"x" * 32)
 
     async def chunks() -> AsyncIterator[bytes]:
         yield b"x" * 12
@@ -646,7 +667,7 @@ def test_json_routes_refuse_bodies_past_the_api_byte_budget(
     async def stream_without_length() -> httpx.Response:
         transport = httpx.ASGITransport(app=service.app())
         async with httpx.AsyncClient(transport=transport, base_url="http://api.test") as client:
-            return await client.post("/api/recall", content=chunks())
+            return await client.post("/api/find", content=chunks())
 
     streamed = dbutil.run(stream_without_length())
 
@@ -757,7 +778,7 @@ def admin() -> Caller:
     [
         "/api/admin/links",
         "/api/admin/health",
-        "/api/admin/health/recall",
+        "/api/admin/health/find",
         "/api/admin/hardware",
         "/api/admin/doctor",
         "/api/admin/usage",
@@ -826,7 +847,7 @@ def stored(stale: bool = False) -> ops.StoredHealth:
             failed_integrity_blobs=0,
             last_integrity_check=None,
         ),
-        recall=None,
+        find=None,
         duration_ms=1.0,
         measured_at=measured_at(settings.health_snapshot_stale_minutes, stale),
         stale=stale,
@@ -857,10 +878,10 @@ def aggregated(stale: bool = False) -> ops.StoredUsage:
             ops.PeriodUsage(
                 days=7,
                 start=datetime(2026, 6, 25, tzinfo=UTC),
-                summary=UsageSummary(recalls=3),
+                summary=UsageSummary(finds=3),
             ),
         ),
-        lifetime=UsageSummary(recalls=9),
+        lifetime=UsageSummary(finds=9),
         points=(),
         by_actor=(),
         by_scope=(),
@@ -885,7 +906,7 @@ def test_admin_health_reads_a_measurement_rather_than_taking_one(
     response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health")
 
     assert response.status_code == 200
-    assert response.json()["recall"] is None
+    assert response.json()["find"] is None
     assert response.json()["stale"] is False
     probe.assert_not_awaited()
 
@@ -912,7 +933,7 @@ def test_admin_health_is_absent_until_a_worker_pass_has_measured(
     assert response.json() is None
 
 
-def test_admin_recall_probes_the_largest_visible_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_admin_find_probes_the_largest_visible_corpus(monkeypatch: pytest.MonkeyPatch) -> None:
     largest = ops.ScopeHealth(
         scopes=(uuid5(),),
         creators=1,
@@ -926,7 +947,7 @@ def test_admin_recall_probes_the_largest_visible_corpus(monkeypatch: pytest.Monk
         last_projection_at=None,
     )
     smaller = largest.model_copy(update={"documents": 1})
-    recall = ops.RecallHealth(
+    find = ops.FindHealth(
         query="probe",
         scopes=largest.scopes,
         candidates=1,
@@ -938,20 +959,20 @@ def test_admin_recall_probes_the_largest_visible_corpus(monkeypatch: pytest.Monk
     # retrieval itself still runs here, under a scoped session an ordinary caller also uses.
     reading = stored().model_copy(update={"corpora": (largest, smaller)})
     probe = AsyncMock()
-    recall_health = AsyncMock(return_value=recall)
+    find_health = AsyncMock(return_value=find)
     monkeypatch.setattr(app_module.ops, "stored_health", AsyncMock(return_value=reading))
     monkeypatch.setattr(app_module.ops, "corpus_health", probe)
-    monkeypatch.setattr(app_module.ops, "recall_health", recall_health)
+    monkeypatch.setattr(app_module.ops, "find_health", find_health)
 
-    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health/recall")
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health/find")
 
     assert response.status_code == 200
     assert response.json()["candidates"] == 1
-    recall_health.assert_awaited_once_with(largest)
+    find_health.assert_awaited_once_with(largest)
     probe.assert_not_awaited()
 
 
-def test_admin_recall_is_absent_without_any_stored_corpus(
+def test_admin_find_is_absent_without_any_stored_corpus(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
@@ -960,15 +981,15 @@ def test_admin_recall_is_absent_without_any_stored_corpus(
         AsyncMock(return_value=stored().model_copy(update={"corpora": ()})),
     )
     corpus_health = AsyncMock(return_value=[])
-    recall_health = AsyncMock()
+    find_health = AsyncMock()
     monkeypatch.setattr(app_module.ops, "corpus_health", corpus_health)
-    monkeypatch.setattr(app_module.ops, "recall_health", recall_health)
+    monkeypatch.setattr(app_module.ops, "find_health", find_health)
 
-    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health/recall")
+    response = call(service_as(monkeypatch, admin()), "GET", "/api/admin/health/find")
 
     assert response.status_code == 200
     assert response.json() is None
-    recall_health.assert_not_awaited()
+    find_health.assert_not_awaited()
 
 
 def test_admin_hardware_returns_the_metrics_probe(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1039,7 +1060,7 @@ def test_admin_usage_reads_the_platform_aggregate_a_worker_measured(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["lifetime"]["recalls"] == 9
+    assert body["lifetime"]["finds"] == 9
     assert [period["days"] for period in body["periods"]] == [7]
     assert body["stale"] is False
     probe.assert_not_awaited()

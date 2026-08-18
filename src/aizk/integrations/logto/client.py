@@ -73,6 +73,18 @@ class SnapshotCaches:
             cache.cache_clear()
 
 
+class RequestBindingHTTPTransport(httpx.AsyncHTTPTransport):
+    """Bind requests to transport errors before the retry policy examines them."""
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        """Send one request and preserve its retry authority on transport errors."""
+        try:
+            return await super().handle_async_request(request)
+        except httpx.RequestError as error:
+            error.request = request
+            raise
+
+
 class LogtoClient:
     """Logto OIDC and Management API client.
 
@@ -99,7 +111,7 @@ class LogtoClient:
         self.http = httpx.AsyncClient(
             transport=AsyncTenacityTransport(
                 config=retry,
-                wrapped=httpx.AsyncHTTPTransport(
+                wrapped=RequestBindingHTTPTransport(
                     limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
                 ),
                 validate_response=httpx.Response.raise_for_status,
@@ -563,7 +575,10 @@ class LogtoClient:
         """
         if not isinstance(error, httpx.RequestError | httpx.HTTPStatusError):
             return False
-        request = error.request
+        try:
+            request = error.request
+        except RuntimeError:
+            return False
         idempotent = request.method in {"GET", "HEAD", "OPTIONS", "PUT", "DELETE"}
         if request.extensions.get("retryable", idempotent) is not True:
             return False

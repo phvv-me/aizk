@@ -51,21 +51,21 @@ async def seed() -> Seed:
             "e1",
             now.subtract(days=2),
             identity.actor_a,
-            Usage.Event.Operation.recall,
+            Usage.Event.Operation.find_memory,
             (identity.actor_a,),
         ),
         capture(
             "e2",
             now.subtract(days=10),
             identity.actor_a,
-            Usage.Event.Operation.remember_text,
+            Usage.Event.Operation.keep_text,
             (identity.org_x,),
         ),
         capture(
             "e3",
             now.subtract(days=200),
             identity.actor_b,
-            Usage.Event.Operation.recall,
+            Usage.Event.Operation.find_memory,
             (identity.org_x,),
         ),
         capture(
@@ -96,14 +96,14 @@ def test_platform_usage_attributes_every_event_to_its_actor_and_its_target_scope
 
     by_actor = {row.actor_id: row for row in usage.by_actor}
     assert set(by_actor) == {identity.actor_a, identity.actor_b}
-    assert by_actor[identity.actor_a].recalls == 1
-    assert by_actor[identity.actor_a].remembers == 1
-    assert by_actor[identity.actor_b].recalls == 1
+    assert by_actor[identity.actor_a].finds == 1
+    assert by_actor[identity.actor_a].keeps == 1
+    assert by_actor[identity.actor_b].finds == 1
     assert by_actor[identity.actor_b].shares == 1
     by_scope = {row.scope_id: row for row in usage.by_scope}
     assert set(by_scope) == {identity.actor_a, identity.org_x, identity.org_y}
-    assert by_scope[identity.org_x].recalls == 1
-    assert by_scope[identity.org_x].remembers == 1
+    assert by_scope[identity.org_x].finds == 1
+    assert by_scope[identity.org_x].keeps == 1
     assert by_scope[identity.org_y].shares == 1
 
 

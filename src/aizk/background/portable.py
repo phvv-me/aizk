@@ -93,7 +93,7 @@ class PortableWorker:
             try:
                 await callback()
             except BaseException as error:
-                if isinstance(error, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                if isinstance(error, asyncio.CancelledError | KeyboardInterrupt | SystemExit):
                     raise
                 logger.exception("portable schedule {} failed", schedule.name)
             fired += 1
@@ -202,7 +202,7 @@ class PortableWorker:
             async with self.semaphores[task.entrypoint]:
                 await job.handle_encoded(task.payload)
         except BaseException as error:
-            if isinstance(error, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+            if isinstance(error, asyncio.CancelledError | KeyboardInterrupt | SystemExit):
                 raise
             logger.exception("portable job {} failed", task.entrypoint)
             await self.fail(task, error)

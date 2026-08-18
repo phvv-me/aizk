@@ -165,7 +165,7 @@ class WebSearcher(Registry, FrozenFlexModel, abc.ABC):
     which the quota ledger charges before anything leaves the machine. `persistable` is
     whether this provider's terms allow keeping what it returns, and the cache refuses
     anything a provider marked unpersistable produced, so the licence is carried by the
-    object rather than remembered by whoever writes the store.
+    object rather than kept by whoever writes the store.
     """
 
     lane: ClassVar[SearchLane]
@@ -461,7 +461,7 @@ class DoclingReader(FrozenFlexModel):
     """The house reader, the fetch chain's fallback when no vendor scraper answers.
 
     It is the same bounded, SSRF-checked reader and the same Docling conversion that
-    `remember(source_uri=...)` already runs, so a page reaching the cache through this
+    `keep(source_uri=...)` already runs, so a page reaching the cache through this
     path went through exactly the boundary a preserved source does.
     """
 

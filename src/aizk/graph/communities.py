@@ -5,7 +5,6 @@ from itertools import batched
 from typing import Self
 
 from loguru import logger
-from mainboard.profiling import span
 from networkx.algorithms.community.louvain import louvain_communities
 from networkx.classes import Graph
 from patos import FrozenModel
@@ -13,6 +12,7 @@ from pydantic import UUID5
 from sqlalchemy import delete
 from sqlmodel import select
 
+from ..common.observability import span
 from ..config import Settings, settings
 from ..serving.embed import EmbedClient
 from ..serving.extract import LLM

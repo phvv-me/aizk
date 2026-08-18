@@ -20,10 +20,10 @@ AWS account identifiers, connection strings, tokens, email addresses, and unrela
 
 Prepare these five views before starting.
 
-1. The deployed crAIZK landing page and architecture diagram
+1. The deployed AIZK landing page and architecture diagram
 2. A clean Codex profile connected through direct Logto OAuth
 3. The redacted C-SPANN plan and cloud result JSON in the public repository
-4. Redacted ccloud cluster health output
+4. The redacted queue steward verdict with Managed MCP tools and Agent Skills
 5. CloudWatch Lambda duration, error, and throttle charts with account details cropped out
 
 Use this public demonstration note.
@@ -50,7 +50,7 @@ and finally to ask the prepared question with `web="off"`.
 
 Show the deployed landing page, then move directly to the connected Codex client.
 
-> Agents often remember detached text without its source or access boundary. crAIZK gives MCP
+> Agents often keep detached text without its source or access boundary. AIZK gives MCP
 > agents durable, scoped memory on CockroachDB Cloud and AWS Lambda. I will write one project policy
 > and retrieve it using different words.
 
@@ -72,7 +72,7 @@ vectors.
 > usage, and the durable queue in one transactional system. The worker can resume without losing
 > the memory operation.
 
-## Grounded recall from 70 to 115 seconds
+## Grounded find from 70 to 115 seconds
 
 Call `find` with the prepared question and `web` set to `off`. Pause on the Atlas source excerpt,
 document handle, and privacy receipt. Highlight that the wording differs from the stored note.
@@ -83,12 +83,13 @@ document handle, and privacy receipt. Highlight that the wording differs from th
 
 ## CockroachDB tools from 115 to 140 seconds
 
-Show the committed redacted C-SPANN plan, then one short ccloud health view. Keep each view on screen
-long enough to read the tool name and result.
+Show the committed redacted C-SPANN plan, then the queue steward verdict. Keep each view on screen
+long enough to read the tool and skill names.
 
 > Distributed Vector Indexing selected the scoped C-SPANN index and executed the cloud probe in seven
-> milliseconds. ccloud inspects the Singapore cluster and manages restricted SQL identities. These
-> are the two required CockroachDB tools. Managed MCP is optional operator evidence.
+> milliseconds. The steward uses Managed MCP and the official CockroachDB Agent Skills to inspect
+> queue and database failures without exposing write tools. Repairs still require approval. ccloud
+> separately manages the cluster and restricted SQL identities.
 
 ## AWS boundary from 140 to 160 seconds
 
@@ -97,20 +98,20 @@ bucket label, recovery schedule, and ten dollar budget without account identifie
 
 > One public Lambda serves MCP and the UI. A private Lambda handles durable processing, S3 preserves
 > bounded uploads, and EventBridge recovers delayed work. CloudWatch showed zero errors and
-> throttles. Warm recall measured a 2.14 second median and 3.16 second p95.
+> throttles. Warm find measured a 2.14 second median and 3.16 second p95.
 
 ## Close from 160 to 165 seconds
 
 Return to the grounded answer and place the public repository URL beside it.
 
-> crAIZK gives agents memory they can question, not a cache they must trust. The source stays
+> AIZK gives agents memory they can question, not a cache they must trust. The source stays
 > visible, the boundary stays in CockroachDB, and the memory survives the agent.
 
 ## Recording and editing checklist
 
 - [x] Complete the direct Logto sign-in and Atlas rehearsal before recording
 - [x] Use only the Maya Chen demonstration identity and one Atlas demo write
-- [x] Record the live write, worker completion, grounded read, C-SPANN plan, ccloud view, and Lambda metrics
+- [ ] Record the live write, worker completion, grounded read, C-SPANN plan, queue steward, and Lambda metrics
 - [x] Capture each required action in editable source footage
 - [x] Keep browser and terminal text readable at 1080p without zooming in during editing
 - [ ] Record clean English narration separately if live narration slows the actions

@@ -5,7 +5,7 @@ from pydantic import UUID5, UUID7
 from sqlalchemy import text
 
 from aizk.config import settings
-from aizk.extract.ingest import remember_session
+from aizk.extract.ingest import keep_session
 from aizk.store.identity import User
 
 pytestmark = pytest.mark.usefixtures("migrated_db")
@@ -22,12 +22,12 @@ async def count(table: str, where: str, params: dict[str, UUID5 | UUID7]) -> int
         return int(row.scalar_one())
 
 
-def test_remember_session_writes_one_embedded_working_item(
+def test_keep_session_writes_one_embedded_working_item(
     fake_embedder: RecordingEmbedder,
 ) -> None:
     async def body() -> None:
         owner = await seed_system()
-        item_id = await remember_session(User.system(), "a captured thought", kind="note")
+        item_id = await keep_session(User.system(), "a captured thought", kind="note")
         assert (
             await count(
                 "session_item",

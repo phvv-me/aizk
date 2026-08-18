@@ -41,8 +41,8 @@ from .operations import ProcessingReport, ProcessingUpdates, UsageReport
 from .organizations import OrganizationDirectory
 
 
-class RecallRequest(FrozenModel):
-    """One browser recall question with an optional evidence budget."""
+class FindRequest(FrozenModel):
+    """One browser find question with an optional evidence budget."""
 
     query: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     budget: Annotated[int, Field(gt=0)] | None = None
@@ -50,13 +50,13 @@ class RecallRequest(FrozenModel):
     @model_validator(mode="after")
     def within_deployment_bounds(self) -> Self:
         """Enforce the live deployment limits at validation time instead of import time."""
-        if len(self.query) > settings.mcp_recall_query_max_chars:
+        if len(self.query) > settings.mcp_find_query_max_chars:
             raise ValueError(
-                f"query must be at most {settings.mcp_recall_query_max_chars} characters"
+                f"query must be at most {settings.mcp_find_query_max_chars} characters"
             )
-        if self.budget is not None and self.budget > settings.mcp_recall_budget_max_tokens:
+        if self.budget is not None and self.budget > settings.mcp_find_budget_max_tokens:
             raise ValueError(
-                f"budget must be at most {settings.mcp_recall_budget_max_tokens} tokens"
+                f"budget must be at most {settings.mcp_find_budget_max_tokens} tokens"
             )
         return self
 
@@ -87,7 +87,7 @@ class RoleRequest(FrozenModel):
 
 
 class Answer(FrozenModel):
-    """One recall answer rendered as merit-ordered Markdown evidence."""
+    """One find answer rendered as merit-ordered Markdown evidence."""
 
     markdown: str
 
@@ -258,11 +258,11 @@ class AizkAPI:
         api.add_api_route("/api/themes", self.themes, operation_id="themes")
         api.add_api_route("/api/graph", self.graph, operation_id="graph")
         api.add_api_route(
-            "/api/recall",
-            self.recall,
+            "/api/find",
+            self.find,
             methods=["POST"],
-            operation_id="recall",
-            openapi_extra=json_body(RecallRequest),
+            operation_id="find",
+            openapi_extra=json_body(FindRequest),
         )
         api.add_api_route(
             "/api/uploads/{capability}",
@@ -301,9 +301,7 @@ class AizkAPI:
         )
         api.add_api_route("/api/admin/links", self.admin_links, operation_id="admin_links")
         api.add_api_route("/api/admin/health", self.admin_health, operation_id="admin_health")
-        api.add_api_route(
-            "/api/admin/health/recall", self.admin_recall, operation_id="admin_recall"
-        )
+        api.add_api_route("/api/admin/health/find", self.admin_find, operation_id="admin_find")
         api.add_api_route(
             "/api/admin/hardware", self.admin_hardware, operation_id="admin_hardware"
         )
@@ -345,7 +343,7 @@ class AizkAPI:
             case ObjectStoreError():
                 return "object storage is temporarily unavailable"
             case httpx.HTTPError():
-                return "an upstream request could not be completed"
+                return "an upstream service is temporarily unavailable"
         return str(error)
 
     @staticmethod
@@ -367,7 +365,7 @@ class AizkAPI:
             case MalwareUnavailableError() | ObjectStoreError():
                 return HTTPStatus.SERVICE_UNAVAILABLE
             case httpx.HTTPError():
-                return HTTPStatus.BAD_GATEWAY
+                return HTTPStatus.SERVICE_UNAVAILABLE
             case ValueError():
                 return HTTPStatus.BAD_REQUEST
         raise TypeError(f"unsupported API failure {type(error).__name__}")
@@ -375,7 +373,7 @@ class AizkAPI:
     @staticmethod
     async def payload(request: Request) -> bytes:
         """Read one JSON body while refusing declared or streamed sizes past the API bound."""
-        budget = 8 * settings.mcp_remember_max_chars
+        budget = 8 * settings.mcp_keep_max_chars
         declared = request.headers.get("content-length")
         if declared is not None and int(declared) > budget:
             raise ByteLimitExceeded("the request body exceeds the API byte budget")
@@ -463,10 +461,10 @@ class AizkAPI:
             raise ValueError("limit must be between 1 and 80")
         return await GraphSlice.load(who.user, limit)
 
-    async def recall(self, request: Request, who: Verified) -> Answer:
-        """Answer one recall question with merit-ordered Markdown evidence."""
-        ask = RecallRequest.model_validate_json(await self.payload(request))
-        result = await self.memory(who).recall(ask.query, ask.effective_budget)
+    async def find(self, request: Request, who: Verified) -> Answer:
+        """Answer one find question with merit-ordered Markdown evidence."""
+        ask = FindRequest.model_validate_json(await self.payload(request))
+        result = await self.memory(who).find_memory(ask.query, ask.effective_budget)
         return Answer(markdown=await result.to_markdown())
 
     async def receive_upload(
@@ -521,8 +519,8 @@ class AizkAPI:
         async with who.user as session:
             return await ops.stored_health(session)
 
-    async def admin_recall(self, who: Verified) -> ops.RecallHealth | None:
-        """Run the live recall probe over the largest corpus the stored reading names.
+    async def admin_find(self, who: Verified) -> ops.FindHealth | None:
+        """Run the live find probe over the largest corpus the stored reading names.
 
         Which corpora exist is a platform-wide count only the owner may take, so it is read
         from the worker's reading rather than measured here. The retrieval itself runs under
@@ -534,7 +532,7 @@ class AizkAPI:
             stored = await ops.stored_health(session)
         if stored is None or not stored.corpora:
             return None
-        return await ops.recall_health(stored.corpora[0])
+        return await ops.find_health(stored.corpora[0])
 
     async def admin_hardware(self, who: Verified) -> ops.HardwareHealth:
         """Return host and model-lane load already collected by the observability profile."""

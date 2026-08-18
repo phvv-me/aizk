@@ -158,7 +158,7 @@ PostgreSQL 18 images store data under a major-version subdirectory.
 Change one only when a verified backup exists and the service is stopped. Moving a path means
 preserving both database archives, stopping only that service, copying with ownership intact,
 recreating the service, and then verifying with the RLS check, a restore drill and an
-authenticated recall before you remove the old volume.
+authenticated find before you remove the old volume.
 :::
 
 ## Encryption at rest, honestly

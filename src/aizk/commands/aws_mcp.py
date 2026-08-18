@@ -30,7 +30,7 @@ _MCP_PATHS = frozenset(
         "/.well-known/oauth-protected-resource/mcp",
     }
 )
-_WEB_PATHS = ("/_app", "/app", "/auth")
+_WEB_PATHS = ("/app", "/auth")
 _WEB_RESPONSE = TypeAdapter(dict[str, Json])
 
 

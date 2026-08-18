@@ -124,7 +124,7 @@ def test_management_benchmark_finds_source_rank_and_preserves_authority(
     user = User.authorized(owner, read=(owner,), write=(owner,), label="Maya")
     calls = 0
 
-    async def recall(
+    async def find(
         question: str,
         caller: User,
         k: int,
@@ -141,7 +141,7 @@ def test_management_benchmark_finds_source_rank_and_preserves_authority(
             Candidate(lane=Lane.Kind.SOURCES, line="brief", source_title="Aizk"),
         ]
 
-    monkeypatch.setattr(management_module, "recall", recall)
+    monkeypatch.setattr(management_module, "find", find)
     benchmark = ManagementBenchmark(user, k=4, budget=500)
 
     assert dbutil.run(benchmark.probe("question", "Aizk")).rank == 2

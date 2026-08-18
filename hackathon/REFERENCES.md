@@ -5,7 +5,7 @@ Reviewed on August 13, 2026.
 The six authored software engineering notes cite nineteen public references. Seventeen targets
 returned a successful automated response. The ACM Digital Library and O'Reilly catalog pages
 refused automated requests with HTTP 403 responses. Their citations remain bibliographic links and
-no content from either page is preserved in crAIZK.
+no content from either page is preserved in AIZK.
 
 The corpus stores only original synthesis notes and outbound citations. It does not copy, upload,
 or redistribute the linked pages, books, extracts, specifications, or documentation.

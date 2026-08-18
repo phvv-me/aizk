@@ -30,7 +30,7 @@
       <Card.Title>Create an organization</Card.Title>
       <InfoTip
         label="What an organization does"
-        text="An organization is a Logto-owned collaboration scope. Membership grants shared recall, while viewer, editor, and admin roles control collaboration permissions."
+        text="An organization is a Logto-owned collaboration scope. Membership grants shared finding, while viewer, editor, and admin roles control collaboration permissions."
       />
     </div>
     <Card.Description>Start a shared memory space and manage its members here.</Card.Description>

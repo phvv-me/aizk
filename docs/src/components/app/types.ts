@@ -1,6 +1,6 @@
 export type AppView =
   | 'overview'
-  | 'recall'
+  | 'find'
   | 'explore'
   | 'sources'
   | 'findings'
@@ -61,8 +61,8 @@ export type ArtifactView = {
 export type Overview = {
   totals: KnowledgeTotals;
   usage: {
-    recalls: number;
-    remembers: number;
+    finds: number;
+    keeps: number;
     files: number;
     uploaded_bytes: number;
     downloaded_bytes: number;
@@ -92,8 +92,8 @@ export type ProcessingReport = {
   generated_at: string;
   state: 'idle' | 'active' | 'delayed';
   stages: StageEstimate[];
-  recallable_lower_seconds: number | null;
-  recallable_upper_seconds: number | null;
+  findable_lower_seconds: number | null;
+  findable_upper_seconds: number | null;
   enriched_lower_seconds: number | null;
   enriched_upper_seconds: number | null;
   recent: ArtifactView[];
@@ -108,8 +108,8 @@ export type UsagePoint = {
 };
 
 export type UsageSummary = {
-  recalls: number;
-  remembers: number;
+  finds: number;
+  keeps: number;
   files: number;
   shares: number;
   artifact_reads: number;

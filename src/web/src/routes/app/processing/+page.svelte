@@ -86,9 +86,9 @@
         />
       </div>
       <Card.Description>
-        Recallable ETA {formatEtaRange(
-          processing.recallable_lower_seconds,
-          processing.recallable_upper_seconds
+        Findable ETA {formatEtaRange(
+          processing.findable_lower_seconds,
+          processing.findable_upper_seconds
         )}. Full enrichment ETA {formatEtaRange(
           processing.enriched_lower_seconds,
           processing.enriched_upper_seconds
@@ -151,7 +151,7 @@
         <Card.Title>Recent originals</Card.Title>
         <InfoTip
           label="How to read original states"
-          text="Queued waits for secure processing. Processing is converting and indexing. Ready can be recalled. Failed is a terminal source state and may need operator attention."
+          text="Queued waits for secure processing. Processing is converting and indexing. Ready can be found. Failed is a terminal source state and may need operator attention."
         />
       </div>
       <Card.Description>
