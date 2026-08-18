@@ -30,6 +30,14 @@ fi
 
 DISABLE_SQLALCHEMY_CEXT=1 uv run --frozen pyproject-build \
     --wheel --outdir "$dist_root" "$source_root"
-uv pip install --python .venv --reinstall --no-deps "$dist_root"/*.whl
-uv run --no-sync python -c \
+set -- "$dist_root"/*.whl
+if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then
+    echo "SQLAlchemy build must produce exactly one wheel" >&2
+    exit 1
+fi
+
+site_packages="$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+uv pip uninstall --python .venv sqlalchemy
+.venv/bin/python -m zipfile -e "$1" "$site_packages"
+.venv/bin/python -c \
     "from sqlalchemy.dialects.postgresql import CreatePolicy, DropPolicy, Policy"
