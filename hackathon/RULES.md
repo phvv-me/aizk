@@ -49,13 +49,9 @@ only fixed read-only MCP calls and one fixed `SHOW JOBS` aggregate through a SQL
 approval before an AIZK domain command may retry work. The model has no database tools and cannot
 choose SQL.
 
-The redacted live verdict is in
-[`results/queue-steward-live.json`](results/queue-steward-live.json). It records the tools, skills,
-counts, safety boundary, and no-action conclusion without a credential, cluster identifier,
-organization value, source text, queue payload, or stored error.
-
-The matching gallery-safe capture is
-[`screenshots/queue-steward-live.png`](screenshots/queue-steward-live.png).
+The source and reproducible invocation are committed under `operator`. The gallery contains only
+redacted product, database, and AWS evidence. Credentials, cluster identifiers, organization
+values, source text, queue payloads, and stored errors are excluded.
 
 ## Submission deliverables
 
@@ -83,8 +79,6 @@ The five criteria have equal weight.
 | Creativity and Originality | Is the idea or application actually novel? |
 
 ## Release gate
-
-The dated execution order and detailed acceptance criteria live in [PLAN.md](PLAN.md).
 
 - [x] Deploy one clean CockroachDB Cloud database from the current baseline
 - [x] Deploy the Lambda image and invoke setup successfully

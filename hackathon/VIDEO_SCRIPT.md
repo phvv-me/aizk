@@ -3,8 +3,7 @@
 Target length is two minutes and forty-five seconds. The final recording must be in English, show
 the working product and CockroachDB memory layer, and remain under three minutes.
 
-The editable source captures, short rough cut and complete silent walkthrough are documented in
-[`video/README.md`](video/README.md) and [`video/EDIT_PLAN.md`](video/EDIT_PLAN.md).
+Keep raw recordings and edit project files outside the source repository.
 
 ## Demo website
 
@@ -22,7 +21,7 @@ Prepare these five views before starting.
 
 1. The deployed AIZK landing page and architecture diagram
 2. A clean Codex profile connected through direct Logto OAuth
-3. The redacted C-SPANN plan and cloud result JSON in the public repository
+3. The redacted C-SPANN and AWS gallery images in the public repository
 4. The redacted queue steward verdict with Managed MCP tools and Agent Skills
 5. CloudWatch Lambda duration, error, and throttle charts with account details cropped out
 
@@ -41,10 +40,10 @@ Ask this differently worded question after the worker finishes.
 What should Atlas verify before promoting a release? Search only memory and keep web off.
 ```
 
-Prepare the clean Codex profile from [`codex/config.oauth.toml`](codex/config.oauth.toml), run
-`codex mcp login aizk`, and complete Logto sign-in before the recorded take. In Codex, ask it to call
-only `status`, then to keep the Atlas note exactly, then to call `status` until processing is idle,
-and finally to ask the prepared question with `web="off"`.
+Use a clean Codex environment and follow the two commands shown on the AIZK landing page. Complete
+Logto sign-in before the recorded take. In Codex, ask it to call only `status`, then to keep the
+Atlas note exactly, then to call `status` until processing is idle, and finally to ask the prepared
+question with `web="off"`.
 
 ## Opening from 0 to 15 seconds
 

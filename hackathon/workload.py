@@ -27,7 +27,7 @@ class LambdaMCP:
         return {
             "io.modelcontextprotocol/protocolVersion": self.protocol_version,
             "io.modelcontextprotocol/clientInfo": {
-                "name": "craizk-docker-workload",
+                "name": "aizk-docker-workload",
                 "version": "1",
             },
             "io.modelcontextprotocol/clientCapabilities": {},
@@ -66,7 +66,7 @@ class LambdaMCP:
                     "path": "/mcp",
                     "protocol": "HTTP/1.1",
                     "sourceIp": "127.0.0.1",
-                    "userAgent": "craizk-docker-workload",
+                    "userAgent": "aizk-docker-workload",
                 },
                 "requestId": f"workload-{request_id}",
                 "routeKey": "$default",

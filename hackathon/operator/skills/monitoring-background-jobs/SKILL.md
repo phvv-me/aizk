@@ -16,7 +16,7 @@ Monitors background job health by identifying failed, paused, and long-running j
 - SQL connection with `VIEWJOB` system privilege (read-only) or `CONTROLJOB` role option (control)
 - Background jobs are excluded from `SHOW CLUSTER STATEMENTS` and from statement statistics surfaced in the DB Console SQL Activity page
 
-**Related skills:** [triaging-live-sql-activity](../triaging-live-sql-activity/SKILL.md) for live queries, [profiling-statement-fingerprints](../profiling-statement-fingerprints/SKILL.md) for historical query analysis.
+**Related skills:** [triaging-live-sql-activity](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/triaging-live-sql-activity/SKILL.md) for live queries, [profiling-statement-fingerprints](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/profiling-statement-fingerprints/SKILL.md) for historical query analysis.
 
 ## Key Interfaces
 
@@ -367,7 +367,7 @@ LIMIT 50;
 
 4. **Decide on action:**
    - Steady progress: Continue monitoring
-   - Stalled progress (fraction_completed not increasing): Investigate with [triaging-live-sql-activity](../triaging-live-sql-activity/SKILL.md)
+   - Stalled progress (fraction_completed not increasing): Investigate with [triaging-live-sql-activity](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/triaging-live-sql-activity/SKILL.md)
    - Failed: Use Query 1 to check error
 
 ## Safety Considerations
@@ -436,8 +436,8 @@ See [permissions reference](references/permissions.md) for CONTROLJOB role optio
 - [SQL query variations](references/sql-query-variations.md)
 
 **Related skills:**
-- [triaging-live-sql-activity](../triaging-live-sql-activity/SKILL.md) - For live query monitoring (job-executed statements may not appear)
-- [profiling-statement-fingerprints](../profiling-statement-fingerprints/SKILL.md) - For historical query analysis (background jobs excluded)
+- [triaging-live-sql-activity](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/triaging-live-sql-activity/SKILL.md) - For live query monitoring (job-executed statements may not appear)
+- [profiling-statement-fingerprints](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/profiling-statement-fingerprints/SKILL.md) - For historical query analysis (background jobs excluded)
 
 **Official CockroachDB Documentation:**
 - [SHOW JOBS](https://www.cockroachlabs.com/docs/stable/show-jobs.html)

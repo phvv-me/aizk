@@ -96,7 +96,7 @@ tested the flow from isolated Codex and OpenCode containers.
 - The queue steward distinguishes application work failures from CockroachDB jobs through Managed
   MCP and names the official Agent Skills and evidence used in every verdict.
 - The public repository includes the complete infrastructure, migrations, documentation, bounded
-  corpus, redacted query plans, and machine-readable result files.
+  corpus, operational agent, and reproducible deployment instructions.
 
 These demonstration measurements describe the bounded six-note public corpus. They do not establish
 a production service level.
@@ -165,7 +165,6 @@ Recommended Devpost tags
 - Public repository at `https://github.com/phvv-me/aizk`
 - Judge rehearsal at `https://github.com/phvv-me/aizk/blob/main/hackathon/DEMO.md`
 - Architecture at `https://github.com/phvv-me/aizk/blob/main/hackathon/ARCHITECTURE.md`
-- Cloud evidence at `https://github.com/phvv-me/aizk/blob/main/hackathon/PERFORMANCE.md`
 - Public video at `VIDEO_URL_AFTER_UPLOAD`
 
 ## Functional demo application
@@ -216,7 +215,7 @@ What should Atlas verify before promoting a release? Search only memory and keep
 The expected result names p95 latency and rollback rate. It includes the Project Atlas source
 excerpt and document handle. Its privacy receipt states that nothing left the machine.
 
-Exact Codex and pinned OpenCode rehearsal commands are available in
+The complete judge flow is available in
 `https://github.com/phvv-me/aizk/blob/main/hackathon/DEMO.md`.
 
 ## Public repository
@@ -270,8 +269,8 @@ procedure and safety rules.
 
 The live service-key run returned a healthy verdict with zero current AIZK queue failures and zero
 failed, paused, or unusually long CockroachDB jobs. It used `get_cluster`, `select_query`, and
-`SHOW JOBS`, then named all three applied skills in its typed output. The public redacted result is
-in `hackathon/results/queue-steward-live.json`.
+`SHOW JOBS`, then named all three applied skills in its typed output. The source and reproducible
+invocation are committed under `hackathon/operator`.
 
 AWS Lambda runs both the public MCP application and the private worker. The MCP Lambda commits each
 accepted memory operation to CockroachDB, then wakes the worker. The worker converts and enriches
@@ -378,10 +377,8 @@ the AIZK name and short product promise.
 1. `01-live-landing.jpg` with the deployed landing page and agent setup
 2. `02-product-overview.jpg` with the product dashboard
 3. `03-scoped-sharing.jpg` with access and temporal semantics
-4. `04-authenticated-dashboard.jpg` with the fictional demonstration identity
-5. `05-agent-keep-and-find.jpg` with one live Keep and grounded Find flow
-6. `10-cockroachdb-cspann.jpg` with the redacted CockroachDB index plan
-7. `11-aws-operations.jpg` with the redacted AWS operational evidence
-8. `00-architecture.png` as the optional architecture upload
+4. `10-cockroachdb-cspann.jpg` with the redacted CockroachDB index plan
+5. `11-aws-operations.jpg` with the redacted AWS operational evidence
+6. `00-architecture.png` as the optional architecture upload
 
 The image captions are recorded in `hackathon/media/README.md`.

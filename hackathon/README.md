@@ -1,35 +1,25 @@
-# AIZK submission workspace
+# AIZK hackathon submission
 
-The submission thumbnail is generated from the canonical 3 to 2 brand source at `thumbnail.png`.
-Run `pnpm --dir docs brand` after changing any brand source.
+This directory contains only the material needed to submit and judge AIZK for the CockroachDB and
+AWS Build with Agentic Memory Hackathon. Product documentation and deployment instructions remain
+with the product code.
 
-This directory contains event-specific material for the CockroachDB and AWS Build with Agentic
-Memory Hackathon. The product README and documentation remain useful without this directory.
+## Submission files
 
-The submission closes on August 18, 2026 at 5 PM EDT, which is August 19 at 6 AM JST.
+- [SUBMISSION.md](SUBMISSION.md) contains the Devpost narrative and form answers.
+- [DEMO.md](DEMO.md) gives judges one short reproducible product flow.
+- [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md) contains the final recording script.
+- [RULES.md](RULES.md) maps the entry to the event requirements.
+- [ARCHITECTURE.md](ARCHITECTURE.md) explains the CockroachDB and AWS design.
+- [DISCLOSURE.md](DISCLOSURE.md) identifies incorporated work and third-party sources.
+- [media](media) contains the thumbnail, gallery images, and architecture diagram.
 
-## Contents
+## Reproducible evidence
 
-- [RULES.md](RULES.md) records the official requirements and current evidence for each one.
-- [PLAN.md](PLAN.md) owns the remaining checklist, daily timeline, gates, and manual decisions.
-- [ARCHITECTURE.md](ARCHITECTURE.md) explains the submitted CockroachDB and AWS design.
-- [DISCLOSURE.md](DISCLOSURE.md) identifies project dates and every category of pre-existing work.
-- [DEMO.md](DEMO.md) defines the clean judge flow and the local Lambda rehearsal.
-- [SUBMISSION.md](SUBMISSION.md) holds the Devpost narrative and form answers.
-- [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md) holds the two minute and thirty second recording plan.
-- [`workload.py`](workload.py) loads the public corpus and measures modern MCP through Lambda.
-- [`codex`](codex) contains the isolated Codex Luna judge-client rehearsal.
-- [`results`](results) contains dated, machine-readable benchmark and smoke-test evidence.
-- [`screenshots`](screenshots) contains only final submission captures and its shot list.
+- [`workload.py`](workload.py) loads the bounded public corpus and exercises the deployed MCP API.
+- [`corpus`](corpus) contains the public example data and its source references.
+- [`operator`](operator) contains the read-only queue steward that uses CockroachDB Managed MCP and
+  the official CockroachDB Agent Skills.
 
-## Current state
-
-The repository, license, build dates, local Lambda simulation, CockroachDB schema, C-SPANN search,
-managed AWS deployment, public demo URL, S3 flow, Logto identity, and isolated Codex Luna client have
-been verified. The final gallery is ready, while video editing and upload remain. [PLAN.md](PLAN.md)
-is the working execution board, while [RULES.md](RULES.md) remains the compliance gate.
-
-## Separation rule
-
-Anything that exists only because of this event belongs here. Runtime, deployment, security, and
-operator documentation stays beside the product code when it remains useful after judging.
+Generated recordings, dated result dumps, client rehearsal containers, and duplicate screenshots
+are intentionally excluded.

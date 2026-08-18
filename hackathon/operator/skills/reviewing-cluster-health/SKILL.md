@@ -19,9 +19,9 @@ Performs a comprehensive health check of a CockroachDB cluster. Before running d
 - Verifying production readiness
 - Monitoring capacity and performance
 
-**For live query issues:** Use [triaging-live-sql-activity](../../cockroachdb-observability-and-diagnostics/triaging-live-sql-activity/SKILL.md).
-**For background jobs:** Use [monitoring-background-jobs](../../cockroachdb-observability-and-diagnostics/monitoring-background-jobs/SKILL.md).
-**For range analysis:** Use [analyzing-range-distribution](../../cockroachdb-observability-and-diagnostics/analyzing-range-distribution/SKILL.md).
+**For live query issues:** Use [triaging-live-sql-activity](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/triaging-live-sql-activity/SKILL.md).
+**For background jobs:** Use [monitoring-background-jobs](../monitoring-background-jobs/SKILL.md).
+**For range analysis:** Use [analyzing-range-distribution](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/analyzing-range-distribution/SKILL.md).
 
 ---
 
@@ -354,10 +354,10 @@ All checks in this skill are read-only. No data is modified.
 - [Production readiness checklist](references/production-readiness.md)
 
 **Related skills:**
-- [upgrading-cluster-version](../upgrading-cluster-version/SKILL.md)
-- [managing-cluster-capacity](../managing-cluster-capacity/SKILL.md)
-- [performing-cluster-maintenance](../performing-cluster-maintenance/SKILL.md)
-- [monitoring-background-jobs](../../cockroachdb-observability-and-diagnostics/monitoring-background-jobs/SKILL.md)
+- [upgrading-cluster-version](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-operations-and-lifecycle/upgrading-cluster-version/SKILL.md)
+- [managing-cluster-capacity](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-operations-and-lifecycle/managing-cluster-capacity/SKILL.md)
+- [performing-cluster-maintenance](https://github.com/cockroachlabs/cockroachdb-skills/blob/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-operations-and-lifecycle/performing-cluster-maintenance/SKILL.md)
+- [monitoring-background-jobs](../monitoring-background-jobs/SKILL.md)
 
 **Official CockroachDB Documentation:**
 - [Monitoring and Alerting](https://www.cockroachlabs.com/docs/stable/monitoring-and-alerting)

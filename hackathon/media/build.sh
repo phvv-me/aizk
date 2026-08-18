@@ -30,8 +30,6 @@ ffmpeg -hide_banner -loglevel error -y \
   -filter_complex "[0:v]scale=1800:1200[base];[1:v]scale=690:690[mark];[base][mark]overlay=995:205" \
   "$media_root/thumbnail-devpost.png"
 
-cp "$media_root/thumbnail-devpost.png" "hackathon/thumbnail.png"
-
 gallery=(
   "$media_root/01-live-landing.jpg"
   "$media_root/02-product-overview.jpg"
@@ -39,16 +37,6 @@ gallery=(
   "$media_root/10-cockroachdb-cspann.jpg"
   "$media_root/11-aws-operations.jpg"
 )
-
-for owner_capture in \
-  "$media_root/04-authenticated-dashboard.jpg" \
-  "$media_root/05-agent-keep-and-find.jpg"
-do
-  if test -f "$owner_capture"
-  then
-    gallery+=("$owner_capture")
-  fi
-done
 
 for image in "${gallery[@]}"
 do

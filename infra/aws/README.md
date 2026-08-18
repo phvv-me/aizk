@@ -165,8 +165,9 @@ a response, failed wake hints, and stale leases.
 
 The release gate verifies modern discovery, all five tools, private S3 upload, worker extraction,
 identity resolution, and grounded retrieval. EventBridge Scheduler builds the cached MCP
-application every five minutes to reduce cold starts. [The performance study](../../hackathon/PERFORMANCE.md)
-explains the operation map and retrieval tradeoffs.
+application every five minutes to reduce cold starts. The deployment inputs expose each optional
+retrieval lane so the bounded demonstration can retain useful evidence without paying for unused
+work.
 
 ## Logto authentication
 

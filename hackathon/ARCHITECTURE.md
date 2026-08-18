@@ -91,5 +91,5 @@ The underlying scoped C-SPANN probe executed in 7 ms, so the remaining cost live
 authority, and composed lane work rather than vector search. AIZK
 therefore disables profiles, RAPTOR, reranking, and access recording, but retains source, community,
 entity catalog, and graph evidence because those lanes improved answer quality. Source-first packing
-prevents broad graph facts from burying direct evidence. [The dated cloud record](PERFORMANCE.md)
-keeps these claims separate from the larger local synthetic result.
+prevents broad graph facts from burying direct evidence. These settings preserve the useful evidence
+lanes while removing the largest avoidable work from the bounded demonstration profile.
