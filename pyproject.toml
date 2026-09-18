@@ -44,7 +44,7 @@ dependencies = [
     "identify>=2.6.19,<3",
     "python-slugify>=8.0.4,<9",
     "inflection>=0.5.1,<0.6",
-    "patos[sql]==0.0.12",
+    "patos[sql]==0.0.13",
     "rlsalchemy==0.6.0",
     "pgqueuer>=1.1.1,<2",
     "croniter>=6.2.4,<7",
