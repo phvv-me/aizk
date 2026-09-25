@@ -28,6 +28,11 @@ built at image time. There is no bind mount of the source and no editable instal
 Any change to Python source, to the SvelteKit app or to these documentation pages needs the image
 rebuilt and the container recreated.
 
+The MCP server keeps FastMCP state in the private `mcp-state` volume. Preserve that volume when
+recreating a legacy OAuth-proxy deployment: its client registrations and token mappings must
+survive the server process. A temporary `FASTMCP_HOME` discards those mappings and forces clients
+to sign in again. The volume initializer gives only the application user access to this state.
+
 ```sh
 docker compose --env-file .env -f src/deploy/docker-compose.yml build server worker
 docker compose --env-file .env -f src/deploy/docker-compose.yml up -d

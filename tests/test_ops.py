@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 from collections.abc import Awaitable, Callable
@@ -25,7 +26,7 @@ from aizk.background.status import TasksStatus
 from aizk.config import DatabaseBackend, settings
 from aizk.ontology import Ontology
 from aizk.ops import EndpointHealth
-from aizk.retrieval import Candidate, Lane
+from aizk.retrieval import Candidate, FindResult, Lane
 from aizk.status import UsageSummary
 from aizk.store import Artifact, Blob, Chunk, OperatorReading, OperatorSnapshot, Usage
 from aizk.store.backend import DatabaseRole
@@ -435,6 +436,32 @@ def test_find_health_reports_candidates_and_expected_failures(
         assert report.error is not None and report.error.startswith("ConnectError:")
     else:
         assert report.error is None
+
+
+@pytest.mark.parametrize("stage", ["retrieval", "rendering"])
+def test_find_health_bounds_retrieval_and_rendering(
+    monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    candidate = CandidateFactory.build(lane=Lane.Kind.SOURCES)
+
+    async def found(query: str, user: User, k: int, token_budget: int) -> list[Candidate]:
+        if stage == "retrieval":
+            await asyncio.sleep(60)
+        return [candidate]
+
+    async def rendered(result: FindResult) -> str:
+        await asyncio.sleep(60)
+        return "unreachable"
+
+    monkeypatch.setattr(ops.probes, "_FIND_PROBE_TIMEOUT", 0.01)
+    monkeypatch.setattr(ops.probes, "find_candidates", found)
+    monkeypatch.setattr(FindResult, "to_markdown", rendered)
+
+    report = dbutil.run(ops.find_health(corpus()))
+
+    assert report.error == "TimeoutError: retrieval probe exceeded 0.01 s"
+    assert report.candidates == 0
+    assert report.sample == ""
 
 
 @pytest.mark.parametrize(

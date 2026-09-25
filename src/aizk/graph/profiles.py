@@ -7,6 +7,7 @@ from typing import cast
 from loguru import logger
 from patos import FrozenFlexModel, FrozenModel
 from pydantic import UUID5, UUID7, TypeAdapter
+from sqlalchemy import any_
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import select
 
@@ -14,7 +15,7 @@ from ..config import settings
 from ..exceptions import NotVisibleError
 from ..serving.embed import Embedder
 from ..serving.extract import LLM
-from ..store import Entity, Fact, Profile, Watermark
+from ..store import Entity, Fact, Profile, Watermark, id_array
 from ..store.engine import Session
 from ..store.identity import User
 from ..types import Scopes
@@ -54,7 +55,7 @@ class ProfileBuilder(FrozenFlexModel):
             Entity.Content.id.in_(select(Entity.Claim.content_id))
         )
         if subject_ids is not None:
-            roster = roster.where(Entity.Content.id.in_(subject_ids))
+            roster = roster.where(Entity.Content.id == any_(id_array(subject_ids)))
         entities = dict((await session.exec(roster.order_by(Entity.Content.id))).all())
         statements: dict[UUID5, list[str]] = defaultdict(list)
         if entities:
@@ -103,9 +104,16 @@ class ProfileBuilder(FrozenFlexModel):
         ]
 
     async def store(self, session: Session, drafts: list[ProfileDraft]) -> dict[UUID5, UUID7]:
-        """Upsert a complete profile batch and return IDs keyed by subject."""
-        if not drafts:
-            return {}
+        """Upsert bounded batches and return IDs keyed by subject."""
+        stored: dict[UUID5, UUID7] = {}
+        for group in batched(drafts, settings.profile_batch_size, strict=False):
+            stored.update(await self._store_batch(session, group))
+        return stored
+
+    async def _store_batch(
+        self, session: Session, drafts: Sequence[ProfileDraft]
+    ) -> dict[UUID5, UUID7]:
+        """Keep one upsert below the driver's parameter limit."""
         base_statement = insert(Profile).values(
             [
                 {
@@ -166,6 +174,19 @@ async def refresh_profiles(
         await builder.store(session, drafts)
     logger.info("refreshed {} profiles in scope {}", len(drafts), key)
     return len(drafts)
+
+
+async def schedule_profile_refresh(scopes: Scopes | None = None) -> int:
+    """Mark visible profiles dirty for the existing bounded projection worker."""
+    key = frozenset(scopes or (settings.system_user_id,))
+    async with User.system(key) as session:
+        subjects = list(await session.exec(select(Entity.Claim.content_id).distinct()))
+        for group in batched(subjects, settings.profile_batch_size, strict=False):
+            await Watermark.bump_many(
+                session, key, Watermark.Kind.entity_dirty, [str(subject) for subject in group]
+            )
+    logger.info("scheduled {} profiles for refresh in scope {}", len(subjects), key)
+    return len(subjects)
 
 
 async def refresh_dirty_profiles(

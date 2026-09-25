@@ -11,6 +11,7 @@ from sqlalchemy import (
     FromClause,
     Integer,
     and_,
+    any_,
     bindparam,
     case,
     extract,
@@ -28,6 +29,7 @@ from sqlmodel.sql.expression import Select, SelectOfScalar
 
 from ....config import DatabaseBackend, settings
 from ....provenance import EpistemicKind, Stance
+from ...binds import id_array
 from ...mixins import ViewBase
 from ...vector import cosine_distance, scoped_vector_candidates
 from ..tables.fact import FactClaim, FactContent
@@ -126,20 +128,21 @@ class LiveFact(ViewBase):
         entity_ids: the entities whose surrounding facts to load.
         limit: maximum statements retained for each entity profile.
         """
+        ids = id_array(entity_ids)
         touches = union_all(
             select(
                 cls.subject_id.label("entity_id"),
                 cls.statement,
                 cls.recorded_from.label("recorded_at"),
                 cls.id,
-            ).where(cls.subject_id.in_(entity_ids)),
+            ).where(cls.subject_id == any_(ids)),
             select(
                 cls.object_id.label("entity_id"),
                 cls.statement,
                 cls.recorded_from.label("recorded_at"),
                 cls.id,
             ).where(
-                cls.object_id.in_(entity_ids),
+                cls.object_id == any_(ids),
                 cls.object_id != cls.subject_id,
             ),
         ).subquery("profile_fact_touch")

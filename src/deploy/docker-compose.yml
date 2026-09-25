@@ -100,16 +100,18 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - >-
-        install -d -o 10001 -g 10001 -m 0700 /backups
-        && chown -R 10001:10001 /backups
-        && chmod 0700 /backups
+        install -d -o 10001 -g 10001 -m 0700 /backups /mcp-state
+        && chown -R 10001:10001 /backups /mcp-state
+        && chmod 0700 /backups /mcp-state
     env_file: []
     environment: {}
     volumes:
       - ${AIZK_BACKUP_VOLUME:-backups}:/backups
+      - mcp-state:/mcp-state
     restart: "no"
 
   db:
+    restart: unless-stopped
     image: tensorchord/vchord-suite:pg18-latest@sha256:c6e5e77a1180199f91b040b6e85c6d10b0ded6d49fb614dfd2e7272ffb91af08
     ports:
       - 127.0.0.1:${AIZK_DB_PORT:-5433}:5432
@@ -342,6 +344,7 @@ services:
   # That last one carries no index consequence at all, because rerank scores are computed per
   # query and never stored, so it is a live ranking nuance rather than a rebuild question.
   vllm-emb:
+    restart: unless-stopped
     image: vllm/vllm-openai:v0.26.0
     command:
       - "${AIZK_EMBED_CHECKPOINT:-Qwen/Qwen3-VL-Embedding-2B}"
@@ -455,6 +458,7 @@ services:
   # AIZK_RERANK_CHECKPOINT/AIZK_RERANK_MODEL split the same way as the other lanes, weights
   # path versus served alias, and the alias must match `src/aizk/config/settings.py`'s rerank_model.
   vllm-rerank:
+    restart: unless-stopped
     image: vllm/vllm-openai:v0.26.0
     command:
       - "${AIZK_RERANK_CHECKPOINT:-Qwen/Qwen3-Reranker-4B}"
@@ -499,6 +503,7 @@ services:
   # 340M large checkpoint serves every task on GPU with fp16, FlashDeberta, and optional compiled
   # tensor subgraphs. Dense documents use overlapping long-context extraction.
   gliner:
+    restart: unless-stopped
     build:
       # context is the package root so the image copies the gate and extraction wire models beside
       # src/services/gliner/app.py. The root .dockerignore keeps the context small.
@@ -588,7 +593,9 @@ services:
       AIZK_TUNNEL_TOKEN: ""
       AIZK_MCP_HOST: 0.0.0.0
       AIZK_MCP_PORT: "8080"
-      FASTMCP_HOME: /tmp/fastmcp
+      FASTMCP_HOME: /var/lib/aizk/mcp
+    volumes:
+      - mcp-state:/var/lib/aizk/mcp
     healthcheck:
       test: ["CMD", "curl", "-sS", "--max-time", "2", "-o", "/dev/null", "http://127.0.0.1:8080/mcp"]
       interval: 10s
@@ -1172,3 +1179,4 @@ volumes:
   object-data:
   clamav-data:
   backups:
+  mcp-state:

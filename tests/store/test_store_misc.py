@@ -527,3 +527,12 @@ def test_an_id_set_travels_as_one_parameter_however_many_ids_it_holds() -> None:
     assert len(names.params) == len(deletion.params) == 1
     assert "= ANY (CAST(" in str(names)
     assert "= ANY (CAST(" in str(deletion)
+
+
+def test_profile_fact_lookup_keeps_large_rosters_in_one_array_bind() -> None:
+    ids = [uuid5() for _ in range(20_000)]
+    statement = Fact.Live.touching(ids, limit=40).compile(dialect=postgresql_dialect())
+
+    assert len(statement.params) == 2
+    assert list(statement.params.values()).count(40) == 1
+    assert str(statement).count("= ANY (CAST(") == 2

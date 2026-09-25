@@ -19,7 +19,7 @@ from ...config import DatabaseBackend, settings
 from ...graph.communities import build_communities
 from ...graph.decay import decay
 from ...graph.insight import derive_insights
-from ...graph.profiles import refresh_dirty_profiles, refresh_profiles
+from ...graph.profiles import refresh_dirty_profiles, schedule_profile_refresh
 from ...graph.raptor import build_raptor
 from ...graph.repair import dedup_entities
 from ...graph.session_tier import promote_sessions
@@ -369,11 +369,11 @@ async def retry_failed_profile_projections(limit: int = 100) -> int:
         return await queue.requeue_failed(ProfileProjectionJob, limit)
 
 
-class ProfileRefreshJob(ModelBackedJob):
-    """Rebuild every profile on the weekly cadence."""
+class ProfileRefreshJob(ScopedScheduledJob):
+    """Schedule weekly refreshes through the bounded profile projection worker."""
 
     async def execute(self, scopes: Scopes) -> None:
-        await refresh_profiles(self.llm, self.embed, scopes=scopes)
+        await schedule_profile_refresh(scopes=scopes)
 
 
 class SessionPromoteJob(ScopedScheduledJob):

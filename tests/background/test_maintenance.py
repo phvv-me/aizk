@@ -91,7 +91,7 @@ def test_job_registry_names_and_settings_are_coherent(
         (DecayJob, "decay"),
         (DedupJob, "dedup_entities"),
         (ProfileProjectionJob, "refresh_dirty_profiles"),
-        (ProfileRefreshJob, "refresh_profiles"),
+        (ProfileRefreshJob, "schedule_profile_refresh"),
         (SessionPromoteJob, "promote_sessions"),
         (InsightJob, "derive_insights"),
     ],

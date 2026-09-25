@@ -9,7 +9,12 @@ from sqlmodel import select
 
 from aizk.config import settings
 from aizk.exceptions import NotVisibleError
-from aizk.graph.profiles import build_profile, refresh_dirty_profiles, refresh_profiles
+from aizk.graph.profiles import (
+    build_profile,
+    refresh_dirty_profiles,
+    refresh_profiles,
+    schedule_profile_refresh,
+)
 from aizk.store import Entity, Fact, Profile, Watermark
 
 
@@ -79,7 +84,7 @@ def test_build_profile_upserts_visible_entities_and_rejects_invisible_ones(
     assert bool(summary and summary.strip()) is visible
 
 
-@pytest.mark.parametrize("scenario", ["empty", "related", "dirty"])
+@pytest.mark.parametrize("scenario", ["empty", "related", "dirty", "scheduled"])
 def test_refresh_profiles_batches_visible_and_dirty_entities(
     owner: UUID5 | UUID7,
     fake_llm: FakeLLM,
@@ -95,15 +100,19 @@ def test_refresh_profiles_batches_visible_and_dirty_entities(
         alpha = await seed_entity_with_facts(owner, "alpha")
         beta = await seed_entity_with_facts(owner, "beta")
         key = frozenset({owner})
-        if scenario == "dirty":
+        if scenario in {"dirty", "scheduled"}:
             monkeypatch.setattr(settings, "profile_batch_size", 1)
-            async with dbutil.actor(owner) as session:
-                await Watermark.bump_many(
-                    session,
-                    key,
-                    Watermark.Kind.entity_dirty,
-                    [str(alpha), str(beta)],
-                )
+            if scenario == "scheduled":
+                await seed_entity_with_facts(uuid5(), "outside scope")
+                assert await schedule_profile_refresh(scopes=key) == 2
+            else:
+                async with dbutil.actor(owner) as session:
+                    await Watermark.bump_many(
+                        session,
+                        key,
+                        Watermark.Kind.entity_dirty,
+                        [str(alpha), str(beta)],
+                    )
             counts = [
                 await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),
                 await refresh_dirty_profiles(fake_llm.llm, fake_embedder, scopes=key),

@@ -65,7 +65,8 @@ rather than inherited from an earlier document.
   values.
 - `SHOW data_checksums` returns `on`.
 - The health report finishes inside its bounds and its real find returns candidates with no
-  `error`. The probe timeouts are 2 seconds per model endpoint and 3.5 for the find.
+  `error`. The probe timeouts are 2 seconds per model endpoint and 10 seconds for retrieval and
+  result formatting together. Inspect the reported latency separately from availability.
 - `aizk admin queue doctor` exits zero, meaning no current blockers.
 
 ## Disk and backups

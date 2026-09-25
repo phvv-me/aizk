@@ -76,7 +76,7 @@ _SERVING_ENDPOINTS = (
 
 _PROBE_TIMEOUT = 2.0
 _FIND_PROBE_QUERY = "What are the current active projects and their next actions?"
-_FIND_PROBE_TIMEOUT = 3.5
+_FIND_PROBE_TIMEOUT = 10.0
 
 
 class ServedEntry(FrozenOpenModel):
@@ -354,16 +354,22 @@ async def find_health(corpus: ScopeHealth) -> FindHealth:
                 k=2,
                 token_budget=512,
             )
-        result = FindResult.from_candidates(candidates)
+            result = FindResult.from_candidates(candidates)
+            sample = (await result.to_markdown())[:500]
         return FindHealth(
             query=_FIND_PROBE_QUERY,
             scopes=corpus.scopes,
             candidates=len(candidates),
             top_source=candidates[0].source_title if candidates else None,
-            sample=(await result.to_markdown())[:500],
+            sample=sample,
             latency_ms=round((perf_counter() - started) * 1000, 1),
         )
     except (TimeoutError, httpx.HTTPError, OpenAIError, DBAPIError) as error:
+        detail = (
+            f"retrieval probe exceeded {_FIND_PROBE_TIMEOUT:g} s"
+            if isinstance(error, TimeoutError)
+            else str(error)
+        )
         return FindHealth(
             query=_FIND_PROBE_QUERY,
             scopes=corpus.scopes,
@@ -371,15 +377,15 @@ async def find_health(corpus: ScopeHealth) -> FindHealth:
             top_source=None,
             sample="",
             latency_ms=round((perf_counter() - started) * 1000, 1),
-            error=f"{type(error).__name__}: {error}"[:300],
+            error=f"{type(error).__name__}: {detail}"[:300],
         )
 
 
 async def health(include_find: bool = True) -> HealthReport:
     """Read one bounded operational and end-to-end regression snapshot.
 
-    include_find: run the live retrieval probe, which took roughly 3 seconds in
-        production. The browser overview endpoint sets this false and fetches
+    include_find: run the live retrieval probe with its ten-second deadline.
+        The browser overview endpoint sets this false and fetches
         `FindHealth` from its own lazily-loaded endpoint instead.
     """
     started = perf_counter()

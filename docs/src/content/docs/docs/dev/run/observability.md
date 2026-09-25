@@ -56,7 +56,7 @@ bytes and bytes saved by compression. A blob shared by two organizations counts 
 and once physically, and pretending otherwise would either overstate the disk or understate who
 used it.
 
-## The five second overview
+## The operational overview
 
 ```sh
 docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker aizk admin health
@@ -64,8 +64,9 @@ docker compose --env-file .env -f src/deploy/docker-compose.yml exec -T worker a
 
 `ops.health()` fans out concurrently over the migration head, the RLS verifier, row counts, the
 queue overview, per scope-set corpus progress, usage totals and the four model endpoints, then
-runs one real find. Endpoint probes time out at 2 seconds and the find at 3.5, so the whole
-report is bounded.
+runs one real find. Endpoint probes time out at 2 seconds. Retrieval and result formatting share
+a 10-second deadline, allowing a fresh process to initialize its clients. The report retains the
+measured retrieval latency separately; a successful probe does not imply a latency target was met.
 
 Run it in `worker`, never in `server`. The public process has no owner credential by design.
 
@@ -107,6 +108,11 @@ aizk admin queue retry profile --limit 100
 
 Retrying only requeues retained failures. It does not repair an invalid source, an ontology
 mismatch, abandoned durable state or a converter bug.
+
+The weekly profile refresh marks entities dirty for the regular profile projection worker.
+It does not generate every profile inside one queue lease. The worker consumes bounded batches;
+profile reads carry entity IDs in one array parameter and profile writes use bounded upserts.
+An empty failed-job count therefore does not imply that all profile enrichment has finished.
 
 ## Read-only extraction diagnosis
 
