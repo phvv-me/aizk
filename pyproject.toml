@@ -24,25 +24,25 @@ dependencies = [
     "sqlalchemy-cockroachdb==2.0.4",
     "greenlet>=3,<4",
     "sqlmodel>=0.0.39,<0.1",
-    "asyncpg>=0.31,<0.32",
+    "asyncpg>=0.32,<0.33",
     "alembic>=1.18.5,<2",
     "pgvector>=0.5,<0.6",
     "pydantic-settings>=2.14.2,<3",
     "httpx>=0.28.1,<0.29",
     "async-lru>=2.3,<3",
     "clamav-client>=0.7.2,<0.8",
-    "cyclopts>=4.21,<5",
+    "cyclopts>=5.2,<6",
     "loguru>=0.7.3,<0.8",
-    "fastmcp==4.0.0b2",
+    "fastmcp>=4.1,<5",
     "py-key-value-aio[keyring,s3]>=0.4.5,<0.5",
     "fastapi>=0.128,<1",
     "networkx>=3.6.1,<4",
-    "openai>=2.45,<3",
+    "openai>=3.28,<4",
     "obstore>=0.11,<0.12",
-    "pydantic-ai-slim[openai]>=2.8,<3",
+    "pydantic-ai-slim[openai]>=2.55,<3",
     "chonkie>=1.7,<2",
     "identify>=2.6.19,<3",
-    "python-slugify>=8.0.4,<9",
+    "python-slugify>=9.1.3,<10",
     "inflection>=0.5.1,<0.6",
     "patos[sql]==0.0.12",
     "rlsalchemy==0.6.0",
@@ -89,11 +89,11 @@ aizk-ocr-probe = "eval.ocr:main"
 dev = [
     # eval + benchmark stack (src/eval and the benchmark tests import these)
     "fire>=0.7.1,<0.8",
-    "pydantic-evals>=2.8,<3",
+    "pydantic-evals>=2.55,<3",
     "ir-measures>=0.4.3,<0.5",
     "pytrec-eval-terrier>=0.5.10,<0.6",
     "autorank>=1.3.0,<2",
-    "statsmodels>=0.14.6,<0.15",
+    "statsmodels>=0.15,<0.16",
     "pytest-regressions>=2.11.0,<3",
     "modal>=1.5.2,<2",
     # numeric and image libs the eval + serving tests import (scipy rides in via statsmodels)
@@ -101,7 +101,7 @@ dev = [
     "pandas>=3.0.3,<4",
     "pillow>=12,<13",
     # third-party type stubs: the crux of the old uv divergence (pyrefly could not type these)
-    "asyncpg-stubs>=0.31.2,<0.32",
+    "asyncpg-stubs>=0.32,<0.33",
     "types-dateparser>=1.4.1.20260617,<2",
     "types-croniter>=6.2.2.20260518,<7",
     "types-networkx>=3.6.1.20260624,<4",
@@ -118,7 +118,7 @@ dev = [
     # test runner and plugins
     "pytest>=9.1.0,<10",
     "pytest-cov>=7.1.0,<8",
-    "pytest-randomly>=4.1.0,<5",
+    "pytest-randomly>=5.0.0,<6",
     "pytest-xdist>=3.8.0,<4",
     "pytest-mock>=3.15.1,<4",
     "pytest-subprocess>=1.6.0,<2",
@@ -129,7 +129,7 @@ dev = [
     "hypothesis>=6.155.3,<7",
     "polyfactory>=3.3,<4",
     "faker>=40.23.0,<41",
-    "syrupy>=5.3.2,<6",
+    "syrupy>=6.1.1,<7",
     "dirty-equals>=0.11,<0.12",
 ]
 
@@ -150,7 +150,6 @@ packages = ["src/aizk", "src/eval"]
 # both require 2.1 for its CREATE VIEW construct, so the whole workspace resolves there and this
 # one stale cap is the only thing an override has to step over. Drop this when they ship 2.1.
 override-dependencies = ["sqlalchemy==2.1.0b3"]
-constraint-dependencies = ["fastmcp-slim==4.0.0b2"]
 prerelease = "allow"
 
 [tool.ruff]
